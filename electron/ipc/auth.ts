@@ -51,6 +51,15 @@ h2{margin:0 0 8px;font-size:20px;}p{margin:0;color:#64748b;font-size:14px;}
 </style></head><body><div class="box"><div class="icon">✓</div>
 <h2>Connected!</h2><p>You can close this window and return to Compass.</p></div></body></html>`
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
 const ERROR_HTML = (msg: string) =>
   `<!DOCTYPE html><html><head><title>Compass — Error</title>
 <style>body{font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;
@@ -58,16 +67,18 @@ height:100vh;margin:0;background:#0f1117;color:#e2e8f0;}
 .box{text-align:center;}.icon{font-size:48px;margin-bottom:16px;}
 h2{margin:0 0 8px;font-size:20px;color:#f87171;}p{margin:0;color:#64748b;font-size:14px;}
 </style></head><body><div class="box"><div class="icon">✗</div>
-<h2>Connection failed</h2><p>${msg}</p></div></body></html>`
+<h2>Connection failed</h2><p>${escapeHtml(msg)}</p></div></body></html>`
 
 /**
  * Starts a temporary HTTP server on OAUTH_PORT, opens the auth URL in a popup
  * BrowserWindow, and waits for the OAuth provider to redirect back with ?code=.
+ * Validates the `state` query parameter to prevent CSRF attacks.
  * Returns the code so the caller can exchange it for tokens.
  */
 function waitForOAuthCode(
   authUrl: string,
-  callbackPath: string
+  callbackPath: string,
+  expectedState: string
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     let win: BrowserWindow | null = null
@@ -84,6 +95,15 @@ function waitForOAuthCode(
 
         const code = reqUrl.searchParams.get('code')
         const error = reqUrl.searchParams.get('error')
+        const returnedState = reqUrl.searchParams.get('state')
+
+        if (returnedState !== expectedState) {
+          res.writeHead(200, { 'Content-Type': 'text/html' })
+          res.end(ERROR_HTML('Invalid state parameter. Request may have been tampered with.'))
+          cleanup()
+          if (!settled) { settled = true; reject(new Error('OAuth state mismatch — possible CSRF attack')) }
+          return
+        }
 
         if (error) {
           res.writeHead(200, { 'Content-Type': 'text/html' })
@@ -108,6 +128,8 @@ function waitForOAuthCode(
       } catch (e) {
         res.writeHead(500)
         res.end()
+        cleanup()
+        if (!settled) { settled = true; reject(e instanceof Error ? e : new Error('Internal error handling OAuth callback')) }
       }
     })
 
@@ -209,6 +231,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     const { randomBytes, createHash } = require('crypto')
     const verifier = randomBytes(32).toString('base64url')
     const challenge = createHash('sha256').update(verifier).digest('base64url')
+    const state = randomBytes(16).toString('base64url')
 
     const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth')
     authUrl.searchParams.set('client_id', clientId)
@@ -219,9 +242,10 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     authUrl.searchParams.set('prompt', 'consent')
     authUrl.searchParams.set('code_challenge', challenge)
     authUrl.searchParams.set('code_challenge_method', 'S256')
+    authUrl.searchParams.set('state', state)
 
     try {
-      const code = await waitForOAuthCode(authUrl.toString(), '/oauth/google/callback')
+      const code = await waitForOAuthCode(authUrl.toString(), '/oauth/google/callback', state)
       const tokens = await exchangeCodeForTokens(code, redirectUri, 'https://oauth2.googleapis.com/token', clientId, clientSecret, verifier)
       saveToken('google', tokens)
 
@@ -256,13 +280,17 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     const redirectUri = `http://localhost:${OAUTH_PORT}/oauth/github/callback`
     const scopes = 'repo read:project read:user'
 
+    const { randomBytes } = require('crypto')
+    const state = randomBytes(16).toString('base64url')
+
     const authUrl = new URL('https://github.com/login/oauth/authorize')
     authUrl.searchParams.set('client_id', clientId)
     authUrl.searchParams.set('redirect_uri', redirectUri)
     authUrl.searchParams.set('scope', scopes)
+    authUrl.searchParams.set('state', state)
 
     try {
-      const code = await waitForOAuthCode(authUrl.toString(), '/oauth/github/callback')
+      const code = await waitForOAuthCode(authUrl.toString(), '/oauth/github/callback', state)
       // GitHub token endpoint returns application/x-www-form-urlencoded by default;
       // we request JSON via Accept header in exchangeCodeForTokens.
       const tokens = await exchangeCodeForTokens(code, redirectUri, 'https://github.com/login/oauth/access_token', clientId, clientSecret, '')
@@ -300,4 +328,9 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     const rows = db.select().from(integrations).all()
     return rows
   })
+
+  ipcMain.handle('auth:get-redirect-uris', () => ({
+    google: `http://localhost:${OAUTH_PORT}/oauth/google/callback`,
+    github: `http://localhost:${OAUTH_PORT}/oauth/github/callback`
+  }))
 }
