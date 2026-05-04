@@ -94,6 +94,7 @@ declare global {
         connectGitHub(): Promise<{ success?: boolean; error?: string }>
         disconnect(service: string): Promise<{ success: boolean }>
         getStatus(): Promise<IntegrationStatus[]>
+        getRedirectUris(): Promise<{ google: string; github: string }>
       }
       sync: {
         triggerSync(service: string): Promise<{ success?: boolean; error?: string; recordsUpdated?: number }>
