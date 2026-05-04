@@ -37,23 +37,13 @@ const UPCOMING_INTEGRATIONS: IntegrationConfig[] = [
   { id: 'plaid', name: 'Plaid', description: 'Read-only bank & investment balance aggregation.', scopes: ['transactions:read'], color: 'from-blue-500/20 to-indigo-500/20', logo: '$' }
 ]
 
-interface RedirectUris {
-  google: string
-  github: string
-}
-
-const FALLBACK_REDIRECT_URIS: RedirectUris = {
-  google: 'http://localhost:4242/oauth/google/callback',
-  github: 'http://localhost:4242/oauth/github/callback'
-}
-
 export default function Integrations(): JSX.Element {
   const [statuses, setStatuses] = useState<Record<string, IntegrationStatus>>({})
   const [syncing, setSyncing] = useState<Set<string>>(new Set())
   const [connecting, setConnecting] = useState<string | null>(null)
   const [syncLog, setSyncLog] = useState<Array<{ service: string; time: Date; records: number; error?: string }>>([])
   const [setupOpen, setSetupOpen] = useState(false)
-  const [redirectUris, setRedirectUris] = useState<RedirectUris>(FALLBACK_REDIRECT_URIS)
+  const [redirectUris, setRedirectUris] = useState<{ google: string; github: string } | null>(null)
 
   useEffect(() => {
     loadStatuses()
@@ -163,7 +153,7 @@ export default function Integrations(): JSX.Element {
                 <li>Go to <strong className="text-foreground">APIs &amp; Services → OAuth consent screen</strong>. Choose <em>External</em>, fill in the app name ("Compass"), your email, and save.</li>
                 <li>Go to <strong className="text-foreground">APIs &amp; Services → Credentials → Create Credentials → OAuth client ID</strong>.</li>
                 <li>Choose <strong className="text-foreground">Web application</strong> (not Desktop — the HTTP redirect requires this).</li>
-                <li>Add <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">{redirectUris.google}</code> as an <strong className="text-foreground">Authorized redirect URI</strong>.</li>
+                <li>Add {redirectUris ? <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">{redirectUris.google}</code> : <em>loading…</em>} as an <strong className="text-foreground">Authorized redirect URI</strong>.</li>
                 <li>Copy the <strong className="text-foreground">Client ID</strong> and <strong className="text-foreground">Client secret</strong> into your <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code> file.</li>
                 <li>Enable the required APIs: <strong className="text-foreground">Google Calendar API</strong>, <strong className="text-foreground">Gmail API</strong>, and <strong className="text-foreground">Google Drive API</strong> under <em>APIs &amp; Services → Library</em>.</li>
                 <li>While in test mode, add your Google account under <strong className="text-foreground">OAuth consent screen → Test users</strong>.</li>
@@ -177,7 +167,7 @@ export default function Integrations(): JSX.Element {
                 <li>Go to <a href="https://github.com/settings/developers" target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">github.com/settings/developers</a> → <strong className="text-foreground">OAuth Apps → New OAuth App</strong>.</li>
                 <li>Set <strong className="text-foreground">Application name</strong> to "Compass".</li>
                 <li>Set <strong className="text-foreground">Homepage URL</strong> to <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">http://localhost</code>.</li>
-                <li>Set <strong className="text-foreground">Authorization callback URL</strong> to <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">{redirectUris.github}</code>.</li>
+                <li>Set <strong className="text-foreground">Authorization callback URL</strong> to {redirectUris ? <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">{redirectUris.github}</code> : <em>loading…</em>}.</li>
                 <li>Click <strong className="text-foreground">Register application</strong>, then generate a <strong className="text-foreground">Client secret</strong>.</li>
                 <li>Copy both values into your <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code> file.</li>
               </ol>

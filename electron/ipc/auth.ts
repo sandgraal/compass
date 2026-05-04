@@ -7,6 +7,8 @@ import { eq } from 'drizzle-orm'
 
 const TOKEN_KEY_PREFIX = 'compass_token_'
 const OAUTH_PORT = 4242
+const GOOGLE_CALLBACK_PATH = '/oauth/google/callback'
+const GITHUB_CALLBACK_PATH = '/oauth/github/callback'
 
 export function saveToken(service: string, tokenData: object): void {
   const json = JSON.stringify(tokenData)
@@ -219,7 +221,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
       return { error: 'GOOGLE_CLIENT_SECRET not configured. Add it to your .env file.' }
     }
 
-    const redirectUri = `http://localhost:${OAUTH_PORT}/oauth/google/callback`
+    const redirectUri = `http://localhost:${OAUTH_PORT}${GOOGLE_CALLBACK_PATH}`
     const scopes = [
       'https://www.googleapis.com/auth/calendar.readonly',
       'https://www.googleapis.com/auth/gmail.readonly',
@@ -245,7 +247,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     authUrl.searchParams.set('state', state)
 
     try {
-      const code = await waitForOAuthCode(authUrl.toString(), '/oauth/google/callback', state)
+      const code = await waitForOAuthCode(authUrl.toString(), GOOGLE_CALLBACK_PATH, state)
       const tokens = await exchangeCodeForTokens(code, redirectUri, 'https://oauth2.googleapis.com/token', clientId, clientSecret, verifier)
       saveToken('google', tokens)
 
@@ -277,7 +279,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
       return { error: 'GITHUB_CLIENT_SECRET not configured. Add it to your .env file.' }
     }
 
-    const redirectUri = `http://localhost:${OAUTH_PORT}/oauth/github/callback`
+    const redirectUri = `http://localhost:${OAUTH_PORT}${GITHUB_CALLBACK_PATH}`
     const scopes = 'repo read:project read:user'
 
     const { randomBytes } = require('crypto')
@@ -290,7 +292,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     authUrl.searchParams.set('state', state)
 
     try {
-      const code = await waitForOAuthCode(authUrl.toString(), '/oauth/github/callback', state)
+      const code = await waitForOAuthCode(authUrl.toString(), GITHUB_CALLBACK_PATH, state)
       // GitHub token endpoint returns application/x-www-form-urlencoded by default;
       // we request JSON via Accept header in exchangeCodeForTokens.
       const tokens = await exchangeCodeForTokens(code, redirectUri, 'https://github.com/login/oauth/access_token', clientId, clientSecret, '')
@@ -330,7 +332,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
   })
 
   ipcMain.handle('auth:get-redirect-uris', () => ({
-    google: `http://localhost:${OAUTH_PORT}/oauth/google/callback`,
-    github: `http://localhost:${OAUTH_PORT}/oauth/github/callback`
+    google: `http://localhost:${OAUTH_PORT}${GOOGLE_CALLBACK_PATH}`,
+    github: `http://localhost:${OAUTH_PORT}${GITHUB_CALLBACK_PATH}`
   }))
 }
