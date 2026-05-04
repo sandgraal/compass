@@ -1,0 +1,119 @@
+import { IpcMain } from 'electron'
+import { getDb } from '../db/client'
+import { appSettings, checklistItems, checklistTemplates } from '../db/schema'
+import { eq } from 'drizzle-orm'
+
+const DEFAULTS: Record<string, string> = {
+  theme: 'system',
+  syncInterval: '15',
+  knowledgeBaseLocation: 'default',
+  showContextDrawer: 'true',
+  notificationsEnabled: 'true'
+}
+
+export function registerSettingsHandlers(ipcMain: IpcMain): void {
+  ipcMain.handle('settings:get', (_event, key: string) => {
+    const db = getDb()
+    const row = db.select().from(appSettings).where(eq(appSettings.key, key)).get()
+    return row?.value ?? DEFAULTS[key] ?? null
+  })
+
+  ipcMain.handle('settings:get-all', () => {
+    const db = getDb()
+    const rows = db.select().from(appSettings).all()
+    const result = { ...DEFAULTS }
+    for (const row of rows) result[row.key] = row.value
+    return result
+  })
+
+  ipcMain.handle('settings:set', (_event, key: string, value: unknown) => {
+    const db = getDb()
+    db.insert(appSettings)
+      .values({ key, value: String(value), updatedAt: new Date() })
+      .onConflictDoUpdate({ target: appSettings.key, set: { value: String(value), updatedAt: new Date() } })
+      .run()
+    return { success: true }
+  })
+
+  // ---- Checklist handlers ----
+  ipcMain.handle('checklist:get-items', (_event, listType: string, date: string) => {
+    const db = getDb()
+    return db.select().from(checklistItems)
+      .where(eq(checklistItems.listType, listType))
+      .all()
+      .filter(i => i.listDate === date)
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+  })
+
+  ipcMain.handle('checklist:add-item', (_event, item: Record<string, unknown>) => {
+    const db = getDb()
+    const result = db.insert(checklistItems).values({
+      listType: item.listType as string,
+      listDate: item.listDate as string,
+      title: item.title as string,
+      body: item.body as string | undefined,
+      category: (item.category as string) || 'personal',
+      sortOrder: (item.sortOrder as number) || 0,
+      source: (item.source as string) || 'manual',
+      createdAt: new Date()
+    }).returning().get()
+    return result
+  })
+
+  ipcMain.handle('checklist:update-item', (_event, id: number, updates: Record<string, unknown>) => {
+    const db = getDb()
+    db.update(checklistItems).set(updates).where(eq(checklistItems.id, id)).run()
+    return { success: true }
+  })
+
+  ipcMain.handle('checklist:delete-item', (_event, id: number) => {
+    const db = getDb()
+    db.delete(checklistItems).where(eq(checklistItems.id, id)).run()
+    return { success: true }
+  })
+
+  ipcMain.handle('checklist:roll-over', (_event, fromDate: string, toDate: string) => {
+    const db = getDb()
+    const unfinished = db.select().from(checklistItems)
+      .where(eq(checklistItems.listType, 'daily'))
+      .all()
+      .filter(i => i.listDate === fromDate && !i.checked && i.source === 'manual')
+
+    for (const item of unfinished) {
+      db.insert(checklistItems).values({
+        listType: 'daily',
+        listDate: toDate,
+        title: item.title,
+        body: item.body,
+        category: item.category,
+        sortOrder: item.sortOrder,
+        source: 'manual',
+        createdAt: new Date()
+      }).run()
+    }
+    return { rolledOver: unfinished.length }
+  })
+
+  ipcMain.handle('checklist:get-template', (_event, listType: string) => {
+    const db = getDb()
+    const row = db.select().from(checklistTemplates).where(eq(checklistTemplates.listType, listType)).get()
+    return row?.contentMd ?? getDefaultTemplate(listType)
+  })
+
+  ipcMain.handle('checklist:save-template', (_event, listType: string, content: string) => {
+    const db = getDb()
+    db.insert(checklistTemplates).values({ listType, contentMd: content, updatedAt: new Date() })
+      .onConflictDoUpdate({ target: checklistTemplates.listType, set: { contentMd: content, updatedAt: new Date() } })
+      .run()
+    return { success: true }
+  })
+}
+
+function getDefaultTemplate(listType: string): string {
+  const templates: Record<string, string> = {
+    daily: `## Morning\n- [ ] Review today's calendar\n- [ ] Check email & prioritize\n- [ ] Set 3 main goals for the day\n\n## Work\n- [ ] Deep work block (2 hrs)\n- [ ] Review GitHub issues\n- [ ] Team sync / standups\n\n## Personal\n- [ ] Exercise\n- [ ] Read (30 min)\n\n## Evening\n- [ ] Plan tomorrow\n- [ ] Tidy workspace\n- [ ] Wind down`,
+    weekly: `## This Week's Goals\n- [ ] \n- [ ] \n\n## Projects Status\n- [ ] \n\n## Weekly Review\n- What went well?\n- What were the blockers?\n- What needs attention next week?`,
+    monthly: `## Monthly Priorities\n1. \n2. \n3. \n\n## Habits Review\n- [ ] \n\n## Financial Check-in\n- [ ] Review budget\n- [ ] Check upcoming bills\n\n## Monthly Reflection\n- Biggest win:\n- Biggest challenge:\n- Focus for next month:`
+  }
+  return templates[listType] || ''
+}

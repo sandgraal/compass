@@ -1,0 +1,27 @@
+#!/bin/sh
+# Block commits that include user data directories
+
+BLOCKED_PATTERNS="knowledge-base .vault .data oauth-tokens"
+
+for pattern in $BLOCKED_PATTERNS; do
+  if git diff --cached --name-only | grep -qE "^${pattern}/"; then
+    echo "COMMIT BLOCKED: Staged files match sensitive pattern: ${pattern}/"
+    echo "   These directories are gitignored for your security."
+    echo "   Run: git restore --staged <file>"
+    exit 1
+  fi
+done
+
+# Block .db files
+if git diff --cached --name-only | grep -qE "\.db(-shm|-wal)?$"; then
+  echo "COMMIT BLOCKED: SQLite database files must not be committed."
+  exit 1
+fi
+
+# Block .env files
+if git diff --cached --name-only | grep -qE "^\.env(\.local|\..*local)?$"; then
+  echo "COMMIT BLOCKED: .env files must never be committed."
+  exit 1
+fi
+
+exit 0

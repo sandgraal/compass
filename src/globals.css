@@ -1,0 +1,168 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 47% 7%;
+    --foreground: 213 31% 91%;
+    --card: 222 47% 9%;
+    --card-foreground: 213 31% 91%;
+    --popover: 222 47% 9%;
+    --popover-foreground: 213 31% 91%;
+    --primary: 238 82% 68%;
+    --primary-foreground: 222 47% 7%;
+    --secondary: 222 47% 14%;
+    --secondary-foreground: 213 31% 91%;
+    --muted: 222 47% 14%;
+    --muted-foreground: 215 20% 55%;
+    --accent: 238 82% 68%;
+    --accent-foreground: 222 47% 7%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 213 31% 91%;
+    --border: 222 47% 16%;
+    --input: 222 47% 14%;
+    --ring: 238 82% 68%;
+    --radius: 0.5rem;
+    --sidebar: 222 47% 5%;
+    --sidebar-foreground: 213 31% 91%;
+    --sidebar-border: 222 47% 12%;
+    --sidebar-accent: 222 47% 12%;
+    --sidebar-accent-foreground: 213 31% 91%;
+  }
+
+  .light {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 98%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 238 82% 58%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 238 82% 58%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 238 82% 58%;
+    --sidebar: 220 14% 96%;
+    --sidebar-foreground: 222 47% 11%;
+    --sidebar-border: 220 13% 88%;
+    --sidebar-accent: 238 82% 96%;
+    --sidebar-accent-foreground: 238 82% 40%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    -webkit-app-region: no-drag;
+    overflow: hidden;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground;
+  }
+
+  /* Title bar drag region */
+  .titlebar-drag {
+    -webkit-app-region: drag;
+  }
+  .titlebar-no-drag {
+    -webkit-app-region: no-drag;
+  }
+}
+
+@layer components {
+  /* TipTap editor styles */
+  .tiptap-editor .ProseMirror {
+    @apply outline-none min-h-[200px] leading-7;
+  }
+
+  .tiptap-editor .ProseMirror h1 {
+    @apply text-2xl font-semibold mt-6 mb-3;
+  }
+  .tiptap-editor .ProseMirror h2 {
+    @apply text-xl font-semibold mt-5 mb-2;
+  }
+  .tiptap-editor .ProseMirror h3 {
+    @apply text-lg font-medium mt-4 mb-2;
+  }
+  .tiptap-editor .ProseMirror p {
+    @apply mb-3;
+  }
+  .tiptap-editor .ProseMirror ul,
+  .tiptap-editor .ProseMirror ol {
+    @apply pl-6 mb-3 space-y-1;
+  }
+  .tiptap-editor .ProseMirror ul {
+    @apply list-disc;
+  }
+  .tiptap-editor .ProseMirror ol {
+    @apply list-decimal;
+  }
+  .tiptap-editor .ProseMirror blockquote {
+    @apply border-l-4 border-primary/40 pl-4 italic text-muted-foreground my-3;
+  }
+  .tiptap-editor .ProseMirror code {
+    @apply font-mono text-sm bg-secondary px-1.5 py-0.5 rounded;
+  }
+  .tiptap-editor .ProseMirror pre {
+    @apply font-mono text-sm bg-secondary p-4 rounded-lg overflow-auto my-3;
+  }
+  .tiptap-editor .ProseMirror table {
+    @apply w-full border-collapse my-3;
+  }
+  .tiptap-editor .ProseMirror th,
+  .tiptap-editor .ProseMirror td {
+    @apply border border-border px-3 py-2 text-sm;
+  }
+  .tiptap-editor .ProseMirror th {
+    @apply bg-secondary font-medium;
+  }
+  .tiptap-editor .ProseMirror hr {
+    @apply border-border my-4;
+  }
+  .tiptap-editor .ProseMirror a {
+    @apply text-primary underline;
+  }
+
+  /* Task list (checkboxes in TipTap) */
+  .tiptap-editor .ProseMirror ul[data-type="taskList"] {
+    @apply list-none pl-0;
+  }
+  .tiptap-editor .ProseMirror ul[data-type="taskList"] li {
+    @apply flex gap-2 items-start;
+  }
+  .tiptap-editor .ProseMirror ul[data-type="taskList"] li input[type="checkbox"] {
+    @apply mt-1 cursor-pointer accent-primary;
+  }
+
+  /* Placeholder */
+  .tiptap-editor .ProseMirror p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    @apply text-muted-foreground pointer-events-none float-left h-0;
+  }
+}
