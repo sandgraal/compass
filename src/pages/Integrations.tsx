@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { RefreshCw, CheckCircle2, XCircle, Plug2, AlertCircle, ExternalLink } from 'lucide-react'
+import { RefreshCw, CheckCircle2, XCircle, Plug2, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react'
 import { cn, formatRelative } from '../lib/utils'
 
 interface IntegrationConfig {
@@ -42,6 +42,7 @@ export default function Integrations(): JSX.Element {
   const [syncing, setSyncing] = useState<Set<string>>(new Set())
   const [connecting, setConnecting] = useState<string | null>(null)
   const [syncLog, setSyncLog] = useState<Array<{ service: string; time: Date; records: number; error?: string }>>([])
+  const [setupOpen, setSetupOpen] = useState(false)
 
   useEffect(() => {
     loadStatuses()
@@ -113,6 +114,70 @@ export default function Integrations(): JSX.Element {
         <p className="text-sm text-muted-foreground mt-1">
           Connect services to automatically populate your knowledge base. Data stays local — only OAuth tokens are stored.
         </p>
+      </div>
+
+      {/* Setup guide */}
+      <div className="mb-6 border border-border rounded-xl overflow-hidden">
+        <button
+          onClick={() => setSetupOpen(v => !v)}
+          className="w-full flex items-center justify-between px-5 py-3.5 bg-card hover:bg-secondary/40 transition-colors text-left"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-foreground">Setup Guide — OAuth Credentials</span>
+            <span className="text-xs px-2 py-0.5 bg-amber-500/20 text-amber-400 rounded-full">Required before connecting</span>
+          </div>
+          {setupOpen
+            ? <ChevronDown size={14} className="text-muted-foreground" />
+            : <ChevronRight size={14} className="text-muted-foreground" />}
+        </button>
+
+        {setupOpen && (
+          <div className="px-5 py-4 border-t border-border bg-card/50 space-y-5 text-sm text-muted-foreground">
+            <p>
+              Compass uses OAuth to connect to Google and GitHub. You need to create your own OAuth app credentials —
+              they stay in your local <code className="text-xs bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code> file and never leave your machine.
+            </p>
+
+            {/* Google */}
+            <div>
+              <h3 className="text-foreground font-semibold mb-2">Google (Calendar · Gmail · Drive)</h3>
+              <ol className="list-decimal list-inside space-y-1.5 text-xs leading-relaxed">
+                <li>Open <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">console.cloud.google.com</a> and create a new project (or use an existing one).</li>
+                <li>Go to <strong className="text-foreground">APIs &amp; Services → OAuth consent screen</strong>. Choose <em>External</em>, fill in the app name ("Compass"), your email, and save.</li>
+                <li>Go to <strong className="text-foreground">APIs &amp; Services → Credentials → Create Credentials → OAuth client ID</strong>.</li>
+                <li>Choose <strong className="text-foreground">Web application</strong> (not Desktop — the HTTP redirect requires this).</li>
+                <li>Add <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">http://localhost:4242/oauth/google/callback</code> as an <strong className="text-foreground">Authorized redirect URI</strong>.</li>
+                <li>Copy the <strong className="text-foreground">Client ID</strong> and <strong className="text-foreground">Client secret</strong> into your <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code> file.</li>
+                <li>Enable the required APIs: <strong className="text-foreground">Google Calendar API</strong>, <strong className="text-foreground">Gmail API</strong>, and <strong className="text-foreground">Google Drive API</strong> under <em>APIs &amp; Services → Library</em>.</li>
+                <li>While in test mode, add your Google account under <strong className="text-foreground">OAuth consent screen → Test users</strong>.</li>
+              </ol>
+            </div>
+
+            {/* GitHub */}
+            <div>
+              <h3 className="text-foreground font-semibold mb-2">GitHub (Issues · PRs · Projects)</h3>
+              <ol className="list-decimal list-inside space-y-1.5 text-xs leading-relaxed">
+                <li>Go to <a href="https://github.com/settings/developers" target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">github.com/settings/developers</a> → <strong className="text-foreground">OAuth Apps → New OAuth App</strong>.</li>
+                <li>Set <strong className="text-foreground">Application name</strong> to "Compass".</li>
+                <li>Set <strong className="text-foreground">Homepage URL</strong> to <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">http://localhost</code>.</li>
+                <li>Set <strong className="text-foreground">Authorization callback URL</strong> to <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">http://localhost:4242/oauth/github/callback</code>.</li>
+                <li>Click <strong className="text-foreground">Register application</strong>, then generate a <strong className="text-foreground">Client secret</strong>.</li>
+                <li>Copy both values into your <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code> file.</li>
+              </ol>
+            </div>
+
+            {/* .env location */}
+            <div className="bg-secondary/50 rounded-lg px-4 py-3 font-mono text-xs space-y-1">
+              <p className="text-foreground font-semibold text-xs mb-2 font-sans">.env (in project root)</p>
+              <p>GOOGLE_CLIENT_ID=<span className="text-amber-400">your_client_id</span></p>
+              <p>GOOGLE_CLIENT_SECRET=<span className="text-amber-400">your_client_secret</span></p>
+              <p>GITHUB_CLIENT_ID=<span className="text-amber-400">your_client_id</span></p>
+              <p>GITHUB_CLIENT_SECRET=<span className="text-amber-400">your_client_secret</span></p>
+            </div>
+
+            <p className="text-xs">After editing <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code>, restart the app (<code className="bg-secondary px-1.5 py-0.5 rounded font-mono">npm run dev</code>) for the credentials to take effect.</p>
+          </div>
+        )}
       </div>
 
       {/* Active integrations */}
