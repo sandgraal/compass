@@ -246,9 +246,6 @@ export default function Monthly(): JSX.Element {
                   </div>
                 </div>
               )}
-              {debtSummary.length === 0 && budgetLines.length === 0 && (
-                <p className="text-xs text-muted-foreground">No finance data for this month.</p>
-              )}
             </div>
           )}
         </div>
