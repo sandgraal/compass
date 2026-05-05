@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { format, addDays, subDays } from 'date-fns'
-import { Plus, ChevronLeft, ChevronRight, RefreshCcw, Download, GripVertical, Trash2, ChevronDown } from 'lucide-react'
+import { Plus, ChevronLeft, ChevronRight, RefreshCcw, Download, GripVertical, Trash2, ChevronDown, FileText, X } from 'lucide-react'
 import { cn, isoDate, todayISO } from '../lib/utils'
 
 const CATEGORIES = ['morning', 'work', 'personal', 'evening'] as const
@@ -13,6 +13,28 @@ const CATEGORY_COLORS: Record<Category, string> = {
   evening: 'text-indigo-400'
 }
 
+/** Parse template markdown into {category, title}[] for seeding a new day */
+function parseTemplate(md: string): Array<{ category: Category; title: string }> {
+  const catMap: Record<string, Category> = {
+    morning: 'morning', work: 'work', personal: 'personal', evening: 'evening'
+  }
+  const results: Array<{ category: Category; title: string }> = []
+  let currentCat: Category = 'personal'
+  for (const line of md.split('\n')) {
+    const headingMatch = line.match(/^#{1,3}\s+(.+)/)
+    if (headingMatch) {
+      const key = headingMatch[1].trim().toLowerCase()
+      currentCat = catMap[key] ?? 'personal'
+      continue
+    }
+    const itemMatch = line.match(/^-\s+\[[ x]\]\s+(.+)/)
+    if (itemMatch) {
+      results.push({ category: currentCat, title: itemMatch[1].trim() })
+    }
+  }
+  return results
+}
+
 export default function Daily(): JSX.Element {
   const [date, setDate] = useState(new Date())
   const [items, setItems] = useState<ChecklistItem[]>([])
@@ -23,6 +45,8 @@ export default function Daily(): JSX.Element {
   const [newCategory, setNewCategory] = useState<Category>('personal')
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
+  const [templateOpen, setTemplateOpen] = useState(false)
+  const [templateContent, setTemplateContent] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
   const dateStr = isoDate(date)
@@ -148,6 +172,40 @@ export default function Daily(): JSX.Element {
     alert(`Rolled over ${result.rolledOver} items to ${tomorrow}`)
   }
 
+  async function openTemplateEditor() {
+    if (window.api) {
+      const content = await window.api.checklist.getTemplate('daily')
+      setTemplateContent(content || '')
+    }
+    setTemplateOpen(true)
+  }
+
+  async function saveTemplate() {
+    if (window.api) {
+      await window.api.checklist.saveTemplate('daily', templateContent)
+    }
+    setTemplateOpen(false)
+  }
+
+  async function seedFromTemplate() {
+    if (!window.api) return
+    const content = await window.api.checklist.getTemplate('daily')
+    const parsed = parseTemplate(content)
+    const created: ChecklistItem[] = []
+    for (let i = 0; i < parsed.length; i++) {
+      const item = await window.api.checklist.addItem({
+        listType: 'daily',
+        listDate: dateStr,
+        title: parsed[i].title,
+        category: parsed[i].category,
+        sortOrder: i,
+        source: 'template'
+      })
+      created.push(item)
+    }
+    setItems(created)
+  }
+
   const grouped = CATEGORIES.map((cat) => ({
     cat,
     items: items.filter((i) => i.category === cat)
@@ -186,6 +244,9 @@ export default function Daily(): JSX.Element {
               <RefreshCcw size={12} /> Roll over
             </button>
           )}
+          <button onClick={openTemplateEditor} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors">
+            <FileText size={12} /> Template
+          </button>
           <button onClick={exportAsMarkdown} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors">
             <Download size={12} /> Export
           </button>
@@ -250,7 +311,15 @@ export default function Daily(): JSX.Element {
           {items.length === 0 && (
             <div className="text-center py-12">
               <p className="text-muted-foreground text-sm">No tasks yet for this day.</p>
-              <p className="text-muted-foreground/60 text-xs mt-1">Add your first task below.</p>
+              <p className="text-muted-foreground/60 text-xs mt-1">Add a task below or start from your template.</p>
+              {window.api && (
+                <button
+                  onClick={seedFromTemplate}
+                  className="mt-3 flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg transition-colors mx-auto"
+                >
+                  <FileText size={12} /> Load from template
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -322,6 +391,40 @@ export default function Daily(): JSX.Element {
           </button>
         </div>
       </div>
+
+      {/* Template editor modal */}
+      {templateOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setTemplateOpen(false)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">Daily Template</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Use <code className="text-primary">## Category</code> headings (morning, work, personal, evening) and <code className="text-primary">- [ ] Task</code> items</p>
+              </div>
+              <button onClick={() => setTemplateOpen(false)} className="p-1.5 rounded hover:bg-secondary text-muted-foreground">
+                <X size={14} />
+              </button>
+            </div>
+            <div className="p-5">
+              <textarea
+                value={templateContent}
+                onChange={(e) => setTemplateContent(e.target.value)}
+                className="w-full h-72 bg-secondary border border-border rounded-lg px-4 py-3 text-sm font-mono text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary resize-none"
+                spellCheck={false}
+              />
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-4 border-t border-border">
+              <button onClick={() => setTemplateOpen(false)} className="text-sm px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors">
+                Cancel
+              </button>
+              <button onClick={saveTemplate} className="text-sm px-4 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors">
+                Save template
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
