@@ -6,7 +6,7 @@ import TaskItem from '@tiptap/extension-task-item'
 import Placeholder from '@tiptap/extension-placeholder'
 import Typography from '@tiptap/extension-typography'
 import Link from '@tiptap/extension-link'
-import { BookOpen, Search, Plus, ChevronRight, RefreshCw, FileText, Folder, Save, Bot } from 'lucide-react'
+import { BookOpen, Search, Plus, ChevronRight, RefreshCw, FileText, Folder, Save, Bot, GitCompare } from 'lucide-react'
 import { cn, formatRelative } from '../lib/utils'
 import { useDebounce } from '../hooks/useDebounce'
 
@@ -27,7 +27,10 @@ export default function KnowledgeBase(): JSX.Element {
   const [searchResults, setSearchResults] = useState<Array<FileNode & { snippet: string }> | null>(null)
   const [saving, setSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
+  const [showDiff, setShowDiff] = useState(false)
+  const [diffOld, setDiffOld] = useState<string | null>(null)   // content before last sync
   const isLoadingRef = useRef(false)
+  const currentRawRef = useRef<string>('')  // raw markdown of currently open file
 
   const debouncedSearch = useDebounce(searchQuery, 300)
 
@@ -53,13 +56,20 @@ export default function KnowledgeBase(): JSX.Element {
     loadFiles()
 
     const isElectron = typeof window !== 'undefined' && !!window.api
-    if (isElectron) {
-      const unsub = window.api.knowledge.onFileChanged((path) => {
-        loadFiles()
-        if (path === selectedPath) loadFileContent(path)
-      })
-      return unsub
-    }
+    if (!isElectron) return
+
+    const unsub = window.api.knowledge.onFileChanged((path) => {
+      loadFiles()
+      if (path === selectedPath) {
+        // Capture current raw content as the "before" snapshot for the diff
+        if (currentRawRef.current) {
+          setDiffOld(currentRawRef.current)
+          setShowDiff(false) // reset; user can click to view diff
+        }
+        loadFileContent(path)
+      }
+    })
+    return unsub
   }, [])
 
   useEffect(() => {
@@ -91,6 +101,7 @@ export default function KnowledgeBase(): JSX.Element {
     if (isElectron) {
       const c = await window.api.knowledge.readFile(path)
       if (editor && c !== null) {
+        currentRawRef.current = c
         isLoadingRef.current = true
         editor.commands.setContent(markdownToHtml(c))
         setContent('')  // reset dirty state — auto-save won't fire until user edits
@@ -101,6 +112,8 @@ export default function KnowledgeBase(): JSX.Element {
 
   function selectFile(path: string) {
     setSelectedPath(path)
+    setDiffOld(null)
+    setShowDiff(false)
     loadFileContent(path)
   }
 
@@ -215,10 +228,38 @@ export default function KnowledgeBase(): JSX.Element {
                   {saving && <span className="flex items-center gap-1 text-xs text-muted-foreground"><RefreshCw size={10} className="animate-spin" /> Saving…</span>}
                 </div>
               </div>
-              <button onClick={saveContent} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors">
-                <Save size={12} /> Save
-              </button>
+              <div className="flex items-center gap-2">
+                {diffOld !== null && (
+                  <button
+                    onClick={() => setShowDiff(v => !v)}
+                    className={cn(
+                      'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors',
+                      showDiff
+                        ? 'bg-primary/20 text-primary border border-primary/30'
+                        : 'bg-secondary hover:bg-secondary/80 text-muted-foreground'
+                    )}
+                  >
+                    <GitCompare size={12} /> {showDiff ? 'Hide diff' : 'Show diff'}
+                  </button>
+                )}
+                <button onClick={saveContent} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors">
+                  <Save size={12} /> Save
+                </button>
+              </div>
             </div>
+
+            {/* Inline diff panel (shown after sync updates the file) */}
+            {showDiff && diffOld !== null && (
+              <div className="border-b border-border bg-card/60 max-h-64 overflow-y-auto">
+                <div className="px-4 py-2 flex items-center justify-between">
+                  <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                    <GitCompare size={11} /> Changes from last sync
+                  </span>
+                  <button onClick={() => setDiffOld(null)} className="text-xs text-muted-foreground hover:text-foreground">Dismiss</button>
+                </div>
+                <DiffView oldText={diffOld} newText={currentRawRef.current} />
+              </div>
+            )}
 
             {/* TipTap editor */}
             <div className="flex-1 overflow-y-auto px-10 py-6">
@@ -374,6 +415,94 @@ function htmlToMarkdown(html: string): string {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .trim()
+}
+
+// ── Diff view ────────────────────────────────────────────────────────────────
+
+type DiffLine = { type: 'same' | 'add' | 'remove'; text: string }
+
+function computeDiff(oldText: string, newText: string): DiffLine[] {
+  const oldLines = oldText.split('\n')
+  const newLines = newText.split('\n')
+
+  // Simple O(n²) LCS-based diff — good enough for knowledge files (< 1000 lines)
+  const n = oldLines.length
+  const m = newLines.length
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0))
+
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      if (oldLines[i] === newLines[j]) {
+        dp[i][j] = 1 + dp[i + 1][j + 1]
+      } else {
+        dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1])
+      }
+    }
+  }
+
+  const result: DiffLine[] = []
+  let i = 0; let j = 0
+  while (i < n || j < m) {
+    if (i < n && j < m && oldLines[i] === newLines[j]) {
+      result.push({ type: 'same', text: oldLines[i] })
+      i++; j++
+    } else if (j < m && (i >= n || dp[i][j + 1] >= dp[i + 1][j])) {
+      result.push({ type: 'add', text: newLines[j] })
+      j++
+    } else {
+      result.push({ type: 'remove', text: oldLines[i] })
+      i++
+    }
+  }
+  return result
+}
+
+function DiffView({ oldText, newText }: { oldText: string; newText: string }): JSX.Element {
+  const lines = computeDiff(oldText, newText)
+  const hasChanges = lines.some(l => l.type !== 'same')
+
+  if (!hasChanges) {
+    return <p className="px-4 py-3 text-xs text-muted-foreground italic">No changes detected.</p>
+  }
+
+  // Show only changed lines + 2 lines of context around each change
+  const CONTEXT = 2
+  const shown = new Set<number>()
+  lines.forEach((l, idx) => {
+    if (l.type !== 'same') {
+      for (let k = Math.max(0, idx - CONTEXT); k <= Math.min(lines.length - 1, idx + CONTEXT); k++) {
+        shown.add(k)
+      }
+    }
+  })
+
+  const chunks: JSX.Element[] = []
+  let prevIdx = -1
+  lines.forEach((line, idx) => {
+    if (!shown.has(idx)) return
+    if (prevIdx >= 0 && idx > prevIdx + 1) {
+      chunks.push(<div key={`gap-${idx}`} className="px-4 py-0.5 text-xs text-muted-foreground/40">···</div>)
+    }
+    prevIdx = idx
+    chunks.push(
+      <div
+        key={idx}
+        className={cn(
+          'px-4 py-0.5 font-mono text-xs whitespace-pre-wrap',
+          line.type === 'add'    && 'bg-emerald-500/10 text-emerald-400',
+          line.type === 'remove' && 'bg-red-500/10 text-red-400 line-through',
+          line.type === 'same'   && 'text-muted-foreground/50'
+        )}
+      >
+        <span className="mr-2 select-none opacity-50">
+          {line.type === 'add' ? '+' : line.type === 'remove' ? '−' : ' '}
+        </span>
+        {line.text || ' '}
+      </div>
+    )
+  })
+
+  return <div className="pb-2">{chunks}</div>
 }
 
 function getMockFiles(): FileNode[] {
