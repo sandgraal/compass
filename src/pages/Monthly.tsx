@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, isSameMonth, isSameDay, addMonths, subMonths } from 'date-fns'
-import { ChevronLeft, ChevronRight, Target, TrendingUp, Plus, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Target, TrendingUp, Plus, X, DollarSign } from 'lucide-react'
 import { cn, isoDate } from '../lib/utils'
 
 const HABIT_COLORS = ['#6272f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899']
@@ -14,6 +14,8 @@ export default function Monthly(): JSX.Element {
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [addingHabit, setAddingHabit] = useState(false)
   const [newHabitName, setNewHabitName] = useState('')
+  const [debtSummary, setDebtSummary] = useState<{ id: number; name: string; balance: number | null; apr: number | null }[]>([])
+  const [budgetLines, setBudgetLines] = useState<{ category: string; budget: number; actual: number }[]>([])
 
   const monthEnd = endOfMonth(month)
   const isCurrentMonth = isSameMonth(month, new Date())
@@ -33,11 +35,19 @@ export default function Monthly(): JSX.Element {
       window.api.calendar.getEvents(month.toISOString(), monthEnd.toISOString()),
       window.api.settings.getAll(),
       window.api.habits.list(),
-      window.api.habits.getEntries(monthKey)
-    ]).then(([calEvents, s, habitList, entries]) => {
+      window.api.habits.getEntries(monthKey),
+      window.api.finance.getDebtSummary().catch(() => ({ debts: [] })),
+      window.api.finance.getBudgetStatus(monthKey).catch(() => ({ lines: [], totals: { budget: 0, actual: 0 } }))
+    ]).then(([calEvents, s, habitList, entries, debtData, budgetData]) => {
       setEvents(calEvents)
       setHabits(habitList)
       setHabitEntries(entries)
+
+      // Finance snapshot
+      const d = debtData as { debts: { id: number; name: string; balance: number | null; apr: number | null }[] }
+      setDebtSummary(d.debts.filter(x => (x.balance ?? 0) !== 0))
+      const b = budgetData as { lines: { category: string; budget: number; actual: number }[]; totals: { budget: number; actual: number } }
+      setBudgetLines(b.lines.filter(l => l.budget > 0 || Math.abs(l.actual) > 0).slice(0, 4))
 
       const settings = s as Record<string, string>
       const savedGoals = settings[`monthly_goals_${monthKey}`]
@@ -175,6 +185,67 @@ export default function Monthly(): JSX.Element {
               ))}
             </div>
           </div>
+
+          {/* Financial snapshot */}
+          {(debtSummary.length > 0 || budgetLines.length > 0) && (
+            <div className="bg-card border border-border rounded-xl p-4">
+              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2 text-emerald-400">
+                <DollarSign size={14} /> Finance
+              </h3>
+              {debtSummary.length > 0 && (
+                <div className="mb-3">
+                  <p className="text-xs text-muted-foreground font-medium mb-1.5 uppercase tracking-wider">Debt</p>
+                  <div className="space-y-1.5">
+                    {debtSummary.map(d => (
+                      <div key={d.id} className="flex items-center justify-between">
+                        <span className="text-xs text-foreground truncate flex-1 mr-2">{d.name}</span>
+                        <span className="text-xs font-mono text-red-400 shrink-0">
+                          ${Math.abs(d.balance ?? 0).toLocaleString('en-US', { minimumFractionDigits: 0 })}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between border-t border-border pt-1.5 mt-1">
+                      <span className="text-xs text-muted-foreground">Total debt</span>
+                      <span className="text-xs font-mono font-semibold text-red-400">
+                        ${debtSummary.reduce((s, d) => s + Math.abs(d.balance ?? 0), 0).toLocaleString('en-US', { minimumFractionDigits: 0 })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {budgetLines.length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium mb-1.5 uppercase tracking-wider">Budget vs Actual</p>
+                  <div className="space-y-1.5">
+                    {budgetLines.map(l => {
+                      const over = l.actual > l.budget && l.budget > 0
+                      return (
+                        <div key={l.category}>
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="text-xs text-foreground capitalize">{l.category}</span>
+                            <span className={cn('text-xs font-mono', over ? 'text-red-400' : 'text-muted-foreground')}>
+                              ${Math.abs(l.actual).toFixed(0)} / ${l.budget.toFixed(0)}
+                            </span>
+                          </div>
+                          {l.budget > 0 && (
+                            <div className="h-1 bg-secondary rounded-full overflow-hidden">
+                              <div
+                                className={cn('h-full rounded-full transition-all', over ? 'bg-red-500' : 'bg-emerald-500')}
+                                style={{ width: `${Math.min(100, (Math.abs(l.actual) / l.budget) * 100)}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+              {debtSummary.length === 0 && budgetLines.length === 0 && (
+                <p className="text-xs text-muted-foreground">No finance data for this month.</p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Middle/right columns: habits tracker */}

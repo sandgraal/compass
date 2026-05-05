@@ -167,6 +167,7 @@ declare global {
         openDataDir(): Promise<{ success: boolean }>
         wipeKnowledge(): Promise<{ success: boolean; error?: string }>
         wipeVault(): Promise<{ success: boolean; error?: string }>
+        exportData(): Promise<{ success: boolean; path?: string; canceled?: boolean; error?: string }>
       }
       theme: {
         getNativeTheme(): Promise<'dark' | 'light'>
