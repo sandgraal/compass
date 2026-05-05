@@ -13,7 +13,7 @@
  */
 
 import { format } from 'date-fns'
-import { KNOWLEDGE_DIR } from '../main'
+import { KNOWLEDGE_DIR } from '../paths'
 import { updateKnowledgeFile } from './writer'
 // import { financeAccounts, financeTransactions, financeDebts, financeBudgetLines } from '../db/schema'
 // import { getDb } from '../db/client'

@@ -1,9 +1,12 @@
 import { IpcMain, BrowserWindow, safeStorage } from 'electron'
 import { createServer, IncomingMessage, ServerResponse } from 'http'
 import { URL } from 'url'
+import { join } from 'path'
+import { writeFileSync, mkdirSync, readFileSync, existsSync, unlinkSync } from 'fs'
 import { getDb } from '../db/client'
 import { integrations } from '../db/schema'
 import { eq } from 'drizzle-orm'
+import { DATA_DIR } from '../paths'
 
 const TOKEN_KEY_PREFIX = 'compass_token_'
 const OAUTH_PORT = 4242
@@ -13,18 +16,12 @@ const GITHUB_CALLBACK_PATH = '/oauth/github/callback'
 export function saveToken(service: string, tokenData: object): void {
   const json = JSON.stringify(tokenData)
   const encrypted = safeStorage.encryptString(json)
-  const { join } = require('path')
-  const { writeFileSync, mkdirSync } = require('fs')
-  const { DATA_DIR } = require('../main')
   mkdirSync(DATA_DIR, { recursive: true })
   writeFileSync(join(DATA_DIR, `${TOKEN_KEY_PREFIX}${service}.enc`), encrypted)
 }
 
 export function loadToken(service: string): object | null {
   try {
-    const { join } = require('path')
-    const { readFileSync, existsSync } = require('fs')
-    const { DATA_DIR } = require('../main')
     const path = join(DATA_DIR, `${TOKEN_KEY_PREFIX}${service}.enc`)
     if (!existsSync(path)) return null
     const encrypted = readFileSync(path)
@@ -37,9 +34,6 @@ export function loadToken(service: string): object | null {
 
 export function deleteToken(service: string): void {
   try {
-    const { join } = require('path')
-    const { unlinkSync, existsSync } = require('fs')
-    const { DATA_DIR } = require('../main')
     const path = join(DATA_DIR, `${TOKEN_KEY_PREFIX}${service}.enc`)
     if (existsSync(path)) unlinkSync(path)
   } catch { /* ignore */ }

@@ -2,7 +2,7 @@ import { IpcMain, safeStorage } from 'electron'
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
-import { VAULT_DIR } from '../main'
+import { VAULT_DIR } from '../paths'
 
 const ALGORITHM = 'aes-256-gcm'
 const KEY_SIZE = 32 // 256 bits

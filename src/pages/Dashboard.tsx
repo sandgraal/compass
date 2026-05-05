@@ -21,29 +21,18 @@ export default function Dashboard(): JSX.Element {
   const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus[]>([])
   const [isSyncing, setIsSyncing] = useState(false)
 
-  useEffect(() => {
-    const hour = new Date().getHours()
-    setGreeting(hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening')
-
-    const isElectron = typeof window !== 'undefined' && !!window.api
-    if (!isElectron) {
-      setStats([
-        { label: 'Tasks Today', value: 8, sub: '3 completed', color: 'text-primary' },
-        { label: 'GitHub Issues', value: 5, sub: 'assigned to you', color: 'text-amber-400' },
-        { label: 'Unread Actions', value: 12, sub: 'in inbox', color: 'text-emerald-400' },
-        { label: 'Events Today', value: 3, sub: 'on calendar', color: 'text-sky-400' }
-      ])
-      return
-    }
+  const loadData = () => {
+    if (typeof window === 'undefined' || !window.api) return
 
     const today = todayISO()
     const now = new Date()
     const endOfDay = new Date(now)
     endOfDay.setHours(23, 59, 59)
+    const sevenDaysOut = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
 
     Promise.all([
       window.api.checklist.getItems('daily', today),
-      window.api.calendar.getEvents(now.toISOString(), endOfDay.toISOString()),
+      window.api.calendar.getEvents(now.toISOString(), sevenDaysOut.toISOString()),
       window.api.github.getItems('open'),
       window.api.gmail.getActions(false),
       window.api.sync.getSyncStatus()
@@ -59,9 +48,27 @@ export default function Dashboard(): JSX.Element {
         { label: 'Tasks Today', value: checkItems.length, sub: `${done} completed`, color: 'text-primary' },
         { label: 'GitHub Issues', value: ghItems.filter(g => g.type === 'issue').length, sub: 'assigned to you', color: 'text-amber-400' },
         { label: 'Inbox Actions', value: gmailItems.length, sub: 'need attention', color: 'text-emerald-400' },
-        { label: 'Events Today', value: calEvents.length, sub: 'on calendar', color: 'text-sky-400' }
+        { label: 'Upcoming Events', value: calEvents.length, sub: 'next 7 days', color: 'text-sky-400' }
       ])
     })
+  }
+
+  useEffect(() => {
+    const hour = new Date().getHours()
+    setGreeting(hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening')
+
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron) {
+      setStats([
+        { label: 'Tasks Today', value: 8, sub: '3 completed', color: 'text-primary' },
+        { label: 'GitHub Issues', value: 5, sub: 'assigned to you', color: 'text-amber-400' },
+        { label: 'Unread Actions', value: 12, sub: 'in inbox', color: 'text-emerald-400' },
+        { label: 'Events Today', value: 3, sub: 'on calendar', color: 'text-sky-400' }
+      ])
+      return
+    }
+
+    loadData()
   }, [])
 
   const handleSync = async () => {
@@ -69,6 +76,8 @@ export default function Dashboard(): JSX.Element {
     setIsSyncing(true)
     await window.api.sync.triggerAllSync()
     setIsSyncing(false)
+    // Reload all dashboard data now that the sync has completed
+    loadData()
   }
 
   return (
@@ -140,12 +149,12 @@ export default function Dashboard(): JSX.Element {
         <div className="bg-card border border-border rounded-xl">
           <div className="flex items-center justify-between px-5 py-4 border-b border-border">
             <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <Calendar size={15} /> Today's Calendar
+              <Calendar size={15} /> Upcoming Events
             </h2>
           </div>
           <div className="divide-y divide-border">
             {events.length === 0 ? (
-              <EmptyState icon={<Calendar size={16} />} message="No events today" />
+              <EmptyState icon={<Calendar size={16} />} message="No upcoming events" />
             ) : (
               events.map((ev) => (
                 <div key={ev.id} className="flex items-start gap-3 px-5 py-3">
@@ -153,7 +162,8 @@ export default function Dashboard(): JSX.Element {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-foreground truncate">{ev.title}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      {ev.allDay ? 'All day' : ev.startAt ? formatTime(ev.startAt) : ''}
+                      {ev.startAt ? format(new Date(ev.startAt), 'EEE, MMM d') : ''}
+                      {!ev.allDay && ev.startAt ? ` · ${formatTime(ev.startAt)}` : ev.allDay ? ' · All day' : ''}
                       {ev.location ? ` · ${ev.location}` : ''}
                     </p>
                   </div>

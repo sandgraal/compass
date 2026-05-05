@@ -1,5 +1,5 @@
 import { format } from 'date-fns'
-import { KNOWLEDGE_DIR } from '../main'
+import { KNOWLEDGE_DIR } from '../paths'
 import { updateKnowledgeFile } from './writer'
 
 interface CalendarEvent {
