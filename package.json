@@ -48,7 +48,7 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "dotenv": "^17.4.2",
-    "drizzle-orm": "^0.36.3",
+    "drizzle-orm": "^0.45.2",
     "googleapis": "^144.0.0",
     "lucide-react": "^0.462.0",
     "node-cron": "^3.0.3",
@@ -58,7 +58,7 @@
     "react-router-dom": "^6.28.0",
     "tailwind-merge": "^2.5.4",
     "tailwindcss-animate": "^1.0.7",
-    "vite": "^5.4.21",
+    "vite": "^6.4.2",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
@@ -73,16 +73,18 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
-    "drizzle-kit": "^0.28.1",
-    "electron": "^33.2.1",
-    "electron-builder": "^25.1.8",
-    "electron-rebuild": "^3.2.9",
-    "electron-vite": "^2.3.0",
+    "drizzle-kit": "^0.31.10",
+    "electron": "^41.5.0",
+    "electron-builder": "^26.9.0",
+    "electron-vite": "^5.0.0",
     "husky": "^9.1.7",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.16",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
+  },
+  "overrides": {
+    "esbuild": "^0.25.0"
   },
   "build": {
     "appId": "com.compass.app",
