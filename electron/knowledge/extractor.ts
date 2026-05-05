@@ -1,5 +1,5 @@
 import { format } from 'date-fns'
-import { KNOWLEDGE_DIR } from '../main'
+import { KNOWLEDGE_DIR } from '../paths'
 import { updateKnowledgeFile } from './writer'
 
 interface CalendarEvent {
@@ -76,19 +76,21 @@ export async function updateGmailKnowledge(messages: GmailMessage[]): Promise<vo
     '# Email Action Items',
     '',
     `> Auto-updated by Compass — ${new Date().toLocaleString()}`,
-    '',
-    '| Subject | From | Snippet |',
-    '|---|---|---|'
+    `> ${messages.length} unread messages needing attention.`,
+    ''
   ]
 
   for (const msg of messages) {
-    const subject = msg.subject.replace(/\|/g, '\\|').slice(0, 60)
-    const from = msg.from.replace(/\|/g, '\\|').slice(0, 40)
-    const snippet = (msg.snippet || '').replace(/\|/g, '\\|').slice(0, 80)
-    lines.push(`| ${subject} | ${from} | ${snippet} |`)
+    const subject = msg.subject.slice(0, 70)
+    const from = msg.from.replace(/<[^>]+>/, '').trim().slice(0, 40)
+    const snippet = (msg.snippet || '').slice(0, 100)
+    lines.push(`## ${subject}`)
+    lines.push(`- **From:** ${from}`)
+    if (snippet) lines.push(`- **Preview:** ${snippet}`)
+    lines.push('')
   }
 
-  updateKnowledgeFile(KNOWLEDGE_DIR, 'inbox/action-items.md', lines.join('\n') + '\n')
+  updateKnowledgeFile(KNOWLEDGE_DIR, 'inbox/action-items.md', lines.join('\n'))
 }
 
 export async function updateDriveKnowledge(files: DriveFile[]): Promise<void> {

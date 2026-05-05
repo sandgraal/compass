@@ -1,7 +1,6 @@
 import 'dotenv/config'
 import { app, BrowserWindow, ipcMain, shell, nativeTheme } from 'electron'
 import { join } from 'path'
-import { homedir } from 'os'
 import { mkdirSync, existsSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerAuthHandlers } from './ipc/auth'
@@ -11,12 +10,9 @@ import { registerVaultHandlers } from './ipc/vault'
 import { registerSettingsHandlers } from './ipc/settings'
 import { initDb } from './db/client'
 import { startCronJobs } from './cron'
+import { APP_DATA_DIR, DATA_DIR, VAULT_DIR, KNOWLEDGE_DIR } from './paths'
 
-// Resolve the app data directory
-export const APP_DATA_DIR = join(homedir(), 'Library', 'Application Support', 'Compass')
-export const DATA_DIR = join(APP_DATA_DIR, '.data')
-export const VAULT_DIR = join(APP_DATA_DIR, '.vault')
-export const KNOWLEDGE_DIR = join(APP_DATA_DIR, 'knowledge-base')
+export { APP_DATA_DIR, DATA_DIR, VAULT_DIR, KNOWLEDGE_DIR }
 
 function ensureDirectories(): void {
   for (const dir of [DATA_DIR, VAULT_DIR, KNOWLEDGE_DIR,

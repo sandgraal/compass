@@ -9,7 +9,8 @@ const api = {
     connectGoogle: () => ipcRenderer.invoke('auth:connect-google'),
     connectGitHub: () => ipcRenderer.invoke('auth:connect-github'),
     disconnect: (service: string) => ipcRenderer.invoke('auth:disconnect', service),
-    getStatus: () => ipcRenderer.invoke('auth:get-status')
+    getStatus: () => ipcRenderer.invoke('auth:get-status'),
+    getRedirectUris: () => ipcRenderer.invoke('auth:get-redirect-uris')
   },
 
   // --- Sync ---
