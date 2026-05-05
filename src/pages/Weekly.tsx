@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { format, startOfWeek, endOfWeek, eachDayOfInterval, addWeeks, subWeeks, isSameDay } from 'date-fns'
 import { ChevronLeft, ChevronRight, CheckSquare, GitBranch, Calendar } from 'lucide-react'
 import { cn, isoDate } from '../lib/utils'
@@ -37,20 +37,38 @@ export default function Weekly(): JSX.Element {
       const s = results[9] as Record<string, string>
       const savedGoals = s[`weekly_goals_${weekKey}`]
       const savedReflection = s[`weekly_reflection_${weekKey}`]
-      if (savedGoals) setGoals(JSON.parse(savedGoals))
-      if (savedReflection) setReflection(JSON.parse(savedReflection))
+      try { if (savedGoals) setGoals(JSON.parse(savedGoals)) } catch { /* ignore corrupt data */ }
+      try { if (savedReflection) setReflection(JSON.parse(savedReflection)) } catch { /* ignore corrupt data */ }
     })
   }, [weekStart])
 
-  function saveGoals(newGoals: string[]) {
-    setGoals(newGoals)
-    if (window.api) window.api.settings.set(`weekly_goals_${weekKey}`, JSON.stringify(newGoals))
-  }
+  const goalsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reflectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  function saveReflection(newReflection: typeof reflection) {
+  useEffect(() => {
+    return () => {
+      if (goalsTimerRef.current) clearTimeout(goalsTimerRef.current)
+      if (reflectionTimerRef.current) clearTimeout(reflectionTimerRef.current)
+    }
+  }, [])
+
+  const saveGoals = useCallback((newGoals: string[]) => {
+    setGoals(newGoals)
+    if (!window.api) return
+    if (goalsTimerRef.current) clearTimeout(goalsTimerRef.current)
+    goalsTimerRef.current = setTimeout(() => {
+      window.api.settings.set(`weekly_goals_${weekKey}`, JSON.stringify(newGoals))
+    }, 500)
+  }, [weekKey])
+
+  const saveReflection = useCallback((newReflection: typeof reflection) => {
     setReflection(newReflection)
-    if (window.api) window.api.settings.set(`weekly_reflection_${weekKey}`, JSON.stringify(newReflection))
-  }
+    if (!window.api) return
+    if (reflectionTimerRef.current) clearTimeout(reflectionTimerRef.current)
+    reflectionTimerRef.current = setTimeout(() => {
+      window.api.settings.set(`weekly_reflection_${weekKey}`, JSON.stringify(newReflection))
+    }, 500)
+  }, [weekKey])
 
   const totalTasks = Object.values(allItems).flat().length
   const completedTasks = Object.values(allItems).flat().filter(i => i.checked).length

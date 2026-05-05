@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, isSameMonth, isSameDay, addMonths, subMonths } from 'date-fns'
 import { ChevronLeft, ChevronRight, Target, TrendingUp } from 'lucide-react'
 import { cn, isoDate } from '../lib/utils'
@@ -36,21 +36,39 @@ export default function Monthly(): JSX.Element {
       const savedGoals = settings[`monthly_goals_${monthKey}`]
       const savedReflection = settings[`monthly_reflection_${monthKey}`]
       const savedHabits = settings[`monthly_habit_data_${monthKey}`]
-      if (savedGoals) setGoals(JSON.parse(savedGoals))
-      if (savedReflection) setReflection(JSON.parse(savedReflection))
-      if (savedHabits) setHabitData(JSON.parse(savedHabits))
+      try { if (savedGoals) setGoals(JSON.parse(savedGoals)) } catch { /* ignore corrupt data */ }
+      try { if (savedReflection) setReflection(JSON.parse(savedReflection)) } catch { /* ignore corrupt data */ }
+      try { if (savedHabits) setHabitData(JSON.parse(savedHabits)) } catch { /* ignore corrupt data */ }
     })
   }, [month])
 
-  function saveGoals(newGoals: string[]) {
-    setGoals(newGoals)
-    if (window.api) window.api.settings.set(`monthly_goals_${monthKey}`, JSON.stringify(newGoals))
-  }
+  const goalsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reflectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  function saveReflection(newReflection: typeof reflection) {
+  useEffect(() => {
+    return () => {
+      if (goalsTimerRef.current) clearTimeout(goalsTimerRef.current)
+      if (reflectionTimerRef.current) clearTimeout(reflectionTimerRef.current)
+    }
+  }, [])
+
+  const saveGoals = useCallback((newGoals: string[]) => {
+    setGoals(newGoals)
+    if (!window.api) return
+    if (goalsTimerRef.current) clearTimeout(goalsTimerRef.current)
+    goalsTimerRef.current = setTimeout(() => {
+      window.api.settings.set(`monthly_goals_${monthKey}`, JSON.stringify(newGoals))
+    }, 500)
+  }, [monthKey])
+
+  const saveReflection = useCallback((newReflection: typeof reflection) => {
     setReflection(newReflection)
-    if (window.api) window.api.settings.set(`monthly_reflection_${monthKey}`, JSON.stringify(newReflection))
-  }
+    if (!window.api) return
+    if (reflectionTimerRef.current) clearTimeout(reflectionTimerRef.current)
+    reflectionTimerRef.current = setTimeout(() => {
+      window.api.settings.set(`monthly_reflection_${monthKey}`, JSON.stringify(newReflection))
+    }, 500)
+  }, [monthKey])
 
   function toggleHabit(habit: string, date: string) {
     const newData = {

@@ -352,9 +352,14 @@ export default function Daily(): JSX.Element {
                   <p className="text-xs text-muted-foreground truncate">{msg.fromAddress}</p>
                 </div>
                 <button
-                  onClick={() => window.api?.gmail.markDone(msg.id).then(() =>
-                    setGmailActions(prev => prev.filter(m => m.id !== msg.id))
-                  )}
+                  onClick={async () => {
+                    try {
+                      await window.api?.gmail.markDone(msg.id)
+                      setGmailActions(prev => prev.filter(m => m.id !== msg.id))
+                    } catch (err) {
+                      console.error('[Daily] markDone failed:', err)
+                    }
+                  }}
                   className="text-xs text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
                 >
                   Done

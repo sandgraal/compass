@@ -47,9 +47,10 @@ export default function Finance(): JSX.Element {
   }
 
   const ingest = async () => {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron || !window.api.finance) return
     setIngesting(true)
     try {
-      if (!window.api.finance) return
       const result = await window.api.finance.ingestFolder()
       setLastIngest(result)
       await refresh()

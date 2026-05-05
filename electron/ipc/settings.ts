@@ -1,5 +1,5 @@
 import { IpcMain, shell } from 'electron'
-import { readdirSync, unlinkSync, rmSync } from 'fs'
+import { readdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { getDb } from '../db/client'
 import { appSettings, checklistItems, checklistTemplates } from '../db/schema'
@@ -112,8 +112,9 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
   })
 
   // ---- Data management ----
-  ipcMain.handle('settings:open-data-dir', () => {
-    shell.openPath(DATA_DIR)
+  ipcMain.handle('settings:open-data-dir', async () => {
+    const error = await shell.openPath(DATA_DIR)
+    if (error) return { success: false, error }
     return { success: true }
   })
 
@@ -125,14 +126,14 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
         const dir = join(KNOWLEDGE_DIR, sub)
         try {
           for (const f of readdirSync(dir)) {
-            unlinkSync(join(dir, f))
+            rmSync(join(dir, f), { recursive: true, force: true })
           }
         } catch { /* dir may not exist */ }
       }
       // Also remove any top-level .md files
       try {
         for (const f of readdirSync(KNOWLEDGE_DIR)) {
-          if (f.endsWith('.md')) unlinkSync(join(KNOWLEDGE_DIR, f))
+          if (f.endsWith('.md')) rmSync(join(KNOWLEDGE_DIR, f), { force: true })
         }
       } catch { /* ignore */ }
       return { success: true }
@@ -144,9 +145,8 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('settings:wipe-vault', () => {
     try {
       for (const f of readdirSync(VAULT_DIR)) {
-        if (f.endsWith('.enc')) unlinkSync(join(VAULT_DIR, f))
+        if (f.endsWith('.enc')) rmSync(join(VAULT_DIR, f), { force: true })
       }
-      // Also clear any vault metadata from DB
       return { success: true }
     } catch (err) {
       return { success: false, error: String(err) }
