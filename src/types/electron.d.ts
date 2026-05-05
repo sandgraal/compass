@@ -150,12 +150,21 @@ declare global {
         getNativeTheme(): Promise<'dark' | 'light'>
         onThemeChange(cb: (theme: string) => void): () => void
       }
-      finance?: {
-        ingestFolder(folder?: string): Promise<{ filesProcessed: number; newTransactions: number; duplicatesDropped: number }>
-        getTransactions(opts?: { month?: string; category?: string; limit?: number }): Promise<Array<{ id: number; date: string; amount: number; description: string; category: string; subcategory?: string }>>
-        getDebtSummary(): Promise<{ debts: Array<{ id: number; name: string; balance: number; apr: number; minPayment: number }>; projection: Array<{ month: number; balance: number }> }>
+      finance: {
+        ingestFolder(folder?: string): Promise<{ filesProcessed: number; newTransactions: number; duplicatesDropped: number; perFile: Array<{ file: string; bank: string; parsed: number; new: number }> }>
+        getTransactions(opts?: { month?: string; category?: string; accountId?: number; limit?: number }): Promise<Array<{ id: number; hash: string; date: string; amount: number; description: string; accountId: number | null; category: string | null; subcategory: string | null; notes: string | null; sourceFile: string | null }>>
+        updateTransaction(id: number, updates: { category?: string; subcategory?: string; notes?: string; accountId?: number }): Promise<{ success: boolean }>
+        deleteTransaction(id: number): Promise<{ success: boolean }>
+        getAccounts(): Promise<Array<{ id: number; name: string; type: string; isDebt: boolean | null; balance: number | null; apr: number | null; minPayment: number | null; creditLimit: number | null }>>
+        upsertAccount(account: { id?: number; name: string; type: string; isDebt?: boolean; balance?: number; apr?: number; minPayment?: number; creditLimit?: number }): Promise<{ success: boolean; id: number }>
+        deleteAccount(id: number): Promise<{ success: boolean }>
+        getDebtSummary(): Promise<{ debts: Array<{ id: number; name: string; balance: number | null; apr: number | null; minPayment: number | null }>; projection: Array<{ month: number; balance: number }> }>
         getBudgetStatus(month?: string): Promise<{ lines: Array<{ category: string; subcategory?: string; monthlyAmount: number; actual: number; variance: number; pct: number }>; totals: { budgeted: number; actual: number } }>
         setBudget(line: { category: string; subcategory?: string; monthlyAmount: number }): Promise<{ success: boolean }>
+        getRules(): Promise<Array<{ id: number; pattern: string; category: string; subcategory: string | null; priority: number | null }>>
+        saveRule(rule: { id?: number; pattern: string; category: string; subcategory?: string; priority?: number }): Promise<{ success: boolean }>
+        deleteRule(id: number): Promise<{ success: boolean }>
+        getInboxPath(): Promise<string>
       }
     }
   }

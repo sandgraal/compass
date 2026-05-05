@@ -98,6 +98,29 @@ const api = {
     wipeVault: () => ipcRenderer.invoke('settings:wipe-vault')
   },
 
+  // --- Finance ---
+  finance: {
+    ingestFolder: (folder?: string) => ipcRenderer.invoke('finance:ingest-folder', folder),
+    getTransactions: (opts?: { month?: string; category?: string; accountId?: number; limit?: number }) =>
+      ipcRenderer.invoke('finance:get-transactions', opts),
+    updateTransaction: (id: number, updates: { category?: string; subcategory?: string; notes?: string; accountId?: number }) =>
+      ipcRenderer.invoke('finance:update-transaction', id, updates),
+    deleteTransaction: (id: number) => ipcRenderer.invoke('finance:delete-transaction', id),
+    getAccounts: () => ipcRenderer.invoke('finance:get-accounts'),
+    upsertAccount: (account: { id?: number; name: string; type: string; isDebt?: boolean; balance?: number; apr?: number; minPayment?: number; creditLimit?: number }) =>
+      ipcRenderer.invoke('finance:upsert-account', account),
+    deleteAccount: (id: number) => ipcRenderer.invoke('finance:delete-account', id),
+    getDebtSummary: () => ipcRenderer.invoke('finance:get-debt-summary'),
+    getBudgetStatus: (month?: string) => ipcRenderer.invoke('finance:get-budget-status', month),
+    setBudget: (line: { category: string; subcategory?: string; monthlyAmount: number }) =>
+      ipcRenderer.invoke('finance:set-budget', line),
+    getRules: () => ipcRenderer.invoke('finance:get-rules'),
+    saveRule: (rule: { id?: number; pattern: string; category: string; subcategory?: string; priority?: number }) =>
+      ipcRenderer.invoke('finance:save-rule', rule),
+    deleteRule: (id: number) => ipcRenderer.invoke('finance:delete-rule', id),
+    getInboxPath: () => ipcRenderer.invoke('finance:get-inbox-path')
+  },
+
   // --- Theme ---
   theme: {
     getNativeTheme: () => ipcRenderer.invoke('get-native-theme'),

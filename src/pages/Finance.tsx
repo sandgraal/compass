@@ -20,8 +20,8 @@ import { format } from 'date-fns'
 import { Wallet, TrendingDown, Target, RefreshCw, Inbox } from 'lucide-react'
 import { cn } from '../lib/utils'
 
-type Txn = { id: number; date: string; amount: number; description: string; category: string; subcategory?: string }
-type Debt = { id: number; name: string; balance: number; apr: number; minPayment: number }
+type Txn = { id: number; date: string; amount: number; description: string; category: string | null; subcategory?: string | null }
+type Debt = { id: number; name: string; balance: number | null; apr: number | null; minPayment: number | null }
 type BudgetLine = { category: string; subcategory?: string; monthlyAmount: number; actual: number; variance: number; pct: number }
 
 export default function Finance(): JSX.Element {
@@ -61,8 +61,8 @@ export default function Finance(): JSX.Element {
 
   useEffect(() => { refresh() }, [])
 
-  const totalDebt = debts.reduce((a, d) => a + d.balance, 0)
-  const wAPR = totalDebt > 0 ? debts.reduce((a, d) => a + d.balance * d.apr, 0) / totalDebt : 0
+  const totalDebt = debts.reduce((a, d) => a + (d.balance ?? 0), 0)
+  const wAPR = totalDebt > 0 ? debts.reduce((a, d) => a + (d.balance ?? 0) * (d.apr ?? 0), 0) / totalDebt : 0
   const totalBudget = budget.reduce((a, b) => a + b.monthlyAmount, 0)
   const totalActual = budget.reduce((a, b) => a + b.actual, 0)
   const monthIncome = txns.filter(t => t.amount > 0 && t.category !== 'Transfers').reduce((a, t) => a + t.amount, 0)
@@ -110,11 +110,11 @@ export default function Finance(): JSX.Element {
                 <tr><th className="text-left">Card</th><th className="text-right">Balance</th><th className="text-right">APR</th></tr>
               </thead>
               <tbody>
-                {[...debts].sort((a, b) => b.apr - a.apr).map(d => (
+                {[...debts].sort((a, b) => (b.apr ?? 0) - (a.apr ?? 0)).map(d => (
                   <tr key={d.id} className="border-t border-border">
                     <td className="py-1.5">{d.name}</td>
-                    <td className="text-right">{fmtMoney(d.balance)}</td>
-                    <td className="text-right">{(d.apr * 100).toFixed(2)}%</td>
+                    <td className="text-right">{fmtMoney(d.balance ?? 0)}</td>
+                    <td className="text-right">{((d.apr ?? 0) * 100).toFixed(2)}%</td>
                   </tr>
                 ))}
               </tbody>

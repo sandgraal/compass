@@ -1,92 +1,372 @@
-/**
- * Finance IPC handlers — exposed to the renderer via the preload bridge.
- *
- * After merging schema.finance.ts into electron/db/schema.ts:
- *   1. Uncomment the schema import below.
- *   2. Uncomment each handler's body.
- *   3. In electron/main.ts, add: registerFinanceHandlers(ipcMain).
- *   4. Add typed wrappers in electron/preload.ts and src/types/electron.d.ts.
- */
-
 import { IpcMain } from 'electron'
 import { join } from 'path'
-import { homedir } from 'os'
-import { existsSync } from 'fs'
-// import { eq, and, gte, lt, desc } from 'drizzle-orm'
-// import { getDb } from '../db/client'
-// import { financeAccounts, financeTransactions, financeDebts, financeBudgetLines, financeCategoryRules, financeSettings } from '../db/schema'
-import { ingestCsvFolder, categorize, RawTxn } from '../integrations/finance'
-import { writeAllFinanceKnowledge, FinanceSnapshot } from '../knowledge/finance-extractor'
+import { existsSync, mkdirSync } from 'fs'
+import { eq, and, gte, lt, desc } from 'drizzle-orm'
+import { getDb } from '../db/client'
+import { financeAccounts, financeTransactions, budgetRules, categorizationRules } from '../db/schema'
+import { ingestCsvFolder } from '../integrations/finance'
+import { writeAllFinanceKnowledge } from '../knowledge/finance-extractor'
+import { DATA_DIR } from '../paths'
 
-// Default location user drops CSVs into. Configurable via finance_settings.
-const DEFAULT_INBOX = join(homedir(), 'Documents', 'Compass', 'finance', 'inbox')
+const INBOX_DIR = join(DATA_DIR, 'finance-inbox')
+const ARCHIVE_DIR = join(DATA_DIR, 'finance-archive')
 
 export function registerFinanceHandlers(ipcMain: IpcMain): void {
-  // --- Ingest a folder of bank CSVs ---
+  // Ensure directories exist on first registration
+  for (const d of [INBOX_DIR, ARCHIVE_DIR]) {
+    if (!existsSync(d)) mkdirSync(d, { recursive: true })
+  }
+
+  // ── Ingest a folder of bank CSVs ──────────────────────────────────────────
   ipcMain.handle('finance:ingest-folder', async (_event, folder?: string) => {
-    const inbox = folder || DEFAULT_INBOX
-    if (!existsSync(inbox)) return { error: `Inbox folder not found: ${inbox}` }
-    // const db = getDb()
-    // const rules = db.select().from(financeCategoryRules).orderBy(financeCategoryRules.priority).all()
-    const rules: any[] = []
-    const result = await ingestCsvFolder(/* db */ null as any, inbox, undefined, undefined)
-    // After ingest, refresh the markdown:
-    // await refreshFinanceKnowledge(db)
+    const inbox = folder || INBOX_DIR
+    if (!existsSync(inbox)) {
+      mkdirSync(inbox, { recursive: true })
+      return { filesProcessed: 0, newTransactions: 0, duplicatesDropped: 0, perFile: [] }
+    }
+
+    const db = getDb()
+    const rules = db.select().from(categorizationRules)
+      .orderBy(categorizationRules.priority).all()
+
+    const result = await ingestCsvFolder(db as any, inbox, ARCHIVE_DIR, undefined, rules)
+
+    // Refresh knowledge markdown after ingest
+    try {
+      await refreshFinanceKnowledge()
+    } catch (e) {
+      console.error('[finance] knowledge refresh failed:', e)
+    }
+
     return result
   })
 
-  // --- Read transactions (paginated, optionally filtered by month/category) ---
-  ipcMain.handle('finance:get-transactions', (_event, opts?: { month?: string; category?: string; limit?: number }) => {
-    // const db = getDb()
-    // let q = db.select().from(financeTransactions).orderBy(desc(financeTransactions.date))
-    // if (opts?.month) q = q.where(and(gte(financeTransactions.date, `${opts.month}-01`), lt(financeTransactions.date, nextMonth(opts.month))))
-    // if (opts?.category) q = q.where(eq(financeTransactions.category, opts.category))
-    // return q.limit(opts?.limit ?? 200).all()
-    return []
+  // ── List transactions ─────────────────────────────────────────────────────
+  ipcMain.handle('finance:get-transactions', (_event, opts?: {
+    month?: string
+    category?: string
+    accountId?: number
+    limit?: number
+  }) => {
+    const db = getDb()
+    const lim = opts?.limit ?? 200
+    const base = db.select().from(financeTransactions)
+      .orderBy(desc(financeTransactions.date))
+
+    const month = opts?.month
+    const cat   = opts?.category
+    const acct  = opts?.accountId
+
+    if (month && cat && acct) {
+      return base.where(and(
+        gte(financeTransactions.date, `${month}-01`),
+        lt(financeTransactions.date, nextMonth(month)),
+        eq(financeTransactions.category, cat),
+        eq(financeTransactions.accountId, acct)
+      )).limit(lim).all()
+    } else if (month && cat) {
+      return base.where(and(
+        gte(financeTransactions.date, `${month}-01`),
+        lt(financeTransactions.date, nextMonth(month)),
+        eq(financeTransactions.category, cat)
+      )).limit(lim).all()
+    } else if (month && acct) {
+      return base.where(and(
+        gte(financeTransactions.date, `${month}-01`),
+        lt(financeTransactions.date, nextMonth(month)),
+        eq(financeTransactions.accountId, acct)
+      )).limit(lim).all()
+    } else if (month) {
+      return base.where(and(
+        gte(financeTransactions.date, `${month}-01`),
+        lt(financeTransactions.date, nextMonth(month))
+      )).limit(lim).all()
+    } else if (cat) {
+      return base.where(eq(financeTransactions.category, cat)).limit(lim).all()
+    } else if (acct) {
+      return base.where(eq(financeTransactions.accountId, acct)).limit(lim).all()
+    } else {
+      return base.limit(lim).all()
+    }
   })
 
-  // --- Debt summary (current state + avalanche projection) ---
-  ipcMain.handle('finance:get-debt-summary', () => {
-    // const db = getDb()
-    // const debts = db.select().from(financeDebts).where(eq(financeDebts.active, true)).all()
-    // const projection = simulateAvalanche(debts, monthlyDebtTarget(db))
-    // return { debts, projection }
-    return { debts: [], projection: [] }
-  })
-
-  // --- Budget status (this month) ---
-  ipcMain.handle('finance:get-budget-status', (_event, month?: string) => {
-    // const db = getDb()
-    // const m = month ?? new Date().toISOString().slice(0, 7)
-    // const budget = db.select().from(financeBudgetLines).all()
-    // const txns = db.select().from(financeTransactions)
-    //   .where(and(gte(financeTransactions.date, `${m}-01`), lt(financeTransactions.date, nextMonth(m))))
-    //   .all()
-    // return computeBudgetStatus(budget, txns)
-    return { lines: [], totals: { budgeted: 0, actual: 0, variance: 0 } }
-  })
-
-  // --- Set / replace a budget line ---
-  ipcMain.handle('finance:set-budget', (_event, line: { category: string; subcategory?: string; monthlyAmount: number }) => {
-    // const db = getDb()
-    // db.insert(financeBudgetLines).values({
-    //   category: line.category, subcategory: line.subcategory, monthlyAmount: line.monthlyAmount,
-    // }).onConflictDoUpdate({ target: [financeBudgetLines.category, financeBudgetLines.subcategory], set: { monthlyAmount: line.monthlyAmount, updatedAt: new Date() } }).run()
+  // ── Update a transaction (category / notes) ───────────────────────────────
+  ipcMain.handle('finance:update-transaction', (_event, id: number, updates: {
+    category?: string
+    subcategory?: string
+    notes?: string
+    accountId?: number
+  }) => {
+    const db = getDb()
+    db.update(financeTransactions).set(updates).where(eq(financeTransactions.id, id)).run()
     return { success: true }
   })
+
+  // ── Delete a transaction ──────────────────────────────────────────────────
+  ipcMain.handle('finance:delete-transaction', (_event, id: number) => {
+    const db = getDb()
+    db.delete(financeTransactions).where(eq(financeTransactions.id, id)).run()
+    return { success: true }
+  })
+
+  // ── List accounts ─────────────────────────────────────────────────────────
+  ipcMain.handle('finance:get-accounts', () => {
+    const db = getDb()
+    return db.select().from(financeAccounts).all()
+  })
+
+  // ── Create / update account ───────────────────────────────────────────────
+  ipcMain.handle('finance:upsert-account', (_event, account: {
+    id?: number
+    name: string
+    type: string
+    isDebt?: boolean
+    balance?: number
+    apr?: number
+    minPayment?: number
+    creditLimit?: number
+  }) => {
+    const db = getDb()
+    const payload = {
+      name: account.name,
+      type: account.type,
+      isDebt: account.isDebt ?? false,
+      balance: account.balance ?? 0,
+      apr: account.apr ?? 0,
+      minPayment: account.minPayment ?? 0,
+      creditLimit: account.creditLimit ?? null,
+      updatedAt: new Date()
+    }
+
+    if (account.id) {
+      db.update(financeAccounts).set(payload)
+        .where(eq(financeAccounts.id, account.id)).run()
+      return { success: true, id: account.id }
+    } else {
+      const result = db.insert(financeAccounts).values(payload).run()
+      return { success: true, id: Number(result.lastInsertRowid) }
+    }
+  })
+
+  // ── Delete account ────────────────────────────────────────────────────────
+  ipcMain.handle('finance:delete-account', (_event, id: number) => {
+    const db = getDb()
+    db.delete(financeAccounts).where(eq(financeAccounts.id, id)).run()
+    return { success: true }
+  })
+
+  // ── Debt summary + avalanche projection ───────────────────────────────────
+  ipcMain.handle('finance:get-debt-summary', () => {
+    const db = getDb()
+    const debts = db.select().from(financeAccounts)
+      .where(eq(financeAccounts.isDebt, true)).all()
+    const projection = simulateAvalanche(debts, 500)
+    return { debts, projection }
+  })
+
+  // ── Budget status (actual vs planned for a month) ─────────────────────────
+  ipcMain.handle('finance:get-budget-status', (_event, month?: string) => {
+    const db = getDb()
+    const m = month ?? new Date().toISOString().slice(0, 7)
+    const budget = db.select().from(budgetRules).all()
+    const txns = db.select().from(financeTransactions)
+      .where(and(
+        gte(financeTransactions.date, `${m}-01`),
+        lt(financeTransactions.date, nextMonth(m))
+      )).all()
+    return computeBudgetStatus(budget, txns)
+  })
+
+  // ── Set a budget line ─────────────────────────────────────────────────────
+  ipcMain.handle('finance:set-budget', (_event, line: {
+    category: string
+    subcategory?: string
+    monthlyAmount: number
+  }) => {
+    const db = getDb()
+    const existing = db.select().from(budgetRules)
+      .where(eq(budgetRules.category, line.category)).all()
+      .find(r => (r.subcategory ?? '') === (line.subcategory ?? ''))
+
+    if (existing) {
+      db.update(budgetRules)
+        .set({ monthlyAmount: line.monthlyAmount, updatedAt: new Date() })
+        .where(eq(budgetRules.id, existing.id)).run()
+    } else {
+      db.insert(budgetRules).values({
+        category: line.category,
+        subcategory: line.subcategory ?? null,
+        monthlyAmount: line.monthlyAmount,
+        updatedAt: new Date()
+      }).run()
+    }
+    return { success: true }
+  })
+
+  // ── Categorization rules ──────────────────────────────────────────────────
+  ipcMain.handle('finance:get-rules', () => {
+    const db = getDb()
+    return db.select().from(categorizationRules)
+      .orderBy(categorizationRules.priority).all()
+  })
+
+  ipcMain.handle('finance:save-rule', (_event, rule: {
+    id?: number
+    pattern: string
+    category: string
+    subcategory?: string
+    priority?: number
+  }) => {
+    const db = getDb()
+    const payload = {
+      pattern: rule.pattern,
+      category: rule.category,
+      subcategory: rule.subcategory ?? null,
+      priority: rule.priority ?? 0
+    }
+    if (rule.id) {
+      db.update(categorizationRules).set(payload)
+        .where(eq(categorizationRules.id, rule.id)).run()
+    } else {
+      db.insert(categorizationRules).values(payload).run()
+    }
+    return { success: true }
+  })
+
+  ipcMain.handle('finance:delete-rule', (_event, id: number) => {
+    const db = getDb()
+    db.delete(categorizationRules).where(eq(categorizationRules.id, id)).run()
+    return { success: true }
+  })
+
+  // ── Get inbox path ────────────────────────────────────────────────────────
+  ipcMain.handle('finance:get-inbox-path', () => INBOX_DIR)
 }
 
-// ----- helpers -----
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-// function nextMonth(yyyymm: string): string {
-//   const [y, m] = yyyymm.split('-').map(Number)
-//   return new Date(y, m, 1).toISOString().slice(0, 7) + '-01'
-// }
+function nextMonth(yyyymm: string): string {
+  const [y, m] = yyyymm.split('-').map(Number)
+  const d = new Date(y, m, 1) // month is 0-indexed in Date; m is already 1-indexed so this gives next month
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+}
 
-// async function refreshFinanceKnowledge(db: any): Promise<void> {
-//   const accounts = db.select().from(financeAccounts).where(eq(financeAccounts.active, true)).all()
-//   const transactions = db.select().from(financeTransactions).all()
-//   const debts = db.select().from(financeDebts).where(eq(financeDebts.active, true)).all()
-//   const budget = db.select().from(financeBudgetLines).all()
-//   writeAllFinanceKnowledge({ accounts, transactions, debts, budget })
-// }
+type DebtRow = {
+  id: number
+  name: string
+  balance: number | null
+  apr: number | null
+  minPayment: number | null
+}
+
+function simulateAvalanche(debts: DebtRow[], extraMonthly: number): { month: number; balance: number }[] {
+  if (!debts.length) return []
+
+  // Sort highest APR first (avalanche strategy)
+  const cards = debts
+    .filter(d => (d.balance ?? 0) > 0)
+    .map(d => ({ name: d.name, balance: d.balance ?? 0, apr: d.apr ?? 0, min: d.minPayment ?? 0 }))
+    .sort((a, b) => b.apr - a.apr)
+
+  if (!cards.length) return []
+
+  const projection: { month: number; balance: number }[] = []
+  let month = 0
+
+  while (cards.some(c => c.balance > 0) && month < 120) {
+    month++
+    const totalMin = cards.reduce((s, c) => s + (c.balance > 0 ? c.min : 0), 0)
+    let extra = Math.max(0, extraMonthly - totalMin) // extra beyond minimums
+
+    for (const c of cards) {
+      if (c.balance <= 0) continue
+      // Monthly interest
+      c.balance += c.balance * (c.apr / 12)
+      // Pay minimum
+      const pay = Math.min(c.balance, c.min + extra)
+      c.balance = Math.max(0, c.balance - pay)
+      extra = Math.max(0, extra - Math.max(0, pay - c.min))
+    }
+
+    const totalBalance = cards.reduce((s, c) => s + c.balance, 0)
+    projection.push({ month, balance: Math.round(totalBalance * 100) / 100 })
+  }
+
+  return projection
+}
+
+type BudgetRuleRow = { id: number; category: string; subcategory: string | null; monthlyAmount: number }
+type TxnRow = { category: string | null; subcategory: string | null; amount: number }
+
+function computeBudgetStatus(
+  budget: BudgetRuleRow[],
+  txns: TxnRow[]
+): {
+  lines: Array<{ category: string; subcategory?: string; monthlyAmount: number; actual: number; variance: number; pct: number }>
+  totals: { budgeted: number; actual: number }
+} {
+  // Sum actual spend by category+subcategory (expenses only, skip transfers)
+  const actualMap: Record<string, number> = {}
+  for (const t of txns) {
+    if ((t.amount ?? 0) >= 0) continue // only expenses (negative amounts)
+    if (t.category === 'Transfers') continue
+    const k = `${t.category ?? 'Uncategorized'}|${t.subcategory ?? ''}`
+    actualMap[k] = (actualMap[k] ?? 0) + Math.abs(t.amount)
+  }
+
+  const lines = budget.map(b => {
+    const k = `${b.category}|${b.subcategory ?? ''}`
+    const actual = actualMap[k] ?? 0
+    return {
+      category: b.category,
+      subcategory: b.subcategory ?? undefined,
+      monthlyAmount: b.monthlyAmount,
+      actual,
+      variance: b.monthlyAmount - actual,
+      pct: b.monthlyAmount > 0 ? actual / b.monthlyAmount : 0
+    }
+  })
+
+  const totals = {
+    budgeted: lines.reduce((s, l) => s + l.monthlyAmount, 0),
+    actual: lines.reduce((s, l) => s + l.actual, 0)
+  }
+
+  return { lines, totals }
+}
+
+async function refreshFinanceKnowledge(): Promise<void> {
+  const db = getDb()
+  const accounts = db.select().from(financeAccounts).all()
+  const transactions = db.select().from(financeTransactions).all()
+  const debts = accounts.filter(a => a.isDebt)
+  const budget = db.select().from(budgetRules).all()
+
+  writeAllFinanceKnowledge({
+    accounts: accounts.map(a => ({
+      name: a.name,
+      type: a.type,
+      institution: '',
+      active: true,
+      notes: null
+    })),
+    transactions: transactions.map(t => ({
+      date: t.date,
+      amount: t.amount,
+      description: t.description,
+      category: t.category ?? 'Uncategorized',
+      subcategory: t.subcategory
+    })),
+    debts: debts.map(d => ({
+      name: d.name,
+      balance: d.balance ?? 0,
+      apr: d.apr ?? 0,
+      minPayment: d.minPayment ?? 0
+    })),
+    budget: budget.map(b => ({
+      category: b.category,
+      subcategory: b.subcategory,
+      monthlyAmount: b.monthlyAmount
+    }))
+  })
+}
