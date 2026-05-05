@@ -1,7 +1,10 @@
-import { IpcMain } from 'electron'
+import { IpcMain, shell } from 'electron'
+import { readdirSync, unlinkSync, rmSync } from 'fs'
+import { join } from 'path'
 import { getDb } from '../db/client'
 import { appSettings, checklistItems, checklistTemplates } from '../db/schema'
 import { eq } from 'drizzle-orm'
+import { VAULT_DIR, KNOWLEDGE_DIR, DATA_DIR } from '../paths'
 
 const DEFAULTS: Record<string, string> = {
   theme: 'system',
@@ -106,6 +109,48 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
       .onConflictDoUpdate({ target: checklistTemplates.listType, set: { contentMd: content, updatedAt: new Date() } })
       .run()
     return { success: true }
+  })
+
+  // ---- Data management ----
+  ipcMain.handle('settings:open-data-dir', () => {
+    shell.openPath(DATA_DIR)
+    return { success: true }
+  })
+
+  ipcMain.handle('settings:wipe-knowledge', () => {
+    try {
+      // Remove all files/dirs inside knowledge-base subdirs, keep the dirs
+      const subdirs = ['profile', 'work', 'calendar', 'inbox', 'drive', 'templates']
+      for (const sub of subdirs) {
+        const dir = join(KNOWLEDGE_DIR, sub)
+        try {
+          for (const f of readdirSync(dir)) {
+            unlinkSync(join(dir, f))
+          }
+        } catch { /* dir may not exist */ }
+      }
+      // Also remove any top-level .md files
+      try {
+        for (const f of readdirSync(KNOWLEDGE_DIR)) {
+          if (f.endsWith('.md')) unlinkSync(join(KNOWLEDGE_DIR, f))
+        }
+      } catch { /* ignore */ }
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('settings:wipe-vault', () => {
+    try {
+      for (const f of readdirSync(VAULT_DIR)) {
+        if (f.endsWith('.enc')) unlinkSync(join(VAULT_DIR, f))
+      }
+      // Also clear any vault metadata from DB
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
   })
 }
 

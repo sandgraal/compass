@@ -92,7 +92,10 @@ const api = {
   settings: {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),
     set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value),
-    getAll: () => ipcRenderer.invoke('settings:get-all')
+    getAll: () => ipcRenderer.invoke('settings:get-all'),
+    openDataDir: () => ipcRenderer.invoke('settings:open-data-dir'),
+    wipeKnowledge: () => ipcRenderer.invoke('settings:wipe-knowledge'),
+    wipeVault: () => ipcRenderer.invoke('settings:wipe-vault')
   },
 
   // --- Theme ---

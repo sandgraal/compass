@@ -142,6 +142,9 @@ declare global {
         get(key: string): Promise<string | null>
         set(key: string, value: unknown): Promise<{ success: boolean }>
         getAll(): Promise<Record<string, string>>
+        openDataDir(): Promise<{ success: boolean }>
+        wipeKnowledge(): Promise<{ success: boolean; error?: string }>
+        wipeVault(): Promise<{ success: boolean; error?: string }>
       }
       theme: {
         getNativeTheme(): Promise<'dark' | 'light'>
