@@ -159,39 +159,43 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
   })
 
   ipcMain.handle('settings:export-data', async () => {
-    const db = getDb()
+    try {
+      const db = getDb()
 
-    const payload = {
-      exportedAt: new Date().toISOString(),
-      appVersion: app.getVersion(),
-      tables: {
-        integrations: db.select().from(integrations).all(),
-        checklistItems: db.select().from(checklistItems).all(),
-        checklistTemplates: db.select().from(checklistTemplates).all(),
-        calendarEvents: db.select().from(calendarEvents).all(),
-        githubItems: db.select().from(githubItems).all(),
-        gmailActions: db.select().from(gmailActions).all(),
-        habits: db.select().from(habits).all(),
-        habitEntries: db.select().from(habitEntries).all(),
-        financeAccounts: db.select().from(financeAccounts).all(),
-        financeTransactions: db.select().from(financeTransactions).all(),
-        budgetRules: db.select().from(budgetRules).all(),
-        knowledgeFiles: db.select().from(knowledgeFiles).all(),
-        appSettings: db.select().from(appSettings).all()
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        appVersion: app.getVersion(),
+        tables: {
+          integrations: db.select().from(integrations).all(),
+          checklistItems: db.select().from(checklistItems).all(),
+          checklistTemplates: db.select().from(checklistTemplates).all(),
+          calendarEvents: db.select().from(calendarEvents).all(),
+          githubItems: db.select().from(githubItems).all(),
+          gmailActions: db.select().from(gmailActions).all(),
+          habits: db.select().from(habits).all(),
+          habitEntries: db.select().from(habitEntries).all(),
+          financeAccounts: db.select().from(financeAccounts).all(),
+          financeTransactions: db.select().from(financeTransactions).all(),
+          budgetRules: db.select().from(budgetRules).all(),
+          knowledgeFiles: db.select().from(knowledgeFiles).all(),
+          appSettings: db.select().from(appSettings).all()
+        }
       }
+
+      const dateSlug = new Date().toISOString().slice(0, 10)
+      const { filePath, canceled } = await dialog.showSaveDialog({
+        title: 'Export Compass Data',
+        defaultPath: join(app.getPath('downloads'), `compass-export-${dateSlug}.json`),
+        filters: [{ name: 'JSON', extensions: ['json'] }]
+      })
+
+      if (canceled || !filePath) return { success: false, canceled: true }
+
+      writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf-8')
+      return { success: true, path: filePath }
+    } catch (err) {
+      return { success: false, error: String(err) }
     }
-
-    const dateSlug = new Date().toISOString().slice(0, 10)
-    const { filePath, canceled } = await dialog.showSaveDialog({
-      title: 'Export Compass Data',
-      defaultPath: join(app.getPath('downloads'), `compass-export-${dateSlug}.json`),
-      filters: [{ name: 'JSON', extensions: ['json'] }]
-    })
-
-    if (canceled || !filePath) return { success: false, canceled: true }
-
-    writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf-8')
-    return { success: true, path: filePath }
   })
 }
 
