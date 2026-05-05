@@ -46,8 +46,13 @@ export default function Monthly(): JSX.Element {
       // Finance snapshot
       const d = debtData as { debts: { id: number; name: string; balance: number | null; apr: number | null }[] }
       setDebtSummary(d.debts.filter(x => (x.balance ?? 0) !== 0))
-      const b = budgetData as { lines: { category: string; budget: number; actual: number }[]; totals: { budget: number; actual: number } }
-      setBudgetLines(b.lines.filter(l => l.budget > 0 || Math.abs(l.actual) > 0).slice(0, 4))
+      const b = budgetData as { lines: { category: string; monthlyAmount: number; actual: number }[]; totals: { budget: number; actual: number } }
+      setBudgetLines(
+        b.lines
+          .map(l => ({ category: l.category, budget: l.monthlyAmount, actual: l.actual }))
+          .filter(l => l.budget > 0 || Math.abs(l.actual) > 0)
+          .slice(0, 4)
+      )
 
       const settings = s as Record<string, string>
       const savedGoals = settings[`monthly_goals_${monthKey}`]
