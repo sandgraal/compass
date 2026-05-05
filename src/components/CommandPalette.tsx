@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, CalendarDays, CalendarRange, Calendar, BookOpen,
-  ShieldCheck, Plug, Settings, Search, TrendingUp, ArrowRight
+  ShieldCheck, Plug, Settings, Search, TrendingUp, RefreshCw, FolderOpen, ArrowRight
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 
@@ -39,6 +39,22 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
     { id: 'finance',       label: 'Finance',         description: 'Budget & transactions',     icon: <TrendingUp size={15} />,      action: () => nav('/finance'),       keywords: ['budget', 'money', 'debt', 'spending'] },
     { id: 'integrations',  label: 'Integrations',    description: 'Connect external services', icon: <Plug size={15} />,            action: () => nav('/integrations'),  keywords: ['google', 'github', 'gmail', 'sync', 'connect'] },
     { id: 'settings',      label: 'Settings',        description: 'App preferences',           icon: <Settings size={15} />,        action: () => nav('/settings'),      keywords: ['preferences', 'theme', 'config'] },
+    {
+      id: 'sync-all',
+      label: 'Sync all services',
+      description: 'Pull latest data from all connected integrations',
+      icon: <RefreshCw size={15} />,
+      action: () => { onClose(); window.api?.sync.triggerAllSync() },
+      keywords: ['sync', 'refresh', 'pull', 'update']
+    },
+    {
+      id: 'open-data-dir',
+      label: 'Open data folder',
+      description: 'Show local data files in Finder',
+      icon: <FolderOpen size={15} />,
+      action: () => { onClose(); window.api?.settings.openDataDir() },
+      keywords: ['finder', 'folder', 'files', 'data', 'explorer']
+    },
   ]
 
   const filtered = query.trim() === ''
