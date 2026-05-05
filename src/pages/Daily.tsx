@@ -539,9 +539,6 @@ function ChecklistRow({ item, isExpanded, isDragTarget, onToggle, onDelete, onUp
 
   return (
     <div
-      draggable={true}
-      onDragStart={(e) => { setIsDragging(true); onDragStart(e) }}
-      onDragEnd={() => setIsDragging(false)}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
@@ -554,7 +551,14 @@ function ChecklistRow({ item, isExpanded, isDragTarget, onToggle, onDelete, onUp
       )}
     >
       <div className="flex items-center gap-3 px-3 py-2.5">
-        <GripVertical size={14} className="text-muted-foreground/30 shrink-0 cursor-grab active:cursor-grabbing" />
+        <span
+          draggable={true}
+          onDragStart={(e) => { setIsDragging(true); onDragStart(e) }}
+          onDragEnd={() => setIsDragging(false)}
+          className="shrink-0"
+        >
+          <GripVertical size={14} className="text-muted-foreground/30 cursor-grab active:cursor-grabbing" />
+        </span>
         <button
           onClick={() => onToggle(!item.checked)}
           className={cn(
