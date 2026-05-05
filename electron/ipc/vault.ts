@@ -1,4 +1,4 @@
-import { IpcMain, safeStorage } from 'electron'
+import { IpcMain, safeStorage, dialog } from 'electron'
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
@@ -109,4 +109,107 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
     writeVaultCategory(category, filtered, key)
     return { success: true }
   })
+
+  ipcMain.handle('vault:import-1password-csv', async () => {
+    const { filePaths, canceled } = await dialog.showOpenDialog({
+      title: 'Import from 1Password CSV',
+      filters: [{ name: 'CSV', extensions: ['csv'] }],
+      properties: ['openFile']
+    })
+    if (canceled || filePaths.length === 0) return { success: false, canceled: true }
+
+    try {
+      const raw = readFileSync(filePaths[0], 'utf-8')
+      const rows = parseCSV(raw)
+      if (rows.length === 0) return { success: false, error: 'Empty or invalid CSV' }
+
+      const key = getOrCreateKey()
+      const credEntries = readVaultCategory('credentials', key) as Record<string, unknown>[]
+      const financialEntries = readVaultCategory('financial', key) as Record<string, unknown>[]
+
+      let imported = 0
+      for (const row of rows) {
+        const type = (row['Type'] || row['type'] || 'Login').toLowerCase()
+        const title = row['Title'] || row['title'] || ''
+        const username = row['Username'] || row['username'] || row['Email'] || row['email'] || ''
+        const password = row['Password'] || row['password'] || ''
+        const url = row['Url'] || row['URL'] || row['url'] || row['Website'] || ''
+        const notes = row['Notes'] || row['notes'] || ''
+
+        if (type.includes('credit') || type.includes('card')) {
+          const entry = {
+            id: randomBytes(8).toString('hex'),
+            institution: title,
+            accountType: 'Credit Card',
+            notes: [url, notes].filter(Boolean).join('\n'),
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          }
+          financialEntries.push(entry)
+        } else {
+          // Login, Secure Note, API Credential, etc. → credentials category
+          const entry = {
+            id: randomBytes(8).toString('hex'),
+            service: title,
+            username,
+            password,
+            apiKey: '',
+            notes: [url, notes].filter(Boolean).join('\n'),
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          }
+          credEntries.push(entry)
+        }
+        imported++
+      }
+
+      writeVaultCategory('credentials', credEntries, key)
+      writeVaultCategory('financial', financialEntries, key)
+
+      return { success: true, imported }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+}
+
+/** Minimal RFC-4180 CSV parser — handles quoted fields with embedded commas/newlines */
+function parseCSV(raw: string): Record<string, string>[] {
+  const lines = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+  if (lines.length < 2) return []
+
+  function parseLine(line: string): string[] {
+    const fields: string[] = []
+    let i = 0
+    while (i < line.length) {
+      if (line[i] === '"') {
+        let field = ''
+        i++ // skip opening quote
+        while (i < line.length) {
+          if (line[i] === '"' && line[i + 1] === '"') { field += '"'; i += 2 }
+          else if (line[i] === '"') { i++; break }
+          else { field += line[i++] }
+        }
+        fields.push(field)
+        if (line[i] === ',') i++
+      } else {
+        const end = line.indexOf(',', i)
+        if (end === -1) { fields.push(line.slice(i)); break }
+        fields.push(line.slice(i, end))
+        i = end + 1
+      }
+    }
+    return fields
+  }
+
+  const headers = parseLine(lines[0])
+  const result: Record<string, string>[] = []
+  for (let r = 1; r < lines.length; r++) {
+    if (!lines[r].trim()) continue
+    const vals = parseLine(lines[r])
+    const row: Record<string, string> = {}
+    headers.forEach((h, i) => { row[h] = vals[i] ?? '' })
+    result.push(row)
+  }
+  return result
 }

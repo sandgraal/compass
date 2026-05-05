@@ -1,7 +1,7 @@
 import { IpcMain, BrowserWindow } from 'electron'
 import { getDb } from '../db/client'
 import { integrations, syncEvents, calendarEvents, githubItems, gmailActions, driveFiles } from '../db/schema'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, desc } from 'drizzle-orm'
 import { loadToken, getValidGoogleToken } from './auth'
 import { updateCalendarKnowledge, updateGitHubKnowledge, updateGmailKnowledge, updateDriveKnowledge } from '../knowledge/extractor'
 
@@ -227,6 +227,25 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('sync:get-status', () => {
     const db = getDb()
     return db.select().from(integrations).all()
+  })
+
+  ipcMain.handle('sync:get-log', () => {
+    const db = getDb()
+    const events = db.select().from(syncEvents)
+      .orderBy(desc(syncEvents.syncedAt))
+      .limit(20)
+      .all()
+    const integrationRows = db.select().from(integrations).all()
+    const integrationMap: Record<number, string> = {}
+    for (const i of integrationRows) integrationMap[i.id] = i.service
+
+    return events.map(e => ({
+      id: e.id,
+      service: e.integrationId ? (integrationMap[e.integrationId] ?? 'unknown') : 'unknown',
+      syncedAt: e.syncedAt,
+      recordsUpdated: e.recordsUpdated ?? 0,
+      error: e.errors ?? null
+    }))
   })
 
   // Calendar events query

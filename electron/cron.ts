@@ -34,7 +34,6 @@ export function startCronJobs(): void {
 export function restartCronJobs(): void {
   if (scheduledTask) {
     scheduledTask.stop()
-    scheduledTask.destroy()
   }
   const interval = getSyncIntervalMinutes()
   scheduledTask = cron.schedule(`*/${interval} * * * *`, async () => {

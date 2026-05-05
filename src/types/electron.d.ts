@@ -114,6 +114,7 @@ declare global {
         triggerSync(service: string): Promise<{ success?: boolean; error?: string; recordsUpdated?: number }>
         triggerAllSync(): Promise<Array<{ success?: boolean; error?: string; service: string }>>
         getSyncStatus(): Promise<IntegrationStatus[]>
+        getLog(): Promise<Array<{ id: number; service: string; syncedAt: Date; recordsUpdated: number; error: string | null }>>
         onSyncUpdate(cb: (data: unknown) => void): () => void
       }
       knowledge: {
@@ -132,6 +133,7 @@ declare global {
         updateEntry(category: string, id: string, entry: Record<string, unknown>): Promise<VaultEntry>
         deleteEntry(category: string, id: string): Promise<{ success: boolean }>
         setContentProtection(enabled: boolean): void
+        import1Password(): Promise<{ success: boolean; imported?: number; canceled?: boolean; error?: string }>
       }
       habits: {
         list(includeInactive?: boolean): Promise<Habit[]>
