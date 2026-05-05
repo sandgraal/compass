@@ -225,7 +225,7 @@ export default function Monthly(): JSX.Element {
                     {budgetLines.map(l => {
                       const over = l.actual > l.budget && l.budget > 0
                       return (
-                        <div key={l.category}>
+                        <div key={`${l.category}:${l.subcategory ?? ''}`}>
                           <div className="flex items-center justify-between mb-0.5">
                             <span className="text-xs text-foreground capitalize">{l.category}</span>
                             <span className={cn('text-xs font-mono', over ? 'text-red-400' : 'text-muted-foreground')}>
