@@ -120,9 +120,16 @@ export default function Weekly(): JSX.Element {
           const dayItems = allItems[isoDate(day)] || []
           const done = dayItems.filter(i => i.checked).length
           const isToday = isSameDay(day, new Date())
+          const dayKey = isoDate(day)
+          const dayEvents = events.filter(e => {
+            if (!e.startAt) return false
+            const d = new Date(e.startAt)
+            return isoDate(d) === dayKey
+          })
+          const isEmpty = dayItems.length === 0 && dayEvents.length === 0
           return (
-            <div key={isoDate(day)} className={cn(
-              'bg-card border rounded-xl p-3',
+            <div key={dayKey} className={cn(
+              'bg-card border rounded-xl p-3 min-h-[120px]',
               isToday ? 'border-primary/50' : 'border-border'
             )}>
               <div className={cn('text-xs font-medium mb-2', isToday ? 'text-primary' : 'text-muted-foreground')}>
@@ -131,22 +138,45 @@ export default function Weekly(): JSX.Element {
                   {format(day, 'd')}
                 </div>
               </div>
-              {dayItems.length === 0 ? (
-                <p className="text-xs text-muted-foreground/40">No tasks</p>
+
+              {isEmpty ? (
+                <p className="text-xs text-muted-foreground/40">Clear</p>
               ) : (
-                <div>
-                  <div className="space-y-1 mb-2">
-                    {dayItems.slice(0, 3).map(item => (
-                      <div key={item.id} className="flex items-center gap-1.5">
-                        <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', item.checked ? 'bg-primary' : 'bg-border')} />
-                        <span className={cn('text-xs truncate', item.checked && 'line-through text-muted-foreground')}>{item.title}</span>
+                <div className="space-y-2">
+                  {/* Calendar events */}
+                  {dayEvents.length > 0 && (
+                    <div className="space-y-1">
+                      {dayEvents.slice(0, 2).map(ev => (
+                        <div key={ev.id} className="flex items-center gap-1.5 min-w-0">
+                          <Calendar size={9} className="text-sky-400 shrink-0" />
+                          <span className="text-xs text-sky-300 truncate leading-tight">
+                            {ev.allDay ? ev.title : `${format(new Date(ev.startAt!), 'h:mma').toLowerCase()} ${ev.title}`}
+                          </span>
+                        </div>
+                      ))}
+                      {dayEvents.length > 2 && (
+                        <p className="text-xs text-muted-foreground/50 pl-3.5">+{dayEvents.length - 2} events</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Tasks */}
+                  {dayItems.length > 0 && (
+                    <div>
+                      <div className="space-y-1">
+                        {dayItems.slice(0, 3).map(item => (
+                          <div key={item.id} className="flex items-center gap-1.5">
+                            <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', item.checked ? 'bg-primary' : 'bg-border')} />
+                            <span className={cn('text-xs truncate', item.checked && 'line-through text-muted-foreground')}>{item.title}</span>
+                          </div>
+                        ))}
+                        {dayItems.length > 3 && (
+                          <p className="text-xs text-muted-foreground/60">+{dayItems.length - 3} more</p>
+                        )}
                       </div>
-                    ))}
-                    {dayItems.length > 3 && (
-                      <p className="text-xs text-muted-foreground/60">+{dayItems.length - 3} more</p>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground">{done}/{dayItems.length}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{done}/{dayItems.length} tasks</p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

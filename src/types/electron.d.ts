@@ -1,92 +1,97 @@
 // Typed window.api interface — mirrors electron/preload.ts
 
-interface VaultEntry {
-  id: string
-  createdAt: number
-  updatedAt: number
-  [key: string]: unknown
-}
-
-interface VaultCategory {
-  id: string
-  label: string
-  icon: string
-  description: string
-}
-
-interface KnowledgeFile {
-  path: string
-  title: string
-  category: string
-  lastModified: number
-  wordCount: number
-  autoUpdated: boolean
-  snippet?: string
-}
-
-interface IntegrationStatus {
-  id: number
-  service: string
-  connectedAt: Date | null
-  lastSyncedAt: Date | null
-  status: string
-  scopes: string | null
-  errorMessage: string | null
-}
-
-interface CalendarEvent {
-  id: number
-  source: string
-  externalId: string
-  title: string
-  startAt: Date | null
-  endAt: Date | null
-  allDay: boolean | null
-  location: string | null
-  description: string | null
-  htmlLink: string | null
-}
-
-interface GitHubItem {
-  id: number
-  type: string
-  repo: string
-  externalId: string
-  title: string
-  url: string
-  state: string
-  body: string | null
-  labels: string | null
-  dueDate: string | null
-}
-
-interface GmailAction {
-  id: number
-  threadId: string
-  subject: string
-  fromAddress: string
-  actionSummary: string | null
-  snippet: string | null
-  receivedAt: Date | null
-  done: boolean | null
-}
-
-interface ChecklistItem {
-  id: number
-  listType: string
-  listDate: string
-  title: string
-  body: string | null
-  checked: boolean | null
-  status: string | null
-  category: string | null
-  sortOrder: number | null
-  source: string | null
-  sourceId: string | null
-  createdAt: Date
-}
-
 declare global {
+  interface VaultEntry {
+    id: string
+    createdAt: number
+    updatedAt: number
+    [key: string]: unknown
+  }
+
+  interface VaultCategory {
+    id: string
+    label: string
+    icon: string
+    description: string
+  }
+
+  interface KnowledgeFile {
+    path: string
+    title: string
+    category: string
+    lastModified: number
+    wordCount: number
+    autoUpdated: boolean
+    snippet?: string
+  }
+
+  interface IntegrationStatus {
+    id: number
+    service: string
+    connectedAt: Date | null
+    lastSyncedAt: Date | null
+    status: string
+    scopes: string | null
+    errorMessage: string | null
+  }
+
+  interface RedirectUris {
+    google: string
+    github: string
+  }
+
+  interface CalendarEvent {
+    id: number
+    source: string
+    externalId: string
+    title: string
+    startAt: Date | null
+    endAt: Date | null
+    allDay: boolean | null
+    location: string | null
+    description: string | null
+    htmlLink: string | null
+  }
+
+  interface GitHubItem {
+    id: number
+    type: string
+    repo: string
+    externalId: string
+    title: string
+    url: string
+    state: string
+    body: string | null
+    labels: string | null
+    dueDate: string | null
+  }
+
+  interface GmailAction {
+    id: number
+    threadId: string
+    subject: string
+    fromAddress: string
+    actionSummary: string | null
+    snippet: string | null
+    receivedAt: Date | null
+    done: boolean | null
+  }
+
+  interface ChecklistItem {
+    id: number
+    listType: string
+    listDate: string
+    title: string
+    body: string | null
+    checked: boolean | null
+    status: string | null
+    category: string | null
+    sortOrder: number | null
+    source: string | null
+    sourceId: string | null
+    createdAt: Date
+  }
+
   interface Window {
     api: {
       auth: {
@@ -94,7 +99,7 @@ declare global {
         connectGitHub(): Promise<{ success?: boolean; error?: string }>
         disconnect(service: string): Promise<{ success: boolean }>
         getStatus(): Promise<IntegrationStatus[]>
-        getRedirectUris(): Promise<{ google: string; github: string }>
+        getRedirectUris(): Promise<RedirectUris>
       }
       sync: {
         triggerSync(service: string): Promise<{ success?: boolean; error?: string; recordsUpdated?: number }>
