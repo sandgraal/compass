@@ -27,6 +27,7 @@ dist-electron/
 release/
 out/
 build/
+*.tsbuildinfo
 
 # ============================================================
 # DEPENDENCIES
