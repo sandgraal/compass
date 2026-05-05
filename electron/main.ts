@@ -51,7 +51,12 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => {
+    console.log('[main] ready-to-show — showing window')
     mainWindow?.show()
+  })
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+    console.error('[main] did-fail-load:', errorCode, errorDescription)
   })
 
   // Open external links in system browser, not in-app
@@ -59,6 +64,20 @@ function createWindow(): void {
     shell.openExternal(url)
     return { action: 'deny' }
   })
+
+  // CSP: only enforce in production (dev server needs ws:// for HMR + eval for source maps)
+  if (!is.dev) {
+    mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://gmail.googleapis.com https://api.github.com https://oauth2.googleapis.com https://github.com https://accounts.google.com; frame-src 'none'; object-src 'none'"
+          ]
+        }
+      })
+    })
+  }
 
   // Dev: load vite dev server; Prod: load built index.html
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -75,15 +94,27 @@ app.whenReady().then(async () => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  ensureDirectories()
-  await initDb()
-  await seedKnowledgeBase()
+  try {
+    ensureDirectories()
+    console.log('[main] directories ensured')
+    await initDb()
+    console.log('[main] db initialized')
+    await seedKnowledgeBase()
+    console.log('[main] knowledge base seeded')
+  } catch (err) {
+    console.error('[main] startup error:', err)
+  }
 
   registerAuthHandlers(ipcMain)
   registerSyncHandlers(ipcMain)
   registerKnowledgeHandlers(ipcMain)
   registerVaultHandlers(ipcMain)
   registerSettingsHandlers(ipcMain)
+
+  // Toggle content protection when navigating to/from vault
+  ipcMain.on('vault:set-content-protection', (_event, enabled: boolean) => {
+    mainWindow?.setContentProtection(enabled)
+  })
 
   // Theme sync with system
   ipcMain.handle('get-native-theme', () => nativeTheme.shouldUseDarkColors ? 'dark' : 'light')

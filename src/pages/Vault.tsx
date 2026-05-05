@@ -58,6 +58,15 @@ export default function Vault(): JSX.Element {
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
+  // Enable content protection when Vault is mounted; disable on unmount
+  useEffect(() => {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (isElectron) {
+      window.api.vault.setContentProtection(true)
+      return () => { window.api.vault.setContentProtection(false) }
+    }
+  }, [])
+
   useEffect(() => {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (isElectron) {

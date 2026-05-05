@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, isSameMonth, isSameDay, addMonths, subMonths } from 'date-fns'
 import { ChevronLeft, ChevronRight, Target, TrendingUp } from 'lucide-react'
 import { cn, isoDate } from '../lib/utils'
@@ -15,6 +15,7 @@ export default function Monthly(): JSX.Element {
 
   const monthEnd = endOfMonth(month)
   const isCurrentMonth = isSameMonth(month, new Date())
+  const monthKey = isoDate(month).slice(0, 7) // 'YYYY-MM'
 
   // Calendar grid
   const calStart = startOfWeek(month, { weekStartsOn: 1 })
@@ -26,15 +27,56 @@ export default function Monthly(): JSX.Element {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
 
-    window.api.calendar.getEvents(month.toISOString(), monthEnd.toISOString())
-      .then(setEvents)
+    Promise.all([
+      window.api.calendar.getEvents(month.toISOString(), monthEnd.toISOString()),
+      window.api.settings.getAll()
+    ]).then(([calEvents, s]) => {
+      setEvents(calEvents)
+      const settings = s as Record<string, string>
+      const savedGoals = settings[`monthly_goals_${monthKey}`]
+      const savedReflection = settings[`monthly_reflection_${monthKey}`]
+      const savedHabits = settings[`monthly_habit_data_${monthKey}`]
+      try { if (savedGoals) setGoals(JSON.parse(savedGoals)) } catch { /* ignore corrupt data */ }
+      try { if (savedReflection) setReflection(JSON.parse(savedReflection)) } catch { /* ignore corrupt data */ }
+      try { if (savedHabits) setHabitData(JSON.parse(savedHabits)) } catch { /* ignore corrupt data */ }
+    })
   }, [month])
 
+  const goalsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reflectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (goalsTimerRef.current) clearTimeout(goalsTimerRef.current)
+      if (reflectionTimerRef.current) clearTimeout(reflectionTimerRef.current)
+    }
+  }, [])
+
+  const saveGoals = useCallback((newGoals: string[]) => {
+    setGoals(newGoals)
+    if (!window.api) return
+    if (goalsTimerRef.current) clearTimeout(goalsTimerRef.current)
+    goalsTimerRef.current = setTimeout(() => {
+      window.api.settings.set(`monthly_goals_${monthKey}`, JSON.stringify(newGoals))
+    }, 500)
+  }, [monthKey])
+
+  const saveReflection = useCallback((newReflection: typeof reflection) => {
+    setReflection(newReflection)
+    if (!window.api) return
+    if (reflectionTimerRef.current) clearTimeout(reflectionTimerRef.current)
+    reflectionTimerRef.current = setTimeout(() => {
+      window.api.settings.set(`monthly_reflection_${monthKey}`, JSON.stringify(newReflection))
+    }, 500)
+  }, [monthKey])
+
   function toggleHabit(habit: string, date: string) {
-    setHabitData(prev => ({
-      ...prev,
-      [habit]: { ...prev[habit], [date]: !prev[habit]?.[date] }
-    }))
+    const newData = {
+      ...habitData,
+      [habit]: { ...habitData[habit], [date]: !habitData[habit]?.[date] }
+    }
+    setHabitData(newData)
+    if (window.api) window.api.settings.set(`monthly_habit_data_${monthKey}`, JSON.stringify(newData))
   }
 
   const today = new Date()
@@ -103,7 +145,7 @@ export default function Monthly(): JSX.Element {
                   <span className="text-xs font-mono text-muted-foreground w-4">{i + 1}.</span>
                   <input
                     value={goal}
-                    onChange={(e) => setGoals(prev => prev.map((g, j) => j === i ? e.target.value : g))}
+                    onChange={(e) => saveGoals(goals.map((g, j) => j === i ? e.target.value : g))}
                     placeholder={`Priority ${i + 1}…`}
                     className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/40 outline-none"
                   />
@@ -180,7 +222,7 @@ export default function Monthly(): JSX.Element {
                   <label className="text-xs text-muted-foreground font-medium mb-1 block">{label}</label>
                   <textarea
                     value={reflection[key as keyof typeof reflection]}
-                    onChange={(e) => setReflection(prev => ({ ...prev, [key]: e.target.value }))}
+                    onChange={(e) => saveReflection({ ...reflection, [key]: e.target.value })}
                     placeholder="Write here…"
                     className="w-full bg-secondary/50 border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-1 focus:ring-primary resize-none min-h-[72px]"
                   />

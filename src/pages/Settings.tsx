@@ -112,9 +112,12 @@ export default function Settings(): JSX.Element {
 
       {/* Data */}
       <SettingsSection icon={<Download size={16} />} title="Data">
-        <SettingsRow label="Export all data" description="Download an encrypted backup of your knowledge base and settings">
-          <button className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors">
-            <Download size={12} /> Export
+        <SettingsRow label="Open data folder" description="Browse your local knowledge base, vault, and database files in Finder">
+          <button
+            onClick={() => window.api?.settings.openDataDir()}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors"
+          >
+            <Database size={12} /> Open in Finder
           </button>
         </SettingsRow>
       </SettingsSection>
@@ -124,13 +127,29 @@ export default function Settings(): JSX.Element {
         <h3 className="text-sm font-semibold text-destructive mb-1 flex items-center gap-2"><Trash2 size={14} /> Danger Zone</h3>
         <p className="text-xs text-muted-foreground mb-4">These actions are permanent and cannot be undone.</p>
         <div className="space-y-3">
-          <SettingsRow label="Wipe knowledge base" description="Delete all files in ~/Library/Application Support/Compass/knowledge-base">
-            <button className="text-xs px-3 py-1.5 border border-destructive/50 text-destructive hover:bg-destructive/10 rounded-lg transition-colors">
+          <SettingsRow label="Wipe knowledge base" description="Delete all files in your local knowledge-base folder">
+            <button
+              onClick={async () => {
+                if (!confirm('Delete all knowledge base files? This cannot be undone.')) return
+                const r = await window.api?.settings.wipeKnowledge()
+                if (r?.success) alert('Knowledge base wiped.')
+                else alert('Error: ' + r?.error)
+              }}
+              className="text-xs px-3 py-1.5 border border-destructive/50 text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+            >
               Wipe
             </button>
           </SettingsRow>
-          <SettingsRow label="Wipe vault" description="Delete all encrypted vault data. Keys will be removed from OS Keychain.">
-            <button className="text-xs px-3 py-1.5 border border-destructive/50 text-destructive hover:bg-destructive/10 rounded-lg transition-colors">
+          <SettingsRow label="Wipe vault" description="Delete all encrypted vault data (.enc files). Cannot be recovered.">
+            <button
+              onClick={async () => {
+                if (!confirm('Delete all vault data? All encrypted entries will be permanently lost.')) return
+                const r = await window.api?.settings.wipeVault()
+                if (r?.success) alert('Vault wiped.')
+                else alert('Error: ' + r?.error)
+              }}
+              className="text-xs px-3 py-1.5 border border-destructive/50 text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+            >
               Wipe vault
             </button>
           </SettingsRow>

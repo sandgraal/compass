@@ -51,7 +51,9 @@ const api = {
     updateEntry: (category: string, id: string, entry: unknown) =>
       ipcRenderer.invoke('vault:update-entry', category, id, entry),
     deleteEntry: (category: string, id: string) =>
-      ipcRenderer.invoke('vault:delete-entry', category, id)
+      ipcRenderer.invoke('vault:delete-entry', category, id),
+    setContentProtection: (enabled: boolean) =>
+      ipcRenderer.send('vault:set-content-protection', enabled)
   },
 
   // --- Checklist ---
@@ -90,7 +92,10 @@ const api = {
   settings: {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),
     set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value),
-    getAll: () => ipcRenderer.invoke('settings:get-all')
+    getAll: () => ipcRenderer.invoke('settings:get-all'),
+    openDataDir: () => ipcRenderer.invoke('settings:open-data-dir'),
+    wipeKnowledge: () => ipcRenderer.invoke('settings:wipe-knowledge'),
+    wipeVault: () => ipcRenderer.invoke('settings:wipe-vault')
   },
 
   // --- Theme ---

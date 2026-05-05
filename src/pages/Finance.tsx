@@ -35,7 +35,7 @@ export default function Finance(): JSX.Element {
 
   const refresh = async () => {
     const isElectron = typeof window !== 'undefined' && !!window.api
-    if (!isElectron) return
+    if (!isElectron || !window.api.finance) return
     const [t, d, b] = await Promise.all([
       window.api.finance.getTransactions({ month, limit: 50 }),
       window.api.finance.getDebtSummary(),
@@ -47,6 +47,8 @@ export default function Finance(): JSX.Element {
   }
 
   const ingest = async () => {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron || !window.api.finance) return
     setIngesting(true)
     try {
       const result = await window.api.finance.ingestFolder()

@@ -117,6 +117,7 @@ declare global {
         addEntry(category: string, entry: Record<string, unknown>): Promise<VaultEntry>
         updateEntry(category: string, id: string, entry: Record<string, unknown>): Promise<VaultEntry>
         deleteEntry(category: string, id: string): Promise<{ success: boolean }>
+        setContentProtection(enabled: boolean): void
       }
       checklist: {
         getItems(listType: string, date: string): Promise<ChecklistItem[]>
@@ -141,10 +142,20 @@ declare global {
         get(key: string): Promise<string | null>
         set(key: string, value: unknown): Promise<{ success: boolean }>
         getAll(): Promise<Record<string, string>>
+        openDataDir(): Promise<{ success: boolean }>
+        wipeKnowledge(): Promise<{ success: boolean; error?: string }>
+        wipeVault(): Promise<{ success: boolean; error?: string }>
       }
       theme: {
         getNativeTheme(): Promise<'dark' | 'light'>
         onThemeChange(cb: (theme: string) => void): () => void
+      }
+      finance?: {
+        ingestFolder(folder?: string): Promise<{ filesProcessed: number; newTransactions: number; duplicatesDropped: number }>
+        getTransactions(opts?: { month?: string; category?: string; limit?: number }): Promise<Array<{ id: number; date: string; amount: number; description: string; category: string; subcategory?: string }>>
+        getDebtSummary(): Promise<{ debts: Array<{ id: number; name: string; balance: number; apr: number; minPayment: number }>; projection: Array<{ month: number; balance: number }> }>
+        getBudgetStatus(month?: string): Promise<{ lines: Array<{ category: string; subcategory?: string; monthlyAmount: number; actual: number; variance: number; pct: number }>; totals: { budgeted: number; actual: number } }>
+        setBudget(line: { category: string; subcategory?: string; monthlyAmount: number }): Promise<{ success: boolean }>
       }
     }
   }

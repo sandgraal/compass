@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { format, startOfWeek, endOfWeek, eachDayOfInterval, addWeeks, subWeeks, isSameDay } from 'date-fns'
 import { ChevronLeft, ChevronRight, CheckSquare, GitBranch, Calendar } from 'lucide-react'
 import { cn, isoDate } from '../lib/utils'
@@ -14,15 +14,18 @@ export default function Weekly(): JSX.Element {
   const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 })
   const days = eachDayOfInterval({ start: weekStart, end: weekEnd })
   const isCurrentWeek = isSameDay(weekStart, startOfWeek(new Date(), { weekStartsOn: 1 }))
+  const weekKey = isoDate(weekStart)
 
   useEffect(() => {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
 
+    // Load checklist + calendar + github + persisted goals/reflection
     Promise.all([
       ...days.map(d => window.api.checklist.getItems('daily', isoDate(d))),
       window.api.calendar.getEvents(weekStart.toISOString(), weekEnd.toISOString()),
-      window.api.github.getItems('open')
+      window.api.github.getItems('open'),
+      window.api.settings.getAll()
     ]).then((results) => {
       const itemResults = results.slice(0, 7) as ChecklistItem[][]
       const itemMap: Record<string, ChecklistItem[]> = {}
@@ -30,8 +33,42 @@ export default function Weekly(): JSX.Element {
       setAllItems(itemMap)
       setEvents(results[7] as CalendarEvent[])
       setGithubItems(results[8] as GitHubItem[])
+
+      const s = results[9] as Record<string, string>
+      const savedGoals = s[`weekly_goals_${weekKey}`]
+      const savedReflection = s[`weekly_reflection_${weekKey}`]
+      try { if (savedGoals) setGoals(JSON.parse(savedGoals)) } catch { /* ignore corrupt data */ }
+      try { if (savedReflection) setReflection(JSON.parse(savedReflection)) } catch { /* ignore corrupt data */ }
     })
   }, [weekStart])
+
+  const goalsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reflectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (goalsTimerRef.current) clearTimeout(goalsTimerRef.current)
+      if (reflectionTimerRef.current) clearTimeout(reflectionTimerRef.current)
+    }
+  }, [])
+
+  const saveGoals = useCallback((newGoals: string[]) => {
+    setGoals(newGoals)
+    if (!window.api) return
+    if (goalsTimerRef.current) clearTimeout(goalsTimerRef.current)
+    goalsTimerRef.current = setTimeout(() => {
+      window.api.settings.set(`weekly_goals_${weekKey}`, JSON.stringify(newGoals))
+    }, 500)
+  }, [weekKey])
+
+  const saveReflection = useCallback((newReflection: typeof reflection) => {
+    setReflection(newReflection)
+    if (!window.api) return
+    if (reflectionTimerRef.current) clearTimeout(reflectionTimerRef.current)
+    reflectionTimerRef.current = setTimeout(() => {
+      window.api.settings.set(`weekly_reflection_${weekKey}`, JSON.stringify(newReflection))
+    }, 500)
+  }, [weekKey])
 
   const totalTasks = Object.values(allItems).flat().length
   const completedTasks = Object.values(allItems).flat().filter(i => i.checked).length
@@ -127,7 +164,7 @@ export default function Weekly(): JSX.Element {
                 <div className="w-5 h-5 rounded border border-border shrink-0 flex items-center justify-center text-xs text-muted-foreground">{i + 1}</div>
                 <input
                   value={goal}
-                  onChange={(e) => setGoals(prev => prev.map((g, j) => j === i ? e.target.value : g))}
+                  onChange={(e) => saveGoals(goals.map((g, j) => j === i ? e.target.value : g))}
                   placeholder={`Goal ${i + 1}…`}
                   className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/50 outline-none"
                 />
@@ -167,7 +204,7 @@ export default function Weekly(): JSX.Element {
               <label className="text-xs text-muted-foreground font-medium mb-1.5 block">{label}</label>
               <textarea
                 value={reflection[key as keyof typeof reflection]}
-                onChange={(e) => setReflection(prev => ({ ...prev, [key]: e.target.value }))}
+                onChange={(e) => saveReflection({ ...reflection, [key]: e.target.value })}
                 placeholder="Write here…"
                 className="w-full bg-secondary/50 border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-1 focus:ring-primary resize-none min-h-[100px]"
               />

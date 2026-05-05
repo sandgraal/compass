@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { format, addDays, subDays } from 'date-fns'
-import { Plus, ChevronLeft, ChevronRight, RefreshCcw, Download, GripVertical, Trash2, ChevronDown } from 'lucide-react'
+import { Plus, ChevronLeft, ChevronRight, RefreshCcw, Download, GripVertical, Trash2, ChevronDown, FileText, X } from 'lucide-react'
 import { cn, isoDate, todayISO } from '../lib/utils'
 
 const CATEGORIES = ['morning', 'work', 'personal', 'evening'] as const
@@ -13,15 +13,40 @@ const CATEGORY_COLORS: Record<Category, string> = {
   evening: 'text-indigo-400'
 }
 
+/** Parse template markdown into {category, title}[] for seeding a new day */
+function parseTemplate(md: string): Array<{ category: Category; title: string }> {
+  const catMap: Record<string, Category> = {
+    morning: 'morning', work: 'work', personal: 'personal', evening: 'evening'
+  }
+  const results: Array<{ category: Category; title: string }> = []
+  let currentCat: Category = 'personal'
+  for (const line of md.split('\n')) {
+    const headingMatch = line.match(/^#{1,3}\s+(.+)/)
+    if (headingMatch) {
+      const key = headingMatch[1].trim().toLowerCase()
+      currentCat = catMap[key] ?? 'personal'
+      continue
+    }
+    const itemMatch = line.match(/^-\s+\[[ x]\]\s+(.+)/)
+    if (itemMatch) {
+      results.push({ category: currentCat, title: itemMatch[1].trim() })
+    }
+  }
+  return results
+}
+
 export default function Daily(): JSX.Element {
   const [date, setDate] = useState(new Date())
   const [items, setItems] = useState<ChecklistItem[]>([])
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [githubDue, setGithubDue] = useState<GitHubItem[]>([])
+  const [gmailActions, setGmailActions] = useState<GmailAction[]>([])
   const [newTitle, setNewTitle] = useState('')
   const [newCategory, setNewCategory] = useState<Category>('personal')
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
+  const [templateOpen, setTemplateOpen] = useState(false)
+  const [templateContent, setTemplateContent] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
   const dateStr = isoDate(date)
@@ -45,16 +70,53 @@ export default function Daily(): JSX.Element {
     const end = new Date(date)
     end.setHours(23, 59, 59)
 
-    const [checkItems, calEvents, ghItems] = await Promise.all([
+    const [checkItems, calEvents, ghItems, gmailItems] = await Promise.all([
       window.api.checklist.getItems('daily', dateStr),
       window.api.calendar.getEvents(start.toISOString(), end.toISOString()),
-      window.api.github.getItems('open')
+      window.api.github.getItems('open'),
+      isToday ? window.api.gmail.getActions(false) : Promise.resolve([])
     ])
 
     setItems(checkItems)
     setEvents(calEvents)
-    setGithubDue(ghItems.filter(g => g.dueDate === dateStr))
+    setGithubDue(ghItems.filter((g: GitHubItem) => g.dueDate === dateStr))
+    setGmailActions((gmailItems as GmailAction[]).slice(0, 5))
     setLoading(false)
+  }
+
+  function exportAsMarkdown() {
+    const lines: string[] = [
+      `# Daily Plan — ${format(date, 'EEEE, MMMM d, yyyy')}`,
+      ''
+    ]
+
+    if (events.length) {
+      lines.push('## Calendar')
+      events.forEach(ev => {
+        const time = ev.allDay ? 'All day' : ev.startAt ? format(new Date(ev.startAt), 'h:mm a') : ''
+        lines.push(`- ${ev.title}${time ? ` (${time})` : ''}`)
+      })
+      lines.push('')
+    }
+
+    CATEGORIES.forEach(cat => {
+      const catItems = items.filter(i => i.category === cat)
+      if (!catItems.length) return
+      lines.push(`## ${cat.charAt(0).toUpperCase() + cat.slice(1)}`)
+      catItems.forEach(item => {
+        lines.push(`- [${item.checked ? 'x' : ' '}] ${item.title}`)
+        if (item.body) lines.push(`  ${item.body}`)
+      })
+      lines.push('')
+    })
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `daily-${dateStr}.md`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   async function addItem() {
@@ -110,6 +172,40 @@ export default function Daily(): JSX.Element {
     alert(`Rolled over ${result.rolledOver} items to ${tomorrow}`)
   }
 
+  async function openTemplateEditor() {
+    if (window.api) {
+      const content = await window.api.checklist.getTemplate('daily')
+      setTemplateContent(content || '')
+    }
+    setTemplateOpen(true)
+  }
+
+  async function saveTemplate() {
+    if (window.api) {
+      await window.api.checklist.saveTemplate('daily', templateContent)
+    }
+    setTemplateOpen(false)
+  }
+
+  async function seedFromTemplate() {
+    if (!window.api) return
+    const content = await window.api.checklist.getTemplate('daily')
+    const parsed = parseTemplate(content)
+    const created: ChecklistItem[] = []
+    for (let i = 0; i < parsed.length; i++) {
+      const item = await window.api.checklist.addItem({
+        listType: 'daily',
+        listDate: dateStr,
+        title: parsed[i].title,
+        category: parsed[i].category,
+        sortOrder: i,
+        source: 'template'
+      })
+      created.push(item)
+    }
+    setItems(created)
+  }
+
   const grouped = CATEGORIES.map((cat) => ({
     cat,
     items: items.filter((i) => i.category === cat)
@@ -148,7 +244,10 @@ export default function Daily(): JSX.Element {
               <RefreshCcw size={12} /> Roll over
             </button>
           )}
-          <button className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors">
+          <button onClick={openTemplateEditor} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors">
+            <FileText size={12} /> Template
+          </button>
+          <button onClick={exportAsMarkdown} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors">
             <Download size={12} /> Export
           </button>
         </div>
@@ -212,7 +311,15 @@ export default function Daily(): JSX.Element {
           {items.length === 0 && (
             <div className="text-center py-12">
               <p className="text-muted-foreground text-sm">No tasks yet for this day.</p>
-              <p className="text-muted-foreground/60 text-xs mt-1">Add your first task below.</p>
+              <p className="text-muted-foreground/60 text-xs mt-1">Add a task below or start from your template.</p>
+              {window.api && (
+                <button
+                  onClick={seedFromTemplate}
+                  className="mt-3 flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg transition-colors mx-auto"
+                >
+                  <FileText size={12} /> Load from template
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -229,6 +336,37 @@ export default function Daily(): JSX.Element {
               <span className="text-xs text-muted-foreground truncate">{item.repo}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Gmail action items (today only) */}
+      {isToday && gmailActions.length > 0 && (
+        <div className="mt-6 border-t border-border pt-4">
+          <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Inbox · Needs Attention</h3>
+          <div className="space-y-2">
+            {gmailActions.map(msg => (
+              <div key={msg.id} className="flex items-start gap-3 py-1.5 group">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0 mt-1.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-foreground truncate">{msg.subject}</p>
+                  <p className="text-xs text-muted-foreground truncate">{msg.fromAddress}</p>
+                </div>
+                <button
+                  onClick={async () => {
+                    try {
+                      await window.api?.gmail.markDone(msg.id)
+                      setGmailActions(prev => prev.filter(m => m.id !== msg.id))
+                    } catch (err) {
+                      console.error('[Daily] markDone failed:', err)
+                    }
+                  }}
+                  className="text-xs text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                >
+                  Done
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -258,6 +396,40 @@ export default function Daily(): JSX.Element {
           </button>
         </div>
       </div>
+
+      {/* Template editor modal */}
+      {templateOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setTemplateOpen(false)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">Daily Template</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Use <code className="text-primary">## Category</code> headings (morning, work, personal, evening) and <code className="text-primary">- [ ] Task</code> items</p>
+              </div>
+              <button onClick={() => setTemplateOpen(false)} className="p-1.5 rounded hover:bg-secondary text-muted-foreground">
+                <X size={14} />
+              </button>
+            </div>
+            <div className="p-5">
+              <textarea
+                value={templateContent}
+                onChange={(e) => setTemplateContent(e.target.value)}
+                className="w-full h-72 bg-secondary border border-border rounded-lg px-4 py-3 text-sm font-mono text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary resize-none"
+                spellCheck={false}
+              />
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-4 border-t border-border">
+              <button onClick={() => setTemplateOpen(false)} className="text-sm px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors">
+                Cancel
+              </button>
+              <button onClick={saveTemplate} className="text-sm px-4 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors">
+                Save template
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
