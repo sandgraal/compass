@@ -421,13 +421,32 @@ function htmlToMarkdown(html: string): string {
 
 type DiffLine = { type: 'same' | 'add' | 'remove'; text: string }
 
+const MAX_DIFF_LINES = 2000
+const MAX_DIFF_CELLS = 1_000_000
+
+function createDiffTooLargeFallback(oldLines: string[], newLines: string[]): DiffLine[] {
+  return [
+    {
+      type: 'same',
+      text: `[Diff omitted: too large to compare safely on this screen (${oldLines.length} old lines, ${newLines.length} new lines).]`,
+    },
+  ]
+}
+
 function computeDiff(oldText: string, newText: string): DiffLine[] {
   const oldLines = oldText.split('\n')
   const newLines = newText.split('\n')
 
-  // Simple O(n²) LCS-based diff — good enough for knowledge files (< 1000 lines)
+  // Simple O(n²) LCS-based diff — keep it for normal-sized files, but avoid
+  // allocating a huge DP matrix on the UI thread for large inputs.
   const n = oldLines.length
   const m = newLines.length
+  const cellCount = (n + 1) * (m + 1)
+
+  if (n > MAX_DIFF_LINES || m > MAX_DIFF_LINES || cellCount > MAX_DIFF_CELLS) {
+    return createDiffTooLargeFallback(oldLines, newLines)
+  }
+
   const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0))
 
   for (let i = n - 1; i >= 0; i--) {
