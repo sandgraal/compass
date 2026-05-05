@@ -7,8 +7,9 @@ export function registerHabitsHandlers(ipcMain: IpcMain): void {
   // ── List habits (active only by default) ─────────────────────────────────
   ipcMain.handle('habits:list', (_event, includeInactive = false) => {
     const db = getDb()
-    const rows = db.select().from(habits).all()
-    return includeInactive ? rows : rows.filter(h => h.active)
+    return includeInactive
+      ? db.select().from(habits).all()
+      : db.select().from(habits).where(eq(habits.active, true)).all()
   })
 
   // ── Create a habit ────────────────────────────────────────────────────────
