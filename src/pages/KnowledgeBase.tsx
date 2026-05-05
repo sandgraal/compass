@@ -38,7 +38,7 @@ export default function KnowledgeBase(): JSX.Element {
       TaskItem.configure({ nested: true }),
       Placeholder.configure({ placeholder: 'Start writing…' }),
       Typography,
-      Link.configure({ openOnClick: true, autolink: true })
+      Link.configure({ openOnClick: false, autolink: true })
     ],
     content: '',
     editorProps: { attributes: { class: 'tiptap-editor' } },
