@@ -202,11 +202,87 @@ async function exchangeCodeForTokens(
     throw new Error(`Token exchange failed (${resp.status}): ${body}`)
   }
 
-  const tokens = await resp.json() as object
-  if ('error' in tokens) {
-    throw new Error(`Token error: ${(tokens as { error: string }).error}`)
+  const tokens = await resp.json() as { error?: string; expires_in?: number; [key: string]: unknown }
+  if (tokens.error) {
+    throw new Error(`Token error: ${tokens.error}`)
+  }
+  // Stamp an absolute expiry so getValidGoogleToken() can check without a clock skew
+  if (tokens.expires_in) {
+    tokens.expires_at = Date.now() + tokens.expires_in * 1000
   }
   return tokens
+}
+
+/**
+ * Refreshes a Google access token using the stored refresh_token.
+ * Saves the updated token bundle (new access_token + expiry) back to disk.
+ * Returns the fresh access token, or throws if refresh fails.
+ */
+export async function refreshGoogleToken(): Promise<string> {
+  const tokens = loadToken('google') as {
+    access_token?: string
+    refresh_token?: string
+    expires_in?: number
+    token_type?: string
+  } | null
+
+  if (!tokens?.refresh_token) {
+    throw new Error('No refresh token stored — please reconnect Google.')
+  }
+
+  const clientId = process.env.GOOGLE_CLIENT_ID || ''
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET || ''
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    refresh_token: tokens.refresh_token,
+    grant_type: 'refresh_token'
+  })
+
+  const resp = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+    body: params.toString()
+  })
+
+  if (!resp.ok) {
+    const body = await resp.text()
+    throw new Error(`Google token refresh failed (${resp.status}): ${body}`)
+  }
+
+  const refreshed = await resp.json() as { access_token: string; expires_in: number }
+
+  // Merge new access token into the existing token bundle (preserve refresh_token)
+  const updated = { ...tokens, access_token: refreshed.access_token, expires_in: refreshed.expires_in }
+  saveToken('google', updated)
+
+  return refreshed.access_token
+}
+
+/**
+ * Returns a valid Google access token, automatically refreshing if expired or close to expiry.
+ * Call this instead of reading the token directly in sync handlers.
+ */
+export async function getValidGoogleToken(): Promise<string> {
+  const tokens = loadToken('google') as {
+    access_token?: string
+    refresh_token?: string
+    expires_at?: number  // ms epoch — we set this on save
+  } | null
+
+  if (!tokens?.access_token) {
+    throw new Error('Google not connected')
+  }
+
+  // Refresh if within 5 minutes of expiry (or no expiry tracked yet)
+  const now = Date.now()
+  const expiresAt = tokens.expires_at ?? 0
+  if (expiresAt - now < 5 * 60 * 1000) {
+    return refreshGoogleToken()
+  }
+
+  return tokens.access_token
 }
 
 export function registerAuthHandlers(ipcMain: IpcMain): void {

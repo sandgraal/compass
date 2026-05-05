@@ -2,7 +2,7 @@ import { IpcMain, BrowserWindow } from 'electron'
 import { getDb } from '../db/client'
 import { integrations, syncEvents, calendarEvents, githubItems, gmailActions, driveFiles } from '../db/schema'
 import { eq, and } from 'drizzle-orm'
-import { loadToken } from './auth'
+import { loadToken, getValidGoogleToken, saveToken } from './auth'
 import { updateCalendarKnowledge, updateGitHubKnowledge, updateGmailKnowledge, updateDriveKnowledge } from '../knowledge/extractor'
 
 type SyncResult = {
@@ -20,7 +20,9 @@ export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<Syn
   let recordsUpdated = 0
 
   try {
-    const headers = { Authorization: `Bearer ${tokens.access_token}` }
+    // Always get a valid (auto-refreshed) token — handles the 1-hour expiry silently
+    const accessToken = await getValidGoogleToken()
+    const headers = { Authorization: `Bearer ${accessToken}` }
 
     // ---- Calendar ----
     const now = new Date()
