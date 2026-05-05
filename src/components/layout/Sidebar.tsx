@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, CalendarDays, CalendarRange, CalendarCheck,
-  BookOpen, ShieldCheck, Plug2, Settings, Circle
+  BookOpen, ShieldCheck, Plug2, Settings, Circle, TrendingUp
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useEffect, useState } from 'react'
@@ -19,6 +19,7 @@ const NAV: NavItem[] = [
   { label: 'Monthly', to: '/monthly', icon: <CalendarCheck size={18} /> },
   { label: 'Knowledge Base', to: '/knowledge', icon: <BookOpen size={18} /> },
   { label: 'Vault', to: '/vault', icon: <ShieldCheck size={18} /> },
+  { label: 'Finance', to: '/finance', icon: <TrendingUp size={18} /> },
   { label: 'Integrations', to: '/integrations', icon: <Plug2 size={18} /> },
   { label: 'Settings', to: '/settings', icon: <Settings size={18} /> },
 ]

@@ -18,6 +18,7 @@ export default function Daily(): JSX.Element {
   const [items, setItems] = useState<ChecklistItem[]>([])
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [githubDue, setGithubDue] = useState<GitHubItem[]>([])
+  const [gmailActions, setGmailActions] = useState<GmailAction[]>([])
   const [newTitle, setNewTitle] = useState('')
   const [newCategory, setNewCategory] = useState<Category>('personal')
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set())
@@ -45,16 +46,53 @@ export default function Daily(): JSX.Element {
     const end = new Date(date)
     end.setHours(23, 59, 59)
 
-    const [checkItems, calEvents, ghItems] = await Promise.all([
+    const [checkItems, calEvents, ghItems, gmailItems] = await Promise.all([
       window.api.checklist.getItems('daily', dateStr),
       window.api.calendar.getEvents(start.toISOString(), end.toISOString()),
-      window.api.github.getItems('open')
+      window.api.github.getItems('open'),
+      isToday ? window.api.gmail.getActions(false) : Promise.resolve([])
     ])
 
     setItems(checkItems)
     setEvents(calEvents)
-    setGithubDue(ghItems.filter(g => g.dueDate === dateStr))
+    setGithubDue(ghItems.filter((g: GitHubItem) => g.dueDate === dateStr))
+    setGmailActions((gmailItems as GmailAction[]).slice(0, 5))
     setLoading(false)
+  }
+
+  function exportAsMarkdown() {
+    const lines: string[] = [
+      `# Daily Plan — ${format(date, 'EEEE, MMMM d, yyyy')}`,
+      ''
+    ]
+
+    if (events.length) {
+      lines.push('## Calendar')
+      events.forEach(ev => {
+        const time = ev.allDay ? 'All day' : ev.startAt ? format(new Date(ev.startAt), 'h:mm a') : ''
+        lines.push(`- ${ev.title}${time ? ` (${time})` : ''}`)
+      })
+      lines.push('')
+    }
+
+    CATEGORIES.forEach(cat => {
+      const catItems = items.filter(i => i.category === cat)
+      if (!catItems.length) return
+      lines.push(`## ${cat.charAt(0).toUpperCase() + cat.slice(1)}`)
+      catItems.forEach(item => {
+        lines.push(`- [${item.checked ? 'x' : ' '}] ${item.title}`)
+        if (item.body) lines.push(`  ${item.body}`)
+      })
+      lines.push('')
+    })
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `daily-${dateStr}.md`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   async function addItem() {
@@ -148,7 +186,7 @@ export default function Daily(): JSX.Element {
               <RefreshCcw size={12} /> Roll over
             </button>
           )}
-          <button className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors">
+          <button onClick={exportAsMarkdown} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors">
             <Download size={12} /> Export
           </button>
         </div>
@@ -229,6 +267,32 @@ export default function Daily(): JSX.Element {
               <span className="text-xs text-muted-foreground truncate">{item.repo}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Gmail action items (today only) */}
+      {isToday && gmailActions.length > 0 && (
+        <div className="mt-6 border-t border-border pt-4">
+          <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Inbox · Needs Attention</h3>
+          <div className="space-y-2">
+            {gmailActions.map(msg => (
+              <div key={msg.id} className="flex items-start gap-3 py-1.5 group">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0 mt-1.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-foreground truncate">{msg.subject}</p>
+                  <p className="text-xs text-muted-foreground truncate">{msg.fromAddress}</p>
+                </div>
+                <button
+                  onClick={() => window.api?.gmail.markDone(msg.id).then(() =>
+                    setGmailActions(prev => prev.filter(m => m.id !== msg.id))
+                  )}
+                  className="text-xs text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                >
+                  Done
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

@@ -8,6 +8,7 @@ import Monthly from './pages/Monthly'
 import KnowledgeBase from './pages/KnowledgeBase'
 import Vault from './pages/Vault'
 import Integrations from './pages/Integrations'
+import Finance from './pages/Finance'
 import Settings from './pages/Settings'
 import { useAppStore } from './store/appStore'
 
@@ -41,6 +42,7 @@ export default function App(): JSX.Element {
           <Route path="monthly" element={<Monthly />} />
           <Route path="knowledge/*" element={<KnowledgeBase />} />
           <Route path="vault" element={<Vault />} />
+          <Route path="finance" element={<Finance />} />
           <Route path="integrations" element={<Integrations />} />
           <Route path="settings" element={<Settings />} />
         </Route>

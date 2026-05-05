@@ -51,7 +51,9 @@ const api = {
     updateEntry: (category: string, id: string, entry: unknown) =>
       ipcRenderer.invoke('vault:update-entry', category, id, entry),
     deleteEntry: (category: string, id: string) =>
-      ipcRenderer.invoke('vault:delete-entry', category, id)
+      ipcRenderer.invoke('vault:delete-entry', category, id),
+    setContentProtection: (enabled: boolean) =>
+      ipcRenderer.send('vault:set-content-protection', enabled)
   },
 
   // --- Checklist ---
