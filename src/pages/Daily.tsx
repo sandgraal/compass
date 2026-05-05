@@ -179,9 +179,11 @@ export default function Daily(): JSX.Element {
       return [...others, ...withOrder]
     })
     if (window.api) {
-      for (let i = 0; i < withOrder.length; i++) {
-        window.api.checklist.updateItem(withOrder[i].id, { sortOrder: i })
-      }
+      await Promise.all(
+        withOrder.map((item, idx) =>
+          window.api!.checklist.updateItem(item.id, { sortOrder: idx })
+        )
+      )
     }
   }
 
