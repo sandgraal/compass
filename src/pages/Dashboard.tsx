@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Calendar, GitBranch, Inbox, ArrowRight, Plus, RefreshCw, Clock } from 'lucide-react'
+import { Calendar, GitBranch, ArrowRight, Plus, RefreshCw, Clock } from 'lucide-react'
 import { format } from 'date-fns'
 import { cn, formatTime, formatRelative, todayISO } from '../lib/utils'
 
@@ -17,7 +17,6 @@ export default function Dashboard(): JSX.Element {
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [tasks, setTasks] = useState<ChecklistItem[]>([])
   const [githubItems, setGithubItems] = useState<GitHubItem[]>([])
-  const [inboxCount, setInboxCount] = useState(0)
   const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus[]>([])
   const [isSyncing, setIsSyncing] = useState(false)
 
@@ -40,7 +39,6 @@ export default function Dashboard(): JSX.Element {
       setTasks(checkItems.slice(0, 5))
       setEvents(calEvents)
       setGithubItems(ghItems.slice(0, 4))
-      setInboxCount(gmailItems.length)
       setIntegrationStatus(integrations)
 
       const done = checkItems.filter((i) => i.checked).length

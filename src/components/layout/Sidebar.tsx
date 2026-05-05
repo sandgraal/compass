@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, CalendarDays, CalendarRange, CalendarCheck,
   BookOpen, ShieldCheck, Plug2, Settings, Circle, TrendingUp
@@ -19,7 +19,6 @@ interface SyncIndicator {
 }
 
 export function Sidebar(): JSX.Element {
-  const location = useLocation()
   const [integrations, setIntegrations] = useState<SyncIndicator[]>([])
   const [inboxCount, setInboxCount] = useState(0)
 

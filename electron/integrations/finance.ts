@@ -7,12 +7,11 @@
  * write-to-DB, knowledge-base markdown) stay unchanged.
  */
 
-import { readFileSync, readdirSync, renameSync, statSync, existsSync, mkdirSync } from 'fs'
+import { readFileSync, readdirSync, renameSync, existsSync, mkdirSync } from 'fs'
 import { join, basename } from 'path'
 import { createHash } from 'crypto'
-import { eq } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-// import * as schema from '../db/schema'  // uncomment after merging schema.finance.ts
+import * as schema from '../db/schema'
 
 // ---------- Types ----------
 export type RawTxn = {
@@ -65,7 +64,6 @@ const parseDate = (s: string): string => {
 const hashTxn = (date: string, amount: number, desc: string, account: string): string =>
   createHash('sha1').update(`${date}|${amount.toFixed(2)}|${desc.trim().toLowerCase()}|${account}`).digest('hex').slice(0, 16)
 
-const lower = (rows: string[][]) => rows.map(r => r.map(c => c.trim().toLowerCase()))
 const findIdx = (h: string[], ...names: string[]): number => {
   for (const n of names) {
     const i = h.findIndex(c => c === n || c.includes(n))
@@ -238,20 +236,20 @@ export type IngestResult = {
 }
 
 export async function ingestCsvFolder(
-  // db: BetterSQLite3Database<typeof schema>,    // uncomment after wiring schema
-  db: any,
+  db: BetterSQLite3Database<typeof schema>,
   inboxDir: string,
   archiveDir = join(inboxDir, '..', 'archive'),
-  accountHint?: (file: string) => string
+  accountHint?: (file: string) => string,
+  rules: { pattern: string; category: string; subcategory?: string | null }[] = []
 ): Promise<IngestResult> {
   if (!existsSync(archiveDir)) mkdirSync(archiveDir, { recursive: true })
   const files = readdirSync(inboxDir).filter(f => f.toLowerCase().endsWith('.csv'))
   const result: IngestResult = { filesProcessed: 0, newTransactions: 0, duplicatesDropped: 0, perFile: [] }
 
-  // TODO after wiring schema: prefetch all hashes for fast dedupe
-  // const existingHashes = new Set(db.select({ h: schema.financeTransactions.hash })
-  //   .from(schema.financeTransactions).all().map(r => r.h))
-  const existingHashes = new Set<string>()
+  // Prefetch existing hashes for fast dedupe
+  const existingHashes = new Set(
+    db.select({ h: schema.financeTransactions.hash }).from(schema.financeTransactions).all().map(r => r.h)
+  )
 
   for (const f of files) {
     const fp = join(inboxDir, f)
@@ -259,18 +257,25 @@ export async function ingestCsvFolder(
     const hLower = headers.map(c => c.trim().toLowerCase())
     const parser = PARSERS.find(p => p.matches(hLower)) || generic
     const hint = accountHint?.(f) ?? f.replace(/[\d_\-]+\.csv$/i, '').replace(/[_-]+/g, ' ').trim()
-    const txns = parser.parse(headers, rows, f, hint)
+    const parsed = parser.parse(headers, rows, f, hint)
+    const txns = rules.length ? categorize(parsed, rules) : parsed
     const fresh = txns.filter(t => !existingHashes.has(t.hash))
 
-    // TODO after wiring schema: insert into financeTransactions
-    // for (const t of fresh) {
-    //   db.insert(schema.financeTransactions).values({
-    //     hash: t.hash, date: t.date, amount: t.amount, description: t.description,
-    //     accountId: null, category: t.category ?? 'Uncategorized', subcategory: t.subcategory,
-    //     notes: t.notes, sourceFile: t.sourceFile, ingestedAt: new Date()
-    //   }).onConflictDoNothing().run()
-    //   existingHashes.add(t.hash)
-    // }
+    for (const t of fresh) {
+      db.insert(schema.financeTransactions).values({
+        hash: t.hash,
+        date: t.date,
+        amount: t.amount,
+        description: t.description,
+        accountId: null,
+        category: t.category ?? 'Uncategorized',
+        subcategory: t.subcategory,
+        notes: t.notes,
+        sourceFile: t.sourceFile,
+        ingestedAt: new Date()
+      }).onConflictDoNothing().run()
+      existingHashes.add(t.hash)
+    }
 
     renameSync(fp, join(archiveDir, f))
     result.filesProcessed++

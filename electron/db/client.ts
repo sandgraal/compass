@@ -29,8 +29,34 @@ export async function initDb(): Promise<void> {
     })
   } catch {
     // Migrations folder may not exist yet; create schema directly on first run
-    await createTablesIfNeeded(sqlite)
+    createTablesIfNeeded(sqlite)
   }
+  // Always ensure new tables exist for existing DBs that pre-date migrations
+  ensureNewTables(sqlite)
+}
+
+function ensureNewTables(sqlite: Database.Database): void {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS finance_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'credit',
+      is_debt INTEGER DEFAULT 0, balance REAL DEFAULT 0, apr REAL DEFAULT 0,
+      min_payment REAL DEFAULT 0, credit_limit REAL, updated_at INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS finance_transactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, date TEXT NOT NULL,
+      amount REAL NOT NULL, description TEXT NOT NULL, account_id INTEGER REFERENCES finance_accounts(id),
+      category TEXT DEFAULT 'Uncategorized', subcategory TEXT, notes TEXT,
+      source_file TEXT, ingested_at INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS budget_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT NOT NULL, subcategory TEXT,
+      monthly_amount REAL NOT NULL DEFAULT 0, updated_at INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS categorization_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, pattern TEXT NOT NULL, category TEXT NOT NULL,
+      subcategory TEXT, priority INTEGER DEFAULT 0
+    );
+  `)
 }
 
 function createTablesIfNeeded(sqlite: Database.Database): void {
@@ -142,6 +168,48 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
       updated_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS finance_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'credit',
+      is_debt INTEGER DEFAULT 0,
+      balance REAL DEFAULT 0,
+      apr REAL DEFAULT 0,
+      min_payment REAL DEFAULT 0,
+      credit_limit REAL,
+      updated_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS finance_transactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      hash TEXT NOT NULL UNIQUE,
+      date TEXT NOT NULL,
+      amount REAL NOT NULL,
+      description TEXT NOT NULL,
+      account_id INTEGER REFERENCES finance_accounts(id),
+      category TEXT DEFAULT 'Uncategorized',
+      subcategory TEXT,
+      notes TEXT,
+      source_file TEXT,
+      ingested_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS budget_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT NOT NULL,
+      subcategory TEXT,
+      monthly_amount REAL NOT NULL DEFAULT 0,
+      updated_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS categorization_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pattern TEXT NOT NULL,
+      category TEXT NOT NULL,
+      subcategory TEXT,
+      priority INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS habits (

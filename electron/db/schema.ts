@@ -119,6 +119,49 @@ export const appSettings = sqliteTable('app_settings', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
+// ---- Finance ----
+export const financeAccounts = sqliteTable('finance_accounts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),                          // "Chase Sapphire", "BofA Checking"
+  type: text('type').notNull().default('credit'),        // 'checking' | 'savings' | 'credit' | 'investment'
+  isDebt: integer('is_debt', { mode: 'boolean' }).default(false),
+  balance: real('balance').default(0),                   // current balance; for debt accounts, positive = amount owed
+  apr: real('apr').default(0),                           // annual rate as decimal e.g. 0.2499
+  minPayment: real('min_payment').default(0),
+  creditLimit: real('credit_limit'),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
+export const financeTransactions = sqliteTable('finance_transactions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  hash: text('hash').notNull().unique(),                 // dedup key
+  date: text('date').notNull(),                          // ISO 'YYYY-MM-DD'
+  amount: real('amount').notNull(),                      // negative = expense
+  description: text('description').notNull(),
+  accountId: integer('account_id').references(() => financeAccounts.id),
+  category: text('category').default('Uncategorized'),
+  subcategory: text('subcategory'),
+  notes: text('notes'),
+  sourceFile: text('source_file'),
+  ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
+export const budgetRules = sqliteTable('budget_rules', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  category: text('category').notNull(),
+  subcategory: text('subcategory'),
+  monthlyAmount: real('monthly_amount').notNull().default(0),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
+export const categorizationRules = sqliteTable('categorization_rules', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  pattern: text('pattern').notNull(),                   // case-insensitive substring match
+  category: text('category').notNull(),
+  subcategory: text('subcategory'),
+  priority: integer('priority').default(0)
+})
+
 // ---- Habits ----
 export const habits = sqliteTable('habits', {
   id: integer('id').primaryKey({ autoIncrement: true }),

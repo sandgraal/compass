@@ -22,7 +22,7 @@ export default function App(): JSX.Element {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (isElectron) {
       window.api.theme.getNativeTheme().then((t) => setTheme(t))
-      const unsub = window.api.theme.onThemeChange((t) => setTheme(t))
+      const unsub = window.api.theme.onThemeChange((t) => setTheme(t as 'dark' | 'light'))
       return unsub
     } else {
       const mq = window.matchMedia('(prefers-color-scheme: dark)')

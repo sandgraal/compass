@@ -2,7 +2,7 @@ import { IpcMain, BrowserWindow } from 'electron'
 import { getDb } from '../db/client'
 import { integrations, syncEvents, calendarEvents, githubItems, gmailActions, driveFiles } from '../db/schema'
 import { eq, and } from 'drizzle-orm'
-import { loadToken, getValidGoogleToken, saveToken } from './auth'
+import { loadToken, getValidGoogleToken } from './auth'
 import { updateCalendarKnowledge, updateGitHubKnowledge, updateGmailKnowledge, updateDriveKnowledge } from '../knowledge/extractor'
 
 type SyncResult = {

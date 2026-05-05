@@ -8,6 +8,8 @@ import { registerSyncHandlers } from './ipc/sync'
 import { registerKnowledgeHandlers } from './ipc/knowledge'
 import { registerVaultHandlers } from './ipc/vault'
 import { registerSettingsHandlers } from './ipc/settings'
+import { registerFinanceHandlers } from './ipc/finance'
+import { registerHabitsHandlers } from './ipc/habits'
 import { initDb } from './db/client'
 import { startCronJobs } from './cron'
 import { APP_DATA_DIR, DATA_DIR, VAULT_DIR, KNOWLEDGE_DIR } from './paths'
@@ -110,6 +112,8 @@ app.whenReady().then(async () => {
   registerKnowledgeHandlers(ipcMain)
   registerVaultHandlers(ipcMain)
   registerSettingsHandlers(ipcMain)
+  registerFinanceHandlers(ipcMain)
+  registerHabitsHandlers(ipcMain)
 
   // Toggle content protection when navigating to/from vault
   ipcMain.on('vault:set-content-protection', (_event, enabled: boolean) => {
