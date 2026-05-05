@@ -1,11 +1,25 @@
+import { useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { ContextDrawer } from './ContextDrawer'
+import { CommandPalette } from '../ui/CommandPalette'
 import { useAppStore } from '../../store/appStore'
 import { cn } from '../../lib/utils'
 
 export function AppLayout(): JSX.Element {
   const { contextDrawerOpen } = useAppStore()
+  const [cmdOpen, setCmdOpen] = useState(false)
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        setCmdOpen(o => !o)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background">
@@ -29,6 +43,9 @@ export function AppLayout(): JSX.Element {
 
       {/* Right context drawer */}
       <ContextDrawer />
+
+      {/* Global ⌘K command palette */}
+      <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
     </div>
   )
 }

@@ -104,8 +104,17 @@ export function Sidebar(): JSX.Element {
         </div>
       )}
 
-      {/* App version */}
-      <div className="px-5 py-3 border-t border-sidebar-border">
+      {/* ⌘K hint + App version */}
+      <div className="px-5 py-3 border-t border-sidebar-border space-y-2">
+        <button
+          onClick={() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true })) }}
+          className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-md bg-sidebar-accent/40 hover:bg-sidebar-accent/70 transition-colors group"
+        >
+          <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors">Search...</span>
+          <kbd className="flex items-center gap-0.5 text-[10px] text-muted-foreground/60 font-mono">
+            <span>⌘</span><span>K</span>
+          </kbd>
+        </button>
         <p className="text-xs text-muted-foreground/50">Compass v0.1.0 · Local only</p>
       </div>
     </aside>
