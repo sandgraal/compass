@@ -98,6 +98,18 @@ const api = {
     wipeVault: () => ipcRenderer.invoke('settings:wipe-vault')
   },
 
+  // --- Habits ---
+  habits: {
+    list: (includeInactive?: boolean) => ipcRenderer.invoke('habits:list', includeInactive),
+    create: (habit: { name: string; icon?: string; color?: string }) =>
+      ipcRenderer.invoke('habits:create', habit),
+    update: (id: number, updates: { name?: string; icon?: string; color?: string; active?: boolean }) =>
+      ipcRenderer.invoke('habits:update', id, updates),
+    delete: (id: number) => ipcRenderer.invoke('habits:delete', id),
+    getEntries: (month: string) => ipcRenderer.invoke('habits:get-entries', month),
+    toggle: (habitId: number, date: string) => ipcRenderer.invoke('habits:toggle', habitId, date)
+  },
+
   // --- Finance ---
   finance: {
     ingestFolder: (folder?: string) => ipcRenderer.invoke('finance:ingest-folder', folder),

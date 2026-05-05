@@ -92,6 +92,15 @@ declare global {
     createdAt: Date
   }
 
+  interface Habit {
+    id: number
+    name: string
+    icon: string | null
+    color: string | null
+    active: boolean | null
+    createdAt: Date | null
+  }
+
   interface Window {
     api: {
       auth: {
@@ -123,6 +132,14 @@ declare global {
         updateEntry(category: string, id: string, entry: Record<string, unknown>): Promise<VaultEntry>
         deleteEntry(category: string, id: string): Promise<{ success: boolean }>
         setContentProtection(enabled: boolean): void
+      }
+      habits: {
+        list(includeInactive?: boolean): Promise<Habit[]>
+        create(habit: { name: string; icon?: string; color?: string }): Promise<{ success: boolean; id: number }>
+        update(id: number, updates: { name?: string; icon?: string; color?: string; active?: boolean }): Promise<{ success: boolean }>
+        delete(id: number): Promise<{ success: boolean }>
+        getEntries(month: string): Promise<Record<number, Record<string, boolean>>>
+        toggle(habitId: number, date: string): Promise<{ success: boolean; completed: boolean }>
       }
       checklist: {
         getItems(listType: string, date: string): Promise<ChecklistItem[]>

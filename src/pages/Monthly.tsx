@@ -1,17 +1,19 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, isSameMonth, isSameDay, addMonths, subMonths } from 'date-fns'
-import { ChevronLeft, ChevronRight, Target, TrendingUp } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Target, TrendingUp, Plus, X } from 'lucide-react'
 import { cn, isoDate } from '../lib/utils'
 
-const DEFAULT_HABITS = ['Exercise', 'Read', 'Meditate', 'No alcohol', 'Sleep 8hrs']
+const HABIT_COLORS = ['#6272f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899']
 
 export default function Monthly(): JSX.Element {
   const [month, setMonth] = useState(() => startOfMonth(new Date()))
-  const [habits, setHabits] = useState(DEFAULT_HABITS)
-  const [habitData, setHabitData] = useState<Record<string, Record<string, boolean>>>({})
+  const [habits, setHabits] = useState<Habit[]>([])
+  const [habitEntries, setHabitEntries] = useState<Record<number, Record<string, boolean>>>({})
   const [goals, setGoals] = useState(['', '', ''])
   const [reflection, setReflection] = useState({ win: '', challenge: '', focus: '' })
   const [events, setEvents] = useState<CalendarEvent[]>([])
+  const [addingHabit, setAddingHabit] = useState(false)
+  const [newHabitName, setNewHabitName] = useState('')
 
   const monthEnd = endOfMonth(month)
   const isCurrentMonth = isSameMonth(month, new Date())
@@ -29,16 +31,19 @@ export default function Monthly(): JSX.Element {
 
     Promise.all([
       window.api.calendar.getEvents(month.toISOString(), monthEnd.toISOString()),
-      window.api.settings.getAll()
-    ]).then(([calEvents, s]) => {
+      window.api.settings.getAll(),
+      window.api.habits.list(),
+      window.api.habits.getEntries(monthKey)
+    ]).then(([calEvents, s, habitList, entries]) => {
       setEvents(calEvents)
+      setHabits(habitList)
+      setHabitEntries(entries)
+
       const settings = s as Record<string, string>
       const savedGoals = settings[`monthly_goals_${monthKey}`]
       const savedReflection = settings[`monthly_reflection_${monthKey}`]
-      const savedHabits = settings[`monthly_habit_data_${monthKey}`]
       try { if (savedGoals) setGoals(JSON.parse(savedGoals)) } catch { /* ignore corrupt data */ }
       try { if (savedReflection) setReflection(JSON.parse(savedReflection)) } catch { /* ignore corrupt data */ }
-      try { if (savedHabits) setHabitData(JSON.parse(savedHabits)) } catch { /* ignore corrupt data */ }
     })
   }, [month])
 
@@ -70,13 +75,30 @@ export default function Monthly(): JSX.Element {
     }, 500)
   }, [monthKey])
 
-  function toggleHabit(habit: string, date: string) {
-    const newData = {
-      ...habitData,
-      [habit]: { ...habitData[habit], [date]: !habitData[habit]?.[date] }
-    }
-    setHabitData(newData)
-    if (window.api) window.api.settings.set(`monthly_habit_data_${monthKey}`, JSON.stringify(newData))
+  async function toggleHabit(habitId: number, date: string) {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron) return
+    const { completed } = await window.api.habits.toggle(habitId, date)
+    setHabitEntries(prev => ({
+      ...prev,
+      [habitId]: { ...(prev[habitId] ?? {}), [date]: completed }
+    }))
+  }
+
+  async function addHabit() {
+    const name = newHabitName.trim()
+    if (!name || !window.api) return
+    const color = HABIT_COLORS[habits.length % HABIT_COLORS.length]
+    const { id } = await window.api.habits.create({ name, color })
+    setHabits(prev => [...prev, { id, name, icon: null, color, active: true, createdAt: new Date() }])
+    setNewHabitName('')
+    setAddingHabit(false)
+  }
+
+  async function removeHabit(id: number) {
+    if (!window.api) return
+    await window.api.habits.delete(id)
+    setHabits(prev => prev.filter(h => h.id !== id))
   }
 
   const today = new Date()
@@ -155,58 +177,98 @@ export default function Monthly(): JSX.Element {
           </div>
         </div>
 
-        {/* Middle column: habits tracker */}
+        {/* Middle/right columns: habits tracker */}
         <div className="col-span-2 space-y-6">
           <div className="bg-card border border-border rounded-xl p-5">
-            <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><TrendingUp size={14} /> Habits Tracker</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr>
-                    <th className="text-left text-muted-foreground font-medium pb-2 pr-4 w-28">Habit</th>
-                    {daysInMonth.map(d => (
-                      <th key={isoDate(d)} className={cn(
-                        'text-center pb-2 w-7 font-medium',
-                        isSameDay(d, today) ? 'text-primary' : 'text-muted-foreground'
-                      )}>
-                        {format(d, 'd')}
-                      </th>
-                    ))}
-                    <th className="text-center text-muted-foreground font-medium pb-2 pl-2">%</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {habits.map((habit) => {
-                    const habDays = habitData[habit] || {}
-                    const doneCount = daysInMonth.filter(d => habDays[isoDate(d)]).length
-                    const pct = Math.round((doneCount / daysInMonth.length) * 100)
-                    return (
-                      <tr key={habit} className="border-t border-border/40">
-                        <td className="py-1.5 pr-4 text-foreground font-medium">{habit}</td>
-                        {daysInMonth.map(d => {
-                          const dateStr = isoDate(d)
-                          const isFuture = d > today
-                          const done = habDays[dateStr]
-                          return (
-                            <td key={dateStr} className="py-1.5 text-center">
-                              <button
-                                onClick={() => !isFuture && toggleHabit(habit, dateStr)}
-                                disabled={isFuture}
-                                className={cn(
-                                  'w-5 h-5 rounded mx-auto transition-colors',
-                                  done ? 'bg-primary' : isFuture ? 'bg-secondary/30' : 'bg-secondary/60 hover:bg-secondary'
-                                )}
-                              />
-                            </td>
-                          )
-                        })}
-                        <td className="py-1.5 text-center text-muted-foreground pl-2">{pct}%</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold flex items-center gap-2"><TrendingUp size={14} /> Habits Tracker</h3>
+              <button
+                onClick={() => setAddingHabit(true)}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Plus size={12} /> Add habit
+              </button>
             </div>
+
+            {/* Add habit input */}
+            {addingHabit && (
+              <div className="mb-3 flex items-center gap-2">
+                <input
+                  autoFocus
+                  value={newHabitName}
+                  onChange={e => setNewHabitName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') addHabit(); if (e.key === 'Escape') { setAddingHabit(false); setNewHabitName('') } }}
+                  placeholder="Habit name…"
+                  className="flex-1 bg-secondary border border-border rounded px-2 py-1 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+                />
+                <button onClick={addHabit} className="text-xs px-2 py-1 bg-primary text-primary-foreground rounded">Add</button>
+                <button onClick={() => { setAddingHabit(false); setNewHabitName('') }} className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+              </div>
+            )}
+
+            {habits.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">No habits yet. Click "Add habit" to start tracking.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr>
+                      <th className="text-left text-muted-foreground font-medium pb-2 pr-3 w-32">Habit</th>
+                      {daysInMonth.map(d => (
+                        <th key={isoDate(d)} className={cn(
+                          'text-center pb-2 w-6 font-medium',
+                          isSameDay(d, today) ? 'text-primary' : 'text-muted-foreground'
+                        )}>
+                          {format(d, 'd')}
+                        </th>
+                      ))}
+                      <th className="text-center text-muted-foreground font-medium pb-2 pl-2">%</th>
+                      <th className="w-4" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {habits.map((habit) => {
+                      const entries = habitEntries[habit.id] || {}
+                      const doneCount = daysInMonth.filter(d => entries[isoDate(d)]).length
+                      const pct = Math.round((doneCount / daysInMonth.length) * 100)
+                      const color = habit.color ?? '#6272f1'
+                      return (
+                        <tr key={habit.id} className="border-t border-border/40 group">
+                          <td className="py-1.5 pr-3 font-medium" style={{ color }}>{habit.name}</td>
+                          {daysInMonth.map(d => {
+                            const dateStr = isoDate(d)
+                            const isFuture = d > today
+                            const done = entries[dateStr]
+                            return (
+                              <td key={dateStr} className="py-1.5 text-center">
+                                <button
+                                  onClick={() => !isFuture && toggleHabit(habit.id, dateStr)}
+                                  disabled={isFuture}
+                                  className={cn(
+                                    'w-5 h-5 rounded mx-auto transition-colors',
+                                    isFuture && 'bg-secondary/20 cursor-default'
+                                  )}
+                                  style={done ? { backgroundColor: color, opacity: 1 } : !isFuture ? { backgroundColor: 'var(--secondary)', opacity: 0.6 } : undefined}
+                                />
+                              </td>
+                            )
+                          })}
+                          <td className="py-1.5 text-center text-muted-foreground pl-2">{pct}%</td>
+                          <td className="py-1.5 pl-1">
+                            <button
+                              onClick={() => removeHabit(habit.id)}
+                              className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
+                            >
+                              <X size={11} />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {/* Monthly reflection */}
