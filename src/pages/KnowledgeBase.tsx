@@ -31,6 +31,7 @@ export default function KnowledgeBase(): JSX.Element {
   const [diffOld, setDiffOld] = useState<string | null>(null)   // content before last sync
   const isLoadingRef = useRef(false)
   const currentRawRef = useRef<string>('')  // raw markdown of currently open file
+  const selectedPathRef = useRef<string | null>(null)
 
   const debouncedSearch = useDebounce(searchQuery, 300)
 
@@ -60,7 +61,7 @@ export default function KnowledgeBase(): JSX.Element {
 
     const unsub = window.api.knowledge.onFileChanged((path) => {
       loadFiles()
-      if (path === selectedPath) {
+      if (path === selectedPathRef.current) {
         // Capture current raw content as the "before" snapshot for the diff
         if (currentRawRef.current) {
           setDiffOld(currentRawRef.current)
@@ -111,6 +112,7 @@ export default function KnowledgeBase(): JSX.Element {
   }
 
   function selectFile(path: string) {
+    selectedPathRef.current = path
     setSelectedPath(path)
     setDiffOld(null)
     setShowDiff(false)
