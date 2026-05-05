@@ -120,6 +120,18 @@ export default function Settings(): JSX.Element {
             <Database size={12} /> Open in Finder
           </button>
         </SettingsRow>
+        <SettingsRow label="Export data" description="Save all your data (tasks, habits, finance, knowledge index) as a JSON file">
+          <button
+            onClick={async () => {
+              const r = await window.api?.settings.exportData()
+              if (r?.success) alert(`Exported to:\n${r.path}`)
+              else if (!r?.canceled) alert('Export failed: ' + r?.error)
+            }}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors"
+          >
+            <Download size={12} /> Export JSON
+          </button>
+        </SettingsRow>
       </SettingsSection>
 
       {/* Danger zone */}

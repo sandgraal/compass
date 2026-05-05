@@ -165,6 +165,28 @@ export default function Daily(): JSX.Element {
     }
   }
 
+  async function updateBody(id: number, body: string) {
+    setItems((prev) => prev.map((i) => i.id === id ? { ...i, body } : i))
+    if (window.api) {
+      await window.api.checklist.updateItem(id, { body })
+    }
+  }
+
+  async function handleReorder(cat: Category, reordered: ChecklistItem[]) {
+    const withOrder = reordered.map((item, idx) => ({ ...item, sortOrder: idx }))
+    setItems((prev) => {
+      const others = prev.filter((i) => i.category !== cat)
+      return [...others, ...withOrder]
+    })
+    if (window.api) {
+      await Promise.all(
+        withOrder.map((item, idx) =>
+          window.api!.checklist.updateItem(item.id, { sortOrder: idx })
+        )
+      )
+    }
+  }
+
   async function rollOver() {
     if (!window.api) return
     const tomorrow = isoDate(addDays(date, 1))
@@ -300,6 +322,8 @@ export default function Daily(): JSX.Element {
               expanded={expandedItems}
               onToggleItem={toggleItem}
               onDeleteItem={deleteItem}
+              onUpdateBody={updateBody}
+              onReorder={(reordered) => handleReorder(cat, reordered)}
               onToggleExpand={(id) => setExpandedItems(prev => {
                 const next = new Set(prev)
                 next.has(id) ? next.delete(id) : next.add(id)
@@ -434,14 +458,32 @@ export default function Daily(): JSX.Element {
   )
 }
 
-function CategorySection({ category, items, expanded, onToggleItem, onDeleteItem, onToggleExpand }: {
+function CategorySection({ category, items, expanded, onToggleItem, onDeleteItem, onUpdateBody, onReorder, onToggleExpand }: {
   category: Category
   items: ChecklistItem[]
   expanded: Set<number>
   onToggleItem: (id: number, checked: boolean) => void
   onDeleteItem: (id: number) => void
+  onUpdateBody: (id: number, body: string) => void
+  onReorder: (newOrder: ChecklistItem[]) => void
   onToggleExpand: (id: number) => void
 }): JSX.Element {
+  const [dragOverId, setDragOverId] = useState<number | null>(null)
+
+  function handleDrop(e: React.DragEvent, targetId: number) {
+    e.preventDefault()
+    const fromId = Number(e.dataTransfer.getData('compassItemId'))
+    if (!fromId || fromId === targetId) { setDragOverId(null); return }
+    const fromIdx = items.findIndex((i) => i.id === fromId)
+    const toIdx = items.findIndex((i) => i.id === targetId)
+    if (fromIdx < 0 || toIdx < 0) { setDragOverId(null); return }
+    const reordered = [...items]
+    const [moved] = reordered.splice(fromIdx, 1)
+    reordered.splice(toIdx, 0, moved)
+    onReorder(reordered)
+    setDragOverId(null)
+  }
+
   return (
     <div>
       <h3 className={cn('text-xs font-semibold uppercase tracking-wider mb-2', CATEGORY_COLORS[category])}>
@@ -453,9 +495,18 @@ function CategorySection({ category, items, expanded, onToggleItem, onDeleteItem
             key={item.id}
             item={item}
             isExpanded={expanded.has(item.id)}
+            isDragTarget={dragOverId === item.id}
             onToggle={(checked) => onToggleItem(item.id, checked)}
             onDelete={() => onDeleteItem(item.id)}
+            onUpdateBody={(body) => onUpdateBody(item.id, body)}
             onToggleExpand={() => onToggleExpand(item.id)}
+            onDragStart={(e) => {
+              e.dataTransfer.setData('compassItemId', String(item.id))
+              e.dataTransfer.effectAllowed = 'move'
+            }}
+            onDragOver={(e) => { e.preventDefault(); setDragOverId(item.id) }}
+            onDragLeave={() => setDragOverId(null)}
+            onDrop={(e) => handleDrop(e, item.id)}
           />
         ))}
       </div>
@@ -463,25 +514,51 @@ function CategorySection({ category, items, expanded, onToggleItem, onDeleteItem
   )
 }
 
-function ChecklistRow({ item, isExpanded, onToggle, onDelete, onToggleExpand }: {
+function ChecklistRow({ item, isExpanded, isDragTarget, onToggle, onDelete, onUpdateBody, onToggleExpand, onDragStart, onDragOver, onDragLeave, onDrop }: {
   item: ChecklistItem
   isExpanded: boolean
+  isDragTarget: boolean
   onToggle: (checked: boolean) => void
   onDelete: () => void
+  onUpdateBody: (body: string) => void
   onToggleExpand: () => void
+  onDragStart: (e: React.DragEvent) => void
+  onDragOver: (e: React.DragEvent) => void
+  onDragLeave: () => void
+  onDrop: (e: React.DragEvent) => void
 }): JSX.Element {
-  const [hovered, setHovered] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const [bodyText, setBodyText] = useState(item.body || '')
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function handleBodyChange(v: string) {
+    setBodyText(v)
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => onUpdateBody(v), 800)
+  }
 
   return (
     <div
-      className={cn('group rounded-lg border transition-colors',
-        item.checked ? 'border-border/50 bg-card/40' : 'border-transparent hover:border-border bg-card/60 hover:bg-card'
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={cn(
+        'group rounded-lg border transition-colors',
+        isDragging && 'opacity-40',
+        isDragTarget ? 'border-primary/60 bg-primary/5' : (
+          item.checked ? 'border-border/50 bg-card/40' : 'border-transparent hover:border-border bg-card/60 hover:bg-card'
+        )
       )}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
     >
       <div className="flex items-center gap-3 px-3 py-2.5">
-        <GripVertical size={14} className="text-muted-foreground/30 shrink-0 cursor-grab" />
+        <span
+          draggable={true}
+          onDragStart={(e) => { setIsDragging(true); onDragStart(e) }}
+          onDragEnd={() => setIsDragging(false)}
+          className="shrink-0"
+        >
+          <GripVertical size={14} className="text-muted-foreground/30 cursor-grab active:cursor-grabbing" />
+        </span>
         <button
           onClick={() => onToggle(!item.checked)}
           className={cn(
@@ -502,12 +579,10 @@ function ChecklistRow({ item, isExpanded, onToggle, onDelete, onToggleExpand }: 
           <span className="text-xs text-muted-foreground/60 font-mono">{item.source}</span>
         )}
 
-        <div className={cn('flex items-center gap-1 transition-opacity', hovered ? 'opacity-100' : 'opacity-0')}>
-          {item.body !== null || true ? (
-            <button onClick={onToggleExpand} className="p-1 rounded hover:bg-secondary text-muted-foreground">
-              <ChevronDown size={12} className={cn('transition-transform', isExpanded && 'rotate-180')} />
-            </button>
-          ) : null}
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onClick={onToggleExpand} className="p-1 rounded hover:bg-secondary text-muted-foreground">
+            <ChevronDown size={12} className={cn('transition-transform', isExpanded && 'rotate-180')} />
+          </button>
           <button onClick={onDelete} className="p-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive">
             <Trash2 size={12} />
           </button>
@@ -517,7 +592,8 @@ function ChecklistRow({ item, isExpanded, onToggle, onDelete, onToggleExpand }: 
       {isExpanded && (
         <div className="px-10 pb-3">
           <textarea
-            defaultValue={item.body || ''}
+            value={bodyText}
+            onChange={(e) => handleBodyChange(e.target.value)}
             placeholder="Add a note…"
             className="w-full text-xs text-muted-foreground bg-transparent resize-none outline-none placeholder:text-muted-foreground/50 min-h-[60px]"
           />

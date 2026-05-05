@@ -95,7 +95,8 @@ const api = {
     getAll: () => ipcRenderer.invoke('settings:get-all'),
     openDataDir: () => ipcRenderer.invoke('settings:open-data-dir'),
     wipeKnowledge: () => ipcRenderer.invoke('settings:wipe-knowledge'),
-    wipeVault: () => ipcRenderer.invoke('settings:wipe-vault')
+    wipeVault: () => ipcRenderer.invoke('settings:wipe-vault'),
+    exportData: () => ipcRenderer.invoke('settings:export-data')
   },
 
   // --- Habits ---
