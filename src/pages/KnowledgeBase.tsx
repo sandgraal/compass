@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import Placeholder from '@tiptap/extension-placeholder'
 import Typography from '@tiptap/extension-typography'
+import Link from '@tiptap/extension-link'
 import { BookOpen, Search, Plus, ChevronRight, RefreshCw, FileText, Folder, Save, Bot } from 'lucide-react'
 import { cn, formatRelative } from '../lib/utils'
 import { useDebounce } from '../hooks/useDebounce'
@@ -26,6 +27,7 @@ export default function KnowledgeBase(): JSX.Element {
   const [searchResults, setSearchResults] = useState<Array<FileNode & { snippet: string }> | null>(null)
   const [saving, setSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
+  const isLoadingRef = useRef(false)
 
   const debouncedSearch = useDebounce(searchQuery, 300)
 
@@ -35,11 +37,13 @@ export default function KnowledgeBase(): JSX.Element {
       TaskList,
       TaskItem.configure({ nested: true }),
       Placeholder.configure({ placeholder: 'Start writing…' }),
-      Typography
+      Typography,
+      Link.configure({ openOnClick: true, autolink: true })
     ],
     content: '',
     editorProps: { attributes: { class: 'tiptap-editor' } },
     onUpdate: ({ editor }) => {
+      if (isLoadingRef.current) return  // suppress updates during initial content load
       const md = editor.getHTML()
       setContent(md)
     }
@@ -87,8 +91,10 @@ export default function KnowledgeBase(): JSX.Element {
     if (isElectron) {
       const c = await window.api.knowledge.readFile(path)
       if (editor && c !== null) {
+        isLoadingRef.current = true
         editor.commands.setContent(markdownToHtml(c))
-        setContent(c)
+        setContent('')  // reset dirty state — auto-save won't fire until user edits
+        isLoadingRef.current = false
       }
     }
   }
@@ -275,22 +281,80 @@ function FileTreeItem({ file, selected, onClick }: { file: FileNode; selected: b
   )
 }
 
-// Minimal markdown → HTML converter for editor seeding
+// Markdown → HTML converter for editor seeding
 function markdownToHtml(md: string): string {
-  return md
-    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^\- \[x\] (.+)$/gm, '<ul data-type="taskList"><li data-checked="true"><label><input type="checkbox" checked/></label><div><p>$1</p></div></li></ul>')
-    .replace(/^\- \[ \] (.+)$/gm, '<ul data-type="taskList"><li data-checked="false"><label><input type="checkbox"/></label><div><p>$1</p></div></li></ul>')
-    .replace(/^\- (.+)$/gm, '<ul><li>$1</li></ul>')
-    .replace(/^\> (.+)$/gm, '<blockquote><p>$1</p></blockquote>')
+  const lines = md.split('\n')
+  const out: string[] = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i]
+
+    // Headings
+    if (/^# /.test(line)) { out.push(`<h1>${inlineHtml(line.slice(2))}</h1>`); i++; continue }
+    if (/^## /.test(line)) { out.push(`<h2>${inlineHtml(line.slice(3))}</h2>`); i++; continue }
+    if (/^### /.test(line)) { out.push(`<h3>${inlineHtml(line.slice(4))}</h3>`); i++; continue }
+
+    // Blockquote
+    if (/^> /.test(line)) { out.push(`<blockquote><p>${inlineHtml(line.slice(2))}</p></blockquote>`); i++; continue }
+
+    // Table: detect header row followed by separator row
+    if (/^\|/.test(line) && i + 1 < lines.length && /^\|[\s\-|]+\|$/.test(lines[i + 1])) {
+      const headers = parseCells(line)
+      i += 2 // skip separator row
+      const rows: string[][] = []
+      while (i < lines.length && /^\|/.test(lines[i])) {
+        rows.push(parseCells(lines[i]))
+        i++
+      }
+      const th = headers.map(h => `<th>${inlineHtml(h)}</th>`).join('')
+      const trs = rows.map(r => `<tr>${r.map(c => `<td>${inlineHtml(c)}</td>`).join('')}</tr>`).join('')
+      out.push(`<table><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>`)
+      continue
+    }
+
+    // Task list items
+    if (/^- \[x\] /.test(line)) {
+      out.push(`<ul data-type="taskList"><li data-checked="true"><label><input type="checkbox" checked/></label><div><p>${inlineHtml(line.slice(6))}</p></div></li></ul>`)
+      i++; continue
+    }
+    if (/^- \[ \] /.test(line)) {
+      out.push(`<ul data-type="taskList"><li data-checked="false"><label><input type="checkbox"/></label><div><p>${inlineHtml(line.slice(6))}</p></div></li></ul>`)
+      i++; continue
+    }
+
+    // Unordered list — collect consecutive items
+    if (/^- /.test(line)) {
+      const items: string[] = []
+      while (i < lines.length && /^- /.test(lines[i])) {
+        items.push(`<li>${inlineHtml(lines[i].slice(2))}</li>`)
+        i++
+      }
+      out.push(`<ul>${items.join('')}</ul>`)
+      continue
+    }
+
+    // Blank line
+    if (line.trim() === '') { i++; continue }
+
+    // Regular paragraph
+    out.push(`<p>${inlineHtml(line)}</p>`)
+    i++
+  }
+
+  return out.join('\n')
+}
+
+function parseCells(row: string): string[] {
+  return row.split('|').slice(1, -1).map(c => c.trim())
+}
+
+function inlineHtml(text: string): string {
+  return text
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/\n\n/g, '</p><p>')
-    .replace(/^(?!<[hupbloc])/gm, '<p>')
-    .replace(/(?<![>])$/gm, '</p>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
 }
 
 function htmlToMarkdown(html: string): string {
@@ -301,6 +365,7 @@ function htmlToMarkdown(html: string): string {
     .replace(/<strong>(.*?)<\/strong>/gi, '**$1**')
     .replace(/<em>(.*?)<\/em>/gi, '*$1*')
     .replace(/<code>(.*?)<\/code>/gi, '`$1`')
+    .replace(/<a href="([^"]+)"[^>]*>(.*?)<\/a>/gi, '[$2]($1)')
     .replace(/<li>(.*?)<\/li>/gi, '- $1\n')
     .replace(/<blockquote><p>(.*?)<\/p><\/blockquote>/gi, '> $1\n')
     .replace(/<p>(.*?)<\/p>/gi, '$1\n\n')
