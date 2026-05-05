@@ -75,7 +75,7 @@ export function startKnowledgeWatcher(mainWindow: BrowserWindow | null): void {
       const content = readFileSync(filePath, 'utf8')
       const db = getDb()
       db.update(knowledgeFiles)
-        .set({ wordCount: countWords(content), lastModified: Date.now() })
+        .set({ wordCount: countWords(content), lastModified: new Date() })
         .where(eq(knowledgeFiles.path, relPath))
         .run()
     } catch { /* ignore */ }
