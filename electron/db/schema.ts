@@ -125,7 +125,7 @@ export const financeAccounts = sqliteTable('finance_accounts', {
   name: text('name').notNull(),                          // "Chase Sapphire", "BofA Checking"
   type: text('type').notNull().default('credit'),        // 'checking' | 'savings' | 'credit' | 'investment'
   isDebt: integer('is_debt', { mode: 'boolean' }).default(false),
-  balance: real('balance').default(0),                   // current balance (negative = owe)
+  balance: real('balance').default(0),                   // current balance; for debt accounts, positive = amount owed
   apr: real('apr').default(0),                           // annual rate as decimal e.g. 0.2499
   minPayment: real('min_payment').default(0),
   creditLimit: real('credit_limit'),
