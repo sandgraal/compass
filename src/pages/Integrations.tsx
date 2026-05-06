@@ -300,13 +300,14 @@ export default function Integrations(): JSX.Element {
             <div className="px-4 py-6 text-center text-sm text-muted-foreground">
               No sync history yet. Connect an integration and trigger a sync.
             </div>
-          ) : syncLog.slice(0, 10).map((log, i) => {
+          ) : syncLog.slice(0, 10).map((log) => {
             const isToday = log.time.toDateString() === new Date().toDateString()
             const timeStr = isToday
               ? log.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
               : log.time.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + log.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            const logKey = `${log.service}-${log.time.getTime()}-${log.error ?? log.records}`
             return (
-              <div key={i} className="flex items-center justify-between px-4 py-2.5">
+              <div key={logKey} className="flex items-center justify-between px-4 py-2.5">
                 <div className="flex items-center gap-2 min-w-0">
                   {log.error
                     ? <AlertCircle size={13} className="text-red-400 shrink-0" />
