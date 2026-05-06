@@ -189,15 +189,11 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
           )
         })
 
-  // Reset selection when query or open state changes
-  useEffect(() => {
-    setSelectedIdx(0)
-  }, [query, open])
-
   // Focus input when opened
   useEffect(() => {
     if (open) {
       setQuery('')
+      setSelectedIdx(0)
       setTimeout(() => inputRef.current?.focus(), 10)
     }
   }, [open])
@@ -240,22 +236,27 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <button
+        type="button"
+        aria-label="Close command palette"
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
 
       {/* Palette */}
-      <div
-        className="relative w-full max-w-lg mx-4 bg-card border border-border rounded-xl shadow-2xl overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="relative w-full max-w-lg mx-4 bg-card border border-border rounded-xl shadow-2xl overflow-hidden">
         {/* Search input */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
           <Search size={15} className="text-muted-foreground shrink-0" />
           <input
             ref={inputRef}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setSelectedIdx(0)
+            }}
             placeholder="Go to page…"
             className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
           />
@@ -271,6 +272,7 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
           ) : (
             filtered.map((cmd, i) => (
               <button
+                type="button"
                 key={cmd.id}
                 onClick={cmd.action}
                 onMouseEnter={() => setSelectedIdx(i)}

@@ -25,6 +25,18 @@ const HABIT_COLORS = [
   '#ec4899'
 ]
 
+const WEEKDAY_HEADERS = [
+  { id: 'mon', label: 'M' },
+  { id: 'tue', label: 'T' },
+  { id: 'wed', label: 'W' },
+  { id: 'thu', label: 'T' },
+  { id: 'fri', label: 'F' },
+  { id: 'sat', label: 'S' },
+  { id: 'sun', label: 'S' }
+]
+
+const MONTHLY_GOAL_KEYS = ['goal-1', 'goal-2', 'goal-3']
+
 export default function Monthly(): JSX.Element {
   const [month, setMonth] = useState(() => startOfMonth(new Date()))
   const [habits, setHabits] = useState<Habit[]>([])
@@ -38,12 +50,15 @@ export default function Monthly(): JSX.Element {
     { id: number; name: string; balance: number | null; apr: number | null }[]
   >([])
   const [budgetLines, setBudgetLines] = useState<
-    { category: string; subcategory?: string; budget: number; actual: number }[]
+    { category: string; budget: number; actual: number }[]
   >([])
+  const newHabitInputRef = useRef<HTMLInputElement>(null)
 
   const monthEnd = endOfMonth(month)
   const isCurrentMonth = isSameMonth(month, new Date())
   const monthKey = isoDate(month).slice(0, 7) // 'YYYY-MM'
+  const monthStartIso = month.toISOString()
+  const monthEndIso = monthEnd.toISOString()
 
   // Calendar grid
   const calStart = startOfWeek(month, { weekStartsOn: 1 })
@@ -56,7 +71,7 @@ export default function Monthly(): JSX.Element {
     if (!isElectron) return
 
     Promise.all([
-      window.api.calendar.getEvents(month.toISOString(), monthEnd.toISOString()),
+      window.api.calendar.getEvents(monthStartIso, monthEndIso),
       window.api.settings.getAll(),
       window.api.habits.list(),
       window.api.habits.getEntries(monthKey),
@@ -75,17 +90,12 @@ export default function Monthly(): JSX.Element {
       }
       setDebtSummary(d.debts.filter((x) => (x.balance ?? 0) !== 0))
       const b = budgetData as {
-        lines: { category: string; subcategory?: string; monthlyAmount: number; actual: number }[]
+        lines: { category: string; monthlyAmount: number; actual: number }[]
         totals: { budget: number; actual: number }
       }
       setBudgetLines(
         b.lines
-          .map((l) => ({
-            category: l.category,
-            subcategory: l.subcategory,
-            budget: l.monthlyAmount,
-            actual: l.actual
-          }))
+          .map((l) => ({ category: l.category, budget: l.monthlyAmount, actual: l.actual }))
           .filter((l) => l.budget > 0 || Math.abs(l.actual) > 0)
           .slice(0, 4)
       )
@@ -104,11 +114,10 @@ export default function Monthly(): JSX.Element {
         /* ignore corrupt data */
       }
     })
-  }, [month])
+  }, [monthEndIso, monthKey, monthStartIso])
 
   const goalsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reflectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const newHabitInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     return () => {
@@ -182,6 +191,7 @@ export default function Monthly(): JSX.Element {
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <button
+            type="button"
             onClick={() => setMonth(subMonths(month, 1))}
             className="p-1.5 rounded hover:bg-secondary transition-colors"
           >
@@ -192,6 +202,7 @@ export default function Monthly(): JSX.Element {
             {isCurrentMonth && <p className="text-sm text-muted-foreground">Current month</p>}
           </div>
           <button
+            type="button"
             onClick={() => setMonth(addMonths(month, 1))}
             className="p-1.5 rounded hover:bg-secondary transition-colors"
           >
@@ -199,6 +210,7 @@ export default function Monthly(): JSX.Element {
           </button>
           {!isCurrentMonth && (
             <button
+              type="button"
               onClick={() => setMonth(startOfMonth(new Date()))}
               className="text-xs text-primary hover:underline"
             >
@@ -214,9 +226,9 @@ export default function Monthly(): JSX.Element {
           {/* Mini calendar */}
           <div className="bg-card border border-border rounded-xl p-4">
             <div className="grid grid-cols-7 text-center mb-2">
-              {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
-                <div key={i} className="text-xs text-muted-foreground font-medium py-1">
-                  {d}
+              {WEEKDAY_HEADERS.map((day) => (
+                <div key={day.id} className="text-xs text-muted-foreground font-medium py-1">
+                  {day.label}
                 </div>
               ))}
             </div>
@@ -253,17 +265,22 @@ export default function Monthly(): JSX.Element {
               <Target size={14} /> Monthly Priorities
             </h3>
             <div className="space-y-2">
-              {goals.map((goal, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="text-xs font-mono text-muted-foreground w-4">{i + 1}.</span>
-                  <input
-                    value={goal}
-                    onChange={(e) => saveGoals(goals.map((g, j) => (j === i ? e.target.value : g)))}
-                    placeholder={`Priority ${i + 1}…`}
-                    className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/40 outline-none"
-                  />
-                </div>
-              ))}
+              {goals.map((goal, i) => {
+                const goalKey = MONTHLY_GOAL_KEYS[i] ?? `goal-${i}`
+                return (
+                  <div key={goalKey} className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-muted-foreground w-4">{i + 1}.</span>
+                    <input
+                      value={goal}
+                      onChange={(e) =>
+                        saveGoals(goals.map((g, j) => (j === i ? e.target.value : g)))
+                      }
+                      placeholder={`Priority ${i + 1}…`}
+                      className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/40 outline-none"
+                    />
+                  </div>
+                )
+              })}
             </div>
           </div>
 
@@ -310,10 +327,10 @@ export default function Monthly(): JSX.Element {
                     Budget vs Actual
                   </p>
                   <div className="space-y-1.5">
-                    {budgetLines.map((l) => {
+                    {budgetLines.map((l, index) => {
                       const over = l.actual > l.budget && l.budget > 0
                       return (
-                        <div key={`${l.category}:${l.subcategory ?? ''}`}>
+                        <div key={`${l.category}:${index}`}>
                           <div className="flex items-center justify-between mb-0.5">
                             <span className="text-xs text-foreground capitalize">{l.category}</span>
                             <span
@@ -356,6 +373,7 @@ export default function Monthly(): JSX.Element {
                 <TrendingUp size={14} /> Habits Tracker
               </h3>
               <button
+                type="button"
                 onClick={() => setAddingHabit(true)}
                 className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
@@ -381,12 +399,14 @@ export default function Monthly(): JSX.Element {
                   className="flex-1 bg-secondary border border-border rounded px-2 py-1 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
                 />
                 <button
+                  type="button"
                   onClick={addHabit}
                   className="text-xs px-2 py-1 bg-primary text-primary-foreground rounded"
                 >
                   Add
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
                     setAddingHabit(false)
                     setNewHabitName('')
@@ -443,6 +463,7 @@ export default function Monthly(): JSX.Element {
                             return (
                               <td key={dateStr} className="py-1.5 text-center">
                                 <button
+                                  type="button"
                                   onClick={() => !isFuture && toggleHabit(habit.id, dateStr)}
                                   disabled={isFuture}
                                   className={cn(
@@ -463,6 +484,7 @@ export default function Monthly(): JSX.Element {
                           <td className="py-1.5 text-center text-muted-foreground pl-2">{pct}%</td>
                           <td className="py-1.5 pl-1">
                             <button
+                              type="button"
                               onClick={() => removeHabit(habit.id)}
                               className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
                             >
@@ -488,10 +510,14 @@ export default function Monthly(): JSX.Element {
                 { key: 'focus', label: '🎯 Focus for next month' }
               ].map(({ key, label }) => (
                 <div key={key}>
-                  <label className="text-xs text-muted-foreground font-medium mb-1 block">
+                  <label
+                    htmlFor={`reflection-${key}`}
+                    className="text-xs text-muted-foreground font-medium mb-1 block"
+                  >
                     {label}
                   </label>
                   <textarea
+                    id={`reflection-${key}`}
                     value={reflection[key as keyof typeof reflection]}
                     onChange={(e) => saveReflection({ ...reflection, [key]: e.target.value })}
                     placeholder="Write here…"

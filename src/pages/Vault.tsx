@@ -90,11 +90,11 @@ export default function Vault(): JSX.Element {
   // Enable content protection when Vault is mounted; disable on unmount
   useEffect(() => {
     const isElectron = typeof window !== 'undefined' && !!window.api
-    if (isElectron) {
-      window.api.vault.setContentProtection(true)
-      return () => {
-        window.api.vault.setContentProtection(false)
-      }
+    if (!isElectron) return undefined
+
+    window.api.vault.setContentProtection(true)
+    return () => {
+      window.api.vault.setContentProtection(false)
     }
   }, [])
 
@@ -136,19 +136,26 @@ export default function Vault(): JSX.Element {
   }, [])
 
   useEffect(() => {
-    loadEntries()
+    void loadEntries(selectedCategory)
   }, [selectedCategory])
 
-  async function loadEntries() {
+  async function loadEntries(category = selectedCategory) {
     setLoading(true)
-    const isElectron = typeof window !== 'undefined' && !!window.api
-    if (isElectron) {
-      const e = await window.api.vault.getEntries(selectedCategory)
-      setEntries(e)
-    } else {
+    try {
+      const isElectron = typeof window !== 'undefined' && !!window.api
+      if (isElectron) {
+        const e = await window.api.vault.getEntries(category)
+        setEntries(e)
+      } else {
+        setEntries([])
+      }
+    } catch (error) {
+      console.error('[vault] Failed to load entries', error)
       setEntries([])
+      showToast('Failed to load vault entries.', 'error')
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   async function addEntry() {
@@ -178,7 +185,7 @@ export default function Vault(): JSX.Element {
           `Imported ${r.imported} item${r.imported === 1 ? '' : 's'} into your vault.`,
           'success'
         )
-        loadEntries()
+        await loadEntries()
       } else {
         showToast(`Import failed: ${r.error}`, 'error')
       }
@@ -234,6 +241,7 @@ export default function Vault(): JSX.Element {
         <div className="flex-1 space-y-0.5 px-2">
           {categories.map((cat) => (
             <button
+              type="button"
               key={cat.id}
               onClick={() => setSelectedCategory(cat.id)}
               className={cn(
@@ -263,6 +271,7 @@ export default function Vault(): JSX.Element {
           </div>
           <p className="text-xs text-muted-foreground/50">Keys in OS Keychain</p>
           <button
+            type="button"
             onClick={import1Password}
             disabled={importing}
             className="w-full flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-border hover:border-primary/50 text-muted-foreground hover:text-foreground rounded-lg transition-colors disabled:opacity-50"
@@ -285,6 +294,7 @@ export default function Vault(): JSX.Element {
             <p className="text-xs text-muted-foreground mt-0.5">{selectedCat?.description}</p>
           </div>
           <button
+            type="button"
             onClick={() => {
               setAdding(true)
               setNewEntry({})
@@ -303,10 +313,14 @@ export default function Vault(): JSX.Element {
               <div className="grid grid-cols-2 gap-4 mb-4">
                 {fields.map((field) => (
                   <div key={field.key}>
-                    <label className="text-xs text-muted-foreground mb-1 block">
+                    <label
+                      htmlFor={`new-entry-${field.key}`}
+                      className="text-xs text-muted-foreground mb-1 block"
+                    >
                       {field.label}
                     </label>
                     <input
+                      id={`new-entry-${field.key}`}
                       type={field.sensitive ? 'password' : 'text'}
                       value={newEntry[field.key] || ''}
                       onChange={(e) =>
@@ -319,12 +333,14 @@ export default function Vault(): JSX.Element {
               </div>
               <div className="flex gap-2 justify-end">
                 <button
+                  type="button"
                   onClick={() => setAdding(false)}
                   className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
                   Cancel
                 </button>
                 <button
+                  type="button"
                   onClick={addEntry}
                   className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
                 >
@@ -350,6 +366,7 @@ export default function Vault(): JSX.Element {
                 No {selectedCat?.label.toLowerCase()} entries yet
               </p>
               <button
+                type="button"
                 onClick={() => setAdding(true)}
                 className="text-xs text-primary hover:underline"
               >
@@ -386,6 +403,7 @@ export default function Vault(): JSX.Element {
         >
           {toast.message}
           <button
+            type="button"
             onClick={() => setToast(null)}
             aria-label="Close notification"
             className="ml-2 opacity-70 hover:opacity-100 text-xs"
@@ -452,6 +470,7 @@ function EntryCard({
         <div className="flex items-center gap-1">
           {history.length > 0 && (
             <button
+              type="button"
               onClick={() => setShowHistory((v) => !v)}
               title={`${history.length} previous version${history.length > 1 ? 's' : ''}`}
               className={cn(
@@ -466,6 +485,7 @@ function EntryCard({
             </button>
           )}
           <button
+            type="button"
             onClick={startEdit}
             title="Edit entry"
             className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
@@ -473,6 +493,7 @@ function EntryCard({
             <Pencil size={12} />
           </button>
           <button
+            type="button"
             onClick={onDelete}
             className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
           >
@@ -486,11 +507,15 @@ function EntryCard({
           <div className="grid grid-cols-2 gap-3 mb-3">
             {fields.map((field) => {
               const isRevealed = editRevealed.has(field.key)
+              const editFieldId = `edit-entry-${entry.id}-${field.key}`
               return (
                 <div key={field.key}>
-                  <label className="text-xs text-muted-foreground mb-1 block">{field.label}</label>
+                  <label htmlFor={editFieldId} className="text-xs text-muted-foreground mb-1 block">
+                    {field.label}
+                  </label>
                   <div className="relative flex items-center">
                     <input
+                      id={editFieldId}
                       type={field.sensitive && !isRevealed ? 'password' : 'text'}
                       value={editValues[field.key] || ''}
                       onChange={(e) =>
@@ -520,12 +545,14 @@ function EntryCard({
           </div>
           <div className="flex gap-2 justify-end">
             <button
+              type="button"
               onClick={() => setEditing(false)}
               className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               Cancel
             </button>
             <button
+              type="button"
               onClick={saveEdit}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
             >
@@ -556,6 +583,7 @@ function EntryCard({
                   </span>
                   {field.sensitive && (
                     <button
+                      type="button"
                       onClick={() => onToggleReveal(fieldId)}
                       className="p-0.5 text-muted-foreground hover:text-foreground transition-colors"
                     >
@@ -563,6 +591,7 @@ function EntryCard({
                     </button>
                   )}
                   <button
+                    type="button"
                     onClick={() => onCopy(value, fieldId)}
                     className={cn(
                       'p-0.5 transition-colors',
@@ -584,10 +613,11 @@ function EntryCard({
           <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
             <History size={11} /> Previous versions (encrypted)
           </p>
-          {history.map((snap, i) => {
+          {history.map((snap) => {
             const savedAt = snap._savedAt ? new Date(snap._savedAt as number) : null
+            const historyKey = savedAt ? `${savedAt.getTime()}` : JSON.stringify(snap)
             return (
-              <div key={i} className="bg-secondary/40 rounded-lg p-3">
+              <div key={historyKey} className="bg-secondary/40 rounded-lg p-3">
                 {savedAt && (
                   <p className="text-xs text-muted-foreground mb-2">
                     {savedAt.toLocaleDateString()}{' '}

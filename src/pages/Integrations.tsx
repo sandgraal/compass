@@ -87,53 +87,48 @@ export default function Integrations(): JSX.Element {
     loadStatuses()
 
     const isElectron = typeof window !== 'undefined' && !!window.api
-    if (isElectron) {
-      window.api.auth
-        .getRedirectUris()
-        .then((uris: RedirectUris) => {
-          setRedirectUris(uris)
-        })
-        .catch(() => {
-          /* use fallback */
-        })
+    if (!isElectron) return undefined
 
-      // Load persisted sync log from DB on mount
-      window.api.sync
-        .getLog()
-        .then((rows) => {
-          setSyncLog(
-            rows.map((r) => ({
-              service: r.service,
-              time: new Date(r.syncedAt),
-              records: r.recordsUpdated,
-              error: r.error ?? undefined
-            }))
-          )
-        })
-        .catch(() => {
-          /* no log yet */
-        })
-
-      const unsub = window.api.sync.onSyncUpdate((data) => {
-        const d = data as {
-          service: string
-          status: string
-          recordsUpdated?: number
-          error?: string
-        }
-        setSyncing((prev) => {
-          const next = new Set(prev)
-          next.delete(d.service)
-          return next
-        })
-        setSyncLog((prev) => [
-          { service: d.service, time: new Date(), records: d.recordsUpdated || 0, error: d.error },
-          ...prev.slice(0, 19)
-        ])
-        loadStatuses()
+    window.api.auth
+      .getRedirectUris()
+      .then((uris: RedirectUris) => {
+        setRedirectUris(uris)
       })
-      return unsub
-    }
+      .catch(() => {
+        /* use fallback */
+      })
+
+    // Load persisted sync log from DB on mount
+    window.api.sync
+      .getLog()
+      .then((rows) => {
+        setSyncLog(
+          rows.map((r) => ({
+            service: r.service,
+            time: new Date(r.syncedAt),
+            records: r.recordsUpdated,
+            error: r.error ?? undefined
+          }))
+        )
+      })
+      .catch(() => {
+        /* no log yet */
+      })
+
+    const unsub = window.api.sync.onSyncUpdate((data) => {
+      const d = data as { service: string; status: string; recordsUpdated?: number; error?: string }
+      setSyncing((prev) => {
+        const next = new Set(prev)
+        next.delete(d.service)
+        return next
+      })
+      setSyncLog((prev) => [
+        { service: d.service, time: new Date(), records: d.recordsUpdated || 0, error: d.error },
+        ...prev.slice(0, 19)
+      ])
+      loadStatuses()
+    })
+    return unsub
   }, [])
 
   async function loadStatuses() {
@@ -195,6 +190,7 @@ export default function Integrations(): JSX.Element {
       {/* Setup guide */}
       <div className="mb-6 border border-border rounded-xl overflow-hidden">
         <button
+          type="button"
           onClick={() => setSetupOpen((v) => !v)}
           aria-expanded={setupOpen}
           aria-controls="setup-guide-panel"
@@ -423,6 +419,7 @@ export default function Integrations(): JSX.Element {
                 <div className="flex items-center gap-2">
                   {isConnected && (
                     <button
+                      type="button"
                       onClick={() => triggerSync(integration.id)}
                       disabled={isSyncing}
                       className="p-1.5 rounded-lg bg-background/40 hover:bg-background/60 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
@@ -461,6 +458,7 @@ export default function Integrations(): JSX.Element {
               <div className="flex gap-2">
                 {isConnected ? (
                   <button
+                    type="button"
                     onClick={() => disconnect(integration.id)}
                     className="text-xs px-3 py-1.5 border border-border hover:border-destructive text-muted-foreground hover:text-destructive rounded-lg transition-colors"
                   >
@@ -468,6 +466,7 @@ export default function Integrations(): JSX.Element {
                   </button>
                 ) : (
                   <button
+                    type="button"
                     onClick={() => connect(integration.id)}
                     disabled={connecting === integration.id}
                     className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
