@@ -38,7 +38,7 @@ export default function Monthly(): JSX.Element {
     { id: number; name: string; balance: number | null; apr: number | null }[]
   >([])
   const [budgetLines, setBudgetLines] = useState<
-    { category: string; budget: number; actual: number }[]
+    { category: string; subcategory?: string; budget: number; actual: number }[]
   >([])
 
   const monthEnd = endOfMonth(month)
@@ -75,12 +75,17 @@ export default function Monthly(): JSX.Element {
       }
       setDebtSummary(d.debts.filter((x) => (x.balance ?? 0) !== 0))
       const b = budgetData as {
-        lines: { category: string; monthlyAmount: number; actual: number }[]
+        lines: { category: string; subcategory?: string; monthlyAmount: number; actual: number }[]
         totals: { budget: number; actual: number }
       }
       setBudgetLines(
         b.lines
-          .map((l) => ({ category: l.category, budget: l.monthlyAmount, actual: l.actual }))
+          .map((l) => ({
+            category: l.category,
+            subcategory: l.subcategory,
+            budget: l.monthlyAmount,
+            actual: l.actual
+          }))
           .filter((l) => l.budget > 0 || Math.abs(l.actual) > 0)
           .slice(0, 4)
       )
@@ -103,6 +108,7 @@ export default function Monthly(): JSX.Element {
 
   const goalsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reflectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const newHabitInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     return () => {
@@ -110,6 +116,10 @@ export default function Monthly(): JSX.Element {
       if (reflectionTimerRef.current) clearTimeout(reflectionTimerRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    if (addingHabit) newHabitInputRef.current?.focus()
+  }, [addingHabit])
 
   const saveGoals = useCallback(
     (newGoals: string[]) => {
@@ -357,6 +367,7 @@ export default function Monthly(): JSX.Element {
             {addingHabit && (
               <div className="mb-3 flex items-center gap-2">
                 <input
+                  ref={newHabitInputRef}
                   value={newHabitName}
                   onChange={(e) => setNewHabitName(e.target.value)}
                   onKeyDown={(e) => {
