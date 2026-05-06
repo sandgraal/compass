@@ -1,0 +1,51 @@
+# Lefthook — fast, parallel git hooks. Replaces Husky.
+# Install: lefthook install
+#
+# All "block-data-dirs" patterns mirror what .husky/pre-commit blocked,
+# now enforced via lefthook + the .claude/hooks/block-data-dirs.sh hook.
+
+pre-commit:
+  parallel: true
+  commands:
+    block-data-dirs:
+      # Refuse to commit any user data
+      run: |
+        if git diff --cached --name-only | grep -qE '^(knowledge-base|\.vault|\.data|oauth-tokens)/'; then
+          echo "BLOCKED: staged files match sensitive directory patterns."
+          echo "These dirs are gitignored — never commit them."
+          exit 1
+        fi
+        if git diff --cached --name-only | grep -qE '\.db(-shm|-wal)?$'; then
+          echo "BLOCKED: SQLite database files must not be committed."
+          exit 1
+        fi
+        if git diff --cached --name-only | grep -qE '^\.env(\.local|\..*local)?$'; then
+          echo "BLOCKED: .env files must never be committed."
+          exit 1
+        fi
+    biome-check:
+      glob: '*.{ts,tsx,js,jsx,json}'
+      run: npx biome check --write --staged --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
+    typecheck-staged:
+      # Only typecheck if TS source files changed (full typecheck is too slow for every commit)
+      glob: '*.{ts,tsx}'
+      run: npm run typecheck
+
+pre-push:
+  parallel: false
+  commands:
+    test:
+      run: npm test -- --run
+
+# Optional commit-msg hook for Conventional Commits format check
+commit-msg:
+  commands:
+    conventional:
+      run: |
+        if ! head -1 {1} | grep -qE '^(feat|fix|chore|docs|refactor|test|perf|style|build|ci|revert)(\(.+\))?: .+'; then
+          echo "WARNING: commit message doesn't follow Conventional Commits."
+          echo "Format: <type>: <subject>"
+          echo "Types: feat, fix, chore, docs, refactor, test, perf, style, build, ci, revert"
+          # Warn but don't block — user may have a reason
+        fi

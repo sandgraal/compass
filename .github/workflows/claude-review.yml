@@ -1,0 +1,38 @@
+name: Claude PR review
+
+on:
+  pull_request:
+    types: [opened, ready_for_review, synchronize]
+  workflow_dispatch:
+
+jobs:
+  review:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Claude review
+        uses: anthropics/claude-code-action@v2
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Review this PR. Run three subagents in parallel and post their findings as inline comments:
+
+            1. security-auditor — review electron/ipc/*, electron/main.ts, electron/preload.ts
+               for any regressions per `.claude/agents/security-auditor.md`
+
+            2. ui-polish — review any src/pages/* and src/components/* changes per
+               `.claude/agents/ui-polish.md`
+
+            3. bug-triager — full diff scan for TODOs, dead code, unused imports per
+               `.claude/agents/bug-triager.md`
+
+            Each subagent posts findings as inline review comments tagged with their name.
+            Final summary comment lists totals per category.

@@ -1,0 +1,28 @@
+name: Security
+
+on:
+  schedule:
+    # Sunday 4am UTC
+    - cron: '0 4 * * 0'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: npm audit
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+      - name: Knip — dead deps surface attack
+        run: npx knip --no-progress --reporter codeclimate > knip-report.json || true
+      - name: Upload knip report
+        uses: actions/upload-artifact@v4
+        with:
+          name: knip-report
+          path: knip-report.json

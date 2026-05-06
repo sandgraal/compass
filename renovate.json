@@ -1,0 +1,57 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":dependencyDashboard",
+    ":separatePatchReleases",
+    "group:allNonMajor",
+    "schedule:weekends"
+  ],
+  "labels": ["dependencies"],
+  "rangeStrategy": "bump",
+  "packageRules": [
+    {
+      "groupName": "Radix UI",
+      "matchPackagePatterns": ["^@radix-ui/"]
+    },
+    {
+      "groupName": "TipTap",
+      "matchPackagePatterns": ["^@tiptap/"]
+    },
+    {
+      "groupName": "Vitest + testing",
+      "matchPackageNames": ["vitest", "@vitest/coverage-v8", "@playwright/test"]
+    },
+    {
+      "groupName": "Biome + lint",
+      "matchPackageNames": ["@biomejs/biome", "oxlint", "knip"]
+    },
+    {
+      "groupName": "Electron core",
+      "matchPackageNames": ["electron", "electron-builder", "electron-vite"]
+    },
+    {
+      "groupName": "TypeScript",
+      "matchPackageNames": ["typescript", "@types/node", "@types/react", "@types/react-dom"]
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "addLabels": ["major-update"],
+      "automerge": false
+    },
+    {
+      "matchUpdateTypes": ["patch", "minor"],
+      "matchDepTypes": ["devDependencies"],
+      "automerge": true,
+      "automergeType": "branch"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "labels": ["security"]
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on monday"]
+  }
+}

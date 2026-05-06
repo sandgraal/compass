@@ -1,0 +1,30 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "electron/main.ts",
+    "electron/preload.ts",
+    "src/main.tsx",
+    "src/App.tsx",
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "mcp/compass-mcp/index.ts"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "electron/**/*.ts",
+    "mcp/**/*.ts"
+  ],
+  "ignore": [
+    "knowledge-base/**",
+    ".vault/**",
+    ".data/**",
+    "dist/**",
+    "dist-electron/**",
+    "out/**",
+    "release/**"
+  ],
+  "ignoreDependencies": [
+    "tailwindcss-animate",
+    "@types/react-beautiful-dnd"
+  ]
+}
