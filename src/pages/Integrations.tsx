@@ -54,12 +54,22 @@ export default function Integrations(): JSX.Element {
         setRedirectUris(uris)
       }).catch(() => { /* use fallback */ })
 
+      // Load persisted sync log from DB on mount
+      window.api.sync.getLog().then((rows) => {
+        setSyncLog(rows.map(r => ({
+          service: r.service,
+          time: new Date(r.syncedAt),
+          records: r.recordsUpdated,
+          error: r.error ?? undefined
+        })))
+      }).catch(() => { /* no log yet */ })
+
       const unsub = window.api.sync.onSyncUpdate((data) => {
         const d = data as { service: string; status: string; recordsUpdated?: number; error?: string }
         setSyncing(prev => { const next = new Set(prev); next.delete(d.service); return next })
         setSyncLog(prev => [
           { service: d.service, time: new Date(), records: d.recordsUpdated || 0, error: d.error },
-          ...prev.slice(0, 9)
+          ...prev.slice(0, 19)
         ])
         loadStatuses()
       })
@@ -283,26 +293,35 @@ export default function Integrations(): JSX.Element {
       </div>
 
       {/* Sync log */}
-      {syncLog.length > 0 && (
-        <div className="mb-8">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Sync Log</h2>
-          <div className="bg-card border border-border rounded-xl divide-y divide-border">
-            {syncLog.map((log, i) => (
-              <div key={i} className="flex items-center justify-between px-4 py-2.5">
-                <div className="flex items-center gap-2">
+      <div className="mb-8">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Sync Log</h2>
+        <div className="bg-card border border-border rounded-xl divide-y divide-border">
+          {syncLog.length === 0 ? (
+            <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+              No sync history yet. Connect an integration and trigger a sync.
+            </div>
+          ) : syncLog.slice(0, 10).map((log) => {
+            const isToday = log.time.toDateString() === new Date().toDateString()
+            const timeStr = isToday
+              ? log.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : log.time.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + log.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            const logKey = `${log.service}-${log.time.getTime()}-${log.error ?? log.records}`
+            return (
+              <div key={logKey} className="flex items-center justify-between px-4 py-2.5">
+                <div className="flex items-center gap-2 min-w-0">
                   {log.error
-                    ? <AlertCircle size={13} className="text-red-400" />
-                    : <CheckCircle2 size={13} className="text-emerald-400" />}
-                  <span className="text-sm text-foreground capitalize">{log.service}</span>
+                    ? <AlertCircle size={13} className="text-red-400 shrink-0" />
+                    : <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />}
+                  <span className="text-sm text-foreground capitalize shrink-0">{log.service}</span>
                   {!log.error && <span className="text-xs text-muted-foreground">{log.records} records updated</span>}
-                  {log.error && <span className="text-xs text-red-400">{log.error}</span>}
+                  {log.error && <span className="text-xs text-red-400 truncate">{log.error}</span>}
                 </div>
-                <span className="text-xs text-muted-foreground">{log.time.toLocaleTimeString()}</span>
+                <span className="text-xs text-muted-foreground shrink-0 ml-2">{timeStr}</span>
               </div>
-            ))}
-          </div>
+            )
+          })}
         </div>
-      )}
+      </div>
 
       {/* Coming soon */}
       <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Coming Soon</h2>

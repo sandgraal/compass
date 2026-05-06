@@ -10,6 +10,7 @@ export default function Weekly(): JSX.Element {
   const [githubItems, setGithubItems] = useState<GitHubItem[]>([])
   const [goals, setGoals] = useState(['', '', ''])
   const [reflection, setReflection] = useState({ wellDone: '', blockers: '', next: '' })
+  const [prevCompletionPct, setPrevCompletionPct] = useState<number | null>(null)
 
   const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 })
   const days = eachDayOfInterval({ start: weekStart, end: weekEnd })
@@ -20,12 +21,17 @@ export default function Weekly(): JSX.Element {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
 
-    // Load checklist + calendar + github + persisted goals/reflection
+    const prevWeekStart = subWeeks(weekStart, 1)
+    const prevWeekEnd = endOfWeek(prevWeekStart, { weekStartsOn: 1 })
+    const prevDays = eachDayOfInterval({ start: prevWeekStart, end: prevWeekEnd })
+
+    // Load checklist + calendar + github + persisted goals/reflection + prev week checklist
     Promise.all([
       ...days.map(d => window.api.checklist.getItems('daily', isoDate(d))),
       window.api.calendar.getEvents(weekStart.toISOString(), weekEnd.toISOString()),
       window.api.github.getItems('open'),
-      window.api.settings.getAll()
+      window.api.settings.getAll(),
+      ...prevDays.map(d => window.api.checklist.getItems('daily', isoDate(d)))
     ]).then((results) => {
       const itemResults = results.slice(0, 7) as ChecklistItem[][]
       const itemMap: Record<string, ChecklistItem[]> = {}
@@ -39,6 +45,14 @@ export default function Weekly(): JSX.Element {
       const savedReflection = s[`weekly_reflection_${weekKey}`]
       try { if (savedGoals) setGoals(JSON.parse(savedGoals)) } catch { /* ignore corrupt data */ }
       try { if (savedReflection) setReflection(JSON.parse(savedReflection)) } catch { /* ignore corrupt data */ }
+
+      // Compute prev week completion %
+      const prevItems = (results.slice(10, 17) as ChecklistItem[][]).flat()
+      if (prevItems.length > 0) {
+        setPrevCompletionPct(Math.round((prevItems.filter(i => i.checked).length / prevItems.length) * 100))
+      } else {
+        setPrevCompletionPct(null)
+      }
     })
   }, [weekStart])
 
@@ -111,6 +125,16 @@ export default function Weekly(): JSX.Element {
             </div>
             <span>{completionPct}%</span>
           </div>
+          {prevCompletionPct !== null && (() => {
+            const delta = completionPct - prevCompletionPct
+            if (delta === 0) return <span className="text-xs text-muted-foreground">= last week</span>
+            const up = delta > 0
+            return (
+              <span className={cn('text-xs flex items-center gap-0.5', up ? 'text-emerald-400' : 'text-red-400')}>
+                {up ? '↑' : '↓'}{Math.abs(delta)}% vs last week
+              </span>
+            )
+          })()}
         </div>
       </div>
 

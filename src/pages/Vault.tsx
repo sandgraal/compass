@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { ShieldCheck, Plus, Eye, EyeOff, Copy, Trash2, Lock, Banknote, IdCard, Key, HeartPulse, Scale, ChevronRight } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { ShieldCheck, Plus, Eye, EyeOff, Copy, Trash2, Lock, Banknote, IdCard, Key, HeartPulse, Scale, ChevronRight, Upload } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -57,6 +57,15 @@ export default function Vault(): JSX.Element {
   const [newEntry, setNewEntry] = useState<Record<string, string>>({})
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function showToast(message: string, type: 'success' | 'error') {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    setToast({ message, type })
+    toastTimerRef.current = setTimeout(() => setToast(null), 4000)
+  }
 
   // Enable content protection when Vault is mounted; disable on unmount
   useEffect(() => {
@@ -65,6 +74,11 @@ export default function Vault(): JSX.Element {
       window.api.vault.setContentProtection(true)
       return () => { window.api.vault.setContentProtection(false) }
     }
+  }, [])
+
+  // Clear toast timer on unmount
+  useEffect(() => {
+    return () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current) }
   }, [])
 
   useEffect(() => {
@@ -108,6 +122,24 @@ export default function Vault(): JSX.Element {
     }
     setNewEntry({})
     setAdding(false)
+  }
+
+  async function import1Password() {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron) return
+    setImporting(true)
+    try {
+      const r = await window.api.vault.import1Password()
+      if (r.canceled) return
+      if (r.success) {
+        showToast(`Imported ${r.imported} item${r.imported === 1 ? '' : 's'} into your vault.`, 'success')
+        loadEntries()
+      } else {
+        showToast('Import failed: ' + r.error, 'error')
+      }
+    } finally {
+      setImporting(false)
+    }
   }
 
   async function deleteEntry(id: string) {
@@ -164,12 +196,20 @@ export default function Vault(): JSX.Element {
           ))}
         </div>
 
-        <div className="px-4 py-3 border-t border-border">
+        <div className="px-4 py-3 border-t border-border space-y-2">
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <ShieldCheck size={11} className="text-emerald-400" />
             AES-256 encrypted
           </div>
-          <p className="text-xs text-muted-foreground/50 mt-0.5">Keys in OS Keychain</p>
+          <p className="text-xs text-muted-foreground/50">Keys in OS Keychain</p>
+          <button
+            onClick={import1Password}
+            disabled={importing}
+            className="w-full flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-border hover:border-primary/50 text-muted-foreground hover:text-foreground rounded-lg transition-colors disabled:opacity-50"
+          >
+            <Upload size={10} />
+            {importing ? 'Importing…' : 'Import 1Password CSV'}
+          </button>
         </div>
       </div>
 
@@ -250,6 +290,17 @@ export default function Vault(): JSX.Element {
           )}
         </div>
       </div>
+      {toast && (
+        <div className={cn(
+          'fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all',
+          toast.type === 'success'
+            ? 'bg-emerald-500/90 text-white'
+            : 'bg-destructive/90 text-destructive-foreground'
+        )}>
+          {toast.message}
+          <button onClick={() => setToast(null)} aria-label="Close notification" className="ml-2 opacity-70 hover:opacity-100 text-xs">✕</button>
+        </div>
+      )}
     </div>
   )
 }

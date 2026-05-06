@@ -18,6 +18,7 @@ const api = {
     triggerSync: (service: string) => ipcRenderer.invoke('sync:trigger', service),
     triggerAllSync: () => ipcRenderer.invoke('sync:trigger-all'),
     getSyncStatus: () => ipcRenderer.invoke('sync:get-status'),
+    getLog: () => ipcRenderer.invoke('sync:get-log'),
     onSyncUpdate: (cb: (data: unknown) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, data: unknown) => cb(data)
       ipcRenderer.on('sync:update', listener)
@@ -53,7 +54,8 @@ const api = {
     deleteEntry: (category: string, id: string) =>
       ipcRenderer.invoke('vault:delete-entry', category, id),
     setContentProtection: (enabled: boolean) =>
-      ipcRenderer.send('vault:set-content-protection', enabled)
+      ipcRenderer.send('vault:set-content-protection', enabled),
+    import1Password: () => ipcRenderer.invoke('vault:import-1password-csv')
   },
 
   // --- Checklist ---
