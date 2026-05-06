@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { ShieldCheck, Plus, Eye, EyeOff, Copy, Trash2, Lock, Banknote, IdCard, Key, HeartPulse, Scale, ChevronRight, Upload, History } from 'lucide-react'
+import { ShieldCheck, Plus, Eye, EyeOff, Copy, Trash2, Lock, Banknote, IdCard, Key, HeartPulse, Scale, ChevronRight, Upload, History, Pencil } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -140,6 +140,13 @@ export default function Vault(): JSX.Element {
     } finally {
       setImporting(false)
     }
+  }
+
+  async function updateEntry(id: string, updates: Record<string, string>) {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron) return
+    const updated = await window.api.vault.updateEntry(selectedCategory, id, updates)
+    setEntries(prev => prev.map(e => e.id === id ? updated : e))
   }
 
   async function deleteEntry(id: string) {
@@ -283,6 +290,7 @@ export default function Vault(): JSX.Element {
                   copiedField={copiedField}
                   onToggleReveal={toggleReveal}
                   onCopy={copyToClipboard}
+                  onUpdate={(updates) => updateEntry(entry.id, updates)}
                   onDelete={() => deleteEntry(entry.id)}
                 />
               ))}
@@ -305,18 +313,33 @@ export default function Vault(): JSX.Element {
   )
 }
 
-function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal, onCopy, onDelete }: {
+function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal, onCopy, onUpdate, onDelete }: {
   entry: VaultEntry
   fields: Array<{ key: string; label: string; sensitive?: boolean }>
   revealedFields: Set<string>
   copiedField: string | null
   onToggleReveal: (key: string) => void
   onCopy: (val: string, key: string) => void
+  onUpdate: (updates: Record<string, string>) => void
   onDelete: () => void
 }): JSX.Element {
   const [showHistory, setShowHistory] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editValues, setEditValues] = useState<Record<string, string>>({})
   const entryName = (entry.institution || entry.service || entry.documentType || entry.type || 'Entry') as string
   const history = (Array.isArray(entry._history) ? entry._history : []) as Array<Record<string, unknown>>
+
+  function startEdit() {
+    const initial: Record<string, string> = {}
+    fields.forEach(f => { initial[f.key] = (entry[f.key] as string) || '' })
+    setEditValues(initial)
+    setEditing(true)
+  }
+
+  function saveEdit() {
+    onUpdate(editValues)
+    setEditing(false)
+  }
 
   return (
     <div className="bg-card border border-border rounded-xl p-5 group">
@@ -331,7 +354,7 @@ function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal,
                 'flex items-center gap-1 p-1.5 rounded text-xs transition-colors',
                 showHistory
                   ? 'text-primary bg-primary/10'
-                  : 'text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100'
+                  : 'text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
               )}
             >
               <History size={12} />
@@ -339,48 +362,77 @@ function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal,
             </button>
           )}
           <button
+            onClick={startEdit}
+            title="Edit entry"
+            className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+          >
+            <Pencil size={12} />
+          </button>
+          <button
             onClick={onDelete}
-            className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
+            className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
           >
             <Trash2 size={13} />
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        {fields.map(field => {
-          const value = entry[field.key] as string | undefined
-          if (!value) return null
-          const fieldId = `${entry.id}-${field.key}`
-          const isRevealed = revealedFields.has(fieldId)
-          const isCopied = copiedField === fieldId
-
-          return (
-            <div key={field.key}>
-              <p className="text-xs text-muted-foreground mb-0.5">{field.label}</p>
-              <div className="flex items-center gap-1.5">
-                <span className={cn('text-sm text-foreground flex-1', field.sensitive && !isRevealed && 'font-mono tracking-wider')}>
-                  {field.sensitive && !isRevealed ? '••••••••' : value}
-                </span>
-                {field.sensitive && (
-                  <button
-                    onClick={() => onToggleReveal(fieldId)}
-                    className="p-0.5 text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    {isRevealed ? <EyeOff size={11} /> : <Eye size={11} />}
-                  </button>
-                )}
-                <button
-                  onClick={() => onCopy(value, fieldId)}
-                  className={cn('p-0.5 transition-colors', isCopied ? 'text-emerald-400' : 'text-muted-foreground hover:text-foreground')}
-                >
-                  <Copy size={11} />
-                </button>
+      {editing ? (
+        <div>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            {fields.map(field => (
+              <div key={field.key}>
+                <label className="text-xs text-muted-foreground mb-1 block">{field.label}</label>
+                <input
+                  type={field.sensitive ? 'password' : 'text'}
+                  value={editValues[field.key] || ''}
+                  onChange={(e) => setEditValues(prev => ({ ...prev, [field.key]: e.target.value }))}
+                  className="w-full bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+                />
               </div>
-            </div>
-          )
-        })}
-      </div>
+            ))}
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setEditing(false)} className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
+            <button onClick={saveEdit} className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors">Save encrypted</button>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          {fields.map(field => {
+            const value = entry[field.key] as string | undefined
+            if (!value) return null
+            const fieldId = `${entry.id}-${field.key}`
+            const isRevealed = revealedFields.has(fieldId)
+            const isCopied = copiedField === fieldId
+
+            return (
+              <div key={field.key}>
+                <p className="text-xs text-muted-foreground mb-0.5">{field.label}</p>
+                <div className="flex items-center gap-1.5">
+                  <span className={cn('text-sm text-foreground flex-1', field.sensitive && !isRevealed && 'font-mono tracking-wider')}>
+                    {field.sensitive && !isRevealed ? '••••••••' : value}
+                  </span>
+                  {field.sensitive && (
+                    <button
+                      onClick={() => onToggleReveal(fieldId)}
+                      className="p-0.5 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {isRevealed ? <EyeOff size={11} /> : <Eye size={11} />}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => onCopy(value, fieldId)}
+                    className={cn('p-0.5 transition-colors', isCopied ? 'text-emerald-400' : 'text-muted-foreground hover:text-foreground')}
+                  >
+                    <Copy size={11} />
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* Entry history */}
       {showHistory && history.length > 0 && (

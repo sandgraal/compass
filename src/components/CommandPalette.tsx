@@ -37,13 +37,13 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       icon: <Plus size={15} />,
       action: async () => {
         onClose()
-        // If we're already on /daily, dispatch a custom event; otherwise navigate there
         if (window.location.hash === '#/daily') {
+          // Already on Daily — dispatch event which resets date and focuses input
           window.dispatchEvent(new CustomEvent('compass:new-task'))
         } else {
+          // Store pending action; Daily picks it up on mount (no race-prone timeout)
+          sessionStorage.setItem('compass:pending-action', 'new-task')
           navigate('/daily')
-          // Give the Daily page a tick to mount, then trigger
-          setTimeout(() => window.dispatchEvent(new CustomEvent('compass:new-task')), 150)
         }
       },
       keywords: ['add', 'task', 'todo', 'checklist', 'new', 'create']
@@ -53,7 +53,17 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
     { id: 'weekly',        label: 'Weekly',          description: 'Weekly review & goals',     icon: <CalendarRange size={15} />,   action: () => nav('/weekly'),        keywords: ['week', 'review'] },
     { id: 'monthly',       label: 'Monthly',         description: 'Monthly planning & habits', icon: <Calendar size={15} />,        action: () => nav('/monthly'),       keywords: ['month', 'habits'] },
     { id: 'knowledge',     label: 'Knowledge Base',  description: 'Browse & edit your notes',  icon: <BookOpen size={15} />,        action: () => nav('/knowledge'),     keywords: ['notes', 'files', 'docs', 'kb'] },
-    { id: 'knowledge-search', label: 'Search knowledge base', description: 'Full-text search across all notes', icon: <Search size={15} />, action: () => { navigate('/knowledge'); onClose(); setTimeout(() => window.dispatchEvent(new CustomEvent('compass:focus-search')), 150) }, keywords: ['find', 'search', 'notes', 'knowledge', 'lookup'] },
+    { id: 'knowledge-search', label: 'Search knowledge base', description: 'Full-text search across all notes', icon: <Search size={15} />, action: () => {
+      onClose()
+      if (window.location.hash === '#/knowledge') {
+        // Already on Knowledge Base — dispatch event directly
+        window.dispatchEvent(new CustomEvent('compass:focus-search'))
+      } else {
+        // Store pending action; KnowledgeBase picks it up on mount
+        sessionStorage.setItem('compass:pending-action', 'focus-search')
+        navigate('/knowledge')
+      }
+    }, keywords: ['find', 'search', 'notes', 'knowledge', 'lookup'] },
     { id: 'vault',         label: 'Vault',           description: 'Secure sensitive data',     icon: <ShieldCheck size={15} />,     action: () => nav('/vault'),         keywords: ['secure', 'passwords', 'credentials', 'financial'] },
     { id: 'finance',       label: 'Finance',         description: 'Budget & transactions',     icon: <TrendingUp size={15} />,      action: () => nav('/finance'),       keywords: ['budget', 'money', 'debt', 'spending'] },
     { id: 'integrations',  label: 'Integrations',    description: 'Connect external services', icon: <Plug size={15} />,            action: () => nav('/integrations'),  keywords: ['google', 'github', 'gmail', 'sync', 'connect'] },

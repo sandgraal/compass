@@ -22,6 +22,7 @@ export default function Dashboard(): JSX.Element {
   const [quickAdd, setQuickAdd] = useState(false)
   const [quickAddText, setQuickAddText] = useState('')
   const quickAddRef = useRef<HTMLInputElement>(null)
+  const isSubmittingRef = useRef(false)
 
   const loadData = () => {
     if (typeof window === 'undefined' || !window.api) return
@@ -87,18 +88,25 @@ export default function Dashboard(): JSX.Element {
 
   const submitQuickAdd = async (e?: React.FormEvent) => {
     e?.preventDefault()
-    if (!quickAddText.trim() || !window.api) return
-    await window.api.checklist.addItem({
-      listType: 'daily',
-      listDate: todayISO(),
-      title: quickAddText.trim(),
-      category: 'personal',
-      source: 'manual',
-      sortOrder: 999
-    })
-    setQuickAddText('')
-    setQuickAdd(false)
-    loadData()
+    if (!quickAddText.trim() || !window.api || isSubmittingRef.current) return
+    isSubmittingRef.current = true
+    try {
+      const today = todayISO()
+      const allItems = await window.api.checklist.getItems('daily', today)
+      await window.api.checklist.addItem({
+        listType: 'daily',
+        listDate: today,
+        title: quickAddText.trim(),
+        category: 'personal',
+        source: 'manual',
+        sortOrder: allItems.length
+      })
+      setQuickAddText('')
+      setQuickAdd(false)
+      loadData()
+    } finally {
+      isSubmittingRef.current = false
+    }
   }
 
   return (

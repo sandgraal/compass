@@ -113,6 +113,9 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
     const fullPath = join(KNOWLEDGE_DIR, relativePath)
     if (!fullPath.startsWith(KNOWLEDGE_DIR)) throw new Error('Path traversal blocked')
     if (existsSync(fullPath)) unlinkSync(fullPath)
+    // Remove any stale .prev backup so it doesn't appear on a future re-creation
+    const prevPath = fullPath + '.prev'
+    if (existsSync(prevPath)) unlinkSync(prevPath)
     return { success: true }
   })
 

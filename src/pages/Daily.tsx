@@ -58,7 +58,18 @@ export default function Daily(): JSX.Element {
 
   // Listen for the ⌘K "New task" command
   useEffect(() => {
-    const handler = () => inputRef.current?.focus()
+    // Check for pending action set by CommandPalette before navigating here
+    const pending = sessionStorage.getItem('compass:pending-action')
+    if (pending === 'new-task') {
+      sessionStorage.removeItem('compass:pending-action')
+      setDate(new Date())
+      setTimeout(() => inputRef.current?.focus(), 0)
+    }
+    const handler = () => {
+      // Reset to today in case the user is viewing a different date
+      setDate(new Date())
+      setTimeout(() => inputRef.current?.focus(), 0)
+    }
     window.addEventListener('compass:new-task', handler)
     return () => window.removeEventListener('compass:new-task', handler)
   }, [])

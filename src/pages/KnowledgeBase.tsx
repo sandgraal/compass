@@ -65,7 +65,8 @@ export default function KnowledgeBase(): JSX.Element {
       if (path === selectedPathRef.current) {
         // Load the .prev snapshot from disk (written by extractor before overwrite)
         window.api.knowledge.getPrev(path).then(prev => {
-          if (prev !== null) {
+          // Guard against stale responses if the user switched files
+          if (selectedPathRef.current === path && prev !== null) {
             setDiffOld(prev)
             setShowDiff(false) // available but not shown until user clicks
           }
@@ -78,6 +79,12 @@ export default function KnowledgeBase(): JSX.Element {
 
   // Wire ⌘K "Search knowledge base" command
   useEffect(() => {
+    // Check for pending action set by CommandPalette before navigating here
+    const pending = sessionStorage.getItem('compass:pending-action')
+    if (pending === 'focus-search') {
+      sessionStorage.removeItem('compass:pending-action')
+      searchRef.current?.focus()
+    }
     const handler = () => searchRef.current?.focus()
     window.addEventListener('compass:focus-search', handler)
     return () => window.removeEventListener('compass:focus-search', handler)
@@ -131,7 +138,8 @@ export default function KnowledgeBase(): JSX.Element {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (isElectron) {
       window.api.knowledge.getPrev(path).then(prev => {
-        if (prev !== null) setDiffOld(prev)
+        // Guard against stale responses if the user switched files quickly
+        if (selectedPathRef.current === path && prev !== null) setDiffOld(prev)
       })
     }
   }
