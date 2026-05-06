@@ -15,7 +15,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - name: Install dependencies (npm 11 via npx)
+        run: npx -y npm@11 ci
       - name: npm audit
         run: npm audit --audit-level=moderate
         continue-on-error: true

@@ -1,12 +1,12 @@
-import { IpcMain } from 'electron'
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, unlinkSync } from 'fs'
-import { join, relative, extname, basename } from 'path'
+import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { basename, extname, join, relative } from 'node:path'
 import chokidar from 'chokidar'
-import { KNOWLEDGE_DIR } from '../paths'
+import { eq } from 'drizzle-orm'
+import type { IpcMain } from 'electron'
+import type { BrowserWindow } from 'electron'
 import { getDb } from '../db/client'
 import { knowledgeFiles } from '../db/schema'
-import { eq } from 'drizzle-orm'
-import { BrowserWindow } from 'electron'
+import { KNOWLEDGE_DIR } from '../paths'
 
 let watcher: ReturnType<typeof chokidar.watch> | null = null
 
@@ -78,7 +78,9 @@ export function startKnowledgeWatcher(mainWindow: BrowserWindow | null): void {
         .set({ wordCount: countWords(content), lastModified: new Date() })
         .where(eq(knowledgeFiles.path, relPath))
         .run()
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   })
 }
 
@@ -114,7 +116,7 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
     if (!fullPath.startsWith(KNOWLEDGE_DIR)) throw new Error('Path traversal blocked')
     if (existsSync(fullPath)) unlinkSync(fullPath)
     // Remove any stale .prev backup so it doesn't appear on a future re-creation
-    const prevPath = fullPath + '.prev'
+    const prevPath = `${fullPath}.prev`
     if (existsSync(prevPath)) unlinkSync(prevPath)
     return { success: true }
   })
@@ -122,7 +124,7 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('knowledge:get-prev', (_event, relativePath: string) => {
     // Sanitize path
     if (relativePath.includes('..')) return null
-    const prevPath = join(KNOWLEDGE_DIR, relativePath + '.prev')
+    const prevPath = join(KNOWLEDGE_DIR, `${relativePath}.prev`)
     if (!existsSync(prevPath)) return null
     return readFileSync(prevPath, 'utf8')
   })

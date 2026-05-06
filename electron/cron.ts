@@ -1,9 +1,9 @@
-import cron from 'node-cron'
+import { eq } from 'drizzle-orm'
 import { BrowserWindow } from 'electron'
-import { syncGoogle, syncGitHub } from './ipc/sync'
+import cron from 'node-cron'
 import { getDb } from './db/client'
 import { appSettings } from './db/schema'
-import { eq } from 'drizzle-orm'
+import { syncGitHub, syncGoogle } from './ipc/sync'
 
 let scheduledTask: cron.ScheduledTask | null = null
 
@@ -15,7 +15,7 @@ function getSyncIntervalMinutes(): number {
   try {
     const db = getDb()
     const row = db.select().from(appSettings).where(eq(appSettings.key, 'syncInterval')).get()
-    return parseInt(row?.value || '15', 10)
+    return Number.parseInt(row?.value || '15', 10)
   } catch {
     return 15
   }

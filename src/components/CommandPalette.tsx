@@ -1,10 +1,22 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, CalendarDays, CalendarRange, Calendar, BookOpen,
-  ShieldCheck, Plug, Settings, Search, TrendingUp, RefreshCw, FolderOpen, ArrowRight, Plus
+  ArrowRight,
+  BookOpen,
+  Calendar,
+  CalendarDays,
+  CalendarRange,
+  FolderOpen,
+  LayoutDashboard,
+  Plug,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings,
+  ShieldCheck,
+  TrendingUp
 } from 'lucide-react'
-import { cn, todayISO } from '../lib/utils'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { cn } from '../lib/utils'
 
 interface Command {
   id: string
@@ -27,13 +39,16 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
-  const nav = (path: string) => { navigate(path); onClose() }
+  const nav = (path: string) => {
+    navigate(path)
+    onClose()
+  }
 
   const COMMANDS: Command[] = [
     {
       id: 'new-task',
       label: 'New task for today',
-      description: 'Add a task to today\'s daily checklist',
+      description: "Add a task to today's daily checklist",
       icon: <Plus size={15} />,
       action: async () => {
         onClose()
@@ -48,32 +63,105 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       },
       keywords: ['add', 'task', 'todo', 'checklist', 'new', 'create']
     },
-    { id: 'dashboard',     label: 'Dashboard',      description: 'Today at a glance',        icon: <LayoutDashboard size={15} />, action: () => nav('/'),              keywords: ['home', 'today'] },
-    { id: 'daily',         label: 'Daily',           description: 'Daily checklist',           icon: <CalendarDays size={15} />,    action: () => nav('/daily'),         keywords: ['checklist', 'tasks', 'todo'] },
-    { id: 'weekly',        label: 'Weekly',          description: 'Weekly review & goals',     icon: <CalendarRange size={15} />,   action: () => nav('/weekly'),        keywords: ['week', 'review'] },
-    { id: 'monthly',       label: 'Monthly',         description: 'Monthly planning & habits', icon: <Calendar size={15} />,        action: () => nav('/monthly'),       keywords: ['month', 'habits'] },
-    { id: 'knowledge',     label: 'Knowledge Base',  description: 'Browse & edit your notes',  icon: <BookOpen size={15} />,        action: () => nav('/knowledge'),     keywords: ['notes', 'files', 'docs', 'kb'] },
-    { id: 'knowledge-search', label: 'Search knowledge base', description: 'Full-text search across all notes', icon: <Search size={15} />, action: () => {
-      onClose()
-      if (window.location.hash === '#/knowledge') {
-        // Already on Knowledge Base — dispatch event directly
-        window.dispatchEvent(new CustomEvent('compass:focus-search'))
-      } else {
-        // Store pending action; KnowledgeBase picks it up on mount
-        sessionStorage.setItem('compass:pending-action', 'focus-search')
-        navigate('/knowledge')
-      }
-    }, keywords: ['find', 'search', 'notes', 'knowledge', 'lookup'] },
-    { id: 'vault',         label: 'Vault',           description: 'Secure sensitive data',     icon: <ShieldCheck size={15} />,     action: () => nav('/vault'),         keywords: ['secure', 'passwords', 'credentials', 'financial'] },
-    { id: 'finance',       label: 'Finance',         description: 'Budget & transactions',     icon: <TrendingUp size={15} />,      action: () => nav('/finance'),       keywords: ['budget', 'money', 'debt', 'spending'] },
-    { id: 'integrations',  label: 'Integrations',    description: 'Connect external services', icon: <Plug size={15} />,            action: () => nav('/integrations'),  keywords: ['google', 'github', 'gmail', 'sync', 'connect'] },
-    { id: 'settings',      label: 'Settings',        description: 'App preferences',           icon: <Settings size={15} />,        action: () => nav('/settings'),      keywords: ['preferences', 'theme', 'config'] },
+    {
+      id: 'dashboard',
+      label: 'Dashboard',
+      description: 'Today at a glance',
+      icon: <LayoutDashboard size={15} />,
+      action: () => nav('/'),
+      keywords: ['home', 'today']
+    },
+    {
+      id: 'daily',
+      label: 'Daily',
+      description: 'Daily checklist',
+      icon: <CalendarDays size={15} />,
+      action: () => nav('/daily'),
+      keywords: ['checklist', 'tasks', 'todo']
+    },
+    {
+      id: 'weekly',
+      label: 'Weekly',
+      description: 'Weekly review & goals',
+      icon: <CalendarRange size={15} />,
+      action: () => nav('/weekly'),
+      keywords: ['week', 'review']
+    },
+    {
+      id: 'monthly',
+      label: 'Monthly',
+      description: 'Monthly planning & habits',
+      icon: <Calendar size={15} />,
+      action: () => nav('/monthly'),
+      keywords: ['month', 'habits']
+    },
+    {
+      id: 'knowledge',
+      label: 'Knowledge Base',
+      description: 'Browse & edit your notes',
+      icon: <BookOpen size={15} />,
+      action: () => nav('/knowledge'),
+      keywords: ['notes', 'files', 'docs', 'kb']
+    },
+    {
+      id: 'knowledge-search',
+      label: 'Search knowledge base',
+      description: 'Full-text search across all notes',
+      icon: <Search size={15} />,
+      action: () => {
+        onClose()
+        if (window.location.hash === '#/knowledge') {
+          // Already on Knowledge Base — dispatch event directly
+          window.dispatchEvent(new CustomEvent('compass:focus-search'))
+        } else {
+          // Store pending action; KnowledgeBase picks it up on mount
+          sessionStorage.setItem('compass:pending-action', 'focus-search')
+          navigate('/knowledge')
+        }
+      },
+      keywords: ['find', 'search', 'notes', 'knowledge', 'lookup']
+    },
+    {
+      id: 'vault',
+      label: 'Vault',
+      description: 'Secure sensitive data',
+      icon: <ShieldCheck size={15} />,
+      action: () => nav('/vault'),
+      keywords: ['secure', 'passwords', 'credentials', 'financial']
+    },
+    {
+      id: 'finance',
+      label: 'Finance',
+      description: 'Budget & transactions',
+      icon: <TrendingUp size={15} />,
+      action: () => nav('/finance'),
+      keywords: ['budget', 'money', 'debt', 'spending']
+    },
+    {
+      id: 'integrations',
+      label: 'Integrations',
+      description: 'Connect external services',
+      icon: <Plug size={15} />,
+      action: () => nav('/integrations'),
+      keywords: ['google', 'github', 'gmail', 'sync', 'connect']
+    },
+    {
+      id: 'settings',
+      label: 'Settings',
+      description: 'App preferences',
+      icon: <Settings size={15} />,
+      action: () => nav('/settings'),
+      keywords: ['preferences', 'theme', 'config']
+    },
     {
       id: 'sync-all',
       label: 'Sync all services',
       description: 'Pull latest data from all connected integrations',
       icon: <RefreshCw size={15} />,
-      action: () => { onClose(); window.api?.sync.triggerAllSync() },
+      action: () => {
+        onClose()
+        window.api?.sync.triggerAllSync()
+      },
       keywords: ['sync', 'refresh', 'pull', 'update']
     },
     {
@@ -81,21 +169,25 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       label: 'Open data folder',
       description: 'Show local data files in Finder',
       icon: <FolderOpen size={15} />,
-      action: () => { onClose(); window.api?.settings.openDataDir() },
+      action: () => {
+        onClose()
+        window.api?.settings.openDataDir()
+      },
       keywords: ['finder', 'folder', 'files', 'data', 'explorer']
-    },
+    }
   ]
 
-  const filtered = query.trim() === ''
-    ? COMMANDS
-    : COMMANDS.filter(cmd => {
-        const q = query.toLowerCase()
-        return (
-          cmd.label.toLowerCase().includes(q) ||
-          cmd.description?.toLowerCase().includes(q) ||
-          cmd.keywords?.some(k => k.includes(q))
-        )
-      })
+  const filtered =
+    query.trim() === ''
+      ? COMMANDS
+      : COMMANDS.filter((cmd) => {
+          const q = query.toLowerCase()
+          return (
+            cmd.label.toLowerCase().includes(q) ||
+            cmd.description?.toLowerCase().includes(q) ||
+            cmd.keywords?.some((k) => k.includes(q))
+          )
+        })
 
   // Reset selection when query or open state changes
   useEffect(() => {
@@ -110,22 +202,28 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
     }
   }, [open])
 
-  const handleKey = useCallback((e: KeyboardEvent) => {
-    if (!open) return
-    if (e.key === 'Escape') { onClose(); return }
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      setSelectedIdx(i => Math.min(i + 1, filtered.length - 1))
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      setSelectedIdx(i => Math.max(i - 1, 0))
-    }
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      filtered[selectedIdx]?.action()
-    }
-  }, [open, filtered, selectedIdx, onClose])
+  const handleKey = useCallback(
+    (e: KeyboardEvent) => {
+      if (!open) return
+      if (e.key === 'Escape') {
+        onClose()
+        return
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSelectedIdx((i) => Math.min(i + 1, filtered.length - 1))
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSelectedIdx((i) => Math.max(i - 1, 0))
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        filtered[selectedIdx]?.action()
+      }
+    },
+    [open, filtered, selectedIdx, onClose]
+  )
 
   useEffect(() => {
     window.addEventListener('keydown', handleKey)
@@ -142,10 +240,7 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
   if (!open) return null
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]"
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]" onClick={onClose}>
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
 
@@ -164,7 +259,9 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
             placeholder="Go to page…"
             className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
           />
-          <kbd className="text-xs text-muted-foreground bg-secondary px-1.5 py-0.5 rounded border border-border">esc</kbd>
+          <kbd className="text-xs text-muted-foreground bg-secondary px-1.5 py-0.5 rounded border border-border">
+            esc
+          </kbd>
         </div>
 
         {/* Results */}
@@ -179,10 +276,17 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
                 onMouseEnter={() => setSelectedIdx(i)}
                 className={cn(
                   'w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors',
-                  i === selectedIdx ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-secondary/60'
+                  i === selectedIdx
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-foreground hover:bg-secondary/60'
                 )}
               >
-                <span className={cn('shrink-0', i === selectedIdx ? 'text-primary' : 'text-muted-foreground')}>
+                <span
+                  className={cn(
+                    'shrink-0',
+                    i === selectedIdx ? 'text-primary' : 'text-muted-foreground'
+                  )}
+                >
                   {cmd.icon}
                 </span>
                 <div className="flex-1 min-w-0">
@@ -199,9 +303,15 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
 
         {/* Footer hint */}
         <div className="flex items-center gap-3 px-4 py-2 border-t border-border text-xs text-muted-foreground">
-          <span><kbd className="bg-secondary px-1 rounded border border-border">↑↓</kbd> navigate</span>
-          <span><kbd className="bg-secondary px-1 rounded border border-border">↵</kbd> select</span>
-          <span><kbd className="bg-secondary px-1 rounded border border-border">esc</kbd> close</span>
+          <span>
+            <kbd className="bg-secondary px-1 rounded border border-border">↑↓</kbd> navigate
+          </span>
+          <span>
+            <kbd className="bg-secondary px-1 rounded border border-border">↵</kbd> select
+          </span>
+          <span>
+            <kbd className="bg-secondary px-1 rounded border border-border">esc</kbd> close
+          </span>
         </div>
       </div>
     </div>

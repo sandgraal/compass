@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core'
+import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 // ---- Integrations ----
 export const integrations = sqliteTable('integrations', {
@@ -34,7 +34,9 @@ export const checklistItems = sqliteTable('checklist_items', {
   dueDate: text('due_date'),
   source: text('source').default('manual'), // 'manual' | 'github' | 'calendar' | 'gmail'
   sourceId: text('source_id'),
-  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date())
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .$defaultFn(() => new Date())
 })
 
 // ---- Checklist Templates ----
@@ -122,11 +124,11 @@ export const appSettings = sqliteTable('app_settings', {
 // ---- Finance ----
 export const financeAccounts = sqliteTable('finance_accounts', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  name: text('name').notNull(),                          // "Chase Sapphire", "BofA Checking"
-  type: text('type').notNull().default('credit'),        // 'checking' | 'savings' | 'credit' | 'investment'
+  name: text('name').notNull(), // "Chase Sapphire", "BofA Checking"
+  type: text('type').notNull().default('credit'), // 'checking' | 'savings' | 'credit' | 'investment'
   isDebt: integer('is_debt', { mode: 'boolean' }).default(false),
-  balance: real('balance').default(0),                   // current balance; for debt accounts, positive = amount owed
-  apr: real('apr').default(0),                           // annual rate as decimal e.g. 0.2499
+  balance: real('balance').default(0), // current balance; for debt accounts, positive = amount owed
+  apr: real('apr').default(0), // annual rate as decimal e.g. 0.2499
   minPayment: real('min_payment').default(0),
   creditLimit: real('credit_limit'),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
@@ -134,9 +136,9 @@ export const financeAccounts = sqliteTable('finance_accounts', {
 
 export const financeTransactions = sqliteTable('finance_transactions', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  hash: text('hash').notNull().unique(),                 // dedup key
-  date: text('date').notNull(),                          // ISO 'YYYY-MM-DD'
-  amount: real('amount').notNull(),                      // negative = expense
+  hash: text('hash').notNull().unique(), // dedup key
+  date: text('date').notNull(), // ISO 'YYYY-MM-DD'
+  amount: real('amount').notNull(), // negative = expense
   description: text('description').notNull(),
   accountId: integer('account_id').references(() => financeAccounts.id),
   category: text('category').default('Uncategorized'),
@@ -156,7 +158,7 @@ export const budgetRules = sqliteTable('budget_rules', {
 
 export const categorizationRules = sqliteTable('categorization_rules', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  pattern: text('pattern').notNull(),                   // case-insensitive substring match
+  pattern: text('pattern').notNull(), // case-insensitive substring match
   category: text('category').notNull(),
   subcategory: text('subcategory'),
   priority: integer('priority').default(0)

@@ -40,7 +40,8 @@
       "recommended": true,
       "correctness": {
         "noUnusedVariables": "warn",
-        "noUnusedImports": "warn"
+        "noUnusedImports": "warn",
+        "useExhaustiveDependencies": "warn"
       },
       "style": {
         "useConst": "warn",
@@ -48,14 +49,17 @@
       },
       "suspicious": {
         "noExplicitAny": "warn",
-        "noConsoleLog": "off"
+        "noConsoleLog": "off",
+        "noAssignInExpressions": "warn",
+        "noArrayIndexKey": "warn"
       },
       "complexity": {
         "noForEach": "off"
       },
       "a11y": {
         "useKeyWithClickEvents": "warn",
-        "useButtonType": "warn"
+        "useButtonType": "warn",
+        "noLabelWithoutControl": "warn"
       }
     }
   },

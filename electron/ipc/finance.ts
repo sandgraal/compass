@@ -1,9 +1,14 @@
-import { IpcMain } from 'electron'
-import { join } from 'path'
-import { existsSync, mkdirSync } from 'fs'
-import { eq, and, gte, lt, desc } from 'drizzle-orm'
+import { existsSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { and, desc, eq, gte, lt } from 'drizzle-orm'
+import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
-import { financeAccounts, financeTransactions, budgetRules, categorizationRules } from '../db/schema'
+import {
+  budgetRules,
+  categorizationRules,
+  financeAccounts,
+  financeTransactions
+} from '../db/schema'
 import { ingestCsvFolder } from '../integrations/finance'
 import { writeAllFinanceKnowledge } from '../knowledge/finance-extractor'
 import { DATA_DIR } from '../paths'
@@ -26,8 +31,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     }
 
     const db = getDb()
-    const rules = db.select().from(categorizationRules)
-      .orderBy(categorizationRules.priority).all()
+    const rules = db.select().from(categorizationRules).orderBy(categorizationRules.priority).all()
 
     const result = await ingestCsvFolder(db as any, inbox, ARCHIVE_DIR, undefined, rules)
 
@@ -42,65 +46,101 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   })
 
   // ── List transactions ─────────────────────────────────────────────────────
-  ipcMain.handle('finance:get-transactions', (_event, opts?: {
-    month?: string
-    category?: string
-    accountId?: number
-    limit?: number
-  }) => {
-    const db = getDb()
-    const lim = opts?.limit ?? 200
-    const base = db.select().from(financeTransactions)
-      .orderBy(desc(financeTransactions.date))
+  ipcMain.handle(
+    'finance:get-transactions',
+    (
+      _event,
+      opts?: {
+        month?: string
+        category?: string
+        accountId?: number
+        limit?: number
+      }
+    ) => {
+      const db = getDb()
+      const lim = opts?.limit ?? 200
+      const base = db.select().from(financeTransactions).orderBy(desc(financeTransactions.date))
 
-    const month = opts?.month
-    const cat   = opts?.category
-    const acct  = opts?.accountId
+      const month = opts?.month
+      const cat = opts?.category
+      const acct = opts?.accountId
 
-    if (month && cat && acct) {
-      return base.where(and(
-        gte(financeTransactions.date, `${month}-01`),
-        lt(financeTransactions.date, nextMonth(month)),
-        eq(financeTransactions.category, cat),
-        eq(financeTransactions.accountId, acct)
-      )).limit(lim).all()
-    } else if (month && cat) {
-      return base.where(and(
-        gte(financeTransactions.date, `${month}-01`),
-        lt(financeTransactions.date, nextMonth(month)),
-        eq(financeTransactions.category, cat)
-      )).limit(lim).all()
-    } else if (month && acct) {
-      return base.where(and(
-        gte(financeTransactions.date, `${month}-01`),
-        lt(financeTransactions.date, nextMonth(month)),
-        eq(financeTransactions.accountId, acct)
-      )).limit(lim).all()
-    } else if (month) {
-      return base.where(and(
-        gte(financeTransactions.date, `${month}-01`),
-        lt(financeTransactions.date, nextMonth(month))
-      )).limit(lim).all()
-    } else if (cat) {
-      return base.where(eq(financeTransactions.category, cat)).limit(lim).all()
-    } else if (acct) {
-      return base.where(eq(financeTransactions.accountId, acct)).limit(lim).all()
-    } else {
+      if (month && cat && acct) {
+        return base
+          .where(
+            and(
+              gte(financeTransactions.date, `${month}-01`),
+              lt(financeTransactions.date, nextMonth(month)),
+              eq(financeTransactions.category, cat),
+              eq(financeTransactions.accountId, acct)
+            )
+          )
+          .limit(lim)
+          .all()
+      }
+      if (month && cat) {
+        return base
+          .where(
+            and(
+              gte(financeTransactions.date, `${month}-01`),
+              lt(financeTransactions.date, nextMonth(month)),
+              eq(financeTransactions.category, cat)
+            )
+          )
+          .limit(lim)
+          .all()
+      }
+      if (month && acct) {
+        return base
+          .where(
+            and(
+              gte(financeTransactions.date, `${month}-01`),
+              lt(financeTransactions.date, nextMonth(month)),
+              eq(financeTransactions.accountId, acct)
+            )
+          )
+          .limit(lim)
+          .all()
+      }
+      if (month) {
+        return base
+          .where(
+            and(
+              gte(financeTransactions.date, `${month}-01`),
+              lt(financeTransactions.date, nextMonth(month))
+            )
+          )
+          .limit(lim)
+          .all()
+      }
+      if (cat) {
+        return base.where(eq(financeTransactions.category, cat)).limit(lim).all()
+      }
+      if (acct) {
+        return base.where(eq(financeTransactions.accountId, acct)).limit(lim).all()
+      }
       return base.limit(lim).all()
     }
-  })
+  )
 
   // ── Update a transaction (category / notes) ───────────────────────────────
-  ipcMain.handle('finance:update-transaction', (_event, id: number, updates: {
-    category?: string
-    subcategory?: string
-    notes?: string
-    accountId?: number
-  }) => {
-    const db = getDb()
-    db.update(financeTransactions).set(updates).where(eq(financeTransactions.id, id)).run()
-    return { success: true }
-  })
+  ipcMain.handle(
+    'finance:update-transaction',
+    (
+      _event,
+      id: number,
+      updates: {
+        category?: string
+        subcategory?: string
+        notes?: string
+        accountId?: number
+      }
+    ) => {
+      const db = getDb()
+      db.update(financeTransactions).set(updates).where(eq(financeTransactions.id, id)).run()
+      return { success: true }
+    }
+  )
 
   // ── Delete a transaction ──────────────────────────────────────────────────
   ipcMain.handle('finance:delete-transaction', (_event, id: number) => {
@@ -116,37 +156,41 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   })
 
   // ── Create / update account ───────────────────────────────────────────────
-  ipcMain.handle('finance:upsert-account', (_event, account: {
-    id?: number
-    name: string
-    type: string
-    isDebt?: boolean
-    balance?: number
-    apr?: number
-    minPayment?: number
-    creditLimit?: number
-  }) => {
-    const db = getDb()
-    const payload = {
-      name: account.name,
-      type: account.type,
-      isDebt: account.isDebt ?? false,
-      balance: account.balance ?? 0,
-      apr: account.apr ?? 0,
-      minPayment: account.minPayment ?? 0,
-      creditLimit: account.creditLimit ?? null,
-      updatedAt: new Date()
-    }
+  ipcMain.handle(
+    'finance:upsert-account',
+    (
+      _event,
+      account: {
+        id?: number
+        name: string
+        type: string
+        isDebt?: boolean
+        balance?: number
+        apr?: number
+        minPayment?: number
+        creditLimit?: number
+      }
+    ) => {
+      const db = getDb()
+      const payload = {
+        name: account.name,
+        type: account.type,
+        isDebt: account.isDebt ?? false,
+        balance: account.balance ?? 0,
+        apr: account.apr ?? 0,
+        minPayment: account.minPayment ?? 0,
+        creditLimit: account.creditLimit ?? null,
+        updatedAt: new Date()
+      }
 
-    if (account.id) {
-      db.update(financeAccounts).set(payload)
-        .where(eq(financeAccounts.id, account.id)).run()
-      return { success: true, id: account.id }
-    } else {
+      if (account.id) {
+        db.update(financeAccounts).set(payload).where(eq(financeAccounts.id, account.id)).run()
+        return { success: true, id: account.id }
+      }
       const result = db.insert(financeAccounts).values(payload).run()
       return { success: true, id: Number(result.lastInsertRowid) }
     }
-  })
+  )
 
   // ── Delete account ────────────────────────────────────────────────────────
   ipcMain.handle('finance:delete-account', (_event, id: number) => {
@@ -158,8 +202,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   // ── Debt summary + avalanche projection ───────────────────────────────────
   ipcMain.handle('finance:get-debt-summary', () => {
     const db = getDb()
-    const debts = db.select().from(financeAccounts)
-      .where(eq(financeAccounts.isDebt, true)).all()
+    const debts = db.select().from(financeAccounts).where(eq(financeAccounts.isDebt, true)).all()
     const projection = simulateAvalanche(debts, 500)
     return { debts, projection }
   })
@@ -169,69 +212,87 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     const db = getDb()
     const m = month ?? new Date().toISOString().slice(0, 7)
     const budget = db.select().from(budgetRules).all()
-    const txns = db.select().from(financeTransactions)
-      .where(and(
-        gte(financeTransactions.date, `${m}-01`),
-        lt(financeTransactions.date, nextMonth(m))
-      )).all()
+    const txns = db
+      .select()
+      .from(financeTransactions)
+      .where(
+        and(gte(financeTransactions.date, `${m}-01`), lt(financeTransactions.date, nextMonth(m)))
+      )
+      .all()
     return computeBudgetStatus(budget, txns)
   })
 
   // ── Set a budget line ─────────────────────────────────────────────────────
-  ipcMain.handle('finance:set-budget', (_event, line: {
-    category: string
-    subcategory?: string
-    monthlyAmount: number
-  }) => {
-    const db = getDb()
-    const existing = db.select().from(budgetRules)
-      .where(eq(budgetRules.category, line.category)).all()
-      .find(r => (r.subcategory ?? '') === (line.subcategory ?? ''))
+  ipcMain.handle(
+    'finance:set-budget',
+    (
+      _event,
+      line: {
+        category: string
+        subcategory?: string
+        monthlyAmount: number
+      }
+    ) => {
+      const db = getDb()
+      const existing = db
+        .select()
+        .from(budgetRules)
+        .where(eq(budgetRules.category, line.category))
+        .all()
+        .find((r) => (r.subcategory ?? '') === (line.subcategory ?? ''))
 
-    if (existing) {
-      db.update(budgetRules)
-        .set({ monthlyAmount: line.monthlyAmount, updatedAt: new Date() })
-        .where(eq(budgetRules.id, existing.id)).run()
-    } else {
-      db.insert(budgetRules).values({
-        category: line.category,
-        subcategory: line.subcategory ?? null,
-        monthlyAmount: line.monthlyAmount,
-        updatedAt: new Date()
-      }).run()
+      if (existing) {
+        db.update(budgetRules)
+          .set({ monthlyAmount: line.monthlyAmount, updatedAt: new Date() })
+          .where(eq(budgetRules.id, existing.id))
+          .run()
+      } else {
+        db.insert(budgetRules)
+          .values({
+            category: line.category,
+            subcategory: line.subcategory ?? null,
+            monthlyAmount: line.monthlyAmount,
+            updatedAt: new Date()
+          })
+          .run()
+      }
+      return { success: true }
     }
-    return { success: true }
-  })
+  )
 
   // ── Categorization rules ──────────────────────────────────────────────────
   ipcMain.handle('finance:get-rules', () => {
     const db = getDb()
-    return db.select().from(categorizationRules)
-      .orderBy(categorizationRules.priority).all()
+    return db.select().from(categorizationRules).orderBy(categorizationRules.priority).all()
   })
 
-  ipcMain.handle('finance:save-rule', (_event, rule: {
-    id?: number
-    pattern: string
-    category: string
-    subcategory?: string
-    priority?: number
-  }) => {
-    const db = getDb()
-    const payload = {
-      pattern: rule.pattern,
-      category: rule.category,
-      subcategory: rule.subcategory ?? null,
-      priority: rule.priority ?? 0
+  ipcMain.handle(
+    'finance:save-rule',
+    (
+      _event,
+      rule: {
+        id?: number
+        pattern: string
+        category: string
+        subcategory?: string
+        priority?: number
+      }
+    ) => {
+      const db = getDb()
+      const payload = {
+        pattern: rule.pattern,
+        category: rule.category,
+        subcategory: rule.subcategory ?? null,
+        priority: rule.priority ?? 0
+      }
+      if (rule.id) {
+        db.update(categorizationRules).set(payload).where(eq(categorizationRules.id, rule.id)).run()
+      } else {
+        db.insert(categorizationRules).values(payload).run()
+      }
+      return { success: true }
     }
-    if (rule.id) {
-      db.update(categorizationRules).set(payload)
-        .where(eq(categorizationRules.id, rule.id)).run()
-    } else {
-      db.insert(categorizationRules).values(payload).run()
-    }
-    return { success: true }
-  })
+  )
 
   ipcMain.handle('finance:delete-rule', (_event, id: number) => {
     const db = getDb()
@@ -259,13 +320,21 @@ type DebtRow = {
   minPayment: number | null
 }
 
-function simulateAvalanche(debts: DebtRow[], extraMonthly: number): { month: number; balance: number }[] {
+function simulateAvalanche(
+  debts: DebtRow[],
+  extraMonthly: number
+): { month: number; balance: number }[] {
   if (!debts.length) return []
 
   // Sort highest APR first (avalanche strategy)
   const cards = debts
-    .filter(d => (d.balance ?? 0) > 0)
-    .map(d => ({ name: d.name, balance: d.balance ?? 0, apr: d.apr ?? 0, min: d.minPayment ?? 0 }))
+    .filter((d) => (d.balance ?? 0) > 0)
+    .map((d) => ({
+      name: d.name,
+      balance: d.balance ?? 0,
+      apr: d.apr ?? 0,
+      min: d.minPayment ?? 0
+    }))
     .sort((a, b) => b.apr - a.apr)
 
   if (!cards.length) return []
@@ -273,7 +342,7 @@ function simulateAvalanche(debts: DebtRow[], extraMonthly: number): { month: num
   const projection: { month: number; balance: number }[] = []
   let month = 0
 
-  while (cards.some(c => c.balance > 0) && month < 120) {
+  while (cards.some((c) => c.balance > 0) && month < 120) {
     month++
     const totalMin = cards.reduce((s, c) => s + (c.balance > 0 ? c.min : 0), 0)
     let extra = Math.max(0, extraMonthly - totalMin) // extra beyond minimums
@@ -295,14 +364,26 @@ function simulateAvalanche(debts: DebtRow[], extraMonthly: number): { month: num
   return projection
 }
 
-type BudgetRuleRow = { id: number; category: string; subcategory: string | null; monthlyAmount: number }
+type BudgetRuleRow = {
+  id: number
+  category: string
+  subcategory: string | null
+  monthlyAmount: number
+}
 type TxnRow = { category: string | null; subcategory: string | null; amount: number }
 
 function computeBudgetStatus(
   budget: BudgetRuleRow[],
   txns: TxnRow[]
 ): {
-  lines: Array<{ category: string; subcategory?: string; monthlyAmount: number; actual: number; variance: number; pct: number }>
+  lines: Array<{
+    category: string
+    subcategory?: string
+    monthlyAmount: number
+    actual: number
+    variance: number
+    pct: number
+  }>
   totals: { budgeted: number; actual: number }
 } {
   // Sum actual spend by category+subcategory (expenses only, skip transfers)
@@ -314,7 +395,7 @@ function computeBudgetStatus(
     actualMap[k] = (actualMap[k] ?? 0) + Math.abs(t.amount)
   }
 
-  const lines = budget.map(b => {
+  const lines = budget.map((b) => {
     const k = `${b.category}|${b.subcategory ?? ''}`
     const actual = actualMap[k] ?? 0
     return {
@@ -339,31 +420,31 @@ async function refreshFinanceKnowledge(): Promise<void> {
   const db = getDb()
   const accounts = db.select().from(financeAccounts).all()
   const transactions = db.select().from(financeTransactions).all()
-  const debts = accounts.filter(a => a.isDebt)
+  const debts = accounts.filter((a) => a.isDebt)
   const budget = db.select().from(budgetRules).all()
 
   writeAllFinanceKnowledge({
-    accounts: accounts.map(a => ({
+    accounts: accounts.map((a) => ({
       name: a.name,
       type: a.type,
       institution: '',
       active: true,
       notes: null
     })),
-    transactions: transactions.map(t => ({
+    transactions: transactions.map((t) => ({
       date: t.date,
       amount: t.amount,
       description: t.description,
       category: t.category ?? 'Uncategorized',
       subcategory: t.subcategory
     })),
-    debts: debts.map(d => ({
+    debts: debts.map((d) => ({
       name: d.name,
       balance: d.balance ?? 0,
       apr: d.apr ?? 0,
       minPayment: d.minPayment ?? 0
     })),
-    budget: budget.map(b => ({
+    budget: budget.map((b) => ({
       category: b.category,
       subcategory: b.subcategory,
       monthlyAmount: b.monthlyAmount

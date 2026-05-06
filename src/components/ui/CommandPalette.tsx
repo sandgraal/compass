@@ -1,10 +1,20 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, CalendarDays, CalendarRange, CalendarClock,
-  BookOpen, ShieldCheck, Plug, Settings, RefreshCw,
-  Search, ArrowRight, FileText, Command
+  ArrowRight,
+  BookOpen,
+  CalendarClock,
+  CalendarDays,
+  CalendarRange,
+  Command,
+  FileText,
+  LayoutDashboard,
+  Plug,
+  RefreshCw,
+  Search,
+  Settings,
+  ShieldCheck
 } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { cn } from '../../lib/utils'
 
 interface CommandItem {
@@ -36,20 +46,87 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): JSX.Elem
   const [selected, setSelected] = useState(0)
   const [knowledgeResults, setKnowledgeResults] = useState<CommandItem[]>([])
 
-  const go = useCallback((path: string) => {
-    navigate(path)
-    onClose()
-  }, [navigate, onClose])
+  const go = useCallback(
+    (path: string) => {
+      navigate(path)
+      onClose()
+    },
+    [navigate, onClose]
+  )
 
   const staticCommands: CommandItem[] = [
-    { id: 'nav-dashboard', label: 'Dashboard', sub: 'Today at a glance', icon: <LayoutDashboard size={15} />, action: () => go('/dashboard'), group: 'navigate', keywords: 'home today overview' },
-    { id: 'nav-daily', label: 'Daily', sub: "Today's checklist", icon: <CalendarDays size={15} />, action: () => go('/daily'), group: 'navigate', keywords: 'tasks checklist today' },
-    { id: 'nav-weekly', label: 'Weekly', sub: 'Week overview', icon: <CalendarRange size={15} />, action: () => go('/weekly'), group: 'navigate', keywords: 'week review' },
-    { id: 'nav-monthly', label: 'Monthly', sub: 'Month planning', icon: <CalendarClock size={15} />, action: () => go('/monthly'), group: 'navigate', keywords: 'month plan habits goals' },
-    { id: 'nav-knowledge', label: 'Knowledge Base', sub: 'Browse & edit notes', icon: <BookOpen size={15} />, action: () => go('/knowledge'), group: 'navigate', keywords: 'notes docs files markdown' },
-    { id: 'nav-vault', label: 'Vault', sub: 'Encrypted secrets', icon: <ShieldCheck size={15} />, action: () => go('/vault'), group: 'navigate', keywords: 'passwords credentials secrets secure' },
-    { id: 'nav-integrations', label: 'Integrations', sub: 'Connected services', icon: <Plug size={15} />, action: () => go('/integrations'), group: 'navigate', keywords: 'google github sync connect oauth' },
-    { id: 'nav-settings', label: 'Settings', sub: 'App preferences', icon: <Settings size={15} />, action: () => go('/settings'), group: 'navigate', keywords: 'theme preferences' },
+    {
+      id: 'nav-dashboard',
+      label: 'Dashboard',
+      sub: 'Today at a glance',
+      icon: <LayoutDashboard size={15} />,
+      action: () => go('/dashboard'),
+      group: 'navigate',
+      keywords: 'home today overview'
+    },
+    {
+      id: 'nav-daily',
+      label: 'Daily',
+      sub: "Today's checklist",
+      icon: <CalendarDays size={15} />,
+      action: () => go('/daily'),
+      group: 'navigate',
+      keywords: 'tasks checklist today'
+    },
+    {
+      id: 'nav-weekly',
+      label: 'Weekly',
+      sub: 'Week overview',
+      icon: <CalendarRange size={15} />,
+      action: () => go('/weekly'),
+      group: 'navigate',
+      keywords: 'week review'
+    },
+    {
+      id: 'nav-monthly',
+      label: 'Monthly',
+      sub: 'Month planning',
+      icon: <CalendarClock size={15} />,
+      action: () => go('/monthly'),
+      group: 'navigate',
+      keywords: 'month plan habits goals'
+    },
+    {
+      id: 'nav-knowledge',
+      label: 'Knowledge Base',
+      sub: 'Browse & edit notes',
+      icon: <BookOpen size={15} />,
+      action: () => go('/knowledge'),
+      group: 'navigate',
+      keywords: 'notes docs files markdown'
+    },
+    {
+      id: 'nav-vault',
+      label: 'Vault',
+      sub: 'Encrypted secrets',
+      icon: <ShieldCheck size={15} />,
+      action: () => go('/vault'),
+      group: 'navigate',
+      keywords: 'passwords credentials secrets secure'
+    },
+    {
+      id: 'nav-integrations',
+      label: 'Integrations',
+      sub: 'Connected services',
+      icon: <Plug size={15} />,
+      action: () => go('/integrations'),
+      group: 'navigate',
+      keywords: 'google github sync connect oauth'
+    },
+    {
+      id: 'nav-settings',
+      label: 'Settings',
+      sub: 'App preferences',
+      icon: <Settings size={15} />,
+      action: () => go('/settings'),
+      group: 'navigate',
+      keywords: 'theme preferences'
+    },
     {
       id: 'action-sync',
       label: 'Sync now',
@@ -73,21 +150,27 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): JSX.Elem
     const timer = setTimeout(async () => {
       try {
         const results = await window.api.knowledge.search(query)
-        const items: CommandItem[] = (results || []).slice(0, 5).map((r: { path: string; title: string; snippet?: string }) => ({
-          id: `kb-${r.path}`,
-          label: r.title,
-          sub: r.snippet?.slice(0, 60) || r.path,
-          icon: <FileText size={15} />,
-          action: () => { go(`/knowledge/${r.path}`) },
-          group: 'knowledge' as const
-        }))
+        const items: CommandItem[] = (results || [])
+          .slice(0, 5)
+          .map((r: { path: string; title: string; snippet?: string }) => ({
+            id: `kb-${r.path}`,
+            label: r.title,
+            sub: r.snippet?.slice(0, 60) || r.path,
+            icon: <FileText size={15} />,
+            action: () => {
+              go(`/knowledge/${r.path}`)
+            },
+            group: 'knowledge' as const
+          }))
         setKnowledgeResults(items)
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }, 200)
     return () => clearTimeout(timer)
   }, [query, go])
 
-  const filtered = [...staticCommands, ...knowledgeResults].filter(cmd => {
+  const filtered = [...staticCommands, ...knowledgeResults].filter((cmd) => {
     if (!query) return cmd.group !== 'knowledge'
     const q = query.toLowerCase()
     return (
@@ -98,13 +181,15 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): JSX.Elem
   })
 
   // Group the filtered items
-  const groups = (['navigate', 'action', 'knowledge'] as const).map(group => ({
-    group,
-    items: filtered.filter(c => c.group === group)
-  })).filter(g => g.items.length > 0)
+  const groups = (['navigate', 'action', 'knowledge'] as const)
+    .map((group) => ({
+      group,
+      items: filtered.filter((c) => c.group === group)
+    }))
+    .filter((g) => g.items.length > 0)
 
   // Flatten with group headers for keyboard index calculation
-  const flatItems = groups.flatMap(g => g.items)
+  const flatItems = groups.flatMap((g) => g.items)
   const safeSelected = Math.min(selected, Math.max(0, flatItems.length - 1))
 
   useEffect(() => {
@@ -124,10 +209,10 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): JSX.Elem
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      setSelected(s => Math.min(s + 1, flatItems.length - 1))
+      setSelected((s) => Math.min(s + 1, flatItems.length - 1))
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
-      setSelected(s => Math.max(s - 1, 0))
+      setSelected((s) => Math.max(s - 1, 0))
     } else if (e.key === 'Enter') {
       e.preventDefault()
       flatItems[safeSelected]?.action()
@@ -143,7 +228,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): JSX.Elem
   return (
     <div
       className="fixed inset-0 z-[100] flex items-start justify-center pt-[18vh]"
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
     >
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
@@ -156,7 +243,10 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): JSX.Elem
           <input
             ref={inputRef}
             value={query}
-            onChange={e => { setQuery(e.target.value); setSelected(0) }}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setSelected(0)
+            }}
             onKeyDown={handleKey}
             placeholder="Search or jump to..."
             className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
@@ -194,10 +284,12 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps): JSX.Elem
                           : 'text-foreground/80 hover:bg-secondary/60'
                       )}
                     >
-                      <span className={cn(
-                        'shrink-0',
-                        safeSelected === idx ? 'text-primary' : 'text-muted-foreground'
-                      )}>
+                      <span
+                        className={cn(
+                          'shrink-0',
+                          safeSelected === idx ? 'text-primary' : 'text-muted-foreground'
+                        )}
+                      >
                         {cmd.icon}
                       </span>
                       <div className="flex-1 min-w-0">

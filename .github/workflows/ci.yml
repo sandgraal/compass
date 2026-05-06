@@ -25,8 +25,8 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies (npm 11 via npx — matches lockfile generator)
+        run: npx -y npm@11 ci
 
       - name: Typecheck (renderer + main)
         run: npm run typecheck
@@ -59,7 +59,8 @@ jobs:
           node-version: 22
           cache: npm
 
-      - run: npm ci
+      - name: Install dependencies (npm 11 via npx)
+        run: npx -y npm@11 ci
 
       - name: Install Playwright
         run: npx playwright install --with-deps chromium

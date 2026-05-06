@@ -1,10 +1,21 @@
-import { useState, useEffect, useRef } from 'react'
-import { format, addDays, subDays } from 'date-fns'
-import { Plus, ChevronLeft, ChevronRight, RefreshCcw, Download, GripVertical, Trash2, ChevronDown, FileText, X } from 'lucide-react'
+import { addDays, format, subDays } from 'date-fns'
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  FileText,
+  GripVertical,
+  Plus,
+  RefreshCcw,
+  Trash2,
+  X
+} from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { cn, isoDate, todayISO } from '../lib/utils'
 
 const CATEGORIES = ['morning', 'work', 'personal', 'evening'] as const
-type Category = typeof CATEGORIES[number]
+type Category = (typeof CATEGORIES)[number]
 
 const CATEGORY_COLORS: Record<Category, string> = {
   morning: 'text-amber-400',
@@ -16,7 +27,10 @@ const CATEGORY_COLORS: Record<Category, string> = {
 /** Parse template markdown into {category, title}[] for seeding a new day */
 function parseTemplate(md: string): Array<{ category: Category; title: string }> {
   const catMap: Record<string, Category> = {
-    morning: 'morning', work: 'work', personal: 'personal', evening: 'evening'
+    morning: 'morning',
+    work: 'work',
+    personal: 'personal',
+    evening: 'evening'
   }
   const results: Array<{ category: Category; title: string }> = []
   let currentCat: Category = 'personal'
@@ -103,25 +117,26 @@ export default function Daily(): JSX.Element {
   }
 
   function exportAsMarkdown() {
-    const lines: string[] = [
-      `# Daily Plan — ${format(date, 'EEEE, MMMM d, yyyy')}`,
-      ''
-    ]
+    const lines: string[] = [`# Daily Plan — ${format(date, 'EEEE, MMMM d, yyyy')}`, '']
 
     if (events.length) {
       lines.push('## Calendar')
-      events.forEach(ev => {
-        const time = ev.allDay ? 'All day' : ev.startAt ? format(new Date(ev.startAt), 'h:mm a') : ''
+      events.forEach((ev) => {
+        const time = ev.allDay
+          ? 'All day'
+          : ev.startAt
+            ? format(new Date(ev.startAt), 'h:mm a')
+            : ''
         lines.push(`- ${ev.title}${time ? ` (${time})` : ''}`)
       })
       lines.push('')
     }
 
-    CATEGORIES.forEach(cat => {
-      const catItems = items.filter(i => i.category === cat)
+    CATEGORIES.forEach((cat) => {
+      const catItems = items.filter((i) => i.category === cat)
       if (!catItems.length) return
       lines.push(`## ${cat.charAt(0).toUpperCase() + cat.slice(1)}`)
-      catItems.forEach(item => {
+      catItems.forEach((item) => {
         lines.push(`- [${item.checked ? 'x' : ' '}] ${item.title}`)
         if (item.body) lines.push(`  ${item.body}`)
       })
@@ -150,27 +165,30 @@ export default function Daily(): JSX.Element {
       })
       setItems((prev) => [...prev, created])
     } else {
-      setItems((prev) => [...prev, {
-        id: Date.now(),
-        listType: 'daily',
-        listDate: dateStr,
-        title: newTitle.trim(),
-        category: newCategory,
-        checked: false,
-        status: 'unchecked',
-        sortOrder: prev.length,
-        body: null,
-        source: 'manual',
-        sourceId: null,
-        createdAt: new Date()
-      }])
+      setItems((prev) => [
+        ...prev,
+        {
+          id: Date.now(),
+          listType: 'daily',
+          listDate: dateStr,
+          title: newTitle.trim(),
+          category: newCategory,
+          checked: false,
+          status: 'unchecked',
+          sortOrder: prev.length,
+          body: null,
+          source: 'manual',
+          sourceId: null,
+          createdAt: new Date()
+        }
+      ])
     }
     setNewTitle('')
     inputRef.current?.focus()
   }
 
   async function toggleItem(id: number, checked: boolean) {
-    setItems((prev) => prev.map((i) => i.id === id ? { ...i, checked } : i))
+    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, checked } : i)))
     if (window.api) {
       await window.api.checklist.updateItem(id, { checked, status: checked ? 'done' : 'unchecked' })
     }
@@ -184,7 +202,7 @@ export default function Daily(): JSX.Element {
   }
 
   async function updateBody(id: number, body: string) {
-    setItems((prev) => prev.map((i) => i.id === id ? { ...i, body } : i))
+    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, body } : i)))
     if (window.api) {
       await window.api.checklist.updateItem(id, { body })
     }
@@ -198,9 +216,7 @@ export default function Daily(): JSX.Element {
     })
     if (window.api) {
       await Promise.all(
-        withOrder.map((item, idx) =>
-          window.api!.checklist.updateItem(item.id, { sortOrder: idx })
-        )
+        withOrder.map((item, idx) => window.api!.checklist.updateItem(item.id, { sortOrder: idx }))
       )
     }
   }
@@ -249,9 +265,9 @@ export default function Daily(): JSX.Element {
   const grouped = CATEGORIES.map((cat) => ({
     cat,
     items: items.filter((i) => i.category === cat)
-  })).filter(g => g.items.length > 0)
+  })).filter((g) => g.items.length > 0)
 
-  const completedCount = items.filter(i => i.checked).length
+  const completedCount = items.filter((i) => i.checked).length
   const progress = items.length > 0 ? Math.round((completedCount / items.length) * 100) : 0
 
   return (
@@ -259,7 +275,10 @@ export default function Daily(): JSX.Element {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <button onClick={() => setDate(subDays(date, 1))} className="p-1.5 rounded hover:bg-secondary transition-colors">
+          <button
+            onClick={() => setDate(subDays(date, 1))}
+            className="p-1.5 rounded hover:bg-secondary transition-colors"
+          >
             <ChevronLeft size={16} />
           </button>
           <div>
@@ -268,11 +287,17 @@ export default function Daily(): JSX.Element {
             </h1>
             <p className="text-sm text-muted-foreground">{format(date, 'MMMM d, yyyy')}</p>
           </div>
-          <button onClick={() => setDate(addDays(date, 1))} className="p-1.5 rounded hover:bg-secondary transition-colors">
+          <button
+            onClick={() => setDate(addDays(date, 1))}
+            className="p-1.5 rounded hover:bg-secondary transition-colors"
+          >
             <ChevronRight size={16} />
           </button>
           {!isToday && (
-            <button onClick={() => setDate(new Date())} className="text-xs text-primary hover:underline">
+            <button
+              onClick={() => setDate(new Date())}
+              className="text-xs text-primary hover:underline"
+            >
               Today
             </button>
           )}
@@ -280,14 +305,23 @@ export default function Daily(): JSX.Element {
 
         <div className="flex items-center gap-2">
           {isToday && (
-            <button onClick={rollOver} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors">
+            <button
+              onClick={rollOver}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors"
+            >
               <RefreshCcw size={12} /> Roll over
             </button>
           )}
-          <button onClick={openTemplateEditor} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors">
+          <button
+            onClick={openTemplateEditor}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors"
+          >
             <FileText size={12} /> Template
           </button>
-          <button onClick={exportAsMarkdown} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors">
+          <button
+            onClick={exportAsMarkdown}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors"
+          >
             <Download size={12} /> Export
           </button>
         </div>
@@ -297,7 +331,9 @@ export default function Daily(): JSX.Element {
       {items.length > 0 && (
         <div className="mb-6">
           <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
-            <span>{completedCount} of {items.length} completed</span>
+            <span>
+              {completedCount} of {items.length} completed
+            </span>
             <span>{progress}%</span>
           </div>
           <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
@@ -313,7 +349,10 @@ export default function Daily(): JSX.Element {
       {events.length > 0 && (
         <div className="mb-6 flex gap-2 overflow-x-auto pb-1">
           {events.map((ev) => (
-            <div key={ev.id} className="shrink-0 bg-primary/10 border border-primary/20 rounded-lg px-3 py-2 min-w-[160px]">
+            <div
+              key={ev.id}
+              className="shrink-0 bg-primary/10 border border-primary/20 rounded-lg px-3 py-2 min-w-[160px]"
+            >
               <p className="text-xs font-medium text-primary truncate">{ev.title}</p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {ev.allDay ? 'All day' : ev.startAt ? format(new Date(ev.startAt), 'h:mm a') : ''}
@@ -326,7 +365,7 @@ export default function Daily(): JSX.Element {
       {/* Checklist by category */}
       {loading ? (
         <div className="space-y-4">
-          {[1, 2, 3].map(n => (
+          {[1, 2, 3].map((n) => (
             <div key={n} className="h-12 bg-secondary/50 rounded-lg animate-pulse" />
           ))}
         </div>
@@ -342,18 +381,22 @@ export default function Daily(): JSX.Element {
               onDeleteItem={deleteItem}
               onUpdateBody={updateBody}
               onReorder={(reordered) => handleReorder(cat, reordered)}
-              onToggleExpand={(id) => setExpandedItems(prev => {
-                const next = new Set(prev)
-                next.has(id) ? next.delete(id) : next.add(id)
-                return next
-              })}
+              onToggleExpand={(id) =>
+                setExpandedItems((prev) => {
+                  const next = new Set(prev)
+                  next.has(id) ? next.delete(id) : next.add(id)
+                  return next
+                })
+              }
             />
           ))}
 
           {items.length === 0 && (
             <div className="text-center py-12">
               <p className="text-muted-foreground text-sm">No tasks yet for this day.</p>
-              <p className="text-muted-foreground/60 text-xs mt-1">Add a task below or start from your template.</p>
+              <p className="text-muted-foreground/60 text-xs mt-1">
+                Add a task below or start from your template.
+              </p>
               {window.api && (
                 <button
                   onClick={seedFromTemplate}
@@ -370,10 +413,14 @@ export default function Daily(): JSX.Element {
       {/* GitHub items due today */}
       {githubDue.length > 0 && (
         <div className="mt-6 border-t border-border pt-4">
-          <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">GitHub · Due Today</h3>
-          {githubDue.map(item => (
+          <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
+            GitHub · Due Today
+          </h3>
+          {githubDue.map((item) => (
             <div key={item.id} className="flex items-center gap-3 py-2">
-              <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-mono">#</span>
+              <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-mono">
+                #
+              </span>
               <span className="text-sm text-foreground flex-1 truncate">{item.title}</span>
               <span className="text-xs text-muted-foreground truncate">{item.repo}</span>
             </div>
@@ -384,9 +431,11 @@ export default function Daily(): JSX.Element {
       {/* Gmail action items (today only) */}
       {isToday && gmailActions.length > 0 && (
         <div className="mt-6 border-t border-border pt-4">
-          <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Inbox · Needs Attention</h3>
+          <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
+            Inbox · Needs Attention
+          </h3>
           <div className="space-y-2">
-            {gmailActions.map(msg => (
+            {gmailActions.map((msg) => (
               <div key={msg.id} className="flex items-start gap-3 py-1.5 group">
                 <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0 mt-1.5" />
                 <div className="flex-1 min-w-0">
@@ -397,7 +446,7 @@ export default function Daily(): JSX.Element {
                   onClick={async () => {
                     try {
                       await window.api?.gmail.markDone(msg.id)
-                      setGmailActions(prev => prev.filter(m => m.id !== msg.id))
+                      setGmailActions((prev) => prev.filter((m) => m.id !== msg.id))
                     } catch (err) {
                       console.error('[Daily] markDone failed:', err)
                     }
@@ -420,7 +469,11 @@ export default function Daily(): JSX.Element {
             onChange={(e) => setNewCategory(e.target.value as Category)}
             className="bg-secondary border border-border rounded-lg px-2 py-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary"
           >
-            {CATEGORIES.map(c => <option key={c} value={c} className="capitalize">{c}</option>)}
+            {CATEGORIES.map((c) => (
+              <option key={c} value={c} className="capitalize">
+                {c}
+              </option>
+            ))}
           </select>
           <input
             ref={inputRef}
@@ -441,15 +494,27 @@ export default function Daily(): JSX.Element {
 
       {/* Template editor modal */}
       {templateOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setTemplateOpen(false)}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          onClick={() => setTemplateOpen(false)}
+        >
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-          <div className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden" onClick={e => e.stopPropagation()}>
+          <div
+            className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div>
                 <h2 className="text-sm font-semibold text-foreground">Daily Template</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Use <code className="text-primary">## Category</code> headings (morning, work, personal, evening) and <code className="text-primary">- [ ] Task</code> items</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Use <code className="text-primary">## Category</code> headings (morning, work,
+                  personal, evening) and <code className="text-primary">- [ ] Task</code> items
+                </p>
               </div>
-              <button onClick={() => setTemplateOpen(false)} className="p-1.5 rounded hover:bg-secondary text-muted-foreground">
+              <button
+                onClick={() => setTemplateOpen(false)}
+                className="p-1.5 rounded hover:bg-secondary text-muted-foreground"
+              >
                 <X size={14} />
               </button>
             </div>
@@ -462,10 +527,16 @@ export default function Daily(): JSX.Element {
               />
             </div>
             <div className="flex justify-end gap-2 px-5 py-4 border-t border-border">
-              <button onClick={() => setTemplateOpen(false)} className="text-sm px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors">
+              <button
+                onClick={() => setTemplateOpen(false)}
+                className="text-sm px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+              >
                 Cancel
               </button>
-              <button onClick={saveTemplate} className="text-sm px-4 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors">
+              <button
+                onClick={saveTemplate}
+                className="text-sm px-4 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+              >
                 Save template
               </button>
             </div>
@@ -476,7 +547,16 @@ export default function Daily(): JSX.Element {
   )
 }
 
-function CategorySection({ category, items, expanded, onToggleItem, onDeleteItem, onUpdateBody, onReorder, onToggleExpand }: {
+function CategorySection({
+  category,
+  items,
+  expanded,
+  onToggleItem,
+  onDeleteItem,
+  onUpdateBody,
+  onReorder,
+  onToggleExpand
+}: {
   category: Category
   items: ChecklistItem[]
   expanded: Set<number>
@@ -491,10 +571,16 @@ function CategorySection({ category, items, expanded, onToggleItem, onDeleteItem
   function handleDrop(e: React.DragEvent, targetId: number) {
     e.preventDefault()
     const fromId = Number(e.dataTransfer.getData('compassItemId'))
-    if (!fromId || fromId === targetId) { setDragOverId(null); return }
+    if (!fromId || fromId === targetId) {
+      setDragOverId(null)
+      return
+    }
     const fromIdx = items.findIndex((i) => i.id === fromId)
     const toIdx = items.findIndex((i) => i.id === targetId)
-    if (fromIdx < 0 || toIdx < 0) { setDragOverId(null); return }
+    if (fromIdx < 0 || toIdx < 0) {
+      setDragOverId(null)
+      return
+    }
     const reordered = [...items]
     const [moved] = reordered.splice(fromIdx, 1)
     reordered.splice(toIdx, 0, moved)
@@ -504,7 +590,12 @@ function CategorySection({ category, items, expanded, onToggleItem, onDeleteItem
 
   return (
     <div>
-      <h3 className={cn('text-xs font-semibold uppercase tracking-wider mb-2', CATEGORY_COLORS[category])}>
+      <h3
+        className={cn(
+          'text-xs font-semibold uppercase tracking-wider mb-2',
+          CATEGORY_COLORS[category]
+        )}
+      >
         {category}
       </h3>
       <div className="space-y-1">
@@ -522,7 +613,10 @@ function CategorySection({ category, items, expanded, onToggleItem, onDeleteItem
               e.dataTransfer.setData('compassItemId', String(item.id))
               e.dataTransfer.effectAllowed = 'move'
             }}
-            onDragOver={(e) => { e.preventDefault(); setDragOverId(item.id) }}
+            onDragOver={(e) => {
+              e.preventDefault()
+              setDragOverId(item.id)
+            }}
             onDragLeave={() => setDragOverId(null)}
             onDrop={(e) => handleDrop(e, item.id)}
           />
@@ -532,7 +626,19 @@ function CategorySection({ category, items, expanded, onToggleItem, onDeleteItem
   )
 }
 
-function ChecklistRow({ item, isExpanded, isDragTarget, onToggle, onDelete, onUpdateBody, onToggleExpand, onDragStart, onDragOver, onDragLeave, onDrop }: {
+function ChecklistRow({
+  item,
+  isExpanded,
+  isDragTarget,
+  onToggle,
+  onDelete,
+  onUpdateBody,
+  onToggleExpand,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop
+}: {
   item: ChecklistItem
   isExpanded: boolean
   isDragTarget: boolean
@@ -563,33 +669,41 @@ function ChecklistRow({ item, isExpanded, isDragTarget, onToggle, onDelete, onUp
       className={cn(
         'group rounded-lg border transition-colors',
         isDragging && 'opacity-40',
-        isDragTarget ? 'border-primary/60 bg-primary/5' : (
-          item.checked ? 'border-border/50 bg-card/40' : 'border-transparent hover:border-border bg-card/60 hover:bg-card'
-        )
+        isDragTarget
+          ? 'border-primary/60 bg-primary/5'
+          : item.checked
+            ? 'border-border/50 bg-card/40'
+            : 'border-transparent hover:border-border bg-card/60 hover:bg-card'
       )}
     >
       <div className="flex items-center gap-3 px-3 py-2.5">
         <span
           draggable={true}
-          onDragStart={(e) => { setIsDragging(true); onDragStart(e) }}
+          onDragStart={(e) => {
+            setIsDragging(true)
+            onDragStart(e)
+          }}
           onDragEnd={() => setIsDragging(false)}
           className="shrink-0"
         >
-          <GripVertical size={14} className="text-muted-foreground/30 cursor-grab active:cursor-grabbing" />
+          <GripVertical
+            size={14}
+            className="text-muted-foreground/30 cursor-grab active:cursor-grabbing"
+          />
         </span>
         <button
           onClick={() => onToggle(!item.checked)}
           className={cn(
             'w-4 h-4 rounded border shrink-0 flex items-center justify-center transition-colors',
-            item.checked
-              ? 'bg-primary border-primary'
-              : 'border-border hover:border-primary'
+            item.checked ? 'bg-primary border-primary' : 'border-border hover:border-primary'
           )}
         >
           {item.checked && <span className="text-white text-[10px] font-bold">✓</span>}
         </button>
 
-        <span className={cn('text-sm flex-1', item.checked && 'line-through text-muted-foreground')}>
+        <span
+          className={cn('text-sm flex-1', item.checked && 'line-through text-muted-foreground')}
+        >
           {item.title}
         </span>
 
@@ -598,10 +712,19 @@ function ChecklistRow({ item, isExpanded, isDragTarget, onToggle, onDelete, onUp
         )}
 
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button onClick={onToggleExpand} className="p-1 rounded hover:bg-secondary text-muted-foreground">
-            <ChevronDown size={12} className={cn('transition-transform', isExpanded && 'rotate-180')} />
+          <button
+            onClick={onToggleExpand}
+            className="p-1 rounded hover:bg-secondary text-muted-foreground"
+          >
+            <ChevronDown
+              size={12}
+              className={cn('transition-transform', isExpanded && 'rotate-180')}
+            />
           </button>
-          <button onClick={onDelete} className="p-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive">
+          <button
+            onClick={onDelete}
+            className="p-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive"
+          >
             <Trash2 size={12} />
           </button>
         </div>
@@ -623,10 +746,75 @@ function ChecklistRow({ item, isExpanded, isDragTarget, onToggle, onDelete, onUp
 
 function getMockItems(dateStr: string): ChecklistItem[] {
   return [
-    { id: 1, listType: 'daily', listDate: dateStr, title: 'Review today\'s calendar', category: 'morning', checked: true, status: 'done', sortOrder: 0, body: null, source: 'manual', sourceId: null, createdAt: new Date() },
-    { id: 2, listType: 'daily', listDate: dateStr, title: 'Deep work block', category: 'work', checked: false, status: 'unchecked', sortOrder: 1, body: null, source: 'manual', sourceId: null, createdAt: new Date() },
-    { id: 3, listType: 'daily', listDate: dateStr, title: 'Review GitHub issues', category: 'work', checked: false, status: 'unchecked', sortOrder: 2, body: null, source: 'github', sourceId: null, createdAt: new Date() },
-    { id: 4, listType: 'daily', listDate: dateStr, title: 'Exercise', category: 'personal', checked: false, status: 'unchecked', sortOrder: 3, body: null, source: 'manual', sourceId: null, createdAt: new Date() },
-    { id: 5, listType: 'daily', listDate: dateStr, title: 'Plan tomorrow', category: 'evening', checked: false, status: 'unchecked', sortOrder: 4, body: null, source: 'manual', sourceId: null, createdAt: new Date() },
+    {
+      id: 1,
+      listType: 'daily',
+      listDate: dateStr,
+      title: "Review today's calendar",
+      category: 'morning',
+      checked: true,
+      status: 'done',
+      sortOrder: 0,
+      body: null,
+      source: 'manual',
+      sourceId: null,
+      createdAt: new Date()
+    },
+    {
+      id: 2,
+      listType: 'daily',
+      listDate: dateStr,
+      title: 'Deep work block',
+      category: 'work',
+      checked: false,
+      status: 'unchecked',
+      sortOrder: 1,
+      body: null,
+      source: 'manual',
+      sourceId: null,
+      createdAt: new Date()
+    },
+    {
+      id: 3,
+      listType: 'daily',
+      listDate: dateStr,
+      title: 'Review GitHub issues',
+      category: 'work',
+      checked: false,
+      status: 'unchecked',
+      sortOrder: 2,
+      body: null,
+      source: 'github',
+      sourceId: null,
+      createdAt: new Date()
+    },
+    {
+      id: 4,
+      listType: 'daily',
+      listDate: dateStr,
+      title: 'Exercise',
+      category: 'personal',
+      checked: false,
+      status: 'unchecked',
+      sortOrder: 3,
+      body: null,
+      source: 'manual',
+      sourceId: null,
+      createdAt: new Date()
+    },
+    {
+      id: 5,
+      listType: 'daily',
+      listDate: dateStr,
+      title: 'Plan tomorrow',
+      category: 'evening',
+      checked: false,
+      status: 'unchecked',
+      sortOrder: 4,
+      body: null,
+      source: 'manual',
+      sourceId: null,
+      createdAt: new Date()
+    }
   ]
 }

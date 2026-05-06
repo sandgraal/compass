@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
-import { Sidebar } from './Sidebar'
-import { ContextDrawer } from './ContextDrawer'
-import { CommandPalette } from '../ui/CommandPalette'
-import { useAppStore } from '../../store/appStore'
 import { cn } from '../../lib/utils'
+import { useAppStore } from '../../store/appStore'
+import { CommandPalette } from '../ui/CommandPalette'
+import { ContextDrawer } from './ContextDrawer'
+import { Sidebar } from './Sidebar'
 
 export function AppLayout(): JSX.Element {
   const { contextDrawerOpen } = useAppStore()
@@ -14,7 +14,7 @@ export function AppLayout(): JSX.Element {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault()
-        setCmdOpen(o => !o)
+        setCmdOpen((o) => !o)
       }
     }
     window.addEventListener('keydown', handler)

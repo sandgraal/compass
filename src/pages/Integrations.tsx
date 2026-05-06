@@ -1,5 +1,13 @@
-import { useState, useEffect } from 'react'
-import { RefreshCw, CheckCircle2, XCircle, Plug2, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react'
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Plug2,
+  RefreshCw,
+  XCircle
+} from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { cn, formatRelative } from '../lib/utils'
 
 interface IntegrationConfig {
@@ -31,17 +39,47 @@ const INTEGRATIONS: IntegrationConfig[] = [
 ]
 
 const UPCOMING_INTEGRATIONS: IntegrationConfig[] = [
-  { id: 'notion', name: 'Notion', description: 'Notes, databases, and project wikis.', scopes: ['read'], color: 'from-slate-500/20 to-slate-700/20', logo: 'N' },
-  { id: 'linear', name: 'Linear', description: 'Engineering issues and sprint tracking.', scopes: ['issues:read'], color: 'from-violet-500/20 to-purple-500/20', logo: 'L' },
-  { id: 'slack', name: 'Slack', description: 'Action items from DMs and channels.', scopes: ['messages:read'], color: 'from-green-500/20 to-teal-500/20', logo: '#' },
-  { id: 'plaid', name: 'Plaid', description: 'Read-only bank & investment balance aggregation.', scopes: ['transactions:read'], color: 'from-blue-500/20 to-indigo-500/20', logo: '$' }
+  {
+    id: 'notion',
+    name: 'Notion',
+    description: 'Notes, databases, and project wikis.',
+    scopes: ['read'],
+    color: 'from-slate-500/20 to-slate-700/20',
+    logo: 'N'
+  },
+  {
+    id: 'linear',
+    name: 'Linear',
+    description: 'Engineering issues and sprint tracking.',
+    scopes: ['issues:read'],
+    color: 'from-violet-500/20 to-purple-500/20',
+    logo: 'L'
+  },
+  {
+    id: 'slack',
+    name: 'Slack',
+    description: 'Action items from DMs and channels.',
+    scopes: ['messages:read'],
+    color: 'from-green-500/20 to-teal-500/20',
+    logo: '#'
+  },
+  {
+    id: 'plaid',
+    name: 'Plaid',
+    description: 'Read-only bank & investment balance aggregation.',
+    scopes: ['transactions:read'],
+    color: 'from-blue-500/20 to-indigo-500/20',
+    logo: '$'
+  }
 ]
 
 export default function Integrations(): JSX.Element {
   const [statuses, setStatuses] = useState<Record<string, IntegrationStatus>>({})
   const [syncing, setSyncing] = useState<Set<string>>(new Set())
   const [connecting, setConnecting] = useState<string | null>(null)
-  const [syncLog, setSyncLog] = useState<Array<{ service: string; time: Date; records: number; error?: string }>>([])
+  const [syncLog, setSyncLog] = useState<
+    Array<{ service: string; time: Date; records: number; error?: string }>
+  >([])
   const [setupOpen, setSetupOpen] = useState(false)
   const [redirectUris, setRedirectUris] = useState<{ google: string; github: string } | null>(null)
 
@@ -50,24 +88,45 @@ export default function Integrations(): JSX.Element {
 
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (isElectron) {
-      window.api.auth.getRedirectUris().then((uris: RedirectUris) => {
-        setRedirectUris(uris)
-      }).catch(() => { /* use fallback */ })
+      window.api.auth
+        .getRedirectUris()
+        .then((uris: RedirectUris) => {
+          setRedirectUris(uris)
+        })
+        .catch(() => {
+          /* use fallback */
+        })
 
       // Load persisted sync log from DB on mount
-      window.api.sync.getLog().then((rows) => {
-        setSyncLog(rows.map(r => ({
-          service: r.service,
-          time: new Date(r.syncedAt),
-          records: r.recordsUpdated,
-          error: r.error ?? undefined
-        })))
-      }).catch(() => { /* no log yet */ })
+      window.api.sync
+        .getLog()
+        .then((rows) => {
+          setSyncLog(
+            rows.map((r) => ({
+              service: r.service,
+              time: new Date(r.syncedAt),
+              records: r.recordsUpdated,
+              error: r.error ?? undefined
+            }))
+          )
+        })
+        .catch(() => {
+          /* no log yet */
+        })
 
       const unsub = window.api.sync.onSyncUpdate((data) => {
-        const d = data as { service: string; status: string; recordsUpdated?: number; error?: string }
-        setSyncing(prev => { const next = new Set(prev); next.delete(d.service); return next })
-        setSyncLog(prev => [
+        const d = data as {
+          service: string
+          status: string
+          recordsUpdated?: number
+          error?: string
+        }
+        setSyncing((prev) => {
+          const next = new Set(prev)
+          next.delete(d.service)
+          return next
+        })
+        setSyncLog((prev) => [
           { service: d.service, time: new Date(), records: d.recordsUpdated || 0, error: d.error },
           ...prev.slice(0, 19)
         ])
@@ -92,9 +151,10 @@ export default function Integrations(): JSX.Element {
     if (!isElectron) return
     setConnecting(service)
     try {
-      const result = service === 'google'
-        ? await window.api.auth.connectGoogle()
-        : await window.api.auth.connectGitHub()
+      const result =
+        service === 'google'
+          ? await window.api.auth.connectGoogle()
+          : await window.api.auth.connectGitHub()
       if (result.error) {
         alert(`Connection failed: ${result.error}`)
       } else {
@@ -118,7 +178,7 @@ export default function Integrations(): JSX.Element {
   async function triggerSync(service: string) {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
-    setSyncing(prev => new Set(prev).add(service))
+    setSyncing((prev) => new Set(prev).add(service))
     await window.api.sync.triggerSync(service)
   }
 
@@ -127,78 +187,197 @@ export default function Integrations(): JSX.Element {
       <div className="mb-8">
         <h1 className="text-2xl font-semibold text-foreground">Integrations</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Connect services to automatically populate your knowledge base. Data stays local — only OAuth tokens are stored.
+          Connect services to automatically populate your knowledge base. Data stays local — only
+          OAuth tokens are stored.
         </p>
       </div>
 
       {/* Setup guide */}
       <div className="mb-6 border border-border rounded-xl overflow-hidden">
         <button
-          onClick={() => setSetupOpen(v => !v)}
+          onClick={() => setSetupOpen((v) => !v)}
           aria-expanded={setupOpen}
           aria-controls="setup-guide-panel"
           className="w-full flex items-center justify-between px-5 py-3.5 bg-card hover:bg-secondary/40 transition-colors text-left"
         >
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-foreground">Setup Guide — OAuth Credentials</span>
-            <span className="text-xs px-2 py-0.5 bg-amber-500/20 text-amber-400 rounded-full">Required before connecting</span>
+            <span className="text-sm font-medium text-foreground">
+              Setup Guide — OAuth Credentials
+            </span>
+            <span className="text-xs px-2 py-0.5 bg-amber-500/20 text-amber-400 rounded-full">
+              Required before connecting
+            </span>
           </div>
-          {setupOpen
-            ? <ChevronDown size={14} className="text-muted-foreground" />
-            : <ChevronRight size={14} className="text-muted-foreground" />}
+          {setupOpen ? (
+            <ChevronDown size={14} className="text-muted-foreground" />
+          ) : (
+            <ChevronRight size={14} className="text-muted-foreground" />
+          )}
         </button>
 
         {setupOpen && (
-          <div id="setup-guide-panel" className="px-5 py-4 border-t border-border bg-card/50 space-y-5 text-sm text-muted-foreground">
+          <div
+            id="setup-guide-panel"
+            className="px-5 py-4 border-t border-border bg-card/50 space-y-5 text-sm text-muted-foreground"
+          >
             <p>
-              Compass uses OAuth to connect to Google and GitHub. You need to create your own OAuth app credentials —
-              they stay in your local <code className="text-xs bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code> file and never leave your machine.
+              Compass uses OAuth to connect to Google and GitHub. You need to create your own OAuth
+              app credentials — they stay in your local{' '}
+              <code className="text-xs bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code>{' '}
+              file and never leave your machine.
             </p>
 
             {/* Google */}
             <div>
-              <h3 className="text-foreground font-semibold mb-2">Google (Calendar · Gmail · Drive)</h3>
+              <h3 className="text-foreground font-semibold mb-2">
+                Google (Calendar · Gmail · Drive)
+              </h3>
               <ol className="list-decimal list-inside space-y-1.5 text-xs leading-relaxed">
-                <li>Open <a href="https://console.cloud.google.com" target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">console.cloud.google.com</a> and create a new project (or use an existing one).</li>
-                <li>Go to <strong className="text-foreground">APIs &amp; Services → OAuth consent screen</strong>. Choose <em>External</em>, fill in the app name ("Compass"), your email, and save.</li>
-                <li>Go to <strong className="text-foreground">APIs &amp; Services → Credentials → Create Credentials → OAuth client ID</strong>.</li>
-                <li>Choose <strong className="text-foreground">Web application</strong> (not Desktop — the HTTP redirect requires this).</li>
-                <li>Add {redirectUris ? <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">{redirectUris.google}</code> : <em>loading…</em>} as an <strong className="text-foreground">Authorized redirect URI</strong>.</li>
-                <li>Copy the <strong className="text-foreground">Client ID</strong> and <strong className="text-foreground">Client secret</strong> into your <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code> file.</li>
-                <li>Enable the required APIs: <strong className="text-foreground">Google Calendar API</strong>, <strong className="text-foreground">Gmail API</strong>, and <strong className="text-foreground">Google Drive API</strong> under <em>APIs &amp; Services → Library</em>.</li>
-                <li>While in test mode, add your Google account under <strong className="text-foreground">OAuth consent screen → Test users</strong>.</li>
+                <li>
+                  Open{' '}
+                  <a
+                    href="https://console.cloud.google.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary underline underline-offset-2"
+                  >
+                    console.cloud.google.com
+                  </a>{' '}
+                  and create a new project (or use an existing one).
+                </li>
+                <li>
+                  Go to{' '}
+                  <strong className="text-foreground">
+                    APIs &amp; Services → OAuth consent screen
+                  </strong>
+                  . Choose <em>External</em>, fill in the app name ("Compass"), your email, and
+                  save.
+                </li>
+                <li>
+                  Go to{' '}
+                  <strong className="text-foreground">
+                    APIs &amp; Services → Credentials → Create Credentials → OAuth client ID
+                  </strong>
+                  .
+                </li>
+                <li>
+                  Choose <strong className="text-foreground">Web application</strong> (not Desktop —
+                  the HTTP redirect requires this).
+                </li>
+                <li>
+                  Add{' '}
+                  {redirectUris ? (
+                    <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">
+                      {redirectUris.google}
+                    </code>
+                  ) : (
+                    <em>loading…</em>
+                  )}{' '}
+                  as an <strong className="text-foreground">Authorized redirect URI</strong>.
+                </li>
+                <li>
+                  Copy the <strong className="text-foreground">Client ID</strong> and{' '}
+                  <strong className="text-foreground">Client secret</strong> into your{' '}
+                  <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code> file.
+                </li>
+                <li>
+                  Enable the required APIs:{' '}
+                  <strong className="text-foreground">Google Calendar API</strong>,{' '}
+                  <strong className="text-foreground">Gmail API</strong>, and{' '}
+                  <strong className="text-foreground">Google Drive API</strong> under{' '}
+                  <em>APIs &amp; Services → Library</em>.
+                </li>
+                <li>
+                  While in test mode, add your Google account under{' '}
+                  <strong className="text-foreground">OAuth consent screen → Test users</strong>.
+                </li>
               </ol>
             </div>
 
             {/* GitHub */}
             <div>
-              <h3 className="text-foreground font-semibold mb-2">GitHub (Issues · PRs · Projects)</h3>
+              <h3 className="text-foreground font-semibold mb-2">
+                GitHub (Issues · PRs · Projects)
+              </h3>
               <ol className="list-decimal list-inside space-y-1.5 text-xs leading-relaxed">
-                <li>Go to <a href="https://github.com/settings/developers" target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">github.com/settings/developers</a> → <strong className="text-foreground">OAuth Apps → New OAuth App</strong>.</li>
-                <li>Set <strong className="text-foreground">Application name</strong> to "Compass".</li>
-                <li>Set <strong className="text-foreground">Homepage URL</strong> to <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">http://localhost</code>.</li>
-                <li>Set <strong className="text-foreground">Authorization callback URL</strong> to {redirectUris ? <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">{redirectUris.github}</code> : <em>loading…</em>}.</li>
-                <li>Click <strong className="text-foreground">Register application</strong>, then generate a <strong className="text-foreground">Client secret</strong>.</li>
-                <li>Copy both values into your <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code> file.</li>
+                <li>
+                  Go to{' '}
+                  <a
+                    href="https://github.com/settings/developers"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary underline underline-offset-2"
+                  >
+                    github.com/settings/developers
+                  </a>{' '}
+                  → <strong className="text-foreground">OAuth Apps → New OAuth App</strong>.
+                </li>
+                <li>
+                  Set <strong className="text-foreground">Application name</strong> to "Compass".
+                </li>
+                <li>
+                  Set <strong className="text-foreground">Homepage URL</strong> to{' '}
+                  <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">
+                    http://localhost
+                  </code>
+                  .
+                </li>
+                <li>
+                  Set <strong className="text-foreground">Authorization callback URL</strong> to{' '}
+                  {redirectUris ? (
+                    <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">
+                      {redirectUris.github}
+                    </code>
+                  ) : (
+                    <em>loading…</em>
+                  )}
+                  .
+                </li>
+                <li>
+                  Click <strong className="text-foreground">Register application</strong>, then
+                  generate a <strong className="text-foreground">Client secret</strong>.
+                </li>
+                <li>
+                  Copy both values into your{' '}
+                  <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code> file.
+                </li>
               </ol>
             </div>
 
             {/* .env location */}
             <div className="bg-secondary/50 rounded-lg px-4 py-3 font-mono text-xs space-y-1">
-              <p className="text-foreground font-semibold text-xs mb-2 font-sans">.env (in project root)</p>
-              <p>GOOGLE_CLIENT_ID=<span className="text-amber-400">your_client_id</span></p>
-              <p>GOOGLE_CLIENT_SECRET=<span className="text-amber-400">your_client_secret</span></p>
-              <p>GITHUB_CLIENT_ID=<span className="text-amber-400">your_client_id</span></p>
-              <p>GITHUB_CLIENT_SECRET=<span className="text-amber-400">your_client_secret</span></p>
+              <p className="text-foreground font-semibold text-xs mb-2 font-sans">
+                .env (in project root)
+              </p>
+              <p>
+                GOOGLE_CLIENT_ID=<span className="text-amber-400">your_client_id</span>
+              </p>
+              <p>
+                GOOGLE_CLIENT_SECRET=<span className="text-amber-400">your_client_secret</span>
+              </p>
+              <p>
+                GITHUB_CLIENT_ID=<span className="text-amber-400">your_client_id</span>
+              </p>
+              <p>
+                GITHUB_CLIENT_SECRET=<span className="text-amber-400">your_client_secret</span>
+              </p>
             </div>
 
-            <p className="text-xs">After editing <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code>, restart the app (<code className="bg-secondary px-1.5 py-0.5 rounded font-mono">npm run dev</code>) for the credentials to take effect.</p>
+            <p className="text-xs">
+              After editing{' '}
+              <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code>, restart
+              the app (
+              <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">npm run dev</code>) for
+              the credentials to take effect.
+            </p>
           </div>
         )}
       </div>
 
       {/* Active integrations */}
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Available</h2>
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+        Available
+      </h2>
       <div className="grid grid-cols-2 gap-4 mb-8">
         {INTEGRATIONS.map((integration) => {
           const status = statuses[integration.id]
@@ -207,10 +386,13 @@ export default function Integrations(): JSX.Element {
           const isSyncing = syncing.has(integration.id)
 
           return (
-            <div key={integration.id} className={cn(
-              'bg-gradient-to-br border border-border rounded-xl p-5',
-              integration.color
-            )}>
+            <div
+              key={integration.id}
+              className={cn(
+                'bg-gradient-to-br border border-border rounded-xl p-5',
+                integration.color
+              )}
+            >
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-background/60 flex items-center justify-center text-lg font-bold text-foreground">
@@ -222,11 +404,16 @@ export default function Integrations(): JSX.Element {
                       {isConnected && <CheckCircle2 size={11} className="text-emerald-400" />}
                       {hasError && <AlertCircle size={11} className="text-red-400" />}
                       {!status && <XCircle size={11} className="text-muted-foreground/40" />}
-                      <span className={cn(
-                        'text-xs',
-                        isConnected ? 'text-emerald-400' :
-                        hasError ? 'text-red-400' : 'text-muted-foreground'
-                      )}>
+                      <span
+                        className={cn(
+                          'text-xs',
+                          isConnected
+                            ? 'text-emerald-400'
+                            : hasError
+                              ? 'text-red-400'
+                              : 'text-muted-foreground'
+                        )}
+                      >
                         {isConnected ? 'Connected' : hasError ? 'Error' : 'Not connected'}
                       </span>
                     </div>
@@ -249,8 +436,11 @@ export default function Integrations(): JSX.Element {
               <p className="text-sm text-muted-foreground mb-3">{integration.description}</p>
 
               <div className="flex flex-wrap gap-1 mb-4">
-                {integration.scopes.map(scope => (
-                  <span key={scope} className="text-xs px-2 py-0.5 bg-background/40 rounded-full text-muted-foreground font-mono">
+                {integration.scopes.map((scope) => (
+                  <span
+                    key={scope}
+                    className="text-xs px-2 py-0.5 bg-background/40 rounded-full text-muted-foreground font-mono"
+                  >
                     {scope}
                   </span>
                 ))}
@@ -294,39 +484,55 @@ export default function Integrations(): JSX.Element {
 
       {/* Sync log */}
       <div className="mb-8">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Sync Log</h2>
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+          Sync Log
+        </h2>
         <div className="bg-card border border-border rounded-xl divide-y divide-border">
           {syncLog.length === 0 ? (
             <div className="px-4 py-6 text-center text-sm text-muted-foreground">
               No sync history yet. Connect an integration and trigger a sync.
             </div>
-          ) : syncLog.slice(0, 10).map((log) => {
-            const isToday = log.time.toDateString() === new Date().toDateString()
-            const timeStr = isToday
-              ? log.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-              : log.time.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + log.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            const logKey = `${log.service}-${log.time.getTime()}-${log.error ?? log.records}`
-            return (
-              <div key={logKey} className="flex items-center justify-between px-4 py-2.5">
-                <div className="flex items-center gap-2 min-w-0">
-                  {log.error
-                    ? <AlertCircle size={13} className="text-red-400 shrink-0" />
-                    : <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />}
-                  <span className="text-sm text-foreground capitalize shrink-0">{log.service}</span>
-                  {!log.error && <span className="text-xs text-muted-foreground">{log.records} records updated</span>}
-                  {log.error && <span className="text-xs text-red-400 truncate">{log.error}</span>}
+          ) : (
+            syncLog.slice(0, 10).map((log) => {
+              const isToday = log.time.toDateString() === new Date().toDateString()
+              const timeStr = isToday
+                ? log.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : `${log.time.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${log.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+              const logKey = `${log.service}-${log.time.getTime()}-${log.error ?? log.records}`
+              return (
+                <div key={logKey} className="flex items-center justify-between px-4 py-2.5">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {log.error ? (
+                      <AlertCircle size={13} className="text-red-400 shrink-0" />
+                    ) : (
+                      <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+                    )}
+                    <span className="text-sm text-foreground capitalize shrink-0">
+                      {log.service}
+                    </span>
+                    {!log.error && (
+                      <span className="text-xs text-muted-foreground">
+                        {log.records} records updated
+                      </span>
+                    )}
+                    {log.error && (
+                      <span className="text-xs text-red-400 truncate">{log.error}</span>
+                    )}
+                  </div>
+                  <span className="text-xs text-muted-foreground shrink-0 ml-2">{timeStr}</span>
                 </div>
-                <span className="text-xs text-muted-foreground shrink-0 ml-2">{timeStr}</span>
-              </div>
-            )
-          })}
+              )
+            })
+          )}
         </div>
       </div>
 
       {/* Coming soon */}
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Coming Soon</h2>
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+        Coming Soon
+      </h2>
       <div className="grid grid-cols-4 gap-3">
-        {UPCOMING_INTEGRATIONS.map(i => (
+        {UPCOMING_INTEGRATIONS.map((i) => (
           <div key={i.id} className="bg-card border border-border rounded-xl p-4 opacity-60">
             <div className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-sm font-bold text-foreground mb-2">
               {i.logo}

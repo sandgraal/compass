@@ -1,23 +1,26 @@
 import 'dotenv/config'
-import { app, BrowserWindow, ipcMain, shell, nativeTheme } from 'electron'
-import { join } from 'path'
-import { mkdirSync, existsSync } from 'fs'
-import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { existsSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { electronApp, is, optimizer } from '@electron-toolkit/utils'
+import { BrowserWindow, app, ipcMain, nativeTheme, shell } from 'electron'
+import { startCronJobs } from './cron'
+import { initDb } from './db/client'
 import { registerAuthHandlers } from './ipc/auth'
-import { registerSyncHandlers } from './ipc/sync'
-import { registerKnowledgeHandlers } from './ipc/knowledge'
-import { registerVaultHandlers } from './ipc/vault'
-import { registerSettingsHandlers } from './ipc/settings'
 import { registerFinanceHandlers } from './ipc/finance'
 import { registerHabitsHandlers } from './ipc/habits'
-import { initDb } from './db/client'
-import { startCronJobs } from './cron'
-import { APP_DATA_DIR, DATA_DIR, VAULT_DIR, KNOWLEDGE_DIR } from './paths'
+import { registerKnowledgeHandlers } from './ipc/knowledge'
+import { registerSettingsHandlers } from './ipc/settings'
+import { registerSyncHandlers } from './ipc/sync'
+import { registerVaultHandlers } from './ipc/vault'
+import { APP_DATA_DIR, DATA_DIR, KNOWLEDGE_DIR, VAULT_DIR } from './paths'
 
 export { APP_DATA_DIR, DATA_DIR, VAULT_DIR, KNOWLEDGE_DIR }
 
 function ensureDirectories(): void {
-  for (const dir of [DATA_DIR, VAULT_DIR, KNOWLEDGE_DIR,
+  for (const dir of [
+    DATA_DIR,
+    VAULT_DIR,
+    KNOWLEDGE_DIR,
     join(KNOWLEDGE_DIR, 'profile'),
     join(KNOWLEDGE_DIR, 'work'),
     join(KNOWLEDGE_DIR, 'calendar'),
@@ -82,8 +85,8 @@ function createWindow(): void {
   }
 
   // Dev: load vite dev server; Prod: load built index.html
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  if (is.dev && process.env.ELECTRON_RENDERER_URL) {
+    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
@@ -121,15 +124,18 @@ app.whenReady().then(async () => {
   })
 
   // Theme sync with system
-  ipcMain.handle('get-native-theme', () => nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
+  ipcMain.handle('get-native-theme', () => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'))
   nativeTheme.on('updated', () => {
-    mainWindow?.webContents.send('native-theme-changed', nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
+    mainWindow?.webContents.send(
+      'native-theme-changed',
+      nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
+    )
   })
 
   createWindow()
   startCronJobs()
 
-  app.on('activate', function () {
+  app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })

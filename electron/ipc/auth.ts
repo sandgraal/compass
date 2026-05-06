@@ -1,11 +1,11 @@
-import { IpcMain, BrowserWindow, safeStorage } from 'electron'
-import { createServer, IncomingMessage, ServerResponse } from 'http'
-import { URL } from 'url'
-import { join } from 'path'
-import { writeFileSync, mkdirSync, readFileSync, existsSync, unlinkSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { type IncomingMessage, type ServerResponse, createServer } from 'node:http'
+import { join } from 'node:path'
+import { URL } from 'node:url'
+import { eq } from 'drizzle-orm'
+import { BrowserWindow, type IpcMain, safeStorage } from 'electron'
 import { getDb } from '../db/client'
 import { integrations } from '../db/schema'
-import { eq } from 'drizzle-orm'
 import { DATA_DIR } from '../paths'
 
 const TOKEN_KEY_PREFIX = 'compass_token_'
@@ -36,7 +36,9 @@ export function deleteToken(service: string): void {
   try {
     const path = join(DATA_DIR, `${TOKEN_KEY_PREFIX}${service}.enc`)
     if (existsSync(path)) unlinkSync(path)
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 const SUCCESS_HTML = `<!DOCTYPE html><html><head><title>Compass — Connected</title>
@@ -97,7 +99,10 @@ function waitForOAuthCode(
           res.writeHead(200, { 'Content-Type': 'text/html' })
           res.end(ERROR_HTML('Invalid state parameter. Request may have been tampered with.'))
           cleanup()
-          if (!settled) { settled = true; reject(new Error('OAuth state mismatch — possible CSRF attack')) }
+          if (!settled) {
+            settled = true
+            reject(new Error('OAuth state mismatch — possible CSRF attack'))
+          }
           return
         }
 
@@ -105,7 +110,10 @@ function waitForOAuthCode(
           res.writeHead(200, { 'Content-Type': 'text/html' })
           res.end(ERROR_HTML(error))
           cleanup()
-          if (!settled) { settled = true; reject(new Error(`OAuth error: ${error}`)) }
+          if (!settled) {
+            settled = true
+            reject(new Error(`OAuth error: ${error}`))
+          }
           return
         }
 
@@ -113,19 +121,28 @@ function waitForOAuthCode(
           res.writeHead(200, { 'Content-Type': 'text/html' })
           res.end(ERROR_HTML('No authorization code received'))
           cleanup()
-          if (!settled) { settled = true; reject(new Error('No code in OAuth callback')) }
+          if (!settled) {
+            settled = true
+            reject(new Error('No code in OAuth callback'))
+          }
           return
         }
 
         res.writeHead(200, { 'Content-Type': 'text/html' })
         res.end(SUCCESS_HTML)
         cleanup()
-        if (!settled) { settled = true; resolve(code) }
+        if (!settled) {
+          settled = true
+          resolve(code)
+        }
       } catch (e) {
         res.writeHead(500)
         res.end()
         cleanup()
-        if (!settled) { settled = true; reject(e instanceof Error ? e : new Error('Internal error handling OAuth callback')) }
+        if (!settled) {
+          settled = true
+          reject(e instanceof Error ? e : new Error('Internal error handling OAuth callback'))
+        }
       }
     })
 
@@ -150,7 +167,11 @@ function waitForOAuthCode(
     server.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
         cleanup()
-        reject(new Error(`Port ${OAUTH_PORT} is already in use. Close any other process using it and try again.`))
+        reject(
+          new Error(
+            `Port ${OAUTH_PORT} is already in use. Close any other process using it and try again.`
+          )
+        )
       } else {
         cleanup()
         reject(err)
@@ -158,8 +179,16 @@ function waitForOAuthCode(
     })
 
     function cleanup() {
-      try { server.close() } catch { /* ignore */ }
-      try { if (win && !win.isDestroyed()) win.close() } catch { /* ignore */ }
+      try {
+        server.close()
+      } catch {
+        /* ignore */
+      }
+      try {
+        if (win && !win.isDestroyed()) win.close()
+      } catch {
+        /* ignore */
+      }
       win = null
     }
   })
@@ -186,7 +215,7 @@ async function exchangeCodeForTokens(
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
-      'Accept': 'application/json'
+      Accept: 'application/json'
     },
     body: params.toString()
   })
@@ -196,7 +225,11 @@ async function exchangeCodeForTokens(
     throw new Error(`Token exchange failed (${resp.status}): ${body}`)
   }
 
-  const tokens = await resp.json() as { error?: string; expires_in?: number; [key: string]: unknown }
+  const tokens = (await resp.json()) as {
+    error?: string
+    expires_in?: number
+    [key: string]: unknown
+  }
   if (tokens.error) {
     throw new Error(`Token error: ${tokens.error}`)
   }
@@ -236,7 +269,7 @@ export async function refreshGoogleToken(): Promise<string> {
 
   const resp = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
     body: params.toString()
   })
 
@@ -245,10 +278,14 @@ export async function refreshGoogleToken(): Promise<string> {
     throw new Error(`Google token refresh failed (${resp.status}): ${body}`)
   }
 
-  const refreshed = await resp.json() as { access_token: string; expires_in: number }
+  const refreshed = (await resp.json()) as { access_token: string; expires_in: number }
 
   // Merge new access token into the existing token bundle (preserve refresh_token)
-  const updated = { ...tokens, access_token: refreshed.access_token, expires_in: refreshed.expires_in }
+  const updated = {
+    ...tokens,
+    access_token: refreshed.access_token,
+    expires_in: refreshed.expires_in
+  }
   saveToken('google', updated)
 
   return refreshed.access_token
@@ -262,7 +299,7 @@ export async function getValidGoogleToken(): Promise<string> {
   const tokens = loadToken('google') as {
     access_token?: string
     refresh_token?: string
-    expires_at?: number  // ms epoch — we set this on save
+    expires_at?: number // ms epoch — we set this on save
   } | null
 
   if (!tokens?.access_token) {
@@ -285,7 +322,10 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET || ''
 
     if (!clientId || clientId === 'your_google_client_id_here') {
-      return { error: 'GOOGLE_CLIENT_ID not configured. Add it to your .env file — see the Setup Guide on the Integrations page.' }
+      return {
+        error:
+          'GOOGLE_CLIENT_ID not configured. Add it to your .env file — see the Setup Guide on the Integrations page.'
+      }
     }
     if (!clientSecret || clientSecret === 'your_google_client_secret_here') {
       return { error: 'GOOGLE_CLIENT_SECRET not configured. Add it to your .env file.' }
@@ -300,7 +340,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
       'https://www.googleapis.com/auth/userinfo.profile'
     ]
 
-    const { randomBytes, createHash } = require('crypto')
+    const { randomBytes, createHash } = require('node:crypto')
     const verifier = randomBytes(32).toString('base64url')
     const challenge = createHash('sha256').update(verifier).digest('base64url')
     const state = randomBytes(16).toString('base64url')
@@ -318,19 +358,29 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
 
     try {
       const code = await waitForOAuthCode(authUrl.toString(), GOOGLE_CALLBACK_PATH, state)
-      const tokens = await exchangeCodeForTokens(code, redirectUri, 'https://oauth2.googleapis.com/token', clientId, clientSecret, verifier)
+      const tokens = await exchangeCodeForTokens(
+        code,
+        redirectUri,
+        'https://oauth2.googleapis.com/token',
+        clientId,
+        clientSecret,
+        verifier
+      )
       saveToken('google', tokens)
 
       const db = getDb()
-      db.insert(integrations).values({
-        service: 'google',
-        connectedAt: new Date(),
-        status: 'connected',
-        scopes: JSON.stringify(scopes)
-      }).onConflictDoUpdate({
-        target: integrations.service,
-        set: { connectedAt: new Date(), status: 'connected', scopes: JSON.stringify(scopes) }
-      }).run()
+      db.insert(integrations)
+        .values({
+          service: 'google',
+          connectedAt: new Date(),
+          status: 'connected',
+          scopes: JSON.stringify(scopes)
+        })
+        .onConflictDoUpdate({
+          target: integrations.service,
+          set: { connectedAt: new Date(), status: 'connected', scopes: JSON.stringify(scopes) }
+        })
+        .run()
 
       return { success: true }
     } catch (err) {
@@ -343,7 +393,10 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     const clientSecret = process.env.GITHUB_CLIENT_SECRET || ''
 
     if (!clientId || clientId === 'your_github_client_id_here') {
-      return { error: 'GITHUB_CLIENT_ID not configured. Add it to your .env file — see the Setup Guide on the Integrations page.' }
+      return {
+        error:
+          'GITHUB_CLIENT_ID not configured. Add it to your .env file — see the Setup Guide on the Integrations page.'
+      }
     }
     if (!clientSecret || clientSecret === 'your_github_client_secret_here') {
       return { error: 'GITHUB_CLIENT_SECRET not configured. Add it to your .env file.' }
@@ -352,7 +405,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     const redirectUri = `http://localhost:${OAUTH_PORT}${GITHUB_CALLBACK_PATH}`
     const scopes = 'repo read:project read:user'
 
-    const { randomBytes } = require('crypto')
+    const { randomBytes } = require('node:crypto')
     const state = randomBytes(16).toString('base64url')
 
     const authUrl = new URL('https://github.com/login/oauth/authorize')
@@ -365,19 +418,33 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
       const code = await waitForOAuthCode(authUrl.toString(), GITHUB_CALLBACK_PATH, state)
       // GitHub token endpoint returns application/x-www-form-urlencoded by default;
       // we request JSON via Accept header in exchangeCodeForTokens.
-      const tokens = await exchangeCodeForTokens(code, redirectUri, 'https://github.com/login/oauth/access_token', clientId, clientSecret, '')
+      const tokens = await exchangeCodeForTokens(
+        code,
+        redirectUri,
+        'https://github.com/login/oauth/access_token',
+        clientId,
+        clientSecret,
+        ''
+      )
       saveToken('github', tokens)
 
       const db = getDb()
-      db.insert(integrations).values({
-        service: 'github',
-        connectedAt: new Date(),
-        status: 'connected',
-        scopes: JSON.stringify(scopes.split(' '))
-      }).onConflictDoUpdate({
-        target: integrations.service,
-        set: { connectedAt: new Date(), status: 'connected', scopes: JSON.stringify(scopes.split(' ')) }
-      }).run()
+      db.insert(integrations)
+        .values({
+          service: 'github',
+          connectedAt: new Date(),
+          status: 'connected',
+          scopes: JSON.stringify(scopes.split(' '))
+        })
+        .onConflictDoUpdate({
+          target: integrations.service,
+          set: {
+            connectedAt: new Date(),
+            status: 'connected',
+            scopes: JSON.stringify(scopes.split(' '))
+          }
+        })
+        .run()
 
       return { success: true }
     } catch (err) {

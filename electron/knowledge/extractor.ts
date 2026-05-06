@@ -82,7 +82,10 @@ export async function updateGmailKnowledge(messages: GmailMessage[]): Promise<vo
 
   for (const msg of messages) {
     const subject = msg.subject.slice(0, 70)
-    const from = msg.from.replace(/<[^>]+>/, '').trim().slice(0, 40)
+    const from = msg.from
+      .replace(/<[^>]+>/, '')
+      .trim()
+      .slice(0, 40)
     const snippet = (msg.snippet || '').slice(0, 100)
     lines.push(`## ${subject}`)
     lines.push(`- **From:** ${from}`)
@@ -115,7 +118,7 @@ export async function updateDriveKnowledge(files: DriveFile[]): Promise<void> {
     lines.push(`| ${link} | ${type} | ${modified} |`)
   }
 
-  updateKnowledgeFile(KNOWLEDGE_DIR, 'drive/index.md', lines.join('\n') + '\n')
+  updateKnowledgeFile(KNOWLEDGE_DIR, 'drive/index.md', `${lines.join('\n')}\n`)
 }
 
 export async function updateGitHubKnowledge(issues: GitHubIssue[]): Promise<void> {
@@ -126,14 +129,14 @@ export async function updateGitHubKnowledge(issues: GitHubIssue[]): Promise<void
     ''
   ]
 
-  const openIssues = issues.filter(i => !i.pull_request && i.state === 'open')
-  const openPRs = issues.filter(i => !!i.pull_request && i.state === 'open')
+  const openIssues = issues.filter((i) => !i.pull_request && i.state === 'open')
+  const openPRs = issues.filter((i) => !!i.pull_request && i.state === 'open')
 
   lines.push('## Open Issues Assigned to Me', '')
   if (openIssues.length) {
     for (const issue of openIssues) {
       const repo = issue.repository?.full_name || issue.html_url.split('/').slice(3, 5).join('/')
-      const labels = issue.labels?.map(l => `\`${l.name}\``).join(' ') || ''
+      const labels = issue.labels?.map((l) => `\`${l.name}\``).join(' ') || ''
       lines.push(`- [${issue.title}](${issue.html_url}) — \`${repo}\` ${labels}`)
     }
   } else {
@@ -150,5 +153,5 @@ export async function updateGitHubKnowledge(issues: GitHubIssue[]): Promise<void
     lines.push('_No open pull requests._')
   }
 
-  updateKnowledgeFile(KNOWLEDGE_DIR, 'work/github-summary.md', lines.join('\n') + '\n')
+  updateKnowledgeFile(KNOWLEDGE_DIR, 'work/github-summary.md', `${lines.join('\n')}\n`)
 }
