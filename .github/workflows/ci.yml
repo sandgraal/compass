@@ -39,7 +39,7 @@ jobs:
         continue-on-error: true
 
       - name: Vitest
-        run: npm test -- --run
+        run: npm run test:run
 
       - name: Build
         run: npm run build

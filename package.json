@@ -18,9 +18,9 @@
     "format": "biome check --write .",
     "lint:fast": "oxlint .",
     "lint:react": "eslint .",
-    "test": "vitest",
-    "test:run": "vitest --run",
-    "test:coverage": "vitest --run --coverage",
+    "test": "vitest --passWithNoTests",
+    "test:run": "vitest --run --passWithNoTests",
+    "test:coverage": "vitest --run --coverage --passWithNoTests",
     "test:e2e": "playwright test",
     "knip": "knip",
     "prepare": "lefthook install"

@@ -36,7 +36,7 @@ pre-push:
   parallel: false
   commands:
     test:
-      run: npm test -- --run
+      run: npm run test:run
 
 # Optional commit-msg hook for Conventional Commits format check
 commit-msg:

@@ -7,7 +7,8 @@ on:
 
 jobs:
   review:
-    if: ${{ !github.event.pull_request.draft }}
+    # Skip drafts AND skip when no API key is configured (avoids failing PRs in forks / new clones)
+    if: ${{ !github.event.pull_request.draft && vars.CLAUDE_REVIEW_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -19,7 +20,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run Claude review
-        uses: anthropics/claude-code-action@v2
+        uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
