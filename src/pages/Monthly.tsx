@@ -265,17 +265,22 @@ export default function Monthly(): JSX.Element {
               <Target size={14} /> Monthly Priorities
             </h3>
             <div className="space-y-2">
-              {goals.map((goal, i) => (
-                <div key={MONTHLY_GOAL_KEYS[i]} className="flex items-center gap-2">
-                  <span className="text-xs font-mono text-muted-foreground w-4">{i + 1}.</span>
-                  <input
-                    value={goal}
-                    onChange={(e) => saveGoals(goals.map((g, j) => (j === i ? e.target.value : g)))}
-                    placeholder={`Priority ${i + 1}…`}
-                    className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/40 outline-none"
-                  />
-                </div>
-              ))}
+              {goals.map((goal, i) => {
+                const goalKey = MONTHLY_GOAL_KEYS[i] ?? `goal-${i}`
+                return (
+                  <div key={goalKey} className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-muted-foreground w-4">{i + 1}.</span>
+                    <input
+                      value={goal}
+                      onChange={(e) =>
+                        saveGoals(goals.map((g, j) => (j === i ? e.target.value : g)))
+                      }
+                      placeholder={`Priority ${i + 1}…`}
+                      className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/40 outline-none"
+                    />
+                  </div>
+                )
+              })}
             </div>
           </div>
 

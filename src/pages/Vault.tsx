@@ -136,19 +136,22 @@ export default function Vault(): JSX.Element {
   }, [])
 
   useEffect(() => {
-    void loadEntries(selectedCategory)
+    void loadEntries(selectedCategory).catch(() => setEntries([]))
   }, [selectedCategory])
 
   async function loadEntries(category = selectedCategory) {
     setLoading(true)
-    const isElectron = typeof window !== 'undefined' && !!window.api
-    if (isElectron) {
-      const e = await window.api.vault.getEntries(category)
-      setEntries(e)
-    } else {
-      setEntries([])
+    try {
+      const isElectron = typeof window !== 'undefined' && !!window.api
+      if (isElectron) {
+        const e = await window.api.vault.getEntries(category)
+        setEntries(e)
+      } else {
+        setEntries([])
+      }
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   async function addEntry() {
@@ -178,7 +181,7 @@ export default function Vault(): JSX.Element {
           `Imported ${r.imported} item${r.imported === 1 ? '' : 's'} into your vault.`,
           'success'
         )
-        loadEntries()
+        await loadEntries()
       } else {
         showToast(`Import failed: ${r.error}`, 'error')
       }
@@ -500,17 +503,15 @@ function EntryCard({
           <div className="grid grid-cols-2 gap-3 mb-3">
             {fields.map((field) => {
               const isRevealed = editRevealed.has(field.key)
+              const editFieldId = `edit-entry-${entry.id}-${field.key}`
               return (
                 <div key={field.key}>
-                  <label
-                    htmlFor={`edit-entry-${field.key}`}
-                    className="text-xs text-muted-foreground mb-1 block"
-                  >
+                  <label htmlFor={editFieldId} className="text-xs text-muted-foreground mb-1 block">
                     {field.label}
                   </label>
                   <div className="relative flex items-center">
                     <input
-                      id={`edit-entry-${field.key}`}
+                      id={editFieldId}
                       type={field.sensitive && !isRevealed ? 'password' : 'text'}
                       value={editValues[field.key] || ''}
                       onChange={(e) =>
