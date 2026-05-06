@@ -1,0 +1,25 @@
+# CODEOWNERS — automatic reviewers per path
+# Currently solo (@sandgraal), but laid out so future contributors can plug in.
+# Pattern: most-specific wins.
+
+# Default — all files
+*                                   @sandgraal
+
+# Security-critical
+/electron/ipc/vault.ts              @sandgraal
+/electron/ipc/auth.ts               @sandgraal
+/electron/main.ts                   @sandgraal
+/electron/preload.ts                @sandgraal
+/electron/db/schema.ts              @sandgraal
+/electron/db/schema.finance.ts      @sandgraal
+
+# Agent infrastructure — changes here affect all future agents
+/CLAUDE.md                          @sandgraal
+/.claude/                           @sandgraal
+/docs/                              @sandgraal
+
+# CI / build
+/.github/                           @sandgraal
+/biome.json                         @sandgraal
+/lefthook.yml                       @sandgraal
+/package.json                       @sandgraal

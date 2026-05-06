@@ -60,3 +60,17 @@ yarn-error.log*
 # ============================================================
 coverage/
 .nyc_output/
+playwright-report/
+test-results/
+
+# ============================================================
+# CLAUDE CODE — local agent state (committed: agents, skills, hooks, settings.json)
+# ============================================================
+.claude/settings.local.json
+.claude/worktrees/
+.claude/project-status.json
+
+# ============================================================
+# KNIP / LINT REPORTS
+# ============================================================
+knip-report.json
