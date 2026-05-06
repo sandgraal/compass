@@ -52,7 +52,7 @@
     "@tiptap/pm": "^2.10.4",
     "@tiptap/react": "^2.10.4",
     "@tiptap/starter-kit": "^2.10.4",
-    "better-sqlite3": "^11.5.0",
+    "better-sqlite3": "^12.9.0",
     "chokidar": "^4.0.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -113,10 +113,7 @@
       "category": "public.app-category.productivity",
       "icon": "resources/icon.icns"
     },
-    "files": [
-      "dist/**/*",
-      "dist-electron/**/*"
-    ],
+    "files": ["dist/**/*", "dist-electron/**/*"],
     "directories": {
       "output": "release"
     }
