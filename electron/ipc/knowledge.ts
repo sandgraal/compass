@@ -113,7 +113,18 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
     const fullPath = join(KNOWLEDGE_DIR, relativePath)
     if (!fullPath.startsWith(KNOWLEDGE_DIR)) throw new Error('Path traversal blocked')
     if (existsSync(fullPath)) unlinkSync(fullPath)
+    // Remove any stale .prev backup so it doesn't appear on a future re-creation
+    const prevPath = fullPath + '.prev'
+    if (existsSync(prevPath)) unlinkSync(prevPath)
     return { success: true }
+  })
+
+  ipcMain.handle('knowledge:get-prev', (_event, relativePath: string) => {
+    // Sanitize path
+    if (relativePath.includes('..')) return null
+    const prevPath = join(KNOWLEDGE_DIR, relativePath + '.prev')
+    if (!existsSync(prevPath)) return null
+    return readFileSync(prevPath, 'utf8')
   })
 
   ipcMain.handle('knowledge:search', (_event, query: string) => {

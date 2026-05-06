@@ -124,6 +124,7 @@ declare global {
         createFile(path: string, title: string): Promise<{ success: boolean }>
         deleteFile(path: string): Promise<{ success: boolean }>
         search(query: string): Promise<Array<KnowledgeFile & { snippet: string }>>
+        getPrev(path: string): Promise<string | null>
         onFileChanged(cb: (path: string) => void): () => void
       }
       vault: {

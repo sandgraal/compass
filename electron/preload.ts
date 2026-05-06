@@ -36,6 +36,7 @@ const api = {
       ipcRenderer.invoke('knowledge:create-file', relativePath, title),
     deleteFile: (relativePath: string) => ipcRenderer.invoke('knowledge:delete-file', relativePath),
     search: (query: string) => ipcRenderer.invoke('knowledge:search', query),
+    getPrev: (path: string) => ipcRenderer.invoke('knowledge:get-prev', path),
     onFileChanged: (cb: (path: string) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, path: string) => cb(path)
       ipcRenderer.on('knowledge:file-changed', listener)

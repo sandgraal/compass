@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Calendar, GitBranch, ArrowRight, Plus, RefreshCw, Clock } from 'lucide-react'
 import { format } from 'date-fns'
@@ -19,6 +19,10 @@ export default function Dashboard(): JSX.Element {
   const [githubItems, setGithubItems] = useState<GitHubItem[]>([])
   const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus[]>([])
   const [isSyncing, setIsSyncing] = useState(false)
+  const [quickAdd, setQuickAdd] = useState(false)
+  const [quickAddText, setQuickAddText] = useState('')
+  const quickAddRef = useRef<HTMLInputElement>(null)
+  const isSubmittingRef = useRef(false)
 
   const loadData = () => {
     if (typeof window === 'undefined' || !window.api) return
@@ -74,8 +78,35 @@ export default function Dashboard(): JSX.Element {
     setIsSyncing(true)
     await window.api.sync.triggerAllSync()
     setIsSyncing(false)
-    // Reload all dashboard data now that the sync has completed
     loadData()
+  }
+
+  const openQuickAdd = () => {
+    setQuickAdd(true)
+    setTimeout(() => quickAddRef.current?.focus(), 10)
+  }
+
+  const submitQuickAdd = async (e?: React.FormEvent) => {
+    e?.preventDefault()
+    if (!quickAddText.trim() || !window.api || isSubmittingRef.current) return
+    isSubmittingRef.current = true
+    try {
+      const today = todayISO()
+      const allItems = await window.api.checklist.getItems('daily', today)
+      await window.api.checklist.addItem({
+        listType: 'daily',
+        listDate: today,
+        title: quickAddText.trim(),
+        category: 'personal',
+        source: 'manual',
+        sortOrder: allItems.length
+      })
+      setQuickAddText('')
+      setQuickAdd(false)
+      loadData()
+    } finally {
+      isSubmittingRef.current = false
+    }
   }
 
   return (
@@ -117,13 +148,22 @@ export default function Dashboard(): JSX.Element {
         <div className="bg-card border border-border rounded-xl">
           <div className="flex items-center justify-between px-5 py-4 border-b border-border">
             <h2 className="text-sm font-semibold text-foreground">Today's Tasks</h2>
-            <Link to="/daily" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors">
-              View all <ArrowRight size={12} />
-            </Link>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={openQuickAdd}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
+                title="Quick-add task (or use ⌘K → New task)"
+              >
+                <Plus size={12} /> Add
+              </button>
+              <Link to="/daily" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors">
+                View all <ArrowRight size={12} />
+              </Link>
+            </div>
           </div>
           <div className="divide-y divide-border">
-            {tasks.length === 0 ? (
-              <EmptyState icon={<Plus size={16} />} message="No tasks yet" action={{ to: '/daily', label: 'Add tasks' }} />
+            {tasks.length === 0 && !quickAdd ? (
+              <EmptyState icon={<Plus size={16} />} message="No tasks yet — add one below" />
             ) : (
               tasks.map((task) => (
                 <div key={task.id} className="flex items-center gap-3 px-5 py-3">
@@ -139,6 +179,28 @@ export default function Dashboard(): JSX.Element {
                   <CategoryBadge category={task.category || 'personal'} />
                 </div>
               ))
+            )}
+            {/* Quick-add inline form */}
+            {quickAdd ? (
+              <form onSubmit={submitQuickAdd} className="flex items-center gap-2 px-5 py-3 border-t border-border">
+                <Plus size={13} className="text-muted-foreground shrink-0" />
+                <input
+                  ref={quickAddRef}
+                  value={quickAddText}
+                  onChange={(e) => setQuickAddText(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Escape' && (setQuickAdd(false), setQuickAddText(''))}
+                  placeholder="Task title… (Enter to save, Esc to cancel)"
+                  className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 outline-none"
+                />
+                <button type="submit" className="text-xs text-primary hover:underline">Save</button>
+              </form>
+            ) : (
+              <button
+                onClick={openQuickAdd}
+                className="w-full flex items-center gap-2 px-5 py-3 text-xs text-muted-foreground/50 hover:text-primary hover:bg-secondary/40 transition-colors"
+              >
+                <Plus size={12} /> New task for today…
+              </button>
             )}
           </div>
         </div>

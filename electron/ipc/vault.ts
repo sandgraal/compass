@@ -97,7 +97,12 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
     const entries = readVaultCategory(category, key) as Record<string, unknown>[]
     const idx = entries.findIndex((e) => e.id === id)
     if (idx === -1) throw new Error('Entry not found')
-    entries[idx] = { ...entries[idx], ...updates, updatedAt: Date.now() }
+    const current = entries[idx]
+    // Snapshot the current user-facing fields (exclude system/history fields)
+    const { _history, id: _id, createdAt, updatedAt, ...snapshot } = current as Record<string, unknown>
+    const history = (Array.isArray(current._history) ? current._history : []) as unknown[]
+    const newHistory = [{ ...snapshot, _savedAt: updatedAt ?? Date.now() }, ...history].slice(0, 5)
+    entries[idx] = { ...current, ...updates, updatedAt: Date.now(), _history: newHistory }
     writeVaultCategory(category, entries, key)
     return entries[idx]
   })

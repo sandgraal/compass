@@ -32,6 +32,7 @@ export default function KnowledgeBase(): JSX.Element {
   const isLoadingRef = useRef(false)
   const currentRawRef = useRef<string>('')  // raw markdown of currently open file
   const selectedPathRef = useRef<string | null>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
 
   const debouncedSearch = useDebounce(searchQuery, 300)
 
@@ -62,15 +63,31 @@ export default function KnowledgeBase(): JSX.Element {
     const unsub = window.api.knowledge.onFileChanged((path) => {
       loadFiles()
       if (path === selectedPathRef.current) {
-        // Capture current raw content as the "before" snapshot for the diff
-        if (currentRawRef.current) {
-          setDiffOld(currentRawRef.current)
-          setShowDiff(false) // reset; user can click to view diff
-        }
+        // Load the .prev snapshot from disk (written by extractor before overwrite)
+        window.api.knowledge.getPrev(path).then(prev => {
+          // Guard against stale responses if the user switched files
+          if (selectedPathRef.current === path && prev !== null) {
+            setDiffOld(prev)
+            setShowDiff(false) // available but not shown until user clicks
+          }
+        })
         loadFileContent(path)
       }
     })
     return unsub
+  }, [])
+
+  // Wire ⌘K "Search knowledge base" command
+  useEffect(() => {
+    // Check for pending action set by CommandPalette before navigating here
+    const pending = sessionStorage.getItem('compass:pending-action')
+    if (pending === 'focus-search') {
+      sessionStorage.removeItem('compass:pending-action')
+      searchRef.current?.focus()
+    }
+    const handler = () => searchRef.current?.focus()
+    window.addEventListener('compass:focus-search', handler)
+    return () => window.removeEventListener('compass:focus-search', handler)
   }, [])
 
   useEffect(() => {
@@ -117,6 +134,14 @@ export default function KnowledgeBase(): JSX.Element {
     setDiffOld(null)
     setShowDiff(false)
     loadFileContent(path)
+    // Load persisted prev snapshot for diff view
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (isElectron) {
+      window.api.knowledge.getPrev(path).then(prev => {
+        // Guard against stale responses if the user switched files quickly
+        if (selectedPathRef.current === path && prev !== null) setDiffOld(prev)
+      })
+    }
   }
 
   const saveContent = useCallback(async () => {
@@ -157,6 +182,7 @@ export default function KnowledgeBase(): JSX.Element {
           <div className="relative">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
+              ref={searchRef}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search knowledge…"

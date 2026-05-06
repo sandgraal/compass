@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { ShieldCheck, Plus, Eye, EyeOff, Copy, Trash2, Lock, Banknote, IdCard, Key, HeartPulse, Scale, ChevronRight, Upload } from 'lucide-react'
+import { ShieldCheck, Plus, Eye, EyeOff, Copy, Trash2, Lock, Banknote, IdCard, Key, HeartPulse, Scale, ChevronRight, Upload, History, Pencil } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -140,6 +140,13 @@ export default function Vault(): JSX.Element {
     } finally {
       setImporting(false)
     }
+  }
+
+  async function updateEntry(id: string, updates: Record<string, string>) {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron) return
+    const updated = await window.api.vault.updateEntry(selectedCategory, id, updates)
+    setEntries(prev => prev.map(e => e.id === id ? updated : e))
   }
 
   async function deleteEntry(id: string) {
@@ -283,6 +290,7 @@ export default function Vault(): JSX.Element {
                   copiedField={copiedField}
                   onToggleReveal={toggleReveal}
                   onCopy={copyToClipboard}
+                  onUpdate={(updates) => updateEntry(entry.id, updates)}
                   onDelete={() => deleteEntry(entry.id)}
                 />
               ))}
@@ -305,63 +313,181 @@ export default function Vault(): JSX.Element {
   )
 }
 
-function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal, onCopy, onDelete }: {
+function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal, onCopy, onUpdate, onDelete }: {
   entry: VaultEntry
   fields: Array<{ key: string; label: string; sensitive?: boolean }>
   revealedFields: Set<string>
   copiedField: string | null
   onToggleReveal: (key: string) => void
   onCopy: (val: string, key: string) => void
+  onUpdate: (updates: Record<string, string>) => void
   onDelete: () => void
 }): JSX.Element {
+  const [showHistory, setShowHistory] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editValues, setEditValues] = useState<Record<string, string>>({})
+  const [editRevealed, setEditRevealed] = useState<Set<string>>(new Set())
   const entryName = (entry.institution || entry.service || entry.documentType || entry.type || 'Entry') as string
+  const history = (Array.isArray(entry._history) ? entry._history : []) as Array<Record<string, unknown>>
+
+  function startEdit() {
+    const initial: Record<string, string> = {}
+    fields.forEach(f => { initial[f.key] = (entry[f.key] as string) || '' })
+    setEditValues(initial)
+    setEditRevealed(new Set())
+    setEditing(true)
+  }
+
+  function saveEdit() {
+    onUpdate(editValues)
+    setEditing(false)
+  }
 
   return (
     <div className="bg-card border border-border rounded-xl p-5 group">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold text-foreground">{entryName}</h3>
-        <button
-          onClick={onDelete}
-          className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
-        >
-          <Trash2 size={13} />
-        </button>
+        <div className="flex items-center gap-1">
+          {history.length > 0 && (
+            <button
+              onClick={() => setShowHistory(v => !v)}
+              title={`${history.length} previous version${history.length > 1 ? 's' : ''}`}
+              className={cn(
+                'flex items-center gap-1 p-1.5 rounded text-xs transition-colors',
+                showHistory
+                  ? 'text-primary bg-primary/10'
+                  : 'text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
+              )}
+            >
+              <History size={12} />
+              <span>{history.length}</span>
+            </button>
+          )}
+          <button
+            onClick={startEdit}
+            title="Edit entry"
+            className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+          >
+            <Pencil size={12} />
+          </button>
+          <button
+            onClick={onDelete}
+            className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        {fields.map(field => {
-          const value = entry[field.key] as string | undefined
-          if (!value) return null
-          const fieldId = `${entry.id}-${field.key}`
-          const isRevealed = revealedFields.has(fieldId)
-          const isCopied = copiedField === fieldId
+      {editing ? (
+        <div>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            {fields.map(field => {
+              const isRevealed = editRevealed.has(field.key)
+              return (
+                <div key={field.key}>
+                  <label className="text-xs text-muted-foreground mb-1 block">{field.label}</label>
+                  <div className="relative flex items-center">
+                    <input
+                      type={field.sensitive && !isRevealed ? 'password' : 'text'}
+                      value={editValues[field.key] || ''}
+                      onChange={(e) => setEditValues(prev => ({ ...prev, [field.key]: e.target.value }))}
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary pr-7"
+                    />
+                    {field.sensitive && (
+                      <button
+                        type="button"
+                        onClick={() => setEditRevealed(prev => {
+                          const next = new Set(prev)
+                          next.has(field.key) ? next.delete(field.key) : next.add(field.key)
+                          return next
+                        })}
+                        className="absolute right-2 text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        {isRevealed ? <EyeOff size={11} /> : <Eye size={11} />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setEditing(false)} className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
+            <button onClick={saveEdit} className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors">Save encrypted</button>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          {fields.map(field => {
+            const value = entry[field.key] as string | undefined
+            if (!value) return null
+            const fieldId = `${entry.id}-${field.key}`
+            const isRevealed = revealedFields.has(fieldId)
+            const isCopied = copiedField === fieldId
 
-          return (
-            <div key={field.key}>
-              <p className="text-xs text-muted-foreground mb-0.5">{field.label}</p>
-              <div className="flex items-center gap-1.5">
-                <span className={cn('text-sm text-foreground flex-1', field.sensitive && !isRevealed && 'font-mono tracking-wider')}>
-                  {field.sensitive && !isRevealed ? '••••••••' : value}
-                </span>
-                {field.sensitive && (
+            return (
+              <div key={field.key}>
+                <p className="text-xs text-muted-foreground mb-0.5">{field.label}</p>
+                <div className="flex items-center gap-1.5">
+                  <span className={cn('text-sm text-foreground flex-1', field.sensitive && !isRevealed && 'font-mono tracking-wider')}>
+                    {field.sensitive && !isRevealed ? '••••••••' : value}
+                  </span>
+                  {field.sensitive && (
+                    <button
+                      onClick={() => onToggleReveal(fieldId)}
+                      className="p-0.5 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {isRevealed ? <EyeOff size={11} /> : <Eye size={11} />}
+                    </button>
+                  )}
                   <button
-                    onClick={() => onToggleReveal(fieldId)}
-                    className="p-0.5 text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={() => onCopy(value, fieldId)}
+                    className={cn('p-0.5 transition-colors', isCopied ? 'text-emerald-400' : 'text-muted-foreground hover:text-foreground')}
                   >
-                    {isRevealed ? <EyeOff size={11} /> : <Eye size={11} />}
+                    <Copy size={11} />
                   </button>
-                )}
-                <button
-                  onClick={() => onCopy(value, fieldId)}
-                  className={cn('p-0.5 transition-colors', isCopied ? 'text-emerald-400' : 'text-muted-foreground hover:text-foreground')}
-                >
-                  <Copy size={11} />
-                </button>
+                </div>
               </div>
-            </div>
-          )
-        })}
-      </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Entry history */}
+      {showHistory && history.length > 0 && (
+        <div className="mt-4 pt-4 border-t border-border space-y-3">
+          <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
+            <History size={11} /> Previous versions (encrypted)
+          </p>
+          {history.map((snap, i) => {
+            const savedAt = snap._savedAt ? new Date(snap._savedAt as number) : null
+            return (
+              <div key={i} className="bg-secondary/40 rounded-lg p-3">
+                {savedAt && (
+                  <p className="text-xs text-muted-foreground mb-2">
+                    {savedAt.toLocaleDateString()} {savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  {fields.map(field => {
+                    const val = snap[field.key] as string | undefined
+                    if (!val) return null
+                    return (
+                      <div key={field.key}>
+                        <p className="text-xs text-muted-foreground/60">{field.label}</p>
+                        <p className={cn('text-xs text-foreground/70', field.sensitive && 'font-mono tracking-wider')}>
+                          {field.sensitive ? '••••••••' : val}
+                        </p>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
