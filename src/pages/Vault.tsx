@@ -136,7 +136,7 @@ export default function Vault(): JSX.Element {
   }, [])
 
   useEffect(() => {
-    void loadEntries(selectedCategory).catch(() => setEntries([]))
+    void loadEntries(selectedCategory)
   }, [selectedCategory])
 
   async function loadEntries(category = selectedCategory) {
@@ -149,6 +149,10 @@ export default function Vault(): JSX.Element {
       } else {
         setEntries([])
       }
+    } catch (error) {
+      console.error('[vault] Failed to load entries', error)
+      setEntries([])
+      showToast('Failed to load vault entries.', 'error')
     } finally {
       setLoading(false)
     }
