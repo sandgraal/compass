@@ -1,0 +1,19 @@
+{
+  "name": "compass-mcp",
+  "version": "0.1.0",
+  "description": "Read-only MCP server exposing Compass's local SQLite + knowledge base to Claude.",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "start": "tsx index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "better-sqlite3": "^11.5.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "tsx": "^4.19.2"
+  }
+}

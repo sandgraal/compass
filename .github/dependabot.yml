@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # Renovate is primary; Dependabot is fallback for GitHub Actions only.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ['*']

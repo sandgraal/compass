@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin.json",
+  "name": "compass-stack",
+  "version": "0.1.0",
+  "description": "Agent infrastructure for the Compass project — subagents, skills, hooks, output styles, and the Compass MCP server. Drop into any local-first Electron+React+TS project and adapt.",
+  "author": "Compass contributors",
+  "license": "MIT",
+  "components": {
+    "agents": ".claude/agents",
+    "skills": ".claude/skills",
+    "hooks": ".claude/settings.json",
+    "outputStyles": ".claude/output-styles",
+    "statusLine": ".claude/statusline/compass-statusline.sh",
+    "mcpServers": ".mcp.json"
+  },
+  "homepage": "https://github.com/sandgraal/compass",
+  "repository": "https://github.com/sandgraal/compass",
+  "keywords": [
+    "claude-code",
+    "electron",
+    "typescript",
+    "react",
+    "agent-infrastructure",
+    "local-first"
+  ]
+}
