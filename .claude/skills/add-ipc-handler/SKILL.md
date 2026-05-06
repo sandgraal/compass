@@ -62,7 +62,7 @@ Inside `Window.api`, find the `<domain>` block and add:
 ## Verify
 
 ```bash
-npx tsc --noEmit                         # renderer
+npx tsc -p tsconfig.web.json --noEmit    # renderer
 npx tsc -p tsconfig.node.json --noEmit   # main
 ```
 

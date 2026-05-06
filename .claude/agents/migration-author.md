@@ -21,7 +21,7 @@ Either:
 4. **Run** `npm run db:generate` (Drizzle Kit) to auto-generate the SQL migration
 5. **Read** the generated migration — verify it matches intent (drop columns can corrupt data; warn if you see one)
 6. **Update types** in `src/types/electron.d.ts` if the change affects an interface exposed to the renderer (e.g. new column in `ChecklistItem`)
-7. **Verify**: `npx tsc --noEmit` (renderer) and `npx tsc -p tsconfig.node.json --noEmit` (main) both pass
+7. **Verify**: `npx tsc -p tsconfig.web.json --noEmit` (renderer) and `npx tsc -p tsconfig.node.json --noEmit` (main) both pass
 
 # Output
 

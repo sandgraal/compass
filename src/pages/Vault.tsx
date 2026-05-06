@@ -1,5 +1,22 @@
-import { useState, useEffect, useRef } from 'react'
-import { ShieldCheck, Plus, Eye, EyeOff, Copy, Trash2, Lock, Banknote, IdCard, Key, HeartPulse, Scale, ChevronRight, Upload, History, Pencil } from 'lucide-react'
+import {
+  Banknote,
+  ChevronRight,
+  Copy,
+  Eye,
+  EyeOff,
+  HeartPulse,
+  History,
+  IdCard,
+  Key,
+  Lock,
+  Pencil,
+  Plus,
+  Scale,
+  ShieldCheck,
+  Trash2,
+  Upload
+} from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { cn } from '../lib/utils'
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -10,7 +27,10 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   legal: <Scale size={16} />
 }
 
-const FIELD_TEMPLATES: Record<string, Array<{ key: string; label: string; sensitive?: boolean }>> = {
+const FIELD_TEMPLATES: Record<
+  string,
+  Array<{ key: string; label: string; sensitive?: boolean }>
+> = {
   financial: [
     { key: 'institution', label: 'Institution' },
     { key: 'accountType', label: 'Account Type' },
@@ -70,15 +90,19 @@ export default function Vault(): JSX.Element {
   // Enable content protection when Vault is mounted; disable on unmount
   useEffect(() => {
     const isElectron = typeof window !== 'undefined' && !!window.api
-    if (isElectron) {
-      window.api.vault.setContentProtection(true)
-      return () => { window.api.vault.setContentProtection(false) }
+    if (!isElectron) return undefined
+
+    window.api.vault.setContentProtection(true)
+    return () => {
+      window.api.vault.setContentProtection(false)
     }
   }, [])
 
   // Clear toast timer on unmount
   useEffect(() => {
-    return () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current) }
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    }
   }, [])
 
   useEffect(() => {
@@ -87,38 +111,63 @@ export default function Vault(): JSX.Element {
       window.api.vault.getCategories().then(setCategories)
     } else {
       setCategories([
-        { id: 'financial', label: 'Financial', icon: 'banknote', description: 'Bank accounts, credit cards' },
+        {
+          id: 'financial',
+          label: 'Financial',
+          icon: 'banknote',
+          description: 'Bank accounts, credit cards'
+        },
         { id: 'identity', label: 'Identity', icon: 'id-card', description: 'SSN, passport, ID' },
-        { id: 'credentials', label: 'Credentials', icon: 'key', description: 'Passwords, API keys' },
-        { id: 'medical', label: 'Medical', icon: 'heart-pulse', description: 'Insurance, prescriptions' },
+        {
+          id: 'credentials',
+          label: 'Credentials',
+          icon: 'key',
+          description: 'Passwords, API keys'
+        },
+        {
+          id: 'medical',
+          label: 'Medical',
+          icon: 'heart-pulse',
+          description: 'Insurance, prescriptions'
+        },
         { id: 'legal', label: 'Legal', icon: 'scale', description: 'Contracts, wills' }
       ])
     }
   }, [])
 
   useEffect(() => {
-    loadEntries()
+    void loadEntries(selectedCategory)
   }, [selectedCategory])
 
-  async function loadEntries() {
+  async function loadEntries(category = selectedCategory) {
     setLoading(true)
-    const isElectron = typeof window !== 'undefined' && !!window.api
-    if (isElectron) {
-      const e = await window.api.vault.getEntries(selectedCategory)
-      setEntries(e)
-    } else {
+    try {
+      const isElectron = typeof window !== 'undefined' && !!window.api
+      if (isElectron) {
+        const e = await window.api.vault.getEntries(category)
+        setEntries(e)
+      } else {
+        setEntries([])
+      }
+    } catch (error) {
+      console.error('[vault] Failed to load entries', error)
       setEntries([])
+      showToast('Failed to load vault entries.', 'error')
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   async function addEntry() {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (isElectron) {
       const created = await window.api.vault.addEntry(selectedCategory, newEntry)
-      setEntries(prev => [...prev, created])
+      setEntries((prev) => [...prev, created])
     } else {
-      setEntries(prev => [...prev, { id: String(Date.now()), ...newEntry, createdAt: Date.now(), updatedAt: Date.now() }])
+      setEntries((prev) => [
+        ...prev,
+        { id: String(Date.now()), ...newEntry, createdAt: Date.now(), updatedAt: Date.now() }
+      ])
     }
     setNewEntry({})
     setAdding(false)
@@ -132,10 +181,13 @@ export default function Vault(): JSX.Element {
       const r = await window.api.vault.import1Password()
       if (r.canceled) return
       if (r.success) {
-        showToast(`Imported ${r.imported} item${r.imported === 1 ? '' : 's'} into your vault.`, 'success')
-        loadEntries()
+        showToast(
+          `Imported ${r.imported} item${r.imported === 1 ? '' : 's'} into your vault.`,
+          'success'
+        )
+        await loadEntries()
       } else {
-        showToast('Import failed: ' + r.error, 'error')
+        showToast(`Import failed: ${r.error}`, 'error')
       }
     } finally {
       setImporting(false)
@@ -146,7 +198,7 @@ export default function Vault(): JSX.Element {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
     const updated = await window.api.vault.updateEntry(selectedCategory, id, updates)
-    setEntries(prev => prev.map(e => e.id === id ? updated : e))
+    setEntries((prev) => prev.map((e) => (e.id === id ? updated : e)))
   }
 
   async function deleteEntry(id: string) {
@@ -155,7 +207,7 @@ export default function Vault(): JSX.Element {
     if (isElectron) {
       await window.api.vault.deleteEntry(selectedCategory, id)
     }
-    setEntries(prev => prev.filter(e => e.id !== id))
+    setEntries((prev) => prev.filter((e) => e.id !== id))
   }
 
   function copyToClipboard(value: string, fieldKey: string) {
@@ -165,7 +217,7 @@ export default function Vault(): JSX.Element {
   }
 
   function toggleReveal(fieldKey: string) {
-    setRevealedFields(prev => {
+    setRevealedFields((prev) => {
       const next = new Set(prev)
       next.has(fieldKey) ? next.delete(fieldKey) : next.add(fieldKey)
       return next
@@ -173,7 +225,7 @@ export default function Vault(): JSX.Element {
   }
 
   const fields = FIELD_TEMPLATES[selectedCategory] || []
-  const selectedCat = categories.find(c => c.id === selectedCategory)
+  const selectedCat = categories.find((c) => c.id === selectedCategory)
 
   return (
     <div className="flex h-full pt-10">
@@ -181,12 +233,15 @@ export default function Vault(): JSX.Element {
       <div className="w-56 shrink-0 border-r border-border bg-card/40 flex flex-col pt-4">
         <div className="px-4 pb-3 flex items-center gap-2">
           <Lock size={14} className="text-primary" />
-          <span className="text-xs font-semibold text-foreground uppercase tracking-wider">Vault</span>
+          <span className="text-xs font-semibold text-foreground uppercase tracking-wider">
+            Vault
+          </span>
         </div>
 
         <div className="flex-1 space-y-0.5 px-2">
           {categories.map((cat) => (
             <button
+              type="button"
               key={cat.id}
               onClick={() => setSelectedCategory(cat.id)}
               className={cn(
@@ -198,7 +253,13 @@ export default function Vault(): JSX.Element {
             >
               {CATEGORY_ICONS[cat.id]}
               {cat.label}
-              <ChevronRight size={12} className={cn('ml-auto transition-transform', selectedCategory === cat.id && 'rotate-90')} />
+              <ChevronRight
+                size={12}
+                className={cn(
+                  'ml-auto transition-transform',
+                  selectedCategory === cat.id && 'rotate-90'
+                )}
+              />
             </button>
           ))}
         </div>
@@ -210,6 +271,7 @@ export default function Vault(): JSX.Element {
           </div>
           <p className="text-xs text-muted-foreground/50">Keys in OS Keychain</p>
           <button
+            type="button"
             onClick={import1Password}
             disabled={importing}
             className="w-full flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-border hover:border-primary/50 text-muted-foreground hover:text-foreground rounded-lg transition-colors disabled:opacity-50"
@@ -232,7 +294,11 @@ export default function Vault(): JSX.Element {
             <p className="text-xs text-muted-foreground mt-0.5">{selectedCat?.description}</p>
           </div>
           <button
-            onClick={() => { setAdding(true); setNewEntry({}) }}
+            type="button"
+            onClick={() => {
+              setAdding(true)
+              setNewEntry({})
+            }}
             className="flex items-center gap-1.5 text-sm px-3 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors"
           >
             <Plus size={14} /> Add entry
@@ -245,21 +311,39 @@ export default function Vault(): JSX.Element {
             <div className="bg-card border border-primary/30 rounded-xl p-5 mb-6">
               <h3 className="text-sm font-semibold mb-4">New {selectedCat?.label} Entry</h3>
               <div className="grid grid-cols-2 gap-4 mb-4">
-                {fields.map(field => (
+                {fields.map((field) => (
                   <div key={field.key}>
-                    <label className="text-xs text-muted-foreground mb-1 block">{field.label}</label>
+                    <label
+                      htmlFor={`new-entry-${field.key}`}
+                      className="text-xs text-muted-foreground mb-1 block"
+                    >
+                      {field.label}
+                    </label>
                     <input
+                      id={`new-entry-${field.key}`}
                       type={field.sensitive ? 'password' : 'text'}
                       value={newEntry[field.key] || ''}
-                      onChange={(e) => setNewEntry(prev => ({ ...prev, [field.key]: e.target.value }))}
+                      onChange={(e) =>
+                        setNewEntry((prev) => ({ ...prev, [field.key]: e.target.value }))
+                      }
                       className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
                 ))}
               </div>
               <div className="flex gap-2 justify-end">
-                <button onClick={() => setAdding(false)} className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
-                <button onClick={addEntry} className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors">
+                <button
+                  type="button"
+                  onClick={() => setAdding(false)}
+                  className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={addEntry}
+                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+                >
                   Save encrypted
                 </button>
               </div>
@@ -269,15 +353,25 @@ export default function Vault(): JSX.Element {
           {/* Entries */}
           {loading ? (
             <div className="space-y-3">
-              {[1, 2].map(n => <div key={n} className="h-24 bg-secondary/30 rounded-xl animate-pulse" />)}
+              {[1, 2].map((n) => (
+                <div key={n} className="h-24 bg-secondary/30 rounded-xl animate-pulse" />
+              ))}
             </div>
           ) : entries.length === 0 && !adding ? (
             <div className="flex flex-col items-center py-16 gap-3">
               <div className="w-12 h-12 rounded-full bg-secondary flex items-center justify-center text-muted-foreground">
                 {CATEGORY_ICONS[selectedCategory]}
               </div>
-              <p className="text-sm text-muted-foreground">No {selectedCat?.label.toLowerCase()} entries yet</p>
-              <button onClick={() => setAdding(true)} className="text-xs text-primary hover:underline">Add your first entry</button>
+              <p className="text-sm text-muted-foreground">
+                No {selectedCat?.label.toLowerCase()} entries yet
+              </p>
+              <button
+                type="button"
+                onClick={() => setAdding(true)}
+                className="text-xs text-primary hover:underline"
+              >
+                Add your first entry
+              </button>
             </div>
           ) : (
             <div className="space-y-4">
@@ -299,21 +393,39 @@ export default function Vault(): JSX.Element {
         </div>
       </div>
       {toast && (
-        <div className={cn(
-          'fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all',
-          toast.type === 'success'
-            ? 'bg-emerald-500/90 text-white'
-            : 'bg-destructive/90 text-destructive-foreground'
-        )}>
+        <div
+          className={cn(
+            'fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all',
+            toast.type === 'success'
+              ? 'bg-emerald-500/90 text-white'
+              : 'bg-destructive/90 text-destructive-foreground'
+          )}
+        >
           {toast.message}
-          <button onClick={() => setToast(null)} aria-label="Close notification" className="ml-2 opacity-70 hover:opacity-100 text-xs">✕</button>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+            className="ml-2 opacity-70 hover:opacity-100 text-xs"
+          >
+            ✕
+          </button>
         </div>
       )}
     </div>
   )
 }
 
-function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal, onCopy, onUpdate, onDelete }: {
+function EntryCard({
+  entry,
+  fields,
+  revealedFields,
+  copiedField,
+  onToggleReveal,
+  onCopy,
+  onUpdate,
+  onDelete
+}: {
   entry: VaultEntry
   fields: Array<{ key: string; label: string; sensitive?: boolean }>
   revealedFields: Set<string>
@@ -327,12 +439,20 @@ function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal,
   const [editing, setEditing] = useState(false)
   const [editValues, setEditValues] = useState<Record<string, string>>({})
   const [editRevealed, setEditRevealed] = useState<Set<string>>(new Set())
-  const entryName = (entry.institution || entry.service || entry.documentType || entry.type || 'Entry') as string
-  const history = (Array.isArray(entry._history) ? entry._history : []) as Array<Record<string, unknown>>
+  const entryName = (entry.institution ||
+    entry.service ||
+    entry.documentType ||
+    entry.type ||
+    'Entry') as string
+  const history = (Array.isArray(entry._history) ? entry._history : []) as Array<
+    Record<string, unknown>
+  >
 
   function startEdit() {
     const initial: Record<string, string> = {}
-    fields.forEach(f => { initial[f.key] = (entry[f.key] as string) || '' })
+    fields.forEach((f) => {
+      initial[f.key] = (entry[f.key] as string) || ''
+    })
     setEditValues(initial)
     setEditRevealed(new Set())
     setEditing(true)
@@ -350,7 +470,8 @@ function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal,
         <div className="flex items-center gap-1">
           {history.length > 0 && (
             <button
-              onClick={() => setShowHistory(v => !v)}
+              type="button"
+              onClick={() => setShowHistory((v) => !v)}
               title={`${history.length} previous version${history.length > 1 ? 's' : ''}`}
               className={cn(
                 'flex items-center gap-1 p-1.5 rounded text-xs transition-colors',
@@ -364,6 +485,7 @@ function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal,
             </button>
           )}
           <button
+            type="button"
             onClick={startEdit}
             title="Edit entry"
             className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
@@ -371,6 +493,7 @@ function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal,
             <Pencil size={12} />
           </button>
           <button
+            type="button"
             onClick={onDelete}
             className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
           >
@@ -382,26 +505,34 @@ function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal,
       {editing ? (
         <div>
           <div className="grid grid-cols-2 gap-3 mb-3">
-            {fields.map(field => {
+            {fields.map((field) => {
               const isRevealed = editRevealed.has(field.key)
+              const editFieldId = `edit-entry-${entry.id}-${field.key}`
               return (
                 <div key={field.key}>
-                  <label className="text-xs text-muted-foreground mb-1 block">{field.label}</label>
+                  <label htmlFor={editFieldId} className="text-xs text-muted-foreground mb-1 block">
+                    {field.label}
+                  </label>
                   <div className="relative flex items-center">
                     <input
+                      id={editFieldId}
                       type={field.sensitive && !isRevealed ? 'password' : 'text'}
                       value={editValues[field.key] || ''}
-                      onChange={(e) => setEditValues(prev => ({ ...prev, [field.key]: e.target.value }))}
+                      onChange={(e) =>
+                        setEditValues((prev) => ({ ...prev, [field.key]: e.target.value }))
+                      }
                       className="w-full bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary pr-7"
                     />
                     {field.sensitive && (
                       <button
                         type="button"
-                        onClick={() => setEditRevealed(prev => {
-                          const next = new Set(prev)
-                          next.has(field.key) ? next.delete(field.key) : next.add(field.key)
-                          return next
-                        })}
+                        onClick={() =>
+                          setEditRevealed((prev) => {
+                            const next = new Set(prev)
+                            next.has(field.key) ? next.delete(field.key) : next.add(field.key)
+                            return next
+                          })
+                        }
                         className="absolute right-2 text-muted-foreground hover:text-foreground transition-colors"
                       >
                         {isRevealed ? <EyeOff size={11} /> : <Eye size={11} />}
@@ -413,13 +544,25 @@ function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal,
             })}
           </div>
           <div className="flex gap-2 justify-end">
-            <button onClick={() => setEditing(false)} className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
-            <button onClick={saveEdit} className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors">Save encrypted</button>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={saveEdit}
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+            >
+              Save encrypted
+            </button>
           </div>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3">
-          {fields.map(field => {
+          {fields.map((field) => {
             const value = entry[field.key] as string | undefined
             if (!value) return null
             const fieldId = `${entry.id}-${field.key}`
@@ -430,11 +573,17 @@ function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal,
               <div key={field.key}>
                 <p className="text-xs text-muted-foreground mb-0.5">{field.label}</p>
                 <div className="flex items-center gap-1.5">
-                  <span className={cn('text-sm text-foreground flex-1', field.sensitive && !isRevealed && 'font-mono tracking-wider')}>
+                  <span
+                    className={cn(
+                      'text-sm text-foreground flex-1',
+                      field.sensitive && !isRevealed && 'font-mono tracking-wider'
+                    )}
+                  >
                     {field.sensitive && !isRevealed ? '••••••••' : value}
                   </span>
                   {field.sensitive && (
                     <button
+                      type="button"
                       onClick={() => onToggleReveal(fieldId)}
                       className="p-0.5 text-muted-foreground hover:text-foreground transition-colors"
                     >
@@ -442,8 +591,12 @@ function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal,
                     </button>
                   )}
                   <button
+                    type="button"
                     onClick={() => onCopy(value, fieldId)}
-                    className={cn('p-0.5 transition-colors', isCopied ? 'text-emerald-400' : 'text-muted-foreground hover:text-foreground')}
+                    className={cn(
+                      'p-0.5 transition-colors',
+                      isCopied ? 'text-emerald-400' : 'text-muted-foreground hover:text-foreground'
+                    )}
                   >
                     <Copy size={11} />
                   </button>
@@ -460,23 +613,30 @@ function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal,
           <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
             <History size={11} /> Previous versions (encrypted)
           </p>
-          {history.map((snap, i) => {
+          {history.map((snap) => {
             const savedAt = snap._savedAt ? new Date(snap._savedAt as number) : null
+            const historyKey = savedAt ? `${savedAt.getTime()}` : JSON.stringify(snap)
             return (
-              <div key={i} className="bg-secondary/40 rounded-lg p-3">
+              <div key={historyKey} className="bg-secondary/40 rounded-lg p-3">
                 {savedAt && (
                   <p className="text-xs text-muted-foreground mb-2">
-                    {savedAt.toLocaleDateString()} {savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {savedAt.toLocaleDateString()}{' '}
+                    {savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </p>
                 )}
                 <div className="grid grid-cols-2 gap-2">
-                  {fields.map(field => {
+                  {fields.map((field) => {
                     const val = snap[field.key] as string | undefined
                     if (!val) return null
                     return (
                       <div key={field.key}>
                         <p className="text-xs text-muted-foreground/60">{field.label}</p>
-                        <p className={cn('text-xs text-foreground/70', field.sensitive && 'font-mono tracking-wider')}>
+                        <p
+                          className={cn(
+                            'text-xs text-foreground/70',
+                            field.sensitive && 'font-mono tracking-wider'
+                          )}
+                        >
                           {field.sensitive ? '••••••••' : val}
                         </p>
                       </div>
