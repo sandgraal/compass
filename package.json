@@ -114,7 +114,8 @@
       "category": "public.app-category.productivity",
       "icon": "resources/icon.icns"
     },
-    "files": ["dist/**/*", "dist-electron/**/*"],
+    "files": ["out/**/*", "package.json"],
+    "asarUnpack": ["**/*.node"],
     "directories": {
       "output": "release"
     }
