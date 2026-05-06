@@ -12,11 +12,17 @@ type SyncResult = {
   error?: string
 }
 
+function getIntegrationId(db: ReturnType<typeof getDb>, service: string): number | null {
+  const row = db.select({ id: integrations.id }).from(integrations).where(eq(integrations.service, service)).get()
+  return row?.id ?? null
+}
+
 export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
   const tokens = loadToken('google') as { access_token?: string; refresh_token?: string } | null
   if (!tokens?.access_token) return { service: 'google', success: false, error: 'Not connected' }
 
   const db = getDb()
+  const integrationId = getIntegrationId(db, 'google')
   let recordsUpdated = 0
 
   try {
@@ -128,11 +134,13 @@ export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<Syn
       .where(eq(integrations.service, 'google'))
       .run()
 
-    db.insert(syncEvents).values({
-      integrationId: 1,
-      syncedAt: new Date(),
-      recordsUpdated
-    }).run()
+    if (integrationId !== null) {
+      db.insert(syncEvents).values({
+        integrationId,
+        syncedAt: new Date(),
+        recordsUpdated
+      }).run()
+    }
 
     mainWindow?.webContents.send('sync:update', { service: 'google', status: 'success', recordsUpdated })
     return { service: 'google', success: true, recordsUpdated }
@@ -143,6 +151,14 @@ export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<Syn
       .set({ status: 'error', errorMessage: message })
       .where(eq(integrations.service, 'google'))
       .run()
+    if (integrationId !== null) {
+      db.insert(syncEvents).values({
+        integrationId,
+        syncedAt: new Date(),
+        recordsUpdated: 0,
+        errors: message
+      }).run()
+    }
     mainWindow?.webContents.send('sync:update', { service: 'google', status: 'error', error: message })
     return { service: 'google', success: false, error: message }
   }
@@ -153,6 +169,7 @@ export async function syncGitHub(mainWindow?: BrowserWindow | null): Promise<Syn
   if (!tokens?.access_token) return { service: 'github', success: false, error: 'Not connected' }
 
   const db = getDb()
+  const integrationId = getIntegrationId(db, 'github')
   let recordsUpdated = 0
 
   try {
@@ -197,6 +214,14 @@ export async function syncGitHub(mainWindow?: BrowserWindow | null): Promise<Syn
       .where(eq(integrations.service, 'github'))
       .run()
 
+    if (integrationId !== null) {
+      db.insert(syncEvents).values({
+        integrationId,
+        syncedAt: new Date(),
+        recordsUpdated
+      }).run()
+    }
+
     mainWindow?.webContents.send('sync:update', { service: 'github', status: 'success', recordsUpdated })
     return { service: 'github', success: true, recordsUpdated }
 
@@ -206,6 +231,14 @@ export async function syncGitHub(mainWindow?: BrowserWindow | null): Promise<Syn
       .set({ status: 'error', errorMessage: message })
       .where(eq(integrations.service, 'github'))
       .run()
+    if (integrationId !== null) {
+      db.insert(syncEvents).values({
+        integrationId,
+        syncedAt: new Date(),
+        recordsUpdated: 0,
+        errors: message
+      }).run()
+    }
     return { service: 'github', success: false, error: message }
   }
 }

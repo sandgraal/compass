@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { ShieldCheck, Plus, Eye, EyeOff, Copy, Trash2, Lock, Banknote, IdCard, Key, HeartPulse, Scale, ChevronRight, Upload } from 'lucide-react'
 import { cn } from '../lib/utils'
 
@@ -58,6 +58,14 @@ export default function Vault(): JSX.Element {
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function showToast(message: string, type: 'success' | 'error') {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    setToast({ message, type })
+    toastTimerRef.current = setTimeout(() => setToast(null), 4000)
+  }
 
   // Enable content protection when Vault is mounted; disable on unmount
   useEffect(() => {
@@ -66,6 +74,11 @@ export default function Vault(): JSX.Element {
       window.api.vault.setContentProtection(true)
       return () => { window.api.vault.setContentProtection(false) }
     }
+  }, [])
+
+  // Clear toast timer on unmount
+  useEffect(() => {
+    return () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current) }
   }, [])
 
   useEffect(() => {
@@ -119,10 +132,10 @@ export default function Vault(): JSX.Element {
       const r = await window.api.vault.import1Password()
       if (r.canceled) return
       if (r.success) {
-        alert(`Imported ${r.imported} item${r.imported === 1 ? '' : 's'} into your vault.`)
+        showToast(`Imported ${r.imported} item${r.imported === 1 ? '' : 's'} into your vault.`, 'success')
         loadEntries()
       } else {
-        alert('Import failed: ' + r.error)
+        showToast('Import failed: ' + r.error, 'error')
       }
     } finally {
       setImporting(false)
@@ -277,6 +290,17 @@ export default function Vault(): JSX.Element {
           )}
         </div>
       </div>
+      {toast && (
+        <div className={cn(
+          'fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all',
+          toast.type === 'success'
+            ? 'bg-emerald-500/90 text-white'
+            : 'bg-destructive/90 text-destructive-foreground'
+        )}>
+          {toast.message}
+          <button onClick={() => setToast(null)} aria-label="Close notification" className="ml-2 opacity-70 hover:opacity-100 text-xs">✕</button>
+        </div>
+      )}
     </div>
   )
 }
