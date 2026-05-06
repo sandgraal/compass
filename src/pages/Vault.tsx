@@ -326,6 +326,7 @@ function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal,
   const [showHistory, setShowHistory] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editValues, setEditValues] = useState<Record<string, string>>({})
+  const [editRevealed, setEditRevealed] = useState<Set<string>>(new Set())
   const entryName = (entry.institution || entry.service || entry.documentType || entry.type || 'Entry') as string
   const history = (Array.isArray(entry._history) ? entry._history : []) as Array<Record<string, unknown>>
 
@@ -333,6 +334,7 @@ function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal,
     const initial: Record<string, string> = {}
     fields.forEach(f => { initial[f.key] = (entry[f.key] as string) || '' })
     setEditValues(initial)
+    setEditRevealed(new Set())
     setEditing(true)
   }
 
@@ -380,17 +382,35 @@ function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal,
       {editing ? (
         <div>
           <div className="grid grid-cols-2 gap-3 mb-3">
-            {fields.map(field => (
-              <div key={field.key}>
-                <label className="text-xs text-muted-foreground mb-1 block">{field.label}</label>
-                <input
-                  type={field.sensitive ? 'password' : 'text'}
-                  value={editValues[field.key] || ''}
-                  onChange={(e) => setEditValues(prev => ({ ...prev, [field.key]: e.target.value }))}
-                  className="w-full bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
-                />
-              </div>
-            ))}
+            {fields.map(field => {
+              const isRevealed = editRevealed.has(field.key)
+              return (
+                <div key={field.key}>
+                  <label className="text-xs text-muted-foreground mb-1 block">{field.label}</label>
+                  <div className="relative flex items-center">
+                    <input
+                      type={field.sensitive && !isRevealed ? 'password' : 'text'}
+                      value={editValues[field.key] || ''}
+                      onChange={(e) => setEditValues(prev => ({ ...prev, [field.key]: e.target.value }))}
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary pr-7"
+                    />
+                    {field.sensitive && (
+                      <button
+                        type="button"
+                        onClick={() => setEditRevealed(prev => {
+                          const next = new Set(prev)
+                          next.has(field.key) ? next.delete(field.key) : next.add(field.key)
+                          return next
+                        })}
+                        className="absolute right-2 text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        {isRevealed ? <EyeOff size={11} /> : <Eye size={11} />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
           </div>
           <div className="flex gap-2 justify-end">
             <button onClick={() => setEditing(false)} className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
