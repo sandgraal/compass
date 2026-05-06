@@ -38,7 +38,7 @@ tsx mcp/compass-mcp/index.ts
 
 ## Register with Claude Code
 
-The repo-root `.mcp.json` registers this server automatically when Claude Code starts in this project. Verify with:
+The repo-root `.mcp.json` registers this server automatically when Claude Code starts in this project. The `mcp/compass-mcp` package is listed as an npm workspace, so running `npm install` at the repo root also installs this server's dependencies. Verify with:
 
 ```bash
 claude mcp list

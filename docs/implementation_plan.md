@@ -7,8 +7,8 @@
 
 | Bucket | Items | % done |
 |---|---|---|
-| **Phase 0** — Agent infrastructure | 7 sub-areas | 0% (this PR sets it up) |
-| **Phase 0+** — Leading-edge agent infra | 10 items | 0% |
+| **Phase 0** — Agent infrastructure | 7 sub-areas | 100% |
+| **Phase 0+** — Leading-edge agent infra | 10 items | 80% (0+.6, 0+.9, 0+.10 deferred) |
 | **Phase 1** — Critical bug fixes | 5 items | 0% |
 | **Phase 2** — Remaining PRD features | 7 items | partial (2.1 vault edit shipped in PR #10 follow-up) |
 | **Phase 3** — Beyond-PRD polish | 2 selected items | 0% |
@@ -42,64 +42,64 @@ Modern (Nov 2025+) Claude Code best practice splits guidance into 4 layers. This
 
 ### 0.2 `docs/` directory
 - [x] `docs/implementation_plan.md` (this file)
-- [ ] `docs/architecture.md` — DB schema overview, IPC handler map, security model, data flow diagrams
-- [ ] `docs/conventions.md` — TS/React style, file naming, error handling pattern, IPC handler pattern, toast notification pattern
-- [ ] `docs/integrations.md` — how to add a new integration (Notion, Linear, etc.)
-- [ ] `docs/knowledge-extractor.md` — how the knowledge file auto-update pipeline works
+- [x] `docs/architecture.md` — DB schema overview, IPC handler map, security model, data flow diagrams
+- [x] `docs/conventions.md` — TS/React style, file naming, error handling pattern, IPC handler pattern, toast notification pattern
+- [x] `docs/integrations.md` — how to add a new integration (Notion, Linear, etc.)
+- [x] `docs/knowledge-extractor.md` — how the knowledge file auto-update pipeline works
 - [x] Move existing `FINANCE_MODULE.md` → `docs/finance.md`
 
 ### 0.3 `.claude/skills/` — auto-invoked workflows
-- [ ] **`add-integration`** — DB schema → IPC → preload → types → UI card → extractor playbook
-- [ ] **`add-ipc-handler`** — handler + preload + type definition pattern
-- [ ] **`add-page`** — route + sidebar + command palette + page component
-- [ ] **`add-vault-category`** — vault category + field templates
-- [ ] **`safe-commit`** — typecheck + lint + draft conventional-commit + open PR
-- [ ] **`security-review`** — IPC sanitization, vault invariants, CSP changes
-- [ ] **`brand-style-check`** — verify tailwind tokens
+- [x] **`add-integration`** — DB schema → IPC → preload → types → UI card → extractor playbook
+- [x] **`add-ipc-handler`** — handler + preload + type definition pattern
+- [x] **`add-page`** — route + sidebar + command palette + page component
+- [x] **`add-vault-category`** — vault category + field templates
+- [x] **`safe-commit`** — typecheck + lint + draft conventional-commit + open PR
+- [x] **`security-review`** — IPC sanitization, vault invariants, CSP changes
+- [x] **`brand-style-check`** — verify tailwind tokens
 
 ### 0.4 `.claude/agents/` — subagents
-- [ ] **`bug-triager`** — read-only crawl for TODOs, dead code, unused deps
-- [ ] **`migration-author`** — Drizzle migration generator
-- [ ] **`security-auditor`** — diff review for vault/OAuth/IPC/CSP regressions
-- [ ] **`integration-implementer`** — heavy isolated impl of full integration end-to-end
-- [ ] **`ui-polish`** — accessibility + keyboard nav + states review
-- [ ] **`docs-keeper`** — keeps `docs/*` in sync with code
+- [x] **`bug-triager`** — read-only crawl for TODOs, dead code, unused deps
+- [x] **`migration-author`** — Drizzle migration generator
+- [x] **`security-auditor`** — diff review for vault/OAuth/IPC/CSP regressions
+- [x] **`integration-implementer`** — heavy isolated impl of full integration end-to-end
+- [x] **`ui-polish`** — accessibility + keyboard nav + states review
+- [x] **`docs-keeper`** — keeps `docs/*` in sync with code
 
 ### 0.5 `.claude/hooks/` — enforcement (`.claude/settings.json`)
-- [ ] PreToolUse on Bash: block `git push --force` to main/master
-- [ ] PreToolUse on Write/Edit: block writes under data dirs (mirror pre-commit)
-- [ ] PreToolUse on Edit/Write: warn on `electron/ipc/vault.ts`, `electron/db/schema.ts`
-- [ ] PostToolUse on schema.ts edit: auto-run `npm run db:generate`
+- [x] PreToolUse on Bash: block `git push --force` to main/master
+- [x] PreToolUse on Write/Edit: block writes under data dirs (mirror pre-commit)
+- [x] PreToolUse on Edit/Write: warn on `electron/ipc/vault.ts`, `electron/db/schema.ts`
+- [x] PostToolUse on schema.ts edit: auto-run `npm run db:generate`
 - [ ] PostToolUse on commit: append summary to `docs/CHANGELOG.md`
 
 ### 0.6 `.github/` — CI/PR scaffolding
-- [ ] `.github/workflows/ci.yml` — typecheck + lint + test + build on PR
-- [ ] `.github/workflows/security.yml` — weekly `npm audit`
-- [ ] `.github/dependabot.yml` — fallback (Renovate is primary)
-- [ ] `.github/PULL_REQUEST_TEMPLATE.md`
-- [ ] `.github/ISSUE_TEMPLATE/` (bug + feature)
-- [ ] `.github/CODEOWNERS`
+- [x] `.github/workflows/ci.yml` — typecheck + lint + test + build on PR
+- [x] `.github/workflows/security.yml` — weekly `npm audit`
+- [x] `.github/dependabot.yml` — fallback (Renovate is primary)
+- [x] `.github/PULL_REQUEST_TEMPLATE.md`
+- [x] `.github/ISSUE_TEMPLATE/` (bug + feature)
+- [x] `.github/CODEOWNERS`
 
 ### 0.7 Tooling — leading-edge stack
-**Lint + format**: [ ] Biome [ ] Oxlint (CI fast-layer) [ ] ESLint (React-only minimal config) [ ] Knip
-**Hooks**: [ ] Lefthook (replaces Husky)
-**Tests**: [ ] Vitest [ ] Playwright (E2E) [ ] coverage 70% on `electron/ipc/` + `electron/knowledge/`
-**Type safety**: [ ] `npm run typecheck` script [ ] electron-trpc (incremental adoption)
-**Dependency hygiene**: [ ] Renovate [ ] syncpack [ ] remove `react-beautiful-dnd`
-**Release**: [ ] Changesets
+**Lint + format**: [x] Biome [x] Oxlint (CI fast-layer) [x] ESLint (React-only minimal config) [x] Knip
+**Hooks**: [x] Lefthook (replaces Husky)
+**Tests**: [x] Vitest [x] Playwright (E2E) [ ] coverage 70% on `electron/ipc/` + `electron/knowledge/`
+**Type safety**: [x] `npm run typecheck` script [ ] electron-trpc (incremental adoption)
+**Dependency hygiene**: [x] Renovate [ ] syncpack [x] remove `react-beautiful-dnd`
+**Release**: [x] Changesets
 
 ---
 
 ## Phase 0+ — Leading-edge agent infrastructure (the "futuristic" tier)
 
-- [ ] **0+.1 Custom statusline** (`.claude/statusline/`) — branch + test status + sync queue length
-- [ ] **0+.2 Compass MCP server** (`mcp/compass-mcp/`) — read-only knowledge + tasks + calendar + sync status as MCP tools (vault excluded)
-- [ ] **0+.3 Output styles** (`.claude/output-styles/`) — code-mode, explain-mode, commit-mode
-- [ ] **0+.4 Plugin manifest** (`.claude/plugin.json`) — wrap whole `.claude/` as installable plugin
-- [ ] **0+.5 Director-pattern agent orchestration** (`.claude/agents/director.md`) — coordinates parallel subagents per feature
+- [x] **0+.1 Custom statusline** (`.claude/statusline/`) — branch + test status + sync queue length
+- [x] **0+.2 Compass MCP server** (`mcp/compass-mcp/`) — read-only knowledge + tasks + calendar + sync status as MCP tools (vault excluded)
+- [x] **0+.3 Output styles** (`.claude/output-styles/`) — code-mode, explain-mode, commit-mode
+- [x] **0+.4 Plugin manifest** (`.claude/plugin.json`) — wrap whole `.claude/` as installable plugin
+- [x] **0+.5 Director-pattern agent orchestration** (`.claude/agents/director.md`) — coordinates parallel subagents per feature
 - [ ] **0+.6 Living docs PostToolUse hook** — auto-run docs-keeper on schema/preload edits
-- [ ] **0+.7 Parallel PR review pipeline** — `claude-code-action` runs security-auditor + ui-polish + bug-triager in parallel
-- [ ] **0+.8 Worktree workflow** — `scripts/worktree.sh` + `docs/agent-orchestration.md`
+- [x] **0+.7 Parallel PR review pipeline** — `claude-code-action` runs security-auditor + ui-polish + bug-triager in parallel
+- [x] **0+.8 Worktree workflow** — `scripts/worktree.sh` + `docs/agent-orchestration.md`
 - [ ] **0+.9 Background scheduled-task agents** — nightly bug-triager, weekly docs-keeper, monthly security-auditor
 - [ ] **0+.10 Project status JSON** (`.claude/project-status.json`) — agent-readable snapshot of repo state
 

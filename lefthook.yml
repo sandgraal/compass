@@ -19,7 +19,7 @@ pre-commit:
           echo "BLOCKED: SQLite database files must not be committed."
           exit 1
         fi
-        if git diff --cached --name-only | grep -qE '^\.env(\.local|\..*local)?$'; then
+        if git diff --cached --name-only | grep -qE '(^|/)\.env[^/]*$'; then
           echo "BLOCKED: .env files must never be committed."
           exit 1
         fi

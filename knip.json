@@ -24,7 +24,6 @@
     "release/**"
   ],
   "ignoreDependencies": [
-    "tailwindcss-animate",
-    "@types/react-beautiful-dnd"
+    "tailwindcss-animate"
   ]
 }

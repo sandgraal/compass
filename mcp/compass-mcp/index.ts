@@ -5,15 +5,15 @@
  * so Claude can answer "what's on my schedule today?" or "search my knowledge
  * base for X" while coding — closing the dogfooding loop.
  *
- * Vault and PII fields are EXPLICITLY EXCLUDED — only knowledge files,
- * checklist items, calendar events, and sync status are exposed.
+ * Vault fields and OAuth tokens are EXPLICITLY EXCLUDED. Returned data may
+ * include user content (task titles, calendar event titles, knowledge files).
  *
  * Run: tsx mcp/compass-mcp/index.ts
  * Register in .mcp.json (already done at repo root).
  */
 import Database from 'better-sqlite3'
-import { readFileSync, readdirSync, statSync } from 'fs'
-import { join, relative, extname } from 'path'
+import { readFileSync, readdirSync, realpathSync } from 'fs'
+import { join, relative, extname, sep } from 'path'
 import { homedir } from 'os'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -132,11 +132,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (!query) return errorResult('query is required')
       const results = walkKnowledge()
         .map((f) => {
-          const content = readFileSync(join(KNOWLEDGE_DIR, f.path), 'utf8')
-          const idx = content.toLowerCase().indexOf(query)
+          const idx = f.content.toLowerCase().indexOf(query)
           if (idx < 0) return null
-          const snippet = content.slice(Math.max(0, idx - 80), idx + 200).replace(/\n/g, ' ')
-          return { ...f, snippet }
+          const snippet = f.content.slice(Math.max(0, idx - 80), idx + 200).replace(/\n/g, ' ')
+          return { path: f.path, title: f.title, snippet }
         })
         .filter(Boolean)
       return textResult(JSON.stringify(results, null, 2))
@@ -176,8 +175,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return errorResult('invalid path')
       }
       const fullPath = join(KNOWLEDGE_DIR, path)
-      if (!fullPath.startsWith(KNOWLEDGE_DIR)) return errorResult('path traversal blocked')
-      const content = readFileSync(fullPath, 'utf8')
+      // Resolve symlinks to prevent traversal via symlinks inside KNOWLEDGE_DIR
+      let resolvedPath: string
+      try {
+        resolvedPath = realpathSync(fullPath)
+      } catch {
+        return errorResult('file not found')
+      }
+      if (!resolvedPath.startsWith(KNOWLEDGE_DIR + sep)) return errorResult('path traversal blocked')
+      const content = readFileSync(resolvedPath, 'utf8')
       return textResult(content)
     }
 
@@ -191,9 +197,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 // Helpers
 // ============================================================
 
-function walkKnowledge(): Array<{ path: string; title: string }> {
+function walkKnowledge(): Array<{ path: string; title: string; content: string }> {
   try {
-    const results: Array<{ path: string; title: string }> = []
+    const results: Array<{ path: string; title: string; content: string }> = []
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const fullPath = join(dir, entry.name)
@@ -202,7 +208,7 @@ function walkKnowledge(): Array<{ path: string; title: string }> {
           const relPath = relative(KNOWLEDGE_DIR, fullPath)
           const content = readFileSync(fullPath, 'utf8')
           const titleMatch = content.match(/^#\s+(.+)$/m)
-          results.push({ path: relPath, title: titleMatch?.[1].trim() || entry.name })
+          results.push({ path: relPath, title: titleMatch?.[1].trim() || entry.name, content })
         }
       }
     }

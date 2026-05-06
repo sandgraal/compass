@@ -6,6 +6,7 @@
   "author": "sandgraal",
   "license": "UNLICENSED",
   "private": true,
+  "workspaces": ["mcp/compass-mcp"],
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
@@ -17,7 +18,7 @@
     "check": "biome check .",
     "format": "biome check --write .",
     "lint:fast": "oxlint .",
-    "lint:react": "eslint .",
+    "lint:react": "eslint src",
     "test": "vitest --passWithNoTests",
     "test:run": "vitest --run --passWithNoTests",
     "test:coverage": "vitest --run --coverage --passWithNoTests",
