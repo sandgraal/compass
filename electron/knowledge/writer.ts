@@ -234,7 +234,18 @@ export function seedKnowledgeFiles(knowledgeDir: string): void {
 
 export function updateKnowledgeFile(knowledgeDir: string, relPath: string, content: string): void {
   const fullPath = join(knowledgeDir, relPath)
+  // Save a snapshot of the previous content so the diff view can compare
+  if (existsSync(fullPath)) {
+    const prev = readFileSync(fullPath, 'utf8')
+    writeFileSync(fullPath + '.prev', prev, 'utf8')
+  }
   writeFileSync(fullPath, content, 'utf8')
+}
+
+export function readPrevKnowledgeFile(knowledgeDir: string, relPath: string): string | null {
+  const prevPath = join(knowledgeDir, relPath + '.prev')
+  if (!existsSync(prevPath)) return null
+  return readFileSync(prevPath, 'utf8')
 }
 
 export function readKnowledgeFile(knowledgeDir: string, relPath: string): string {

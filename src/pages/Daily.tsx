@@ -56,6 +56,13 @@ export default function Daily(): JSX.Element {
     loadData()
   }, [date])
 
+  // Listen for the ⌘K "New task" command
+  useEffect(() => {
+    const handler = () => inputRef.current?.focus()
+    window.addEventListener('compass:new-task', handler)
+    return () => window.removeEventListener('compass:new-task', handler)
+  }, [])
+
   async function loadData() {
     setLoading(true)
     const isElectron = typeof window !== 'undefined' && !!window.api

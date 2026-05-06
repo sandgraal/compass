@@ -116,6 +116,14 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
     return { success: true }
   })
 
+  ipcMain.handle('knowledge:get-prev', (_event, relativePath: string) => {
+    // Sanitize path
+    if (relativePath.includes('..')) return null
+    const prevPath = join(KNOWLEDGE_DIR, relativePath + '.prev')
+    if (!existsSync(prevPath)) return null
+    return readFileSync(prevPath, 'utf8')
+  })
+
   ipcMain.handle('knowledge:search', (_event, query: string) => {
     // Simple in-process full-text search across all markdown files
     const files = walkDir(KNOWLEDGE_DIR, KNOWLEDGE_DIR)

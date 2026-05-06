@@ -2,9 +2,9 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, CalendarDays, CalendarRange, Calendar, BookOpen,
-  ShieldCheck, Plug, Settings, Search, TrendingUp, RefreshCw, FolderOpen, ArrowRight
+  ShieldCheck, Plug, Settings, Search, TrendingUp, RefreshCw, FolderOpen, ArrowRight, Plus
 } from 'lucide-react'
-import { cn } from '../lib/utils'
+import { cn, todayISO } from '../lib/utils'
 
 interface Command {
   id: string
@@ -30,11 +30,30 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
   const nav = (path: string) => { navigate(path); onClose() }
 
   const COMMANDS: Command[] = [
+    {
+      id: 'new-task',
+      label: 'New task for today',
+      description: 'Add a task to today\'s daily checklist',
+      icon: <Plus size={15} />,
+      action: async () => {
+        onClose()
+        // If we're already on /daily, dispatch a custom event; otherwise navigate there
+        if (window.location.hash === '#/daily') {
+          window.dispatchEvent(new CustomEvent('compass:new-task'))
+        } else {
+          navigate('/daily')
+          // Give the Daily page a tick to mount, then trigger
+          setTimeout(() => window.dispatchEvent(new CustomEvent('compass:new-task')), 150)
+        }
+      },
+      keywords: ['add', 'task', 'todo', 'checklist', 'new', 'create']
+    },
     { id: 'dashboard',     label: 'Dashboard',      description: 'Today at a glance',        icon: <LayoutDashboard size={15} />, action: () => nav('/'),              keywords: ['home', 'today'] },
     { id: 'daily',         label: 'Daily',           description: 'Daily checklist',           icon: <CalendarDays size={15} />,    action: () => nav('/daily'),         keywords: ['checklist', 'tasks', 'todo'] },
     { id: 'weekly',        label: 'Weekly',          description: 'Weekly review & goals',     icon: <CalendarRange size={15} />,   action: () => nav('/weekly'),        keywords: ['week', 'review'] },
     { id: 'monthly',       label: 'Monthly',         description: 'Monthly planning & habits', icon: <Calendar size={15} />,        action: () => nav('/monthly'),       keywords: ['month', 'habits'] },
     { id: 'knowledge',     label: 'Knowledge Base',  description: 'Browse & edit your notes',  icon: <BookOpen size={15} />,        action: () => nav('/knowledge'),     keywords: ['notes', 'files', 'docs', 'kb'] },
+    { id: 'knowledge-search', label: 'Search knowledge base', description: 'Full-text search across all notes', icon: <Search size={15} />, action: () => { navigate('/knowledge'); onClose(); setTimeout(() => window.dispatchEvent(new CustomEvent('compass:focus-search')), 150) }, keywords: ['find', 'search', 'notes', 'knowledge', 'lookup'] },
     { id: 'vault',         label: 'Vault',           description: 'Secure sensitive data',     icon: <ShieldCheck size={15} />,     action: () => nav('/vault'),         keywords: ['secure', 'passwords', 'credentials', 'financial'] },
     { id: 'finance',       label: 'Finance',         description: 'Budget & transactions',     icon: <TrendingUp size={15} />,      action: () => nav('/finance'),       keywords: ['budget', 'money', 'debt', 'spending'] },
     { id: 'integrations',  label: 'Integrations',    description: 'Connect external services', icon: <Plug size={15} />,            action: () => nav('/integrations'),  keywords: ['google', 'github', 'gmail', 'sync', 'connect'] },

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { ShieldCheck, Plus, Eye, EyeOff, Copy, Trash2, Lock, Banknote, IdCard, Key, HeartPulse, Scale, ChevronRight, Upload } from 'lucide-react'
+import { ShieldCheck, Plus, Eye, EyeOff, Copy, Trash2, Lock, Banknote, IdCard, Key, HeartPulse, Scale, ChevronRight, Upload, History } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -314,18 +314,37 @@ function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal,
   onCopy: (val: string, key: string) => void
   onDelete: () => void
 }): JSX.Element {
+  const [showHistory, setShowHistory] = useState(false)
   const entryName = (entry.institution || entry.service || entry.documentType || entry.type || 'Entry') as string
+  const history = (Array.isArray(entry._history) ? entry._history : []) as Array<Record<string, unknown>>
 
   return (
     <div className="bg-card border border-border rounded-xl p-5 group">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold text-foreground">{entryName}</h3>
-        <button
-          onClick={onDelete}
-          className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
-        >
-          <Trash2 size={13} />
-        </button>
+        <div className="flex items-center gap-1">
+          {history.length > 0 && (
+            <button
+              onClick={() => setShowHistory(v => !v)}
+              title={`${history.length} previous version${history.length > 1 ? 's' : ''}`}
+              className={cn(
+                'flex items-center gap-1 p-1.5 rounded text-xs transition-colors',
+                showHistory
+                  ? 'text-primary bg-primary/10'
+                  : 'text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100'
+              )}
+            >
+              <History size={12} />
+              <span>{history.length}</span>
+            </button>
+          )}
+          <button
+            onClick={onDelete}
+            className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -362,6 +381,41 @@ function EntryCard({ entry, fields, revealedFields, copiedField, onToggleReveal,
           )
         })}
       </div>
+
+      {/* Entry history */}
+      {showHistory && history.length > 0 && (
+        <div className="mt-4 pt-4 border-t border-border space-y-3">
+          <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
+            <History size={11} /> Previous versions (encrypted)
+          </p>
+          {history.map((snap, i) => {
+            const savedAt = snap._savedAt ? new Date(snap._savedAt as number) : null
+            return (
+              <div key={i} className="bg-secondary/40 rounded-lg p-3">
+                {savedAt && (
+                  <p className="text-xs text-muted-foreground mb-2">
+                    {savedAt.toLocaleDateString()} {savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  {fields.map(field => {
+                    const val = snap[field.key] as string | undefined
+                    if (!val) return null
+                    return (
+                      <div key={field.key}>
+                        <p className="text-xs text-muted-foreground/60">{field.label}</p>
+                        <p className={cn('text-xs text-foreground/70', field.sensitive && 'font-mono tracking-wider')}>
+                          {field.sensitive ? '••••••••' : val}
+                        </p>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
