@@ -323,6 +323,40 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     return results
   })
 
+  ipcMain.handle('sync:set-interval', async (_event, service: string, minutes: number) => {
+    if (typeof service !== 'string' || service.length === 0) {
+      return { success: false, error: 'Invalid service' }
+    }
+    const parsed = Number(minutes)
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1440) {
+      return { success: false, error: 'Invalid interval' }
+    }
+    const normalized = Math.floor(parsed)
+
+    const db = getDb()
+    const existing = db
+      .select({ id: integrations.id })
+      .from(integrations)
+      .where(eq(integrations.service, service))
+      .get()
+
+    if (existing) {
+      db.update(integrations)
+        .set({ syncIntervalMinutes: normalized })
+        .where(eq(integrations.service, service))
+        .run()
+    } else {
+      db.insert(integrations)
+        .values({ service, status: 'disconnected', syncIntervalMinutes: normalized })
+        .run()
+    }
+
+    // Lazy-load cron module to avoid an import cycle (cron.ts imports syncGoogle/syncGitHub from here).
+    const { restartCronJobs } = await import('../cron')
+    restartCronJobs()
+    return { success: true, service, minutes: normalized }
+  })
+
   ipcMain.handle('sync:get-status', () => {
     const db = getDb()
     return db.select().from(integrations).all()

@@ -33,6 +33,7 @@ declare global {
     status: string
     scopes: string | null
     errorMessage: string | null
+    syncIntervalMinutes: number
   }
 
   interface RedirectUris {
@@ -125,6 +126,10 @@ declare global {
             error: string | null
           }>
         >
+        setInterval(
+          service: string,
+          minutes: number
+        ): Promise<{ success: boolean; service?: string; minutes?: number; error?: string }>
         onSyncUpdate(cb: (data: unknown) => void): () => void
       }
       knowledge: {
