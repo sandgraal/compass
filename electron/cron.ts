@@ -22,20 +22,29 @@ function getSyncIntervalMinutes(): number {
 }
 
 export function startCronJobs(): void {
-  // Default: sync every 15 minutes
-  scheduledTask = cron.schedule('*/15 * * * *', async () => {
+  const interval = getSyncIntervalMinutes()
+  if (interval <= 0) {
+    // "Manual only" — don't schedule anything
+    scheduledTask = null
+    return
+  }
+  scheduledTask = cron.schedule(`*/${interval} * * * *`, async () => {
     const win = getMainWindow()
     await Promise.all([syncGoogle(win), syncGitHub(win)])
   })
-
   scheduledTask.start()
 }
 
 export function restartCronJobs(): void {
   if (scheduledTask) {
     scheduledTask.stop()
+    scheduledTask = null
   }
   const interval = getSyncIntervalMinutes()
+  if (interval <= 0) {
+    // "Manual only" — don't reschedule
+    return
+  }
   scheduledTask = cron.schedule(`*/${interval} * * * *`, async () => {
     const win = getMainWindow()
     await Promise.all([syncGoogle(win), syncGitHub(win)])
