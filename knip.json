@@ -9,11 +9,7 @@
     "playwright.config.ts",
     "mcp/compass-mcp/index.ts"
   ],
-  "project": [
-    "src/**/*.{ts,tsx}",
-    "electron/**/*.ts",
-    "mcp/**/*.ts"
-  ],
+  "project": ["src/**/*.{ts,tsx}", "electron/**/*.ts", "mcp/**/*.ts"],
   "ignore": [
     "knowledge-base/**",
     ".vault/**",
@@ -23,7 +19,5 @@
     "out/**",
     "release/**"
   ],
-  "ignoreDependencies": [
-    "tailwindcss-animate"
-  ]
+  "ignoreDependencies": ["tailwindcss-animate"]
 }

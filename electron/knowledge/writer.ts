@@ -1,5 +1,5 @@
-import { existsSync, writeFileSync, readFileSync } from 'fs'
-import { join } from 'path'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 const STARTER_FILES: Record<string, string> = {
   'profile/personal.md': `# Personal Profile
@@ -237,13 +237,13 @@ export function updateKnowledgeFile(knowledgeDir: string, relPath: string, conte
   // Save a snapshot of the previous content so the diff view can compare
   if (existsSync(fullPath)) {
     const prev = readFileSync(fullPath, 'utf8')
-    writeFileSync(fullPath + '.prev', prev, 'utf8')
+    writeFileSync(`${fullPath}.prev`, prev, 'utf8')
   }
   writeFileSync(fullPath, content, 'utf8')
 }
 
 export function readPrevKnowledgeFile(knowledgeDir: string, relPath: string): string | null {
-  const prevPath = join(knowledgeDir, relPath + '.prev')
+  const prevPath = join(knowledgeDir, `${relPath}.prev`)
   if (!existsSync(prevPath)) return null
   return readFileSync(prevPath, 'utf8')
 }

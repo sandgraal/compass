@@ -20,6 +20,5 @@ export const useAppStore = create<AppStore>((set) => ({
   contextDrawerOpen: true,
   setContextDrawerOpen: (open) => set({ contextDrawerOpen: open }),
   syncing: {},
-  setSyncing: (service, value) =>
-    set((s) => ({ syncing: { ...s.syncing, [service]: value } }))
+  setSyncing: (service, value) => set((s) => ({ syncing: { ...s.syncing, [service]: value } }))
 }))

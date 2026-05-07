@@ -1,7 +1,7 @@
-import { IpcMain, safeStorage, dialog } from 'electron'
-import { createCipheriv, createDecipheriv, randomBytes } from 'crypto'
-import { readFileSync, writeFileSync, existsSync } from 'fs'
-import { join } from 'path'
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { type IpcMain, dialog, safeStorage } from 'electron'
 import { VAULT_DIR } from '../paths'
 
 const ALGORITHM = 'aes-256-gcm'
@@ -63,11 +63,36 @@ function writeVaultCategory(category: string, entries: unknown[], key: Buffer): 
 }
 
 const VAULT_CATEGORIES = [
-  { id: 'financial', label: 'Financial', icon: 'banknote', description: 'Bank accounts, credit cards, investments' },
-  { id: 'identity', label: 'Identity', icon: 'id-card', description: 'SSN, passport, driver\'s license' },
-  { id: 'credentials', label: 'Credentials', icon: 'key', description: 'Passwords, API keys, license keys' },
-  { id: 'medical', label: 'Medical', icon: 'heart-pulse', description: 'Insurance, prescriptions, providers' },
-  { id: 'legal', label: 'Legal', icon: 'scale', description: 'Contracts, wills, property documents' }
+  {
+    id: 'financial',
+    label: 'Financial',
+    icon: 'banknote',
+    description: 'Bank accounts, credit cards, investments'
+  },
+  {
+    id: 'identity',
+    label: 'Identity',
+    icon: 'id-card',
+    description: "SSN, passport, driver's license"
+  },
+  {
+    id: 'credentials',
+    label: 'Credentials',
+    icon: 'key',
+    description: 'Passwords, API keys, license keys'
+  },
+  {
+    id: 'medical',
+    label: 'Medical',
+    icon: 'heart-pulse',
+    description: 'Insurance, prescriptions, providers'
+  },
+  {
+    id: 'legal',
+    label: 'Legal',
+    icon: 'scale',
+    description: 'Contracts, wills, property documents'
+  }
 ]
 
 export function registerVaultHandlers(ipcMain: IpcMain): void {
@@ -92,20 +117,32 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
     return newEntry
   })
 
-  ipcMain.handle('vault:update-entry', (_event, category: string, id: string, updates: Record<string, unknown>) => {
-    const key = getOrCreateKey()
-    const entries = readVaultCategory(category, key) as Record<string, unknown>[]
-    const idx = entries.findIndex((e) => e.id === id)
-    if (idx === -1) throw new Error('Entry not found')
-    const current = entries[idx]
-    // Snapshot the current user-facing fields (exclude system/history fields)
-    const { _history, id: _id, createdAt, updatedAt, ...snapshot } = current as Record<string, unknown>
-    const history = (Array.isArray(current._history) ? current._history : []) as unknown[]
-    const newHistory = [{ ...snapshot, _savedAt: updatedAt ?? Date.now() }, ...history].slice(0, 5)
-    entries[idx] = { ...current, ...updates, updatedAt: Date.now(), _history: newHistory }
-    writeVaultCategory(category, entries, key)
-    return entries[idx]
-  })
+  ipcMain.handle(
+    'vault:update-entry',
+    (_event, category: string, id: string, updates: Record<string, unknown>) => {
+      const key = getOrCreateKey()
+      const entries = readVaultCategory(category, key) as Record<string, unknown>[]
+      const idx = entries.findIndex((e) => e.id === id)
+      if (idx === -1) throw new Error('Entry not found')
+      const current = entries[idx]
+      // Snapshot the current user-facing fields (exclude system/history fields)
+      const {
+        _history,
+        id: _id,
+        createdAt,
+        updatedAt,
+        ...snapshot
+      } = current as Record<string, unknown>
+      const history = (Array.isArray(current._history) ? current._history : []) as unknown[]
+      const newHistory = [{ ...snapshot, _savedAt: updatedAt ?? Date.now() }, ...history].slice(
+        0,
+        5
+      )
+      entries[idx] = { ...current, ...updates, updatedAt: Date.now(), _history: newHistory }
+      writeVaultCategory(category, entries, key)
+      return entries[idx]
+    }
+  )
 
   ipcMain.handle('vault:delete-entry', (_event, category: string, id: string) => {
     const key = getOrCreateKey()
@@ -134,12 +171,12 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
 
       let imported = 0
       for (const row of rows) {
-        const type = (row['Type'] || row['type'] || 'Login').toLowerCase()
-        const title = row['Title'] || row['title'] || ''
-        const username = row['Username'] || row['username'] || row['Email'] || row['email'] || ''
-        const password = row['Password'] || row['password'] || ''
-        const url = row['Url'] || row['URL'] || row['url'] || row['Website'] || ''
-        const notes = row['Notes'] || row['notes'] || ''
+        const type = (row.Type || row.type || 'Login').toLowerCase()
+        const title = row.Title || row.title || ''
+        const username = row.Username || row.username || row.Email || row.email || ''
+        const password = row.Password || row.password || ''
+        const url = row.Url || row.URL || row.url || row.Website || ''
+        const notes = row.Notes || row.notes || ''
 
         if (type.includes('credit') || type.includes('card')) {
           const entry = {
@@ -231,7 +268,9 @@ function parseCSV(raw: string): Record<string, string>[] {
     if (vals.length === 1 && !vals[0].trim()) continue
 
     const row: Record<string, string> = {}
-    headers.forEach((h, i) => { row[h] = vals[i] ?? '' })
+    headers.forEach((h, i) => {
+      row[h] = vals[i] ?? ''
+    })
     result.push(row)
   }
 

@@ -1,8 +1,8 @@
+import { format } from 'date-fns'
+import { ArrowRight, Calendar, Clock, GitBranch, Plus, RefreshCw } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Calendar, GitBranch, ArrowRight, Plus, RefreshCw, Clock } from 'lucide-react'
-import { format } from 'date-fns'
-import { cn, formatTime, formatRelative, todayISO } from '../lib/utils'
+import { cn, formatRelative, formatTime, todayISO } from '../lib/utils'
 
 interface DashStat {
   label: string
@@ -47,10 +47,30 @@ export default function Dashboard(): JSX.Element {
 
       const done = checkItems.filter((i) => i.checked).length
       setStats([
-        { label: 'Tasks Today', value: checkItems.length, sub: `${done} completed`, color: 'text-primary' },
-        { label: 'GitHub Issues', value: ghItems.filter(g => g.type === 'issue').length, sub: 'assigned to you', color: 'text-amber-400' },
-        { label: 'Inbox Actions', value: gmailItems.length, sub: 'need attention', color: 'text-emerald-400' },
-        { label: 'Upcoming Events', value: calEvents.length, sub: 'next 7 days', color: 'text-sky-400' }
+        {
+          label: 'Tasks Today',
+          value: checkItems.length,
+          sub: `${done} completed`,
+          color: 'text-primary'
+        },
+        {
+          label: 'GitHub Issues',
+          value: ghItems.filter((g) => g.type === 'issue').length,
+          sub: 'assigned to you',
+          color: 'text-amber-400'
+        },
+        {
+          label: 'Inbox Actions',
+          value: gmailItems.length,
+          sub: 'need attention',
+          color: 'text-emerald-400'
+        },
+        {
+          label: 'Upcoming Events',
+          value: calEvents.length,
+          sub: 'next 7 days',
+          color: 'text-sky-400'
+        }
       ])
     })
   }
@@ -114,12 +134,8 @@ export default function Dashboard(): JSX.Element {
       {/* Header */}
       <div className="flex items-start justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-semibold text-foreground">
-            {greeting} 👋
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            {format(new Date(), "EEEE, MMMM d, yyyy")}
-          </p>
+          <h1 className="text-2xl font-semibold text-foreground">{greeting} 👋</h1>
+          <p className="text-muted-foreground mt-1">{format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
         </div>
         <button
           onClick={handleSync}
@@ -156,7 +172,10 @@ export default function Dashboard(): JSX.Element {
               >
                 <Plus size={12} /> Add
               </button>
-              <Link to="/daily" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors">
+              <Link
+                to="/daily"
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
+              >
                 View all <ArrowRight size={12} />
               </Link>
             </div>
@@ -167,13 +186,20 @@ export default function Dashboard(): JSX.Element {
             ) : (
               tasks.map((task) => (
                 <div key={task.id} className="flex items-center gap-3 px-5 py-3">
-                  <div className={cn(
-                    'w-4 h-4 rounded border shrink-0 flex items-center justify-center',
-                    task.checked ? 'bg-primary border-primary' : 'border-border'
-                  )}>
+                  <div
+                    className={cn(
+                      'w-4 h-4 rounded border shrink-0 flex items-center justify-center',
+                      task.checked ? 'bg-primary border-primary' : 'border-border'
+                    )}
+                  >
                     {task.checked && <span className="text-white text-xs">✓</span>}
                   </div>
-                  <span className={cn('text-sm flex-1 truncate', task.checked && 'line-through text-muted-foreground')}>
+                  <span
+                    className={cn(
+                      'text-sm flex-1 truncate',
+                      task.checked && 'line-through text-muted-foreground'
+                    )}
+                  >
                     {task.title}
                   </span>
                   <CategoryBadge category={task.category || 'personal'} />
@@ -182,17 +208,27 @@ export default function Dashboard(): JSX.Element {
             )}
             {/* Quick-add inline form */}
             {quickAdd ? (
-              <form onSubmit={submitQuickAdd} className="flex items-center gap-2 px-5 py-3 border-t border-border">
+              <form
+                onSubmit={submitQuickAdd}
+                className="flex items-center gap-2 px-5 py-3 border-t border-border"
+              >
                 <Plus size={13} className="text-muted-foreground shrink-0" />
                 <input
                   ref={quickAddRef}
                   value={quickAddText}
                   onChange={(e) => setQuickAddText(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Escape' && (setQuickAdd(false), setQuickAddText(''))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      setQuickAdd(false)
+                      setQuickAddText('')
+                    }
+                  }}
                   placeholder="Task title… (Enter to save, Esc to cancel)"
                   className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 outline-none"
                 />
-                <button type="submit" className="text-xs text-primary hover:underline">Save</button>
+                <button type="submit" className="text-xs text-primary hover:underline">
+                  Save
+                </button>
               </form>
             ) : (
               <button
@@ -223,7 +259,11 @@ export default function Dashboard(): JSX.Element {
                     <p className="text-sm text-foreground truncate">{ev.title}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       {ev.startAt ? format(new Date(ev.startAt), 'EEE, MMM d') : ''}
-                      {!ev.allDay && ev.startAt ? ` · ${formatTime(ev.startAt)}` : ev.allDay ? ' · All day' : ''}
+                      {!ev.allDay && ev.startAt
+                        ? ` · ${formatTime(ev.startAt)}`
+                        : ev.allDay
+                          ? ' · All day'
+                          : ''}
                       {ev.location ? ` · ${ev.location}` : ''}
                     </p>
                   </div>
@@ -239,20 +279,31 @@ export default function Dashboard(): JSX.Element {
             <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <GitBranch size={15} /> GitHub
             </h2>
-            <Link to="/integrations" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors">
+            <Link
+              to="/integrations"
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
+            >
               View all <ArrowRight size={12} />
             </Link>
           </div>
           <div className="divide-y divide-border">
             {githubItems.length === 0 ? (
-              <EmptyState icon={<GitBranch size={16} />} message="Connect GitHub to see issues" action={{ to: '/integrations', label: 'Connect' }} />
+              <EmptyState
+                icon={<GitBranch size={16} />}
+                message="Connect GitHub to see issues"
+                action={{ to: '/integrations', label: 'Connect' }}
+              />
             ) : (
               githubItems.map((item) => (
                 <div key={item.id} className="flex items-start gap-3 px-5 py-3">
-                  <span className={cn(
-                    'text-xs px-1.5 py-0.5 rounded font-mono shrink-0 mt-0.5',
-                    item.type === 'pr' ? 'bg-purple-500/20 text-purple-400' : 'bg-amber-500/20 text-amber-400'
-                  )}>
+                  <span
+                    className={cn(
+                      'text-xs px-1.5 py-0.5 rounded font-mono shrink-0 mt-0.5',
+                      item.type === 'pr'
+                        ? 'bg-purple-500/20 text-purple-400'
+                        : 'bg-amber-500/20 text-amber-400'
+                    )}
+                  >
                     {item.type === 'pr' ? 'PR' : '#'}
                   </span>
                   <div className="flex-1 min-w-0">
@@ -271,13 +322,20 @@ export default function Dashboard(): JSX.Element {
             <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <Clock size={15} /> Sync Status
             </h2>
-            <Link to="/integrations" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors">
+            <Link
+              to="/integrations"
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
+            >
               Manage <ArrowRight size={12} />
             </Link>
           </div>
           <div className="divide-y divide-border">
             {integrationStatus.length === 0 ? (
-              <EmptyState icon={<Clock size={16} />} message="No integrations connected" action={{ to: '/integrations', label: 'Connect' }} />
+              <EmptyState
+                icon={<Clock size={16} />}
+                message="No integrations connected"
+                action={{ to: '/integrations', label: 'Connect' }}
+              />
             ) : (
               integrationStatus.map((i) => (
                 <div key={i.service} className="flex items-center justify-between px-5 py-3">
@@ -292,7 +350,10 @@ export default function Dashboard(): JSX.Element {
               ))
             )}
             {integrationStatus.length < 2 && (
-              <Link to="/integrations" className="flex items-center gap-2 px-5 py-3 text-xs text-primary hover:bg-secondary/50 transition-colors">
+              <Link
+                to="/integrations"
+                className="flex items-center gap-2 px-5 py-3 text-xs text-primary hover:bg-secondary/50 transition-colors"
+              >
                 <Plus size={12} /> Add integration
               </Link>
             )}
@@ -303,13 +364,23 @@ export default function Dashboard(): JSX.Element {
   )
 }
 
-function EmptyState({ icon, message, action }: { icon: React.ReactNode; message: string; action?: { to: string; label: string } }): JSX.Element {
+function EmptyState({
+  icon,
+  message,
+  action
+}: {
+  icon: React.ReactNode
+  message: string
+  action?: { to: string; label: string }
+}): JSX.Element {
   return (
     <div className="flex flex-col items-center py-8 px-4 gap-2">
       <div className="text-muted-foreground/40">{icon}</div>
       <p className="text-sm text-muted-foreground">{message}</p>
       {action && (
-        <Link to={action.to} className="text-xs text-primary hover:underline">{action.label}</Link>
+        <Link to={action.to} className="text-xs text-primary hover:underline">
+          {action.label}
+        </Link>
       )}
     </div>
   )
@@ -323,7 +394,12 @@ function CategoryBadge({ category }: { category: string }): JSX.Element {
     evening: 'bg-indigo-500/10 text-indigo-400'
   }
   return (
-    <span className={cn('text-xs px-1.5 py-0.5 rounded capitalize', colors[category] || 'bg-muted text-muted-foreground')}>
+    <span
+      className={cn(
+        'text-xs px-1.5 py-0.5 rounded capitalize',
+        colors[category] || 'bg-muted text-muted-foreground'
+      )}
+    >
       {category}
     </span>
   )
@@ -331,10 +407,15 @@ function CategoryBadge({ category }: { category: string }): JSX.Element {
 
 function StatusDot({ status }: { status: string }): JSX.Element {
   return (
-    <div className={cn(
-      'w-2 h-2 rounded-full',
-      status === 'connected' ? 'bg-emerald-500' :
-      status === 'error' ? 'bg-red-500' : 'bg-muted-foreground/40'
-    )} />
+    <div
+      className={cn(
+        'w-2 h-2 rounded-full',
+        status === 'connected'
+          ? 'bg-emerald-500'
+          : status === 'error'
+            ? 'bg-red-500'
+            : 'bg-muted-foreground/40'
+      )}
+    />
   )
 }

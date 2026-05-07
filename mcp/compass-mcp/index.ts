@@ -1,3 +1,9 @@
+import { readFileSync, readdirSync, realpathSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { extname, join, relative, sep } from 'node:path'
+import { Server } from '@modelcontextprotocol/sdk/server/index.js'
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 /**
  * Compass MCP Server
  *
@@ -12,15 +18,6 @@
  * Register in .mcp.json (already done at repo root).
  */
 import Database from 'better-sqlite3'
-import { readFileSync, readdirSync, realpathSync } from 'fs'
-import { join, relative, extname, sep } from 'path'
-import { homedir } from 'os'
-import { Server } from '@modelcontextprotocol/sdk/server/index.js'
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema
-} from '@modelcontextprotocol/sdk/types.js'
 
 // Mirror electron/paths.ts — but we open the DB read-only
 const APP_DATA_DIR = join(homedir(), 'Library', 'Application Support', 'Compass')
@@ -48,7 +45,7 @@ const TOOLS = [
   {
     name: 'compass_today_tasks',
     description:
-      'Returns all tasks on today\'s daily checklist (manual + auto-pulled from Gmail/GitHub/Calendar). Read-only.',
+      "Returns all tasks on today's daily checklist (manual + auto-pulled from Gmail/GitHub/Calendar). Read-only.",
     inputSchema: {
       type: 'object',
       properties: {},
@@ -161,9 +158,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const db = openDb()
       if (!db) return errorResult('Compass DB not found')
       const rows = db
-        .prepare(
-          'SELECT service, status, last_synced_at, error_message FROM integrations'
-        )
+        .prepare('SELECT service, status, last_synced_at, error_message FROM integrations')
         .all()
       db.close()
       return textResult(JSON.stringify(rows, null, 2))
@@ -182,7 +177,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       } catch {
         return errorResult('file not found')
       }
-      if (!resolvedPath.startsWith(KNOWLEDGE_DIR + sep)) return errorResult('path traversal blocked')
+      if (!resolvedPath.startsWith(KNOWLEDGE_DIR + sep))
+        return errorResult('path traversal blocked')
       const content = readFileSync(resolvedPath, 'utf8')
       return textResult(content)
     }

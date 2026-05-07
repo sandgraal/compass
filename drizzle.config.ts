@@ -1,6 +1,6 @@
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { defineConfig } from 'drizzle-kit'
-import { join } from 'path'
-import { homedir } from 'os'
 
 const dataDir = join(homedir(), 'Library', 'Application Support', 'Compass', '.data')
 

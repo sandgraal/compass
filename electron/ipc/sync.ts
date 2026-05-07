@@ -1,9 +1,21 @@
-import { IpcMain, BrowserWindow } from 'electron'
+import { and, desc, eq } from 'drizzle-orm'
+import { BrowserWindow, type IpcMain } from 'electron'
 import { getDb } from '../db/client'
-import { integrations, syncEvents, calendarEvents, githubItems, gmailActions, driveFiles } from '../db/schema'
-import { eq, and, desc } from 'drizzle-orm'
-import { loadToken, getValidGoogleToken } from './auth'
-import { updateCalendarKnowledge, updateGitHubKnowledge, updateGmailKnowledge, updateDriveKnowledge } from '../knowledge/extractor'
+import {
+  calendarEvents,
+  driveFiles,
+  githubItems,
+  gmailActions,
+  integrations,
+  syncEvents
+} from '../db/schema'
+import {
+  updateCalendarKnowledge,
+  updateDriveKnowledge,
+  updateGitHubKnowledge,
+  updateGmailKnowledge
+} from '../knowledge/extractor'
+import { getValidGoogleToken, loadToken } from './auth'
 
 type SyncResult = {
   service: string
@@ -13,7 +25,11 @@ type SyncResult = {
 }
 
 function getIntegrationId(db: ReturnType<typeof getDb>, service: string): number | null {
-  const row = db.select({ id: integrations.id }).from(integrations).where(eq(integrations.service, service)).get()
+  const row = db
+    .select({ id: integrations.id })
+    .from(integrations)
+    .where(eq(integrations.service, service))
+    .get()
   return row?.id ?? null
 }
 
@@ -39,24 +55,31 @@ export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<Syn
     )
 
     if (calResp.ok) {
-      const calData = await calResp.json() as { items?: CalendarEvent[] }
+      const calData = (await calResp.json()) as { items?: CalendarEvent[] }
       const events = calData.items || []
       for (const ev of events) {
-        db.insert(calendarEvents).values({
-          source: 'google',
-          externalId: ev.id,
-          title: ev.summary || '(No title)',
-          startAt: ev.start?.dateTime ? new Date(ev.start.dateTime) : ev.start?.date ? new Date(ev.start.date) : null,
-          endAt: ev.end?.dateTime ? new Date(ev.end.dateTime) : null,
-          allDay: !!ev.start?.date,
-          location: ev.location,
-          description: ev.description,
-          htmlLink: ev.htmlLink,
-          syncedAt: new Date()
-        }).onConflictDoUpdate({
-          target: calendarEvents.externalId,
-          set: { title: ev.summary || '(No title)', syncedAt: new Date() }
-        }).run()
+        db.insert(calendarEvents)
+          .values({
+            source: 'google',
+            externalId: ev.id,
+            title: ev.summary || '(No title)',
+            startAt: ev.start?.dateTime
+              ? new Date(ev.start.dateTime)
+              : ev.start?.date
+                ? new Date(ev.start.date)
+                : null,
+            endAt: ev.end?.dateTime ? new Date(ev.end.dateTime) : null,
+            allDay: !!ev.start?.date,
+            location: ev.location,
+            description: ev.description,
+            htmlLink: ev.htmlLink,
+            syncedAt: new Date()
+          })
+          .onConflictDoUpdate({
+            target: calendarEvents.externalId,
+            set: { title: ev.summary || '(No title)', syncedAt: new Date() }
+          })
+          .run()
         recordsUpdated++
       }
       await updateCalendarKnowledge(events)
@@ -69,7 +92,7 @@ export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<Syn
     )
 
     if (gmailResp.ok) {
-      const gmailData = await gmailResp.json() as { messages?: { id: string }[] }
+      const gmailData = (await gmailResp.json()) as { messages?: { id: string }[] }
       const messages = gmailData.messages || []
       const actions: GmailMessage[] = []
 
@@ -79,25 +102,40 @@ export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<Syn
           { headers }
         )
         if (!msgResp.ok) continue
-        const msgData = await msgResp.json() as GmailMessageData
-        const subject = msgData.payload?.headers?.find((h: { name: string }) => h.name === 'Subject')?.value || '(No subject)'
-        const from = msgData.payload?.headers?.find((h: { name: string }) => h.name === 'From')?.value || ''
-        const date = msgData.payload?.headers?.find((h: { name: string }) => h.name === 'Date')?.value
+        const msgData = (await msgResp.json()) as GmailMessageData
+        const subject =
+          msgData.payload?.headers?.find((h: { name: string }) => h.name === 'Subject')?.value ||
+          '(No subject)'
+        const from =
+          msgData.payload?.headers?.find((h: { name: string }) => h.name === 'From')?.value || ''
+        const date = msgData.payload?.headers?.find(
+          (h: { name: string }) => h.name === 'Date'
+        )?.value
 
-        const action: GmailMessage = { id: msg.id, threadId: msgData.threadId, subject, from, snippet: msgData.snippet, date }
-        actions.push(action)
-
-        db.insert(gmailActions).values({
+        const action: GmailMessage = {
+          id: msg.id,
           threadId: msgData.threadId,
           subject,
-          fromAddress: from,
+          from,
           snippet: msgData.snippet,
-          receivedAt: date ? new Date(date) : new Date(),
-          syncedAt: new Date()
-        }).onConflictDoUpdate({
-          target: gmailActions.threadId,
-          set: { subject, syncedAt: new Date() }
-        }).run()
+          date
+        }
+        actions.push(action)
+
+        db.insert(gmailActions)
+          .values({
+            threadId: msgData.threadId,
+            subject,
+            fromAddress: from,
+            snippet: msgData.snippet,
+            receivedAt: date ? new Date(date) : new Date(),
+            syncedAt: new Date()
+          })
+          .onConflictDoUpdate({
+            target: gmailActions.threadId,
+            set: { subject, syncedAt: new Date() }
+          })
+          .run()
         recordsUpdated++
       }
       await updateGmailKnowledge(actions)
@@ -110,20 +148,27 @@ export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<Syn
     )
 
     if (driveResp.ok) {
-      const driveData = await driveResp.json() as { files?: DriveFile[] }
+      const driveData = (await driveResp.json()) as { files?: DriveFile[] }
       const files = driveData.files || []
       for (const f of files) {
-        db.insert(driveFiles).values({
-          externalId: f.id,
-          name: f.name,
-          mimeType: f.mimeType,
-          url: f.webViewLink,
-          lastModified: f.modifiedTime ? new Date(f.modifiedTime) : null,
-          syncedAt: new Date()
-        }).onConflictDoUpdate({
-          target: driveFiles.externalId,
-          set: { name: f.name, lastModified: f.modifiedTime ? new Date(f.modifiedTime) : null, syncedAt: new Date() }
-        }).run()
+        db.insert(driveFiles)
+          .values({
+            externalId: f.id,
+            name: f.name,
+            mimeType: f.mimeType,
+            url: f.webViewLink,
+            lastModified: f.modifiedTime ? new Date(f.modifiedTime) : null,
+            syncedAt: new Date()
+          })
+          .onConflictDoUpdate({
+            target: driveFiles.externalId,
+            set: {
+              name: f.name,
+              lastModified: f.modifiedTime ? new Date(f.modifiedTime) : null,
+              syncedAt: new Date()
+            }
+          })
+          .run()
         recordsUpdated++
       }
       await updateDriveKnowledge(files)
@@ -135,16 +180,21 @@ export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<Syn
       .run()
 
     if (integrationId !== null) {
-      db.insert(syncEvents).values({
-        integrationId,
-        syncedAt: new Date(),
-        recordsUpdated
-      }).run()
+      db.insert(syncEvents)
+        .values({
+          integrationId,
+          syncedAt: new Date(),
+          recordsUpdated
+        })
+        .run()
     }
 
-    mainWindow?.webContents.send('sync:update', { service: 'google', status: 'success', recordsUpdated })
+    mainWindow?.webContents.send('sync:update', {
+      service: 'google',
+      status: 'success',
+      recordsUpdated
+    })
     return { service: 'google', success: true, recordsUpdated }
-
   } catch (err) {
     const message = (err as Error).message
     db.update(integrations)
@@ -152,14 +202,20 @@ export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<Syn
       .where(eq(integrations.service, 'google'))
       .run()
     if (integrationId !== null) {
-      db.insert(syncEvents).values({
-        integrationId,
-        syncedAt: new Date(),
-        recordsUpdated: 0,
-        errors: message
-      }).run()
+      db.insert(syncEvents)
+        .values({
+          integrationId,
+          syncedAt: new Date(),
+          recordsUpdated: 0,
+          errors: message
+        })
+        .run()
     }
-    mainWindow?.webContents.send('sync:update', { service: 'google', status: 'error', error: message })
+    mainWindow?.webContents.send('sync:update', {
+      service: 'google',
+      status: 'error',
+      error: message
+    })
     return { service: 'google', success: false, error: message }
   }
 }
@@ -185,24 +241,27 @@ export async function syncGitHub(mainWindow?: BrowserWindow | null): Promise<Syn
     )
 
     if (issuesResp.ok) {
-      const issues = await issuesResp.json() as GitHubIssue[]
+      const issues = (await issuesResp.json()) as GitHubIssue[]
       const items: GitHubIssue[] = []
       for (const issue of issues) {
         const isPR = !!issue.pull_request
-        db.insert(githubItems).values({
-          type: isPR ? 'pr' : 'issue',
-          repo: issue.repository?.full_name || issue.html_url.split('/').slice(3, 5).join('/'),
-          externalId: String(issue.id),
-          title: issue.title,
-          url: issue.html_url,
-          state: issue.state,
-          body: issue.body?.slice(0, 500),
-          labels: JSON.stringify(issue.labels?.map((l: { name: string }) => l.name) || []),
-          syncedAt: new Date()
-        }).onConflictDoUpdate({
-          target: githubItems.externalId,
-          set: { title: issue.title, state: issue.state, syncedAt: new Date() }
-        }).run()
+        db.insert(githubItems)
+          .values({
+            type: isPR ? 'pr' : 'issue',
+            repo: issue.repository?.full_name || issue.html_url.split('/').slice(3, 5).join('/'),
+            externalId: String(issue.id),
+            title: issue.title,
+            url: issue.html_url,
+            state: issue.state,
+            body: issue.body?.slice(0, 500),
+            labels: JSON.stringify(issue.labels?.map((l: { name: string }) => l.name) || []),
+            syncedAt: new Date()
+          })
+          .onConflictDoUpdate({
+            target: githubItems.externalId,
+            set: { title: issue.title, state: issue.state, syncedAt: new Date() }
+          })
+          .run()
         recordsUpdated++
         items.push(issue)
       }
@@ -215,16 +274,21 @@ export async function syncGitHub(mainWindow?: BrowserWindow | null): Promise<Syn
       .run()
 
     if (integrationId !== null) {
-      db.insert(syncEvents).values({
-        integrationId,
-        syncedAt: new Date(),
-        recordsUpdated
-      }).run()
+      db.insert(syncEvents)
+        .values({
+          integrationId,
+          syncedAt: new Date(),
+          recordsUpdated
+        })
+        .run()
     }
 
-    mainWindow?.webContents.send('sync:update', { service: 'github', status: 'success', recordsUpdated })
+    mainWindow?.webContents.send('sync:update', {
+      service: 'github',
+      status: 'success',
+      recordsUpdated
+    })
     return { service: 'github', success: true, recordsUpdated }
-
   } catch (err) {
     const message = (err as Error).message
     db.update(integrations)
@@ -232,12 +296,14 @@ export async function syncGitHub(mainWindow?: BrowserWindow | null): Promise<Syn
       .where(eq(integrations.service, 'github'))
       .run()
     if (integrationId !== null) {
-      db.insert(syncEvents).values({
-        integrationId,
-        syncedAt: new Date(),
-        recordsUpdated: 0,
-        errors: message
-      }).run()
+      db.insert(syncEvents)
+        .values({
+          integrationId,
+          syncedAt: new Date(),
+          recordsUpdated: 0,
+          errors: message
+        })
+        .run()
     }
     return { service: 'github', success: false, error: message }
   }
@@ -264,15 +330,12 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
 
   ipcMain.handle('sync:get-log', () => {
     const db = getDb()
-    const events = db.select().from(syncEvents)
-      .orderBy(desc(syncEvents.syncedAt))
-      .limit(20)
-      .all()
+    const events = db.select().from(syncEvents).orderBy(desc(syncEvents.syncedAt)).limit(20).all()
     const integrationRows = db.select().from(integrations).all()
     const integrationMap: Record<number, string> = {}
     for (const i of integrationRows) integrationMap[i.id] = i.service
 
-    return events.map(e => ({
+    return events.map((e) => ({
       id: e.id,
       service: e.integrationId ? (integrationMap[e.integrationId] ?? 'unknown') : 'unknown',
       syncedAt: e.syncedAt,
@@ -286,26 +349,26 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     const db = getDb()
     const startMs = new Date(start).getTime()
     const endMs = new Date(end).getTime()
-    return db.select().from(calendarEvents)
-      .where(and(
-        eq(calendarEvents.source, 'google')
-      ))
+    return db
+      .select()
+      .from(calendarEvents)
+      .where(and(eq(calendarEvents.source, 'google')))
       .all()
-      .filter(e => e.startAt && e.startAt.getTime() >= startMs && e.startAt.getTime() <= endMs)
+      .filter((e) => e.startAt && e.startAt.getTime() >= startMs && e.startAt.getTime() <= endMs)
   })
 
   // GitHub items query
   ipcMain.handle('github:get-items', (_event, state?: string) => {
     const db = getDb()
     const rows = db.select().from(githubItems).all()
-    return state ? rows.filter(r => r.state === state) : rows
+    return state ? rows.filter((r) => r.state === state) : rows
   })
 
   // Gmail actions query
   ipcMain.handle('gmail:get-actions', (_event, done?: boolean) => {
     const db = getDb()
     const rows = db.select().from(gmailActions).all()
-    return done !== undefined ? rows.filter(r => r.done === done) : rows
+    return done !== undefined ? rows.filter((r) => r.done === done) : rows
   })
 
   ipcMain.handle('gmail:mark-done', (_event, id: number) => {

@@ -1,10 +1,18 @@
-import { NavLink } from 'react-router-dom'
 import {
-  LayoutDashboard, CalendarDays, CalendarRange, CalendarCheck,
-  BookOpen, ShieldCheck, Plug2, Settings, Circle, TrendingUp
+  BookOpen,
+  CalendarCheck,
+  CalendarDays,
+  CalendarRange,
+  Circle,
+  LayoutDashboard,
+  Plug2,
+  Settings,
+  ShieldCheck,
+  TrendingUp
 } from 'lucide-react'
-import { cn } from '../../lib/utils'
 import { useEffect, useState } from 'react'
+import { NavLink } from 'react-router-dom'
+import { cn } from '../../lib/utils'
 
 interface NavItem {
   label: string
@@ -32,18 +40,28 @@ export function Sidebar(): JSX.Element {
     })
 
     // Load inbox count
-    window.api.gmail.getActions(false).then((actions) => {
-      setInboxCount(actions.length)
-    }).catch(() => {})
+    window.api.gmail
+      .getActions(false)
+      .then((actions) => {
+        setInboxCount(actions.length)
+      })
+      .catch(() => {})
 
     const unsub = window.api.sync.onSyncUpdate((data) => {
       const d = data as { service: string; status: string }
       setIntegrations((prev) =>
-        prev.map((i) => i.service === d.service ? { ...i, status: d.status === 'success' ? 'connected' : 'error' } : i)
+        prev.map((i) =>
+          i.service === d.service
+            ? { ...i, status: d.status === 'success' ? 'connected' : 'error' }
+            : i
+        )
       )
       // Re-fetch inbox count after any sync
       if (d.service === 'google') {
-        window.api?.gmail.getActions(false).then(a => setInboxCount(a.length)).catch(() => {})
+        window.api?.gmail
+          .getActions(false)
+          .then((a) => setInboxCount(a.length))
+          .catch(() => {})
       }
     })
     return unsub
@@ -57,8 +75,13 @@ export function Sidebar(): JSX.Element {
     { label: 'Knowledge Base', to: '/knowledge', icon: <BookOpen size={18} /> },
     { label: 'Vault', to: '/vault', icon: <ShieldCheck size={18} /> },
     { label: 'Finance', to: '/finance', icon: <TrendingUp size={18} /> },
-    { label: 'Integrations', to: '/integrations', icon: <Plug2 size={18} />, badge: inboxCount > 0 ? inboxCount : undefined },
-    { label: 'Settings', to: '/settings', icon: <Settings size={18} /> },
+    {
+      label: 'Integrations',
+      to: '/integrations',
+      icon: <Plug2 size={18} />,
+      badge: inboxCount > 0 ? inboxCount : undefined
+    },
+    { label: 'Settings', to: '/settings', icon: <Settings size={18} /> }
   ]
 
   return (
@@ -102,7 +125,9 @@ export function Sidebar(): JSX.Element {
       {/* Integration status indicators */}
       {integrations.length > 0 && (
         <div className="px-4 py-3 border-t border-sidebar-border">
-          <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wider">Integrations</p>
+          <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wider">
+            Integrations
+          </p>
           <div className="space-y-1.5">
             {integrations.map((i) => (
               <div key={i.service} className="flex items-center gap-2">
@@ -110,8 +135,11 @@ export function Sidebar(): JSX.Element {
                   size={6}
                   className={cn(
                     'fill-current',
-                    i.status === 'connected' ? 'text-emerald-500' :
-                    i.status === 'error' ? 'text-red-500' : 'text-muted-foreground'
+                    i.status === 'connected'
+                      ? 'text-emerald-500'
+                      : i.status === 'error'
+                        ? 'text-red-500'
+                        : 'text-muted-foreground'
                   )}
                 />
                 <span className="text-xs text-muted-foreground capitalize">{i.service}</span>
@@ -124,12 +152,19 @@ export function Sidebar(): JSX.Element {
       {/* ⌘K hint + App version */}
       <div className="px-5 py-3 border-t border-sidebar-border space-y-2">
         <button
-          onClick={() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true })) }}
+          onClick={() => {
+            window.dispatchEvent(
+              new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true })
+            )
+          }}
           className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-md bg-sidebar-accent/40 hover:bg-sidebar-accent/70 transition-colors group"
         >
-          <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors">Search...</span>
+          <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors">
+            Search...
+          </span>
           <kbd className="flex items-center gap-0.5 text-[10px] text-muted-foreground/60 font-mono">
-            <span>⌘</span><span>K</span>
+            <span>⌘</span>
+            <span>K</span>
           </kbd>
         </button>
         <p className="text-xs text-muted-foreground/50">Compass v0.1.0 · Local only</p>

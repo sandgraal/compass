@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react'
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { AppLayout } from './components/layout/AppLayout'
-import Dashboard from './pages/Dashboard'
-import Daily from './pages/Daily'
-import Weekly from './pages/Weekly'
-import Monthly from './pages/Monthly'
-import KnowledgeBase from './pages/KnowledgeBase'
-import Vault from './pages/Vault'
-import Integrations from './pages/Integrations'
-import Finance from './pages/Finance'
-import Settings from './pages/Settings'
+import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
 import CommandPalette from './components/CommandPalette'
+import { AppLayout } from './components/layout/AppLayout'
+import Daily from './pages/Daily'
+import Dashboard from './pages/Dashboard'
+import Finance from './pages/Finance'
+import Integrations from './pages/Integrations'
+import KnowledgeBase from './pages/KnowledgeBase'
+import Monthly from './pages/Monthly'
+import Settings from './pages/Settings'
+import Vault from './pages/Vault'
+import Weekly from './pages/Weekly'
 import { useAppStore } from './store/appStore'
 
 export default function App(): JSX.Element {
@@ -24,13 +24,12 @@ export default function App(): JSX.Element {
       window.api.theme.getNativeTheme().then((t) => setTheme(t))
       const unsub = window.api.theme.onThemeChange((t) => setTheme(t as 'dark' | 'light'))
       return unsub
-    } else {
-      const mq = window.matchMedia('(prefers-color-scheme: dark)')
-      setTheme(mq.matches ? 'dark' : 'light')
-      const handler = (e: MediaQueryListEvent) => setTheme(e.matches ? 'dark' : 'light')
-      mq.addEventListener('change', handler)
-      return () => mq.removeEventListener('change', handler)
     }
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    setTheme(mq.matches ? 'dark' : 'light')
+    const handler = (e: MediaQueryListEvent) => setTheme(e.matches ? 'dark' : 'light')
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
   }, [setTheme])
 
   // ⌘K global shortcut
@@ -38,7 +37,7 @@ export default function App(): JSX.Element {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault()
-        setPaletteOpen(prev => !prev)
+        setPaletteOpen((prev) => !prev)
       }
     }
     window.addEventListener('keydown', handler)

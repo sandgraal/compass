@@ -1,14 +1,25 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { useEditor, EditorContent } from '@tiptap/react'
-import StarterKit from '@tiptap/starter-kit'
-import TaskList from '@tiptap/extension-task-list'
-import TaskItem from '@tiptap/extension-task-item'
-import Placeholder from '@tiptap/extension-placeholder'
-import Typography from '@tiptap/extension-typography'
 import Link from '@tiptap/extension-link'
-import { BookOpen, Search, Plus, ChevronRight, RefreshCw, FileText, Folder, Save, Bot, GitCompare } from 'lucide-react'
-import { cn, formatRelative } from '../lib/utils'
+import Placeholder from '@tiptap/extension-placeholder'
+import TaskItem from '@tiptap/extension-task-item'
+import TaskList from '@tiptap/extension-task-list'
+import Typography from '@tiptap/extension-typography'
+import { EditorContent, useEditor } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+import {
+  BookOpen,
+  Bot,
+  ChevronRight,
+  FileText,
+  Folder,
+  GitCompare,
+  Plus,
+  RefreshCw,
+  Save,
+  Search
+} from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDebounce } from '../hooks/useDebounce'
+import { cn, formatRelative } from '../lib/utils'
 
 interface FileNode {
   path: string
@@ -24,13 +35,15 @@ export default function KnowledgeBase(): JSX.Element {
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [content, setContent] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<Array<FileNode & { snippet: string }> | null>(null)
+  const [searchResults, setSearchResults] = useState<Array<FileNode & { snippet: string }> | null>(
+    null
+  )
   const [saving, setSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [showDiff, setShowDiff] = useState(false)
-  const [diffOld, setDiffOld] = useState<string | null>(null)   // content before last sync
+  const [diffOld, setDiffOld] = useState<string | null>(null) // content before last sync
   const isLoadingRef = useRef(false)
-  const currentRawRef = useRef<string>('')  // raw markdown of currently open file
+  const currentRawRef = useRef<string>('') // raw markdown of currently open file
   const selectedPathRef = useRef<string | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
@@ -48,7 +61,7 @@ export default function KnowledgeBase(): JSX.Element {
     content: '',
     editorProps: { attributes: { class: 'tiptap-editor' } },
     onUpdate: ({ editor }) => {
-      if (isLoadingRef.current) return  // suppress updates during initial content load
+      if (isLoadingRef.current) return // suppress updates during initial content load
       const md = editor.getHTML()
       setContent(md)
     }
@@ -64,7 +77,7 @@ export default function KnowledgeBase(): JSX.Element {
       loadFiles()
       if (path === selectedPathRef.current) {
         // Load the .prev snapshot from disk (written by extractor before overwrite)
-        window.api.knowledge.getPrev(path).then(prev => {
+        window.api.knowledge.getPrev(path).then((prev) => {
           // Guard against stale responses if the user switched files
           if (selectedPathRef.current === path && prev !== null) {
             setDiffOld(prev)
@@ -122,7 +135,7 @@ export default function KnowledgeBase(): JSX.Element {
         currentRawRef.current = c
         isLoadingRef.current = true
         editor.commands.setContent(markdownToHtml(c))
-        setContent('')  // reset dirty state — auto-save won't fire until user edits
+        setContent('') // reset dirty state — auto-save won't fire until user edits
         isLoadingRef.current = false
       }
     }
@@ -137,7 +150,7 @@ export default function KnowledgeBase(): JSX.Element {
     // Load persisted prev snapshot for diff view
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (isElectron) {
-      window.api.knowledge.getPrev(path).then(prev => {
+      window.api.knowledge.getPrev(path).then((prev) => {
         // Guard against stale responses if the user switched files quickly
         if (selectedPathRef.current === path && prev !== null) setDiffOld(prev)
       })
@@ -171,7 +184,7 @@ export default function KnowledgeBase(): JSX.Element {
     return acc
   }, {})
 
-  const selectedFile = files.find(f => f.path === selectedPath)
+  const selectedFile = files.find((f) => f.path === selectedPath)
 
   return (
     <div className="flex h-full pt-10">
@@ -180,7 +193,10 @@ export default function KnowledgeBase(): JSX.Element {
         {/* Search */}
         <div className="px-3 py-3 border-b border-border">
           <div className="relative">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Search
+              size={13}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
             <input
               ref={searchRef}
               value={searchQuery}
@@ -195,19 +211,31 @@ export default function KnowledgeBase(): JSX.Element {
         <div className="flex-1 overflow-y-auto py-2">
           {searchResults ? (
             <div>
-              <p className="text-xs text-muted-foreground px-4 py-1 font-medium">{searchResults.length} results</p>
-              {searchResults.map(r => (
+              <p className="text-xs text-muted-foreground px-4 py-1 font-medium">
+                {searchResults.length} results
+              </p>
+              {searchResults.map((r) => (
                 <FileTreeItem
                   key={r.path}
                   file={r}
                   selected={selectedPath === r.path}
-                  onClick={() => { setSearchQuery(''); setSearchResults(null); selectFile(r.path) }}
+                  onClick={() => {
+                    setSearchQuery('')
+                    setSearchResults(null)
+                    selectFile(r.path)
+                  }}
                 />
               ))}
             </div>
           ) : (
             Object.entries(grouped).map(([cat, catFiles]) => (
-              <CategoryGroup key={cat} name={cat} files={catFiles} selectedPath={selectedPath} onSelect={selectFile} />
+              <CategoryGroup
+                key={cat}
+                name={cat}
+                files={catFiles}
+                selectedPath={selectedPath}
+                onSelect={selectFile}
+              />
             ))
           )}
         </div>
@@ -241,8 +269,12 @@ export default function KnowledgeBase(): JSX.Element {
               <div>
                 <h2 className="text-base font-semibold text-foreground">{selectedFile.title}</h2>
                 <div className="flex items-center gap-3 mt-0.5">
-                  <span className="text-xs text-muted-foreground capitalize">{selectedFile.category}</span>
-                  <span className="text-xs text-muted-foreground">{selectedFile.wordCount} words</span>
+                  <span className="text-xs text-muted-foreground capitalize">
+                    {selectedFile.category}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {selectedFile.wordCount} words
+                  </span>
                   {selectedFile.autoUpdated && (
                     <span className="flex items-center gap-1 text-xs text-primary/70">
                       <Bot size={10} /> Auto-updated
@@ -253,13 +285,17 @@ export default function KnowledgeBase(): JSX.Element {
                       <Save size={10} /> Saved {formatRelative(lastSaved)}
                     </span>
                   )}
-                  {saving && <span className="flex items-center gap-1 text-xs text-muted-foreground"><RefreshCw size={10} className="animate-spin" /> Saving…</span>}
+                  {saving && (
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <RefreshCw size={10} className="animate-spin" /> Saving…
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 {diffOld !== null && (
                   <button
-                    onClick={() => setShowDiff(v => !v)}
+                    onClick={() => setShowDiff((v) => !v)}
                     className={cn(
                       'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors',
                       showDiff
@@ -270,7 +306,10 @@ export default function KnowledgeBase(): JSX.Element {
                     <GitCompare size={12} /> {showDiff ? 'Hide diff' : 'Show diff'}
                   </button>
                 )}
-                <button onClick={saveContent} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors">
+                <button
+                  onClick={saveContent}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors"
+                >
                   <Save size={12} /> Save
                 </button>
               </div>
@@ -283,7 +322,12 @@ export default function KnowledgeBase(): JSX.Element {
                   <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
                     <GitCompare size={11} /> Changes from last sync
                   </span>
-                  <button onClick={() => setDiffOld(null)} className="text-xs text-muted-foreground hover:text-foreground">Dismiss</button>
+                  <button
+                    onClick={() => setDiffOld(null)}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Dismiss
+                  </button>
                 </div>
                 <DiffView oldText={diffOld} newText={currentRawRef.current} />
               </div>
@@ -310,7 +354,12 @@ export default function KnowledgeBase(): JSX.Element {
   )
 }
 
-function CategoryGroup({ name, files, selectedPath, onSelect }: {
+function CategoryGroup({
+  name,
+  files,
+  selectedPath,
+  onSelect
+}: {
   name: string
   files: FileNode[]
   selectedPath: string | null
@@ -327,25 +376,39 @@ function CategoryGroup({ name, files, selectedPath, onSelect }: {
         <Folder size={10} />
         {name}
       </button>
-      {open && files.map(f => (
-        <FileTreeItem key={f.path} file={f} selected={selectedPath === f.path} onClick={() => onSelect(f.path)} />
-      ))}
+      {open &&
+        files.map((f) => (
+          <FileTreeItem
+            key={f.path}
+            file={f}
+            selected={selectedPath === f.path}
+            onClick={() => onSelect(f.path)}
+          />
+        ))}
     </div>
   )
 }
 
-function FileTreeItem({ file, selected, onClick }: { file: FileNode; selected: boolean; onClick: () => void }): JSX.Element {
+function FileTreeItem({
+  file,
+  selected,
+  onClick
+}: { file: FileNode; selected: boolean; onClick: () => void }): JSX.Element {
   return (
     <button
       onClick={onClick}
       className={cn(
         'w-full flex items-center gap-2 px-5 py-1.5 text-xs transition-colors text-left',
-        selected ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40'
+        selected
+          ? 'bg-primary/10 text-primary'
+          : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40'
       )}
     >
       <FileText size={11} className="shrink-0" />
       <span className="truncate">{file.title}</span>
-      {file.autoUpdated && <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0 ml-auto" />}
+      {file.autoUpdated && (
+        <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0 ml-auto" />
+      )}
     </button>
   )
 }
@@ -360,12 +423,28 @@ function markdownToHtml(md: string): string {
     const line = lines[i]
 
     // Headings
-    if (/^# /.test(line)) { out.push(`<h1>${inlineHtml(line.slice(2))}</h1>`); i++; continue }
-    if (/^## /.test(line)) { out.push(`<h2>${inlineHtml(line.slice(3))}</h2>`); i++; continue }
-    if (/^### /.test(line)) { out.push(`<h3>${inlineHtml(line.slice(4))}</h3>`); i++; continue }
+    if (/^# /.test(line)) {
+      out.push(`<h1>${inlineHtml(line.slice(2))}</h1>`)
+      i++
+      continue
+    }
+    if (/^## /.test(line)) {
+      out.push(`<h2>${inlineHtml(line.slice(3))}</h2>`)
+      i++
+      continue
+    }
+    if (/^### /.test(line)) {
+      out.push(`<h3>${inlineHtml(line.slice(4))}</h3>`)
+      i++
+      continue
+    }
 
     // Blockquote
-    if (/^> /.test(line)) { out.push(`<blockquote><p>${inlineHtml(line.slice(2))}</p></blockquote>`); i++; continue }
+    if (/^> /.test(line)) {
+      out.push(`<blockquote><p>${inlineHtml(line.slice(2))}</p></blockquote>`)
+      i++
+      continue
+    }
 
     // Table: detect header row followed by separator row
     if (/^\|/.test(line) && i + 1 < lines.length && /^\|[\s\-|]+\|$/.test(lines[i + 1])) {
@@ -376,20 +455,28 @@ function markdownToHtml(md: string): string {
         rows.push(parseCells(lines[i]))
         i++
       }
-      const th = headers.map(h => `<th>${inlineHtml(h)}</th>`).join('')
-      const trs = rows.map(r => `<tr>${r.map(c => `<td>${inlineHtml(c)}</td>`).join('')}</tr>`).join('')
+      const th = headers.map((h) => `<th>${inlineHtml(h)}</th>`).join('')
+      const trs = rows
+        .map((r) => `<tr>${r.map((c) => `<td>${inlineHtml(c)}</td>`).join('')}</tr>`)
+        .join('')
       out.push(`<table><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>`)
       continue
     }
 
     // Task list items
     if (/^- \[x\] /.test(line)) {
-      out.push(`<ul data-type="taskList"><li data-checked="true"><label><input type="checkbox" checked/></label><div><p>${inlineHtml(line.slice(6))}</p></div></li></ul>`)
-      i++; continue
+      out.push(
+        `<ul data-type="taskList"><li data-checked="true"><label><input type="checkbox" checked/></label><div><p>${inlineHtml(line.slice(6))}</p></div></li></ul>`
+      )
+      i++
+      continue
     }
     if (/^- \[ \] /.test(line)) {
-      out.push(`<ul data-type="taskList"><li data-checked="false"><label><input type="checkbox"/></label><div><p>${inlineHtml(line.slice(6))}</p></div></li></ul>`)
-      i++; continue
+      out.push(
+        `<ul data-type="taskList"><li data-checked="false"><label><input type="checkbox"/></label><div><p>${inlineHtml(line.slice(6))}</p></div></li></ul>`
+      )
+      i++
+      continue
     }
 
     // Unordered list — collect consecutive items
@@ -404,7 +491,10 @@ function markdownToHtml(md: string): string {
     }
 
     // Blank line
-    if (line.trim() === '') { i++; continue }
+    if (line.trim() === '') {
+      i++
+      continue
+    }
 
     // Regular paragraph
     out.push(`<p>${inlineHtml(line)}</p>`)
@@ -415,7 +505,10 @@ function markdownToHtml(md: string): string {
 }
 
 function parseCells(row: string): string[] {
-  return row.split('|').slice(1, -1).map(c => c.trim())
+  return row
+    .split('|')
+    .slice(1, -1)
+    .map((c) => c.trim())
 }
 
 function inlineHtml(text: string): string {
@@ -456,8 +549,8 @@ function createDiffTooLargeFallback(oldLines: string[], newLines: string[]): Dif
   return [
     {
       type: 'same',
-      text: `[Diff omitted: too large to compare safely on this screen (${oldLines.length} old lines, ${newLines.length} new lines).]`,
-    },
+      text: `[Diff omitted: too large to compare safely on this screen (${oldLines.length} old lines, ${newLines.length} new lines).]`
+    }
   ]
 }
 
@@ -488,11 +581,13 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
   }
 
   const result: DiffLine[] = []
-  let i = 0; let j = 0
+  let i = 0
+  let j = 0
   while (i < n || j < m) {
     if (i < n && j < m && oldLines[i] === newLines[j]) {
       result.push({ type: 'same', text: oldLines[i] })
-      i++; j++
+      i++
+      j++
     } else if (j < m && (i >= n || dp[i][j + 1] >= dp[i + 1][j])) {
       result.push({ type: 'add', text: newLines[j] })
       j++
@@ -506,7 +601,7 @@ function computeDiff(oldText: string, newText: string): DiffLine[] {
 
 function DiffView({ oldText, newText }: { oldText: string; newText: string }): JSX.Element {
   const lines = computeDiff(oldText, newText)
-  const hasChanges = lines.some(l => l.type !== 'same')
+  const hasChanges = lines.some((l) => l.type !== 'same')
 
   if (!hasChanges) {
     return <p className="px-4 py-3 text-xs text-muted-foreground italic">No changes detected.</p>
@@ -517,7 +612,11 @@ function DiffView({ oldText, newText }: { oldText: string; newText: string }): J
   const shown = new Set<number>()
   lines.forEach((l, idx) => {
     if (l.type !== 'same') {
-      for (let k = Math.max(0, idx - CONTEXT); k <= Math.min(lines.length - 1, idx + CONTEXT); k++) {
+      for (
+        let k = Math.max(0, idx - CONTEXT);
+        k <= Math.min(lines.length - 1, idx + CONTEXT);
+        k++
+      ) {
         shown.add(k)
       }
     }
@@ -528,7 +627,11 @@ function DiffView({ oldText, newText }: { oldText: string; newText: string }): J
   lines.forEach((line, idx) => {
     if (!shown.has(idx)) return
     if (prevIdx >= 0 && idx > prevIdx + 1) {
-      chunks.push(<div key={`gap-${idx}`} className="px-4 py-0.5 text-xs text-muted-foreground/40">···</div>)
+      chunks.push(
+        <div key={`gap-${idx}`} className="px-4 py-0.5 text-xs text-muted-foreground/40">
+          ···
+        </div>
+      )
     }
     prevIdx = idx
     chunks.push(
@@ -536,9 +639,9 @@ function DiffView({ oldText, newText }: { oldText: string; newText: string }): J
         key={idx}
         className={cn(
           'px-4 py-0.5 font-mono text-xs whitespace-pre-wrap',
-          line.type === 'add'    && 'bg-emerald-500/10 text-emerald-400',
+          line.type === 'add' && 'bg-emerald-500/10 text-emerald-400',
           line.type === 'remove' && 'bg-red-500/10 text-red-400 line-through',
-          line.type === 'same'   && 'text-muted-foreground/50'
+          line.type === 'same' && 'text-muted-foreground/50'
         )}
       >
         <span className="mr-2 select-none opacity-50">
@@ -554,10 +657,45 @@ function DiffView({ oldText, newText }: { oldText: string; newText: string }): J
 
 function getMockFiles(): FileNode[] {
   return [
-    { path: 'profile/personal.md', title: 'Personal Profile', category: 'profile', lastModified: Date.now(), wordCount: 45, autoUpdated: false },
-    { path: 'profile/goals.md', title: 'Goals & Aspirations', category: 'profile', lastModified: Date.now(), wordCount: 32, autoUpdated: false },
-    { path: 'work/projects.md', title: 'Active Projects', category: 'work', lastModified: Date.now(), wordCount: 67, autoUpdated: false },
-    { path: 'work/github-summary.md', title: 'GitHub Summary', category: 'work', lastModified: Date.now(), wordCount: 120, autoUpdated: true },
-    { path: 'calendar/upcoming.md', title: 'Upcoming Events', category: 'calendar', lastModified: Date.now(), wordCount: 89, autoUpdated: true },
+    {
+      path: 'profile/personal.md',
+      title: 'Personal Profile',
+      category: 'profile',
+      lastModified: Date.now(),
+      wordCount: 45,
+      autoUpdated: false
+    },
+    {
+      path: 'profile/goals.md',
+      title: 'Goals & Aspirations',
+      category: 'profile',
+      lastModified: Date.now(),
+      wordCount: 32,
+      autoUpdated: false
+    },
+    {
+      path: 'work/projects.md',
+      title: 'Active Projects',
+      category: 'work',
+      lastModified: Date.now(),
+      wordCount: 67,
+      autoUpdated: false
+    },
+    {
+      path: 'work/github-summary.md',
+      title: 'GitHub Summary',
+      category: 'work',
+      lastModified: Date.now(),
+      wordCount: 120,
+      autoUpdated: true
+    },
+    {
+      path: 'calendar/upcoming.md',
+      title: 'Upcoming Events',
+      category: 'calendar',
+      lastModified: Date.now(),
+      wordCount: 89,
+      autoUpdated: true
+    }
   ]
 }

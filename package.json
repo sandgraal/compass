@@ -22,7 +22,7 @@
     "test": "vitest --passWithNoTests",
     "test:run": "vitest --run --passWithNoTests",
     "test:coverage": "vitest --run --coverage --passWithNoTests",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --pass-with-no-tests",
     "knip": "knip",
     "prepare": "lefthook install"
   },
@@ -114,7 +114,8 @@
       "category": "public.app-category.productivity",
       "icon": "resources/icon.icns"
     },
-    "files": ["dist/**/*", "dist-electron/**/*"],
+    "files": ["out/**/*", "package.json"],
+    "asarUnpack": ["**/*.node"],
     "directories": {
       "output": "release"
     }

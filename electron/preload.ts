@@ -1,5 +1,5 @@
-import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import { contextBridge, ipcRenderer } from 'electron'
 
 // Typed API exposed to the renderer via contextBridge
 // The renderer has ZERO direct access to Node.js or Electron internals
@@ -76,8 +76,7 @@ const api = {
 
   // --- Calendar Events ---
   calendar: {
-    getEvents: (start: string, end: string) =>
-      ipcRenderer.invoke('calendar:get-events', start, end)
+    getEvents: (start: string, end: string) => ipcRenderer.invoke('calendar:get-events', start, end)
   },
 
   // --- GitHub Items ---
@@ -107,8 +106,10 @@ const api = {
     list: (includeInactive?: boolean) => ipcRenderer.invoke('habits:list', includeInactive),
     create: (habit: { name: string; icon?: string; color?: string }) =>
       ipcRenderer.invoke('habits:create', habit),
-    update: (id: number, updates: { name?: string; icon?: string; color?: string; active?: boolean }) =>
-      ipcRenderer.invoke('habits:update', id, updates),
+    update: (
+      id: number,
+      updates: { name?: string; icon?: string; color?: string; active?: boolean }
+    ) => ipcRenderer.invoke('habits:update', id, updates),
     delete: (id: number) => ipcRenderer.invoke('habits:delete', id),
     getEntries: (month: string) => ipcRenderer.invoke('habits:get-entries', month),
     toggle: (habitId: number, date: string) => ipcRenderer.invoke('habits:toggle', habitId, date)
@@ -117,22 +118,41 @@ const api = {
   // --- Finance ---
   finance: {
     ingestFolder: (folder?: string) => ipcRenderer.invoke('finance:ingest-folder', folder),
-    getTransactions: (opts?: { month?: string; category?: string; accountId?: number; limit?: number }) =>
-      ipcRenderer.invoke('finance:get-transactions', opts),
-    updateTransaction: (id: number, updates: { category?: string; subcategory?: string; notes?: string; accountId?: number }) =>
-      ipcRenderer.invoke('finance:update-transaction', id, updates),
+    getTransactions: (opts?: {
+      month?: string
+      category?: string
+      accountId?: number
+      limit?: number
+    }) => ipcRenderer.invoke('finance:get-transactions', opts),
+    updateTransaction: (
+      id: number,
+      updates: { category?: string; subcategory?: string; notes?: string; accountId?: number }
+    ) => ipcRenderer.invoke('finance:update-transaction', id, updates),
     deleteTransaction: (id: number) => ipcRenderer.invoke('finance:delete-transaction', id),
     getAccounts: () => ipcRenderer.invoke('finance:get-accounts'),
-    upsertAccount: (account: { id?: number; name: string; type: string; isDebt?: boolean; balance?: number; apr?: number; minPayment?: number; creditLimit?: number }) =>
-      ipcRenderer.invoke('finance:upsert-account', account),
+    upsertAccount: (account: {
+      id?: number
+      name: string
+      type: string
+      isDebt?: boolean
+      balance?: number
+      apr?: number
+      minPayment?: number
+      creditLimit?: number
+    }) => ipcRenderer.invoke('finance:upsert-account', account),
     deleteAccount: (id: number) => ipcRenderer.invoke('finance:delete-account', id),
     getDebtSummary: () => ipcRenderer.invoke('finance:get-debt-summary'),
     getBudgetStatus: (month?: string) => ipcRenderer.invoke('finance:get-budget-status', month),
     setBudget: (line: { category: string; subcategory?: string; monthlyAmount: number }) =>
       ipcRenderer.invoke('finance:set-budget', line),
     getRules: () => ipcRenderer.invoke('finance:get-rules'),
-    saveRule: (rule: { id?: number; pattern: string; category: string; subcategory?: string; priority?: number }) =>
-      ipcRenderer.invoke('finance:save-rule', rule),
+    saveRule: (rule: {
+      id?: number
+      pattern: string
+      category: string
+      subcategory?: string
+      priority?: number
+    }) => ipcRenderer.invoke('finance:save-rule', rule),
     deleteRule: (id: number) => ipcRenderer.invoke('finance:delete-rule', id),
     getInboxPath: () => ipcRenderer.invoke('finance:get-inbox-path')
   },

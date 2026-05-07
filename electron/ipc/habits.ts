@@ -1,7 +1,7 @@
-import { IpcMain } from 'electron'
-import { eq, and, gte, lt } from 'drizzle-orm'
+import { and, eq, gte, lt } from 'drizzle-orm'
+import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
-import { habits, habitEntries } from '../db/schema'
+import { habitEntries, habits } from '../db/schema'
 
 export function registerHabitsHandlers(ipcMain: IpcMain): void {
   // ── List habits (active only by default) ─────────────────────────────────
@@ -13,33 +13,49 @@ export function registerHabitsHandlers(ipcMain: IpcMain): void {
   })
 
   // ── Create a habit ────────────────────────────────────────────────────────
-  ipcMain.handle('habits:create', (_event, habit: {
-    name: string
-    icon?: string
-    color?: string
-  }) => {
-    const db = getDb()
-    const result = db.insert(habits).values({
-      name: habit.name,
-      icon: habit.icon ?? null,
-      color: habit.color ?? '#6272f1',
-      active: true,
-      createdAt: new Date()
-    }).run()
-    return { success: true, id: Number(result.lastInsertRowid) }
-  })
+  ipcMain.handle(
+    'habits:create',
+    (
+      _event,
+      habit: {
+        name: string
+        icon?: string
+        color?: string
+      }
+    ) => {
+      const db = getDb()
+      const result = db
+        .insert(habits)
+        .values({
+          name: habit.name,
+          icon: habit.icon ?? null,
+          color: habit.color ?? '#6272f1',
+          active: true,
+          createdAt: new Date()
+        })
+        .run()
+      return { success: true, id: Number(result.lastInsertRowid) }
+    }
+  )
 
   // ── Update a habit ────────────────────────────────────────────────────────
-  ipcMain.handle('habits:update', (_event, id: number, updates: {
-    name?: string
-    icon?: string
-    color?: string
-    active?: boolean
-  }) => {
-    const db = getDb()
-    db.update(habits).set(updates).where(eq(habits.id, id)).run()
-    return { success: true }
-  })
+  ipcMain.handle(
+    'habits:update',
+    (
+      _event,
+      id: number,
+      updates: {
+        name?: string
+        icon?: string
+        color?: string
+        active?: boolean
+      }
+    ) => {
+      const db = getDb()
+      db.update(habits).set(updates).where(eq(habits.id, id)).run()
+      return { success: true }
+    }
+  )
 
   // ── Delete a habit (soft delete — sets active = false) ────────────────────
   ipcMain.handle('habits:delete', (_event, id: number) => {
@@ -58,7 +74,9 @@ export function registerHabitsHandlers(ipcMain: IpcMain): void {
     const next = new Date(y, m, 1) // JS months are 0-indexed; m is 1-indexed so this gives next month
     const end = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-01`
 
-    const entries = db.select().from(habitEntries)
+    const entries = db
+      .select()
+      .from(habitEntries)
       .where(and(gte(habitEntries.date, start), lt(habitEntries.date, end)))
       .all()
 
@@ -77,7 +95,9 @@ export function registerHabitsHandlers(ipcMain: IpcMain): void {
     const db = getDb()
 
     // Check if entry exists
-    const existing = db.select().from(habitEntries)
+    const existing = db
+      .select()
+      .from(habitEntries)
       .where(and(eq(habitEntries.habitId, habitId), eq(habitEntries.date, date)))
       .all()[0]
 
@@ -87,13 +107,14 @@ export function registerHabitsHandlers(ipcMain: IpcMain): void {
         .where(eq(habitEntries.id, existing.id))
         .run()
       return { success: true, completed: !existing.completed }
-    } else {
-      db.insert(habitEntries).values({
+    }
+    db.insert(habitEntries)
+      .values({
         habitId,
         date,
         completed: true
-      }).run()
-      return { success: true, completed: true }
-    }
+      })
+      .run()
+    return { success: true, completed: true }
   })
 }

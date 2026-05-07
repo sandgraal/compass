@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { BookOpen, Calendar, ChevronDown, ChevronRight, GitBranch, Inbox, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { X, BookOpen, Calendar, GitBranch, Inbox, ChevronDown, ChevronRight } from 'lucide-react'
-import { useAppStore } from '../../store/appStore'
 import { cn, formatDate, formatTime } from '../../lib/utils'
+import { useAppStore } from '../../store/appStore'
 
 interface ContextSection {
   id: string
@@ -37,48 +37,50 @@ export function ContextDrawer(): JSX.Element {
       window.api.calendar.getEvents(now.toISOString(), endOfWeek.toISOString()),
       window.api.github.getItems('open'),
       window.api.gmail.getActions(false)
-    ]).then(([events, github, gmail]) => {
-      const newSections: ContextSection[] = []
+    ])
+      .then(([events, github, gmail]) => {
+        const newSections: ContextSection[] = []
 
-      if (events.length) {
-        newSections.push({
-          id: 'calendar',
-          label: 'Upcoming',
-          icon: <Calendar size={14} />,
-          items: events.slice(0, 5).map((e) => ({
-            title: e.title,
-            subtitle: e.startAt ? `${formatDate(e.startAt)} ${formatTime(e.startAt)}` : 'All day'
-          }))
-        })
-      }
+        if (events.length) {
+          newSections.push({
+            id: 'calendar',
+            label: 'Upcoming',
+            icon: <Calendar size={14} />,
+            items: events.slice(0, 5).map((e) => ({
+              title: e.title,
+              subtitle: e.startAt ? `${formatDate(e.startAt)} ${formatTime(e.startAt)}` : 'All day'
+            }))
+          })
+        }
 
-      if (github.length) {
-        newSections.push({
-          id: 'github',
-          label: 'GitHub',
-          icon: <GitBranch size={14} />,
-          items: github.slice(0, 5).map((g) => ({
-            title: g.title,
-            subtitle: g.repo,
-            href: g.url
-          }))
-        })
-      }
+        if (github.length) {
+          newSections.push({
+            id: 'github',
+            label: 'GitHub',
+            icon: <GitBranch size={14} />,
+            items: github.slice(0, 5).map((g) => ({
+              title: g.title,
+              subtitle: g.repo,
+              href: g.url
+            }))
+          })
+        }
 
-      if (gmail.length) {
-        newSections.push({
-          id: 'gmail',
-          label: 'Inbox',
-          icon: <Inbox size={14} />,
-          items: gmail.slice(0, 5).map((m) => ({
-            title: m.subject,
-            subtitle: m.fromAddress
-          }))
-        })
-      }
+        if (gmail.length) {
+          newSections.push({
+            id: 'gmail',
+            label: 'Inbox',
+            icon: <Inbox size={14} />,
+            items: gmail.slice(0, 5).map((m) => ({
+              title: m.subject,
+              subtitle: m.fromAddress
+            }))
+          })
+        }
 
-      setSections(newSections)
-    }).catch(() => setSections(getMockSections()))
+        setSections(newSections)
+      })
+      .catch(() => setSections(getMockSections()))
   }, [location.pathname])
 
   if (!contextDrawerOpen) return <></>
@@ -112,19 +114,19 @@ export function ContextDrawer(): JSX.Element {
             <div key={section.id} className="mb-1">
               <button
                 className="w-full flex items-center justify-between px-4 py-2 text-xs font-medium text-muted-foreground hover:text-foreground uppercase tracking-wider"
-                onClick={() => setExpanded((prev) => {
-                  const next = new Set(prev)
-                  next.has(section.id) ? next.delete(section.id) : next.add(section.id)
-                  return next
-                })}
+                onClick={() =>
+                  setExpanded((prev) => {
+                    const next = new Set(prev)
+                    next.has(section.id) ? next.delete(section.id) : next.add(section.id)
+                    return next
+                  })
+                }
               >
                 <span className="flex items-center gap-1.5">
                   {section.icon}
                   {section.label}
                 </span>
-                {expanded.has(section.id)
-                  ? <ChevronDown size={12} />
-                  : <ChevronRight size={12} />}
+                {expanded.has(section.id) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
               </button>
 
               {expanded.has(section.id) && (
@@ -140,7 +142,9 @@ export function ContextDrawer(): JSX.Element {
                     >
                       <p className="text-xs text-foreground truncate">{item.title}</p>
                       {item.subtitle && (
-                        <p className="text-xs text-muted-foreground truncate mt-0.5">{item.subtitle}</p>
+                        <p className="text-xs text-muted-foreground truncate mt-0.5">
+                          {item.subtitle}
+                        </p>
                       )}
                     </div>
                   ))}

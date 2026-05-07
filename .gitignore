@@ -69,6 +69,12 @@ test-results/
 .claude/settings.local.json
 .claude/worktrees/
 .claude/project-status.json
+.claude/scheduled_tasks.lock
+
+# ============================================================
+# ICON BUILD ARTIFACTS (resources/icon.icns is committed)
+# ============================================================
+resources/icon.iconset/
 
 # ============================================================
 # KNIP / LINT REPORTS
