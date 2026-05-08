@@ -86,13 +86,23 @@ const config: Config = {
         'scale-in': {
           from: { opacity: '0', transform: 'scale(0.96) translateY(-4px)' },
           to: { opacity: '1', transform: 'scale(1) translateY(0)' }
+        },
+        'toast-in': {
+          from: { opacity: '0', transform: 'translateX(calc(100% + 24px))' },
+          to: { opacity: '1', transform: 'translateX(0)' }
+        },
+        'toast-out': {
+          from: { opacity: '1', transform: 'translateX(0)' },
+          to: { opacity: '0', transform: 'translateX(calc(100% + 24px))' }
         }
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
         'fade-in': 'fade-in 0.2s ease-out',
-        'scale-in': 'scale-in 0.15s ease-out'
+        'scale-in': 'scale-in 0.15s ease-out',
+        'toast-in': 'toast-in 0.2s ease-out',
+        'toast-out': 'toast-out 0.15s ease-in forwards'
       }
     }
   },

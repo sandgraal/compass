@@ -12,6 +12,7 @@ import {
   X
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { useToast } from '../components/ui/Toast'
 import { cn, isoDate, todayISO } from '../lib/utils'
 
 const CATEGORIES = ['morning', 'work', 'personal', 'evening'] as const
@@ -62,6 +63,7 @@ export default function Daily(): JSX.Element {
   const [templateOpen, setTemplateOpen] = useState(false)
   const [templateContent, setTemplateContent] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const { toast } = useToast()
 
   const dateStr = isoDate(date)
   const isToday = dateStr === todayISO()
@@ -225,7 +227,10 @@ export default function Daily(): JSX.Element {
     if (!window.api) return
     const tomorrow = isoDate(addDays(date, 1))
     const result = await window.api.checklist.rollOver(dateStr, tomorrow)
-    alert(`Rolled over ${result.rolledOver} items to ${tomorrow}`)
+    toast(
+      `Rolled over ${result.rolledOver} item${result.rolledOver === 1 ? '' : 's'} to ${tomorrow}`,
+      'success'
+    )
   }
 
   async function openTemplateEditor() {
