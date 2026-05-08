@@ -12,7 +12,7 @@ import {
   Wallet,
   X
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '../lib/utils'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -99,11 +99,11 @@ export default function Finance(): JSX.Element {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  function showToast(message: string, type: 'success' | 'error') {
+  const showToast = useCallback((message: string, type: 'success' | 'error') => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
     setToast({ message, type })
     toastTimerRef.current = setTimeout(() => setToast(null), 4000)
-  }
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -113,7 +113,7 @@ export default function Finance(): JSX.Element {
 
   const month = new Date().toISOString().slice(0, 7)
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron || !window.api.finance) return
     try {
@@ -133,7 +133,7 @@ export default function Finance(): JSX.Element {
       console.error('[finance] refresh failed', err)
       showToast('Failed to load finance data.', 'error')
     }
-  }
+  }, [month, showToast])
 
   const ingest = async () => {
     const isElectron = typeof window !== 'undefined' && !!window.api
@@ -148,10 +148,9 @@ export default function Finance(): JSX.Element {
     }
   }
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refresh closes over `month` (stable per render) and only needs to fire on mount; including it would cause an infinite loop.
   useEffect(() => {
-    refresh()
-  }, [])
+    void refresh()
+  }, [refresh])
 
   // ── Derived totals ────────────────────────────────────────────────────────
   const totalDebt = debts.reduce((a, d) => a + (d.balance ?? 0), 0)
@@ -192,9 +191,7 @@ export default function Finance(): JSX.Element {
   }
 
   async function deleteAccount(id: number) {
-    if (
-      !confirm('Delete this account? Transactions will keep their account ID but become orphaned.')
-    )
+    if (!confirm('Delete this account? This only works when no transactions still reference it.'))
       return
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
@@ -204,14 +201,14 @@ export default function Finance(): JSX.Element {
       await refresh()
     } catch (err) {
       console.error('[finance] deleteAccount failed', err)
-      showToast('Failed to delete account.', 'error')
+      showToast(err instanceof Error ? err.message : 'Failed to delete account.', 'error')
     }
   }
 
   // ── Transaction handlers ──────────────────────────────────────────────────
   async function updateTxn(
     id: number,
-    updates: { category?: string; subcategory?: string; notes?: string; accountId?: number }
+    updates: { category?: string; subcategory?: string; notes?: string; accountId?: number | null }
   ) {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
@@ -514,7 +511,7 @@ function TransactionsTab({
   accounts: Account[]
   onUpdate: (
     id: number,
-    updates: { category?: string; subcategory?: string; notes?: string; accountId?: number }
+    updates: { category?: string; subcategory?: string; notes?: string; accountId?: number | null }
   ) => Promise<void>
   onDelete: (id: number) => Promise<void>
 }): JSX.Element {
@@ -582,7 +579,7 @@ function TransactionRow({
   onToggle: () => void
   onUpdate: (
     id: number,
-    updates: { category?: string; subcategory?: string; notes?: string; accountId?: number }
+    updates: { category?: string; subcategory?: string; notes?: string; accountId?: number | null }
   ) => Promise<void>
   onDelete: (id: number) => Promise<void>
   onCancel: () => void
@@ -620,13 +617,13 @@ function TransactionRow({
         category?: string
         subcategory?: string
         notes?: string
-        accountId?: number
+        accountId?: number | null
       } = {
         category: finalCategory,
         subcategory: subcategory.trim(),
         notes: notes.trim()
       }
-      if (typeof accountId === 'number') updates.accountId = accountId
+      updates.accountId = typeof accountId === 'number' ? accountId : null
       await onUpdate(txn.id, updates)
       onCancel()
     } catch {
@@ -657,7 +654,7 @@ function TransactionRow({
         <td className="py-1.5">{txn.date}</td>
         <td className="truncate max-w-[280px]">{txn.description}</td>
         <td className="text-muted-foreground">
-          {txn.category}
+          {txn.category ?? 'Uncategorized'}
           {txn.subcategory ? ` / ${txn.subcategory}` : ''}
         </td>
         <td className={cn('text-right', txn.amount < 0 ? 'text-red-400' : 'text-emerald-400')}>
@@ -893,9 +890,10 @@ function AccountsTab({
       }
       if (form.id) payload.id = form.id
       if (form.balance.trim() !== '') payload.balance = Number(form.balance)
-      if (aprPct !== undefined && !Number.isNaN(aprPct)) payload.apr = aprPct / 100
-      if (form.minPayment.trim() !== '') payload.minPayment = Number(form.minPayment)
-      if (form.creditLimit.trim() !== '') payload.creditLimit = Number(form.creditLimit)
+      if (form.isDebt && aprPct !== undefined && !Number.isNaN(aprPct)) payload.apr = aprPct / 100
+      if (form.isDebt && form.minPayment.trim() !== '') payload.minPayment = Number(form.minPayment)
+      if (form.isDebt && form.creditLimit.trim() !== '')
+        payload.creditLimit = Number(form.creditLimit)
 
       await onSave(payload)
       cancel()
@@ -972,36 +970,40 @@ function AccountsTab({
                 Treat balance as amount owed
               </label>
             </FormField>
-            <FormField label="APR (%)">
-              <input
-                type="number"
-                step="0.01"
-                value={form.apr}
-                onChange={(e) => setForm((f) => ({ ...f, apr: e.target.value }))}
-                placeholder="22.99"
-                className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
-              />
-            </FormField>
-            <FormField label="Min payment">
-              <input
-                type="number"
-                step="0.01"
-                value={form.minPayment}
-                onChange={(e) => setForm((f) => ({ ...f, minPayment: e.target.value }))}
-                placeholder="25.00"
-                className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
-              />
-            </FormField>
-            <FormField label="Credit limit">
-              <input
-                type="number"
-                step="0.01"
-                value={form.creditLimit}
-                onChange={(e) => setForm((f) => ({ ...f, creditLimit: e.target.value }))}
-                placeholder="10000.00"
-                className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
-              />
-            </FormField>
+            {form.isDebt && (
+              <>
+                <FormField label="APR (%)">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={form.apr}
+                    onChange={(e) => setForm((f) => ({ ...f, apr: e.target.value }))}
+                    placeholder="22.99"
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </FormField>
+                <FormField label="Min payment">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={form.minPayment}
+                    onChange={(e) => setForm((f) => ({ ...f, minPayment: e.target.value }))}
+                    placeholder="25.00"
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </FormField>
+                <FormField label="Credit limit">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={form.creditLimit}
+                    onChange={(e) => setForm((f) => ({ ...f, creditLimit: e.target.value }))}
+                    placeholder="10000.00"
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </FormField>
+              </>
+            )}
           </div>
           {error && (
             <div className="flex items-center gap-2 text-sm text-destructive mb-3">
