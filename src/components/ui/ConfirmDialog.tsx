@@ -25,18 +25,28 @@ export function ConfirmDialogProvider({ children }: { children: React.ReactNode 
 
   const confirm = useCallback((options: ConfirmOptions): Promise<boolean> => {
     return new Promise((resolve) => {
+      const previousResolve = resolveRef.current
+      if (previousResolve) {
+        resolveRef.current = null
+        previousResolve(false)
+      }
+
       resolveRef.current = resolve
       setPending({ options, resolve })
     })
   }, [])
 
   function handleConfirm() {
-    resolveRef.current?.(true)
+    const resolve = resolveRef.current
+    resolveRef.current = null
+    resolve?.(true)
     setPending(null)
   }
 
   function handleCancel() {
-    resolveRef.current?.(false)
+    const resolve = resolveRef.current
+    resolveRef.current = null
+    resolve?.(false)
     setPending(null)
   }
 
