@@ -11,10 +11,10 @@ import {
   Target,
   Trash2,
   TrendingDown,
-  Wallet,
-  X
+  Wallet
 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useToast } from '../components/ui/Toast'
 import { cn } from '../lib/utils'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -105,20 +105,7 @@ export default function Finance(): JSX.Element {
   const [vaultSeeded, setVaultSeeded] = useState(0)
   const [detectedAccounts, setDetectedAccounts] = useState<string[]>([])
 
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const showToast = useCallback((message: string, type: 'success' | 'error') => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-    setToast({ message, type })
-    toastTimerRef.current = setTimeout(() => setToast(null), 4000)
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-    }
-  }, [])
+  const { toast: showToast } = useToast()
 
   const month = new Date().toISOString().slice(0, 7)
 
@@ -437,27 +424,6 @@ export default function Finance(): JSX.Element {
       )}
 
       {tab === 'rules' && <RulesTab rules={rules} onSave={saveRule} onDelete={deleteRule} />}
-
-      {toast && (
-        <div
-          className={cn(
-            'fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all',
-            toast.type === 'success'
-              ? 'bg-emerald-500/90 text-white'
-              : 'bg-destructive/90 text-destructive-foreground'
-          )}
-        >
-          {toast.message}
-          <button
-            type="button"
-            onClick={() => setToast(null)}
-            aria-label="Close notification"
-            className="ml-2 opacity-70 hover:opacity-100 text-xs"
-          >
-            <X size={12} />
-          </button>
-        </div>
-      )}
     </div>
   )
 }
