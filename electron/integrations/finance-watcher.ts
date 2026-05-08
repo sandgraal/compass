@@ -136,11 +136,12 @@ export async function startFinanceWatcher(
     await watcher.close()
     watcher = null
   }
-  watchedFolder = folder
+  watchedFolder = null
   if (!folder || !existsSync(folder)) {
     console.log('[finance-watcher] not watching (folder missing or unset):', folder)
     return
   }
+  watchedFolder = folder
 
   console.log('[finance-watcher] watching', folder)
   initialScan(folder)
