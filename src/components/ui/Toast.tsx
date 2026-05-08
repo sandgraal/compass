@@ -9,6 +9,7 @@ interface ToastItem {
   id: string
   message: string
   type: ToastType
+  open: boolean
 }
 
 interface ToastContextValue {
@@ -17,6 +18,9 @@ interface ToastContextValue {
 
 const ToastContext = createContext<ToastContextValue | null>(null)
 
+/** Must match the `toast-out` animation duration in tailwind.config.ts. */
+const TOAST_EXIT_ANIMATION_MS = 150
+
 export function ToastProvider({ children }: { children: React.ReactNode }): JSX.Element {
   const [toasts, setToasts] = useState<ToastItem[]>([])
   const counterRef = useRef(0)
@@ -24,11 +28,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
   const toast = useCallback((message: string, type: ToastType = 'info') => {
     counterRef.current += 1
     const id = String(counterRef.current)
-    setToasts((prev) => [...prev, { id, message, type }])
+    setToasts((prev) => [...prev, { id, message, type, open: true }])
   }, [])
 
   function dismiss(id: string) {
-    setToasts((prev) => prev.filter((t) => t.id !== id))
+    // Step 1: set open=false so Radix transitions to data-state=closed and the exit animation plays.
+    setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, open: false } : t)))
+    // Step 2: remove from state after the toast-out animation completes.
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id))
+    }, TOAST_EXIT_ANIMATION_MS)
   }
 
   return (
@@ -38,7 +47,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
         {toasts.map((t) => (
           <RadixToast.Root
             key={t.id}
-            open
+            open={t.open}
             onOpenChange={(open) => {
               if (!open) dismiss(t.id)
             }}

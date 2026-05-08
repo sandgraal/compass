@@ -56,7 +56,7 @@ export function ConfirmDialogProvider({ children }: { children: React.ReactNode 
       <AlertDialog.Root
         open={!!pending}
         onOpenChange={(open) => {
-          if (!open) handleCancel()
+          if (!open && resolveRef.current) handleCancel()
         }}
       >
         <AlertDialog.Portal>
