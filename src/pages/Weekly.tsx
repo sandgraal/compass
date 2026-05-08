@@ -119,6 +119,7 @@ export default function Weekly(): JSX.Element {
   const now = new Date()
   const totalEvents = events.length
   const attendedEvents = events.filter((e) => e.startAt && new Date(e.startAt) < now).length
+  const isPastWeek = weekEnd < now
 
   return (
     <div className="p-8 pt-14 max-w-5xl mx-auto animate-fade-in">
@@ -190,9 +191,9 @@ export default function Weekly(): JSX.Element {
           {totalEvents > 0 && (
             <span className="flex items-center gap-1.5">
               <Calendar size={14} className="text-sky-400" />
-              {isCurrentWeek
-                ? `${attendedEvents} / ${totalEvents} events`
-                : `${attendedEvents} events attended`}
+              {isPastWeek
+                ? `${attendedEvents} events attended`
+                : `${attendedEvents} / ${totalEvents} events`}
             </span>
           )}
         </div>

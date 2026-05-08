@@ -1,5 +1,5 @@
 import { and, desc, eq } from 'drizzle-orm'
-import { BrowserWindow, Notification, type IpcMain } from 'electron'
+import { BrowserWindow, type IpcMain, Notification } from 'electron'
 import { getDb } from '../db/client'
 import {
   appSettings,
@@ -47,11 +47,7 @@ function getIntegrationId(db: ReturnType<typeof getDb>, service: string): number
   return row?.id ?? null
 }
 
-function maybeSendNotification(
-  service: string,
-  recordsUpdated: number,
-  error?: string
-): void {
+function maybeSendNotification(service: string, recordsUpdated: number, error?: string): void {
   // Skip if nothing happened and no error
   if (recordsUpdated === 0 && !error) return
 
@@ -59,15 +55,17 @@ function maybeSendNotification(
 
   try {
     const db = getDb()
-    const row = db.select().from(appSettings).where(eq(appSettings.key, 'notificationsEnabled')).get()
-    const enabled = row ? row.value === 'true' : true // default is 'true' per DEFAULTS
+    const row = db
+      .select()
+      .from(appSettings)
+      .where(eq(appSettings.key, 'notificationsEnabled'))
+      .get()
+    const enabled = row ? row.value !== 'false' : true // default is 'true' per DEFAULTS
     if (!enabled) return
 
     const serviceLabel = service === 'google' ? 'Google' : 'GitHub'
     const title = `Compass — ${serviceLabel} synced`
-    const body = error
-      ? `Sync failed: ${error.slice(0, 80)}`
-      : `${recordsUpdated} records updated`
+    const body = error ? `Sync failed: ${error.slice(0, 80)}` : `${recordsUpdated} records updated`
 
     new Notification({ title, body }).show()
   } catch {
