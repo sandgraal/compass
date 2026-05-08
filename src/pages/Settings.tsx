@@ -1,5 +1,7 @@
 import { Bell, Database, Download, Monitor, Moon, Shield, Sun, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { useConfirm } from '../components/ui/ConfirmDialog'
+import { useToast } from '../components/ui/Toast'
 import { cn } from '../lib/utils'
 import { useAppStore } from '../store/appStore'
 
@@ -9,6 +11,8 @@ export default function Settings(): JSX.Element {
   const [notifications, setNotifications] = useState(true)
   const [contextDrawer, setContextDrawer] = useState(true)
   const { setContextDrawerOpen } = useAppStore()
+  const { toast } = useToast()
+  const confirm = useConfirm()
 
   useEffect(() => {
     const isElectron = typeof window !== 'undefined' && !!window.api
@@ -160,8 +164,8 @@ export default function Settings(): JSX.Element {
           <button
             onClick={async () => {
               const r = await window.api?.settings.exportData()
-              if (r?.success) alert(`Exported to:\n${r.path}`)
-              else if (!r?.canceled) alert(`Export failed: ${r?.error}`)
+              if (r?.success) toast(`Exported to: ${r.path}`, 'success')
+              else if (!r?.canceled) toast(`Export failed: ${r?.error}`, 'error')
             }}
             className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors"
           >
@@ -185,10 +189,17 @@ export default function Settings(): JSX.Element {
           >
             <button
               onClick={async () => {
-                if (!confirm('Delete all knowledge base files? This cannot be undone.')) return
+                const ok = await confirm({
+                  title: 'Wipe knowledge base?',
+                  description:
+                    'Delete all files in your local knowledge-base folder. This cannot be undone.',
+                  confirmLabel: 'Wipe',
+                  destructive: true
+                })
+                if (!ok) return
                 const r = await window.api?.settings.wipeKnowledge()
-                if (r?.success) alert('Knowledge base wiped.')
-                else alert(`Error: ${r?.error}`)
+                if (r?.success) toast('Knowledge base wiped.', 'success')
+                else toast(`Error: ${r?.error}`, 'error')
               }}
               className="text-xs px-3 py-1.5 border border-destructive/50 text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
             >
@@ -201,13 +212,17 @@ export default function Settings(): JSX.Element {
           >
             <button
               onClick={async () => {
-                if (
-                  !confirm('Delete all vault data? All encrypted entries will be permanently lost.')
-                )
-                  return
+                const ok = await confirm({
+                  title: 'Wipe vault?',
+                  description:
+                    'Delete all encrypted vault data (.enc files). All entries will be permanently lost and cannot be recovered.',
+                  confirmLabel: 'Wipe vault',
+                  destructive: true
+                })
+                if (!ok) return
                 const r = await window.api?.settings.wipeVault()
-                if (r?.success) alert('Vault wiped.')
-                else alert(`Error: ${r?.error}`)
+                if (r?.success) toast('Vault wiped.', 'success')
+                else toast(`Error: ${r?.error}`, 'error')
               }}
               className="text-xs px-3 py-1.5 border border-destructive/50 text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
             >

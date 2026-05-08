@@ -17,6 +17,8 @@ import {
   Upload
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { useConfirm } from '../components/ui/ConfirmDialog'
+import { useToast } from '../components/ui/Toast'
 import { cn } from '../lib/utils'
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -78,14 +80,8 @@ export default function Vault(): JSX.Element {
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  function showToast(message: string, type: 'success' | 'error') {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-    setToast({ message, type })
-    toastTimerRef.current = setTimeout(() => setToast(null), 4000)
-  }
+  const { toast: showToast } = useToast()
+  const confirm = useConfirm()
 
   // Enable content protection when Vault is mounted; disable on unmount
   useEffect(() => {
@@ -95,13 +91,6 @@ export default function Vault(): JSX.Element {
     window.api.vault.setContentProtection(true)
     return () => {
       window.api.vault.setContentProtection(false)
-    }
-  }, [])
-
-  // Clear toast timer on unmount
-  useEffect(() => {
-    return () => {
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
     }
   }, [])
 
@@ -209,7 +198,13 @@ export default function Vault(): JSX.Element {
   }
 
   async function deleteEntry(id: string) {
-    if (!confirm('Delete this entry? This cannot be undone.')) return
+    const ok = await confirm({
+      title: 'Delete entry?',
+      description: 'This entry will be permanently removed from your vault. This cannot be undone.',
+      confirmLabel: 'Delete',
+      destructive: true
+    })
+    if (!ok) return
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (isElectron) {
       await window.api.vault.deleteEntry(selectedCategory, id)
@@ -399,26 +394,6 @@ export default function Vault(): JSX.Element {
           )}
         </div>
       </div>
-      {toast && (
-        <div
-          className={cn(
-            'fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all',
-            toast.type === 'success'
-              ? 'bg-emerald-500/90 text-white'
-              : 'bg-destructive/90 text-destructive-foreground'
-          )}
-        >
-          {toast.message}
-          <button
-            type="button"
-            onClick={() => setToast(null)}
-            aria-label="Close notification"
-            className="ml-2 opacity-70 hover:opacity-100 text-xs"
-          >
-            ✕
-          </button>
-        </div>
-      )}
     </div>
   )
 }
