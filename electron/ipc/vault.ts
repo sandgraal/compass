@@ -135,8 +135,11 @@ export function seedVaultFromDetectedAccounts(
       if (acct.lastFour && e.accountNumber && String(e.accountNumber).endsWith(acct.lastFour))
         return true
       // No lastFour — match on the human name (USAA Checking vs USAA Savings)
-      if (!acct.lastFour && e.notes && String(e.notes).includes(acct.name)) return true
-      return !acct.lastFour
+      if (!acct.lastFour) {
+        const accountName = acct.name?.trim()
+        if (accountName && e.notes && String(e.notes).includes(accountName)) return true
+      }
+      return false
     })
     if (dupe) continue
 
