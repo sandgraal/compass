@@ -8,6 +8,8 @@ import {
   XCircle
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { useConfirm } from '../components/ui/ConfirmDialog'
+import { useToast } from '../components/ui/Toast'
 import { cn, formatRelative } from '../lib/utils'
 
 interface IntegrationConfig {
@@ -90,6 +92,8 @@ export default function Integrations(): JSX.Element {
   >([])
   const [setupOpen, setSetupOpen] = useState(false)
   const [redirectUris, setRedirectUris] = useState<{ google: string; github: string } | null>(null)
+  const { toast } = useToast()
+  const confirm = useConfirm()
 
   useEffect(() => {
     loadStatuses()
@@ -159,7 +163,7 @@ export default function Integrations(): JSX.Element {
           ? await window.api.auth.connectGoogle()
           : await window.api.auth.connectGitHub()
       if (result.error) {
-        alert(`Connection failed: ${result.error}`)
+        toast(`Connection failed: ${result.error}`, 'error')
       } else {
         await loadStatuses()
         triggerSync(service)
@@ -170,7 +174,13 @@ export default function Integrations(): JSX.Element {
   }
 
   async function disconnect(service: string) {
-    if (!confirm(`Disconnect ${service}? Your synced data will remain in the app.`)) return
+    const ok = await confirm({
+      title: `Disconnect ${service}?`,
+      description: 'Your synced data will remain in the app. You can reconnect at any time.',
+      confirmLabel: 'Disconnect',
+      destructive: false
+    })
+    if (!ok) return
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (isElectron) {
       await window.api.auth.disconnect(service)
