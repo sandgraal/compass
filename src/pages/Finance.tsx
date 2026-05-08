@@ -623,7 +623,9 @@ function TransactionRow({
         subcategory: subcategory.trim(),
         notes: notes.trim()
       }
-      updates.accountId = typeof accountId === 'number' ? accountId : null
+      if (accountId !== (txn.accountId ?? '')) {
+        updates.accountId = typeof accountId === 'number' ? accountId : null
+      }
       await onUpdate(txn.id, updates)
       onCancel()
     } catch {

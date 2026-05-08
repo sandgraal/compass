@@ -200,7 +200,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       .from(financeTransactions)
       .where(eq(financeTransactions.accountId, id))
       .get()
-    const transactionCount = transactionCountResult?.count ?? 0
+    const transactionCount = Number(transactionCountResult?.count ?? 0)
     if (transactionCount > 0) {
       throw new Error(
         `Can't delete this account while ${transactionCount} transaction${transactionCount === 1 ? '' : 's'} still reference it.`
