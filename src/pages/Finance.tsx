@@ -14,6 +14,7 @@ import {
   Wallet
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
 import { cn } from '../lib/utils'
 
@@ -106,6 +107,7 @@ export default function Finance(): JSX.Element {
   const [detectedAccounts, setDetectedAccounts] = useState<string[]>([])
 
   const { toast: showToast } = useToast()
+  const confirm = useConfirm()
 
   const month = new Date().toISOString().slice(0, 7)
 
@@ -214,8 +216,13 @@ export default function Finance(): JSX.Element {
   }
 
   async function deleteAccount(id: number) {
-    if (!confirm('Delete this account? This only works when no transactions still reference it.'))
-      return
+    const ok = await confirm({
+      title: 'Delete account?',
+      description: 'This only works when no transactions still reference it.',
+      confirmLabel: 'Delete',
+      destructive: true
+    })
+    if (!ok) return
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
     try {
@@ -247,7 +254,13 @@ export default function Finance(): JSX.Element {
   }
 
   async function deleteTxn(id: number) {
-    if (!confirm('Delete this transaction? This cannot be undone.')) return
+    const ok = await confirm({
+      title: 'Delete transaction?',
+      description: 'This cannot be undone.',
+      confirmLabel: 'Delete',
+      destructive: true
+    })
+    if (!ok) return
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
     try {
@@ -282,7 +295,13 @@ export default function Finance(): JSX.Element {
   }
 
   async function deleteRule(id: number) {
-    if (!confirm('Delete this rule?')) return
+    const ok = await confirm({
+      title: 'Delete rule?',
+      description: 'The rule will be removed and transactions will no longer be auto-categorized by it.',
+      confirmLabel: 'Delete',
+      destructive: true
+    })
+    if (!ok) return
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
     try {
@@ -471,7 +490,7 @@ function Overview({
         <Tile
           label="Spent (mo)"
           value={fmtMoney(monthExpense)}
-          sub={`${budget.length && totalBudget > 0 ? Math.round((totalActual / totalBudget) * 100) : 0}% of budget`}
+          sub={`${totalBudget > 0 ? Math.round((totalActual / totalBudget) * 100) : 0}% of budget`}
           icon={<Target size={14} />}
         />
         <Tile
