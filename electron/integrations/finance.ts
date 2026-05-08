@@ -234,6 +234,50 @@ const boa: Parser = {
   }
 }
 
+const usaa: Parser = {
+  // USAA bank-download CSV: Date, Description, Original Description, Category, Amount, Status
+  // Posted/Pending in Status; Amount is signed (negative = expense). Account hint comes from filename
+  // (e.g. "USAA_Checking_2026_bk_download.csv" → "USAA Checking").
+  name: 'USAA',
+  matches: (h) =>
+    h.includes('date') &&
+    h.includes('description') &&
+    h.includes('original description') &&
+    h.includes('amount') &&
+    h.includes('status'),
+  parse: (headers, rows, file, hint) => {
+    const h = headers.map((c) => c.trim().toLowerCase())
+    const di = h.indexOf('date')
+    const descI = h.indexOf('description')
+    const origI = h.indexOf('original description')
+    const catI = h.indexOf('category')
+    const ai = h.indexOf('amount')
+    const si = h.indexOf('status')
+    const account = hint || 'USAA'
+    return rows.flatMap((r) => {
+      try {
+        if (si !== -1 && (r[si] || '').trim().toLowerCase() === 'pending') return [] // skip pending
+        const amount = parseMoney(r[ai])
+        const date = parseDate(r[di])
+        const description = (r[descI] || r[origI] || '').trim()
+        return [
+          {
+            date,
+            amount,
+            description,
+            account,
+            category: catI !== -1 ? r[catI]?.trim() || undefined : undefined,
+            sourceFile: file,
+            hash: hashTxn(date, amount, description, account)
+          }
+        ]
+      } catch {
+        return []
+      }
+    })
+  }
+}
+
 const generic: Parser = {
   name: 'Generic',
   matches: () => true,
@@ -269,7 +313,7 @@ const generic: Parser = {
   }
 }
 
-const PARSERS: Parser[] = [chase, capitalOne, discover, amex, boa, generic]
+const PARSERS: Parser[] = [chase, capitalOne, discover, amex, boa, usaa, generic]
 
 // ---------- CSV reader (minimal, no external dep) ----------
 function readCsv(path: string): { headers: string[]; rows: string[][] } {
@@ -398,4 +442,283 @@ export function categorize(
     if (hit) return { ...t, category: hit.category, subcategory: hit.subcategory ?? undefined }
     return { ...t, category: 'Uncategorized' }
   })
+}
+
+// =====================================================================
+// Source-of-truth folder support
+// =====================================================================
+// Unlike `ingestCsvFolder` (which drains an inbox and archives processed
+// files), the functions below let users point at a folder they own and
+// keep — e.g. `~/Documents/Money/`. Files are read in place; dedupe by
+// transaction hash makes re-processing the same file a safe no-op, so
+// chokidar can fire on every save without corruption.
+
+import ExcelJS from 'exceljs'
+
+export type DetectedAccount = {
+  name: string // e.g. "USAA Checking", "Amex Platinum (****81003)"
+  type: 'checking' | 'savings' | 'credit' | 'investment'
+  institution: string // "USAA", "American Express"
+  lastFour?: string // when statement reveals it
+  isDebt: boolean // credit cards = true
+  sourceFile: string
+}
+
+export type ParsedFile = {
+  bank: string
+  txns: RawTxn[]
+  account?: DetectedAccount
+}
+
+/**
+ * Infer an account hint and metadata from the filename and (if xlsx)
+ * the file's header rows. Best-effort — returns undefined if we can't
+ * confidently tell what the account is.
+ */
+function detectAccount(file: string, peek?: { acctNumber?: string }): DetectedAccount | undefined {
+  const name = basename(file).toLowerCase()
+  // USAA: USAA_Checking_2026_bk_download.csv / USAA_Savings_*.csv
+  if (name.includes('usaa')) {
+    if (name.includes('checking')) {
+      return {
+        name: 'USAA Checking',
+        type: 'checking',
+        institution: 'USAA',
+        isDebt: false,
+        sourceFile: basename(file)
+      }
+    }
+    if (name.includes('savings')) {
+      return {
+        name: 'USAA Savings',
+        type: 'savings',
+        institution: 'USAA',
+        isDebt: false,
+        sourceFile: basename(file)
+      }
+    }
+  }
+  // AMEX: detect from peek (xlsx header cells) for the last 4 of card
+  if (name.includes('amex') || name.includes('american') || peek?.acctNumber) {
+    const lastFour = peek?.acctNumber?.match(/(\d{4,5})\s*$/)?.[1]
+    let displayName = 'American Express'
+    if (name.includes('platinum')) displayName = 'Amex Platinum'
+    else if (name.includes('gold')) displayName = 'Amex Gold'
+    else if (name.includes('green')) displayName = 'Amex Green'
+    else if (name.includes('blue')) displayName = 'Amex Blue'
+    if (lastFour) displayName += ` (****${lastFour})`
+    return {
+      name: displayName,
+      type: 'credit',
+      institution: 'American Express',
+      lastFour,
+      isDebt: true,
+      sourceFile: basename(file)
+    }
+  }
+  return undefined
+}
+
+/**
+ * Parse an AMEX exported xlsx with the standard "Transaction Details"
+ * sheet (columns: Date, Description, Amount, ...). Header row is at index 6.
+ */
+async function parseAmexXlsx(filePath: string): Promise<ParsedFile> {
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.readFile(filePath)
+  const ws = wb.getWorksheet('Transaction Details') ?? wb.worksheets[0]
+  if (!ws) return { bank: 'Amex (xlsx)', txns: [] }
+
+  // Find the account number from rows 1-6 (cell containing "XXXX-XXXXXX-")
+  let acctNumber: string | undefined
+  for (let r = 1; r <= 6; r++) {
+    const row = ws.getRow(r)
+    row.eachCell({ includeEmpty: false }, (cell) => {
+      const v = String(cell.value ?? '')
+      if (/^X{2,}.*\d{3,5}$/.test(v)) acctNumber = v
+    })
+    if (acctNumber) break
+  }
+  const account = detectAccount(filePath, { acctNumber })
+  const accountName = account?.name ?? 'Amex'
+
+  // Detect the header row by scanning for one that contains 'Date' and 'Amount'
+  let headerRowIdx = -1
+  for (let r = 1; r <= 12 && headerRowIdx === -1; r++) {
+    const cells = ws.getRow(r).values as (string | undefined | null)[]
+    const lower = cells.map((c) => String(c ?? '').toLowerCase())
+    if (lower.includes('date') && lower.includes('amount')) headerRowIdx = r
+  }
+  if (headerRowIdx === -1) return { bank: 'Amex (xlsx)', txns: [], account }
+
+  const headerCells = ws.getRow(headerRowIdx).values as (string | undefined | null)[]
+  const headers = headerCells.map((c) =>
+    String(c ?? '')
+      .trim()
+      .toLowerCase()
+  )
+  const dI = headers.indexOf('date')
+  const descI = headers.indexOf('description')
+  const aI = headers.indexOf('amount')
+  const catI = headers.indexOf('category')
+  if (dI === -1 || descI === -1 || aI === -1) return { bank: 'Amex (xlsx)', txns: [], account }
+
+  const txns: RawTxn[] = []
+  for (let r = headerRowIdx + 1; r <= ws.rowCount; r++) {
+    const cells = ws.getRow(r).values as (string | number | Date | undefined | null)[]
+    const rawDate = cells[dI]
+    const rawDesc = cells[descI]
+    const rawAmt = cells[aI]
+    if (rawDate == null || rawDesc == null || rawAmt == null) continue
+    try {
+      let dateStr: string
+      if (rawDate instanceof Date) {
+        dateStr = `${rawDate.getFullYear()}-${String(rawDate.getMonth() + 1).padStart(2, '0')}-${String(rawDate.getDate()).padStart(2, '0')}`
+      } else {
+        dateStr = parseDate(String(rawDate))
+      }
+      const amount = -Number(rawAmt) // AMEX export: positive = charge → make negative
+      const description = String(rawDesc).trim()
+      const category = catI !== -1 ? String(cells[catI] ?? '').trim() || undefined : undefined
+      txns.push({
+        date: dateStr,
+        amount,
+        description,
+        account: accountName,
+        category,
+        sourceFile: basename(filePath),
+        hash: hashTxn(dateStr, amount, description, accountName)
+      })
+    } catch {
+      // skip unparseable rows (subtotal lines, blanks, etc.)
+    }
+  }
+  return { bank: 'Amex (xlsx)', txns, account }
+}
+
+/**
+ * Parse a single CSV file using the existing parser pipeline.
+ */
+function parseCsvFile(filePath: string): ParsedFile {
+  const { headers, rows } = readCsv(filePath)
+  const hLower = headers.map((c) => c.trim().toLowerCase())
+  const parser = PARSERS.find((p) => p.matches(hLower)) || generic
+  const account = detectAccount(filePath)
+  const hint =
+    account?.name ??
+    basename(filePath, '.csv')
+      .replace(/[\d_\-]+$/i, '')
+      .replace(/[_-]+/g, ' ')
+      .trim()
+  const txns = parser.parse(headers, rows, basename(filePath), hint)
+  return { bank: parser.name, txns, account }
+}
+
+/**
+ * Dispatch on extension. Returns parsed transactions + best-effort account
+ * detection. Pure: no DB writes, no file moves.
+ */
+export async function parseFinanceFile(filePath: string): Promise<ParsedFile | null> {
+  const lower = filePath.toLowerCase()
+  if (lower.endsWith('.csv')) return parseCsvFile(filePath)
+  if (lower.endsWith('.xlsx')) return parseAmexXlsx(filePath)
+  return null
+}
+
+/**
+ * Ingest one or more files into the DB. Idempotent (dedupes by hash).
+ * Does NOT move/delete the source files — designed for a folder the
+ * user owns (e.g. ~/Documents/Money). Auto-creates a `financeAccounts`
+ * row for any newly-detected account.
+ */
+export async function ingestFinanceFiles(
+  db: BetterSQLite3Database<typeof schema>,
+  filePaths: string[],
+  rules: { pattern: string; category: string; subcategory?: string | null }[] = []
+): Promise<{
+  result: IngestResult
+  detectedAccounts: (DetectedAccount & { dbId: number })[]
+}> {
+  const result: IngestResult = {
+    filesProcessed: 0,
+    newTransactions: 0,
+    duplicatesDropped: 0,
+    perFile: []
+  }
+
+  // Prefetch existing hashes + accounts for fast dedupe
+  const existingHashes = new Set(
+    db
+      .select({ h: schema.financeTransactions.hash })
+      .from(schema.financeTransactions)
+      .all()
+      .map((r) => r.h)
+  )
+  const existingAccounts = db.select().from(schema.financeAccounts).all()
+  const accountIdByName = new Map(existingAccounts.map((a) => [a.name, a.id]))
+  const detected: (DetectedAccount & { dbId: number })[] = []
+
+  for (const fp of filePaths) {
+    const parsed = await parseFinanceFile(fp)
+    if (!parsed) continue
+    const { bank, txns, account } = parsed
+    const f = basename(fp)
+
+    // Auto-create the account if we detected one and it doesn't exist yet
+    let accountDbId: number | null = null
+    if (account) {
+      let id = accountIdByName.get(account.name)
+      if (id === undefined) {
+        const inserted = db
+          .insert(schema.financeAccounts)
+          .values({
+            name: account.name,
+            type: account.type,
+            institution: account.institution,
+            isDebt: account.isDebt,
+            balance: 0,
+            apr: 0,
+            minPayment: 0,
+            creditLimit: null
+          } as typeof schema.financeAccounts.$inferInsert)
+          .returning({ id: schema.financeAccounts.id })
+          .get()
+        id = inserted?.id
+        if (id !== undefined) {
+          accountIdByName.set(account.name, id)
+          detected.push({ ...account, dbId: id })
+        }
+      }
+      accountDbId = id ?? null
+    }
+
+    const categorized = rules.length ? categorize(txns, rules) : txns
+    const fresh = categorized.filter((t) => !existingHashes.has(t.hash))
+
+    for (const t of fresh) {
+      db.insert(schema.financeTransactions)
+        .values({
+          hash: t.hash,
+          date: t.date,
+          amount: t.amount,
+          description: t.description,
+          accountId: accountDbId,
+          category: t.category ?? 'Uncategorized',
+          subcategory: t.subcategory,
+          notes: t.notes,
+          sourceFile: t.sourceFile,
+          ingestedAt: new Date()
+        })
+        .onConflictDoNothing()
+        .run()
+      existingHashes.add(t.hash)
+    }
+
+    result.filesProcessed++
+    result.newTransactions += fresh.length
+    result.duplicatesDropped += categorized.length - fresh.length
+    result.perFile.push({ file: f, bank, parsed: categorized.length, new: fresh.length })
+  }
+
+  return { result, detectedAccounts: detected }
 }

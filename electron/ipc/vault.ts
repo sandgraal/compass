@@ -95,6 +95,70 @@ const VAULT_CATEGORIES = [
   }
 ]
 
+/**
+ * Seed (idempotently) a stub financial Vault entry for each detected account.
+ * Skips entries whose `institution` + `accountType` already exist — won't
+ * overwrite anything the user has filled in. Returns the count of new entries
+ * created so callers can tell the user.
+ *
+ * Designed for the finance folder watcher: when a CSV/XLSX reveals an
+ * account we've never seen, we drop a stub the user can complete in Vault
+ * (account #, routing, login, security questions, etc.).
+ */
+export function seedVaultFromDetectedAccounts(
+  detectedAccounts: Array<{
+    name: string
+    institution: string
+    type: string
+    lastFour?: string
+    sourceFile: string
+  }>
+): number {
+  if (detectedAccounts.length === 0) return 0
+  const key = getOrCreateKey()
+  const existing = readVaultCategory('financial', key) as Record<string, unknown>[]
+  let added = 0
+
+  for (const acct of detectedAccounts) {
+    const accountTypeLabel =
+      acct.type === 'credit'
+        ? 'Credit Card'
+        : acct.type === 'savings'
+          ? 'Savings'
+          : acct.type === 'checking'
+            ? 'Checking'
+            : acct.type
+    // Idempotent match on institution + accountType + lastFour
+    const dupe = existing.find((e) => {
+      if (e.institution !== acct.institution) return false
+      if (e.accountType !== accountTypeLabel) return false
+      if (acct.lastFour && e.accountNumber && String(e.accountNumber).endsWith(acct.lastFour))
+        return true
+      // No lastFour — match on the human name (USAA Checking vs USAA Savings)
+      if (!acct.lastFour && e.notes && String(e.notes).includes(acct.name)) return true
+      return !acct.lastFour
+    })
+    if (dupe) continue
+
+    const newEntry = {
+      id: randomBytes(8).toString('hex'),
+      institution: acct.institution,
+      accountType: accountTypeLabel,
+      accountNumber: acct.lastFour ? `••••${acct.lastFour}` : '',
+      routingNumber: '',
+      notes: `Auto-detected from ${acct.sourceFile} — ${acct.name}. Fill in account number, login, and security questions.`,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      _autoSeeded: true
+    }
+    existing.push(newEntry)
+    added++
+  }
+
+  if (added > 0) writeVaultCategory('financial', existing, key)
+  return added
+}
+
 export function registerVaultHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('vault:get-categories', () => VAULT_CATEGORIES)
 

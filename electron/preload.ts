@@ -156,7 +156,25 @@ const api = {
       priority?: number
     }) => ipcRenderer.invoke('finance:save-rule', rule),
     deleteRule: (id: number) => ipcRenderer.invoke('finance:delete-rule', id),
-    getInboxPath: () => ipcRenderer.invoke('finance:get-inbox-path')
+    getInboxPath: () => ipcRenderer.invoke('finance:get-inbox-path'),
+
+    // Watched folder (source-of-truth, e.g. ~/Documents/Money)
+    getWatchFolder: () => ipcRenderer.invoke('finance:get-watch-folder'),
+    setWatchFolder: (folder: string | null) =>
+      ipcRenderer.invoke('finance:set-watch-folder', folder),
+    pickWatchFolder: () => ipcRenderer.invoke('finance:pick-watch-folder'),
+    ingestWatchedNow: () => ipcRenderer.invoke('finance:ingest-watched-now'),
+    stopWatching: () => ipcRenderer.invoke('finance:stop-watching'),
+    onIngestComplete: (cb: (data: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: unknown) => cb(data)
+      ipcRenderer.on('finance-watcher:ingest-complete', listener)
+      return () => ipcRenderer.removeListener('finance-watcher:ingest-complete', listener)
+    },
+    onIngestError: (cb: (data: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: unknown) => cb(data)
+      ipcRenderer.on('finance-watcher:ingest-error', listener)
+      return () => ipcRenderer.removeListener('finance-watcher:ingest-error', listener)
+    }
   },
 
   // --- Theme ---

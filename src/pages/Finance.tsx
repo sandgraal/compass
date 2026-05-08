@@ -16,7 +16,7 @@
  */
 
 import { format } from 'date-fns'
-import { Inbox, RefreshCw, Target, TrendingDown, Wallet } from 'lucide-react'
+import { Eye, FolderOpen, Inbox, RefreshCw, Target, TrendingDown, Wallet } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { cn } from '../lib/utils'
 
@@ -54,6 +54,13 @@ export default function Finance(): JSX.Element {
     newTransactions: number
     duplicatesDropped: number
   } | null>(null)
+  const [watchFolder, setWatchFolder] = useState<{
+    path: string
+    isWatching: boolean
+    exists: boolean
+  } | null>(null)
+  const [vaultSeeded, setVaultSeeded] = useState(0)
+  const [detectedAccounts, setDetectedAccounts] = useState<string[]>([])
 
   const month = new Date().toISOString().slice(0, 7)
 
@@ -75,16 +82,47 @@ export default function Finance(): JSX.Element {
     if (!isElectron || !window.api.finance) return
     setIngesting(true)
     try {
-      const result = await window.api.finance.ingestFolder()
-      setLastIngest(result)
+      const out = await window.api.finance.ingestWatchedNow()
+      setLastIngest(out.result)
+      setVaultSeeded(out.vaultSeeded)
+      setDetectedAccounts(out.detectedAccounts.map((a) => a.name))
       await refresh()
     } finally {
       setIngesting(false)
     }
   }
 
+  const pickFolder = async () => {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron || !window.api.finance) return
+    const r = await window.api.finance.pickWatchFolder()
+    if (!r.canceled && r.path) {
+      const status = await window.api.finance.getWatchFolder()
+      setWatchFolder(status)
+    }
+  }
+
   useEffect(() => {
     refresh()
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron || !window.api.finance) return
+
+    // Initial watch folder status
+    window.api.finance.getWatchFolder().then(setWatchFolder)
+
+    // Listen for ingest events from the watcher
+    const unsub = window.api.finance.onIngestComplete((data) => {
+      const d = data as {
+        result: typeof lastIngest
+        detectedAccounts: { name: string }[]
+        vaultSeeded: number
+      }
+      if (d.result) setLastIngest(d.result)
+      setVaultSeeded(d.vaultSeeded)
+      setDetectedAccounts(d.detectedAccounts.map((a) => a.name))
+      refresh()
+    })
+    return unsub
   }, [])
 
   const totalDebt = debts.reduce((a, d) => a + (d.balance ?? 0), 0)
@@ -108,15 +146,65 @@ export default function Finance(): JSX.Element {
           <h1 className="text-xl font-semibold text-foreground">Finance</h1>
           <p className="text-sm text-muted-foreground">{format(new Date(), 'MMMM yyyy')}</p>
         </div>
-        <button
-          onClick={ingest}
-          disabled={ingesting}
-          className="inline-flex items-center gap-2 text-sm px-3 py-1.5 rounded bg-primary text-primary-foreground disabled:opacity-50"
-        >
-          {ingesting ? <RefreshCw size={14} className="animate-spin" /> : <Inbox size={14} />}
-          {ingesting ? 'Ingesting…' : 'Process inbox'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={pickFolder}
+            className="inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded border border-border text-muted-foreground hover:text-foreground"
+            title={watchFolder?.path}
+          >
+            <FolderOpen size={13} />
+            {watchFolder?.path
+              ? watchFolder.path.replace(/^.*?\/Documents\//, '~/Documents/')
+              : 'Pick folder'}
+          </button>
+          <button
+            onClick={ingest}
+            disabled={ingesting}
+            className="inline-flex items-center gap-2 text-sm px-3 py-1.5 rounded bg-primary text-primary-foreground disabled:opacity-50"
+          >
+            {ingesting ? <RefreshCw size={14} className="animate-spin" /> : <Inbox size={14} />}
+            {ingesting ? 'Processing…' : 'Process now'}
+          </button>
+        </div>
       </div>
+
+      {/* Watch folder status */}
+      {watchFolder && (
+        <div className="mb-4 px-4 py-3 rounded-lg border border-border bg-card flex items-center gap-3 text-xs">
+          <Eye
+            size={13}
+            className={cn(watchFolder.isWatching ? 'text-emerald-400' : 'text-muted-foreground/50')}
+          />
+          <span className="text-foreground font-medium">
+            {watchFolder.isWatching ? 'Watching' : 'Not watching'}
+          </span>
+          <span className="text-muted-foreground font-mono">{watchFolder.path}</span>
+          {!watchFolder.exists && (
+            <span className="ml-auto text-amber-400">folder doesn't exist</span>
+          )}
+          {watchFolder.exists && watchFolder.isWatching && (
+            <span className="ml-auto text-muted-foreground/70">
+              Drop CSVs / xlsx here — auto-processes
+            </span>
+          )}
+        </div>
+      )}
+
+      {detectedAccounts.length > 0 && (
+        <div className="mb-4 px-4 py-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-xs">
+          <p className="text-emerald-300 font-medium mb-1">
+            🎉 Detected {detectedAccounts.length} new account
+            {detectedAccounts.length > 1 ? 's' : ''}
+          </p>
+          <p className="text-foreground/80">{detectedAccounts.join(' · ')}</p>
+          {vaultSeeded > 0 && (
+            <p className="text-muted-foreground mt-1">
+              Created {vaultSeeded} stub{vaultSeeded > 1 ? 's' : ''} in Vault → Financial. Open the
+              Vault to fill in account numbers.
+            </p>
+          )}
+        </div>
+      )}
 
       {lastIngest && (
         <div className="mb-4 px-3 py-2 rounded bg-secondary text-sm text-muted-foreground">
@@ -226,7 +314,8 @@ export default function Finance(): JSX.Element {
         <h3 className="text-sm font-semibold mb-3">Recent transactions</h3>
         {txns.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No transactions yet — drop bank CSVs in your inbox folder and click "Process inbox".
+            No transactions yet — drop bank CSVs or xlsx exports into the watched folder and they
+            auto-process.
           </p>
         ) : (
           <table className="w-full text-sm">
