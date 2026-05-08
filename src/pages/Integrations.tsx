@@ -38,6 +38,14 @@ const INTEGRATIONS: IntegrationConfig[] = [
   }
 ]
 
+const SYNC_INTERVAL_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
+  { value: 5, label: 'Every 5m' },
+  { value: 15, label: 'Every 15m' },
+  { value: 30, label: 'Every 30m' },
+  { value: 60, label: 'Every hour' },
+  { value: 0, label: 'Manual only' }
+]
+
 const UPCOMING_INTEGRATIONS: IntegrationConfig[] = [
   {
     id: 'notion',
@@ -175,6 +183,19 @@ export default function Integrations(): JSX.Element {
     if (!isElectron) return
     setSyncing((prev) => new Set(prev).add(service))
     await window.api.sync.triggerSync(service)
+  }
+
+  async function changeSyncInterval(service: string, minutes: number) {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron) return
+    // Optimistic update so the dropdown reflects the change immediately.
+    setStatuses((prev) => {
+      const existing = prev[service]
+      if (!existing) return prev
+      return { ...prev, [service]: { ...existing, syncIntervalMinutes: minutes } }
+    })
+    await window.api.sync.setInterval(service, minutes)
+    await loadStatuses()
   }
 
   return (
@@ -447,6 +468,25 @@ export default function Integrations(): JSX.Element {
                 <p className="text-xs text-muted-foreground mb-3">
                   Last synced {formatRelative(status.lastSyncedAt)}
                 </p>
+              )}
+
+              {isConnected && (
+                <label className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
+                  <span>Sync</span>
+                  <select
+                    value={status?.syncIntervalMinutes ?? 15}
+                    onChange={(e) =>
+                      changeSyncInterval(integration.id, Number.parseInt(e.target.value, 10))
+                    }
+                    className="bg-background/40 border border-border rounded-md px-2 py-1 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    {SYNC_INTERVAL_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               )}
 
               {hasError && status?.errorMessage && (

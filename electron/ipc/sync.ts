@@ -24,6 +24,19 @@ type SyncResult = {
   error?: string
 }
 
+const SUPPORTED_SYNC_SERVICES = new Set(['google', 'github'])
+
+function normalizeSupportedSyncService(service: unknown): string | null {
+  if (typeof service !== 'string') return null
+
+  const normalized = service.trim()
+  if (normalized.length === 0 || !SUPPORTED_SYNC_SERVICES.has(normalized)) {
+    return null
+  }
+
+  return normalized
+}
+
 function getIntegrationId(db: ReturnType<typeof getDb>, service: string): number | null {
   const row = db
     .select({ id: integrations.id })
@@ -321,6 +334,45 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     const win = BrowserWindow.getAllWindows()[0]
     const results = await Promise.all([syncGoogle(win), syncGitHub(win)])
     return results
+  })
+
+  ipcMain.handle('sync:set-interval', async (_event, service: string, minutes: number) => {
+    const normalizedService = normalizeSupportedSyncService(service)
+    if (!normalizedService) {
+      return { success: false, error: 'Invalid service' }
+    }
+    const parsed = Number(minutes)
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1440) {
+      return { success: false, error: 'Invalid interval' }
+    }
+    const normalized = Math.floor(parsed)
+
+    const db = getDb()
+    const existing = db
+      .select({ id: integrations.id })
+      .from(integrations)
+      .where(eq(integrations.service, normalizedService))
+      .get()
+
+    if (existing) {
+      db.update(integrations)
+        .set({ syncIntervalMinutes: normalized })
+        .where(eq(integrations.service, normalizedService))
+        .run()
+    } else {
+      db.insert(integrations)
+        .values({
+          service: normalizedService,
+          status: 'disconnected',
+          syncIntervalMinutes: normalized
+        })
+        .run()
+    }
+
+    // Lazy-load cron module to avoid an import cycle (cron.ts imports syncGoogle/syncGitHub from here).
+    const { restartCronJobs } = await import('../cron')
+    restartCronJobs()
+    return { success: true, service: normalizedService, minutes: normalized }
   })
 
   ipcMain.handle('sync:get-status', () => {

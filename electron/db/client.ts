@@ -57,6 +57,41 @@ function ensureNewTables(sqlite: Database.Database): void {
       subcategory TEXT, priority INTEGER DEFAULT 0
     );
   `)
+
+  // Backfill new columns on pre-existing tables (safe no-op when columns already exist).
+  const addedSyncInterval = ensureColumn(
+    sqlite,
+    'integrations',
+    'sync_interval_minutes',
+    'INTEGER NOT NULL DEFAULT 15'
+  )
+  if (addedSyncInterval) {
+    // One-time migration: seed per-integration intervals from the legacy global setting so users
+    // who tuned `syncInterval` keep their preference on existing connected integrations.
+    try {
+      const legacy = sqlite
+        .prepare("SELECT value FROM app_settings WHERE key = 'syncInterval'")
+        .get() as { value?: string } | undefined
+      const parsed = Number.parseInt(legacy?.value ?? '15', 10)
+      if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1440 && parsed !== 15) {
+        sqlite.prepare('UPDATE integrations SET sync_interval_minutes = ?').run(parsed)
+      }
+    } catch {
+      /* app_settings might not exist on a pristine DB — ignore */
+    }
+  }
+}
+
+function ensureColumn(
+  sqlite: Database.Database,
+  table: string,
+  column: string,
+  ddl: string
+): boolean {
+  const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  if (cols.some((c) => c.name === column)) return false
+  sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`)
+  return true
 }
 
 function createTablesIfNeeded(sqlite: Database.Database): void {
@@ -68,7 +103,8 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       last_synced_at INTEGER,
       status TEXT NOT NULL DEFAULT 'disconnected',
       scopes TEXT,
-      error_message TEXT
+      error_message TEXT,
+      sync_interval_minutes INTEGER NOT NULL DEFAULT 15
     );
 
     CREATE TABLE IF NOT EXISTS sync_events (

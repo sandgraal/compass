@@ -8,7 +8,9 @@ export const integrations = sqliteTable('integrations', {
   lastSyncedAt: integer('last_synced_at', { mode: 'timestamp_ms' }),
   status: text('status').notNull().default('disconnected'), // 'connected' | 'disconnected' | 'error'
   scopes: text('scopes'), // JSON array
-  errorMessage: text('error_message')
+  errorMessage: text('error_message'),
+  // Per-integration sync interval in minutes. 0 = manual only. Default 15.
+  syncIntervalMinutes: integer('sync_interval_minutes').notNull().default(15)
 })
 
 // ---- Sync Events ----

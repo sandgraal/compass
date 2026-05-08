@@ -19,6 +19,8 @@ const api = {
     triggerAllSync: () => ipcRenderer.invoke('sync:trigger-all'),
     getSyncStatus: () => ipcRenderer.invoke('sync:get-status'),
     getLog: () => ipcRenderer.invoke('sync:get-log'),
+    setInterval: (service: string, minutes: number) =>
+      ipcRenderer.invoke('sync:set-interval', service, minutes),
     onSyncUpdate: (cb: (data: unknown) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, data: unknown) => cb(data)
       ipcRenderer.on('sync:update', listener)
