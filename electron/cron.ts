@@ -44,13 +44,43 @@ function stopAllJobs(): void {
   scheduledTasks.clear()
 }
 
-function scheduleForService(service: string, intervalMinutes: number): void {
-  // 0 (or invalid) = manual only — skip scheduling entirely.
-  if (!Number.isFinite(intervalMinutes) || intervalMinutes <= 0) return
+function cronExpressionForIntervalMinutes(intervalMinutes: number): string | null {
+  if (!Number.isFinite(intervalMinutes) || intervalMinutes <= 0) return null
 
-  // node-cron supports `*/N * * * *`; clamp upper bound at 59 minutes for predictable cron syntax.
-  const minutes = Math.max(1, Math.min(59, Math.floor(intervalMinutes)))
-  const expr = `*/${minutes} * * * *`
+  const minutes = Math.floor(intervalMinutes)
+
+  // Exact minute-based schedules.
+  if (minutes >= 1 && minutes <= 59) {
+    return `*/${minutes} * * * *`
+  }
+
+  // Exact hourly schedule.
+  if (minutes === 60) {
+    return '0 * * * *'
+  }
+
+  // Exact daily schedule.
+  if (minutes === 1440) {
+    return '0 0 * * *'
+  }
+
+  // Exact multi-hour schedules that cron can represent as "every N hours".
+  if (minutes > 60 && minutes < 1440 && minutes % 60 === 0) {
+    const hours = minutes / 60
+    if (hours >= 1 && hours <= 23) {
+      return `0 */${hours} * * *`
+    }
+  }
+
+  // Do not silently change the configured interval to a different cadence.
+  return null
+}
+
+function scheduleForService(service: string, intervalMinutes: number): void {
+  // 0 (or invalid/unsupported) = manual only — skip scheduling entirely.
+  const expr = cronExpressionForIntervalMinutes(intervalMinutes)
+  if (!expr) return
+
   const task = cron.schedule(expr, () => runSyncForService(service))
   task.start()
   scheduledTasks.set(service, task)
