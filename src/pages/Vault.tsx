@@ -197,8 +197,15 @@ export default function Vault(): JSX.Element {
   async function updateEntry(id: string, updates: Record<string, string>) {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
-    const updated = await window.api.vault.updateEntry(selectedCategory, id, updates)
-    setEntries((prev) => prev.map((e) => (e.id === id ? updated : e)))
+    try {
+      const updated = await window.api.vault.updateEntry(selectedCategory, id, updates)
+      setEntries((prev) => prev.map((e) => (e.id === id ? updated : e)))
+      showToast('Entry updated successfully.', 'success')
+    } catch (err) {
+      console.error('[vault] Failed to update entry', err)
+      showToast('Failed to save changes. Please try again.', 'error')
+      throw err
+    }
   }
 
   async function deleteEntry(id: string) {
@@ -432,13 +439,15 @@ function EntryCard({
   copiedField: string | null
   onToggleReveal: (key: string) => void
   onCopy: (val: string, key: string) => void
-  onUpdate: (updates: Record<string, string>) => void
+  onUpdate: (updates: Record<string, string>) => Promise<void>
   onDelete: () => void
 }): JSX.Element {
   const [showHistory, setShowHistory] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editValues, setEditValues] = useState<Record<string, string>>({})
   const [editRevealed, setEditRevealed] = useState<Set<string>>(new Set())
+  const [saving, setSaving] = useState(false)
+  const firstInputRef = useRef<HTMLInputElement>(null)
   const entryName = (entry.institution ||
     entry.service ||
     entry.documentType ||
@@ -447,6 +456,27 @@ function EntryCard({
   const history = (Array.isArray(entry._history) ? entry._history : []) as Array<
     Record<string, unknown>
   >
+
+  // Focus the first input when entering edit mode
+  useEffect(() => {
+    if (editing) {
+      requestAnimationFrame(() => {
+        firstInputRef.current?.focus()
+      })
+    }
+  }, [editing])
+
+  // Esc key cancels edit mode
+  useEffect(() => {
+    if (!editing) return undefined
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setEditing(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [editing])
 
   function startEdit() {
     const initial: Record<string, string> = {}
@@ -458,9 +488,16 @@ function EntryCard({
     setEditing(true)
   }
 
-  function saveEdit() {
-    onUpdate(editValues)
-    setEditing(false)
+  async function saveEdit() {
+    setSaving(true)
+    try {
+      await onUpdate(editValues)
+      setEditing(false)
+    } catch {
+      // Error toast is shown by the parent's updateEntry handler
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -488,6 +525,7 @@ function EntryCard({
             type="button"
             onClick={startEdit}
             title="Edit entry"
+            aria-label="Edit entry"
             className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
           >
             <Pencil size={12} />
@@ -495,6 +533,7 @@ function EntryCard({
           <button
             type="button"
             onClick={onDelete}
+            aria-label="Delete entry"
             className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
           >
             <Trash2 size={13} />
@@ -505,7 +544,7 @@ function EntryCard({
       {editing ? (
         <div>
           <div className="grid grid-cols-2 gap-3 mb-3">
-            {fields.map((field) => {
+            {fields.map((field, fieldIdx) => {
               const isRevealed = editRevealed.has(field.key)
               const editFieldId = `edit-entry-${entry.id}-${field.key}`
               return (
@@ -515,6 +554,7 @@ function EntryCard({
                   </label>
                   <div className="relative flex items-center">
                     <input
+                      ref={fieldIdx === 0 ? firstInputRef : undefined}
                       id={editFieldId}
                       type={field.sensitive && !isRevealed ? 'password' : 'text'}
                       value={editValues[field.key] || ''}
@@ -547,6 +587,7 @@ function EntryCard({
             <button
               type="button"
               onClick={() => setEditing(false)}
+              aria-label="Cancel editing"
               className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               Cancel
@@ -554,9 +595,11 @@ function EntryCard({
             <button
               type="button"
               onClick={saveEdit}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+              disabled={saving}
+              aria-label="Save encrypted entry"
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
-              Save encrypted
+              {saving ? 'Saving…' : 'Save encrypted'}
             </button>
           </div>
         </div>

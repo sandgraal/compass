@@ -2,6 +2,7 @@ import { readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { eq } from 'drizzle-orm'
 import { type IpcMain, app, dialog, shell } from 'electron'
+import { restartCronJobs } from '../cron'
 import { getDb } from '../db/client'
 import {
   appSettings,
@@ -55,6 +56,9 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
         set: { value: String(value), updatedAt: new Date() }
       })
       .run()
+    if (key === 'syncInterval') {
+      restartCronJobs()
+    }
     return { success: true }
   })
 
