@@ -133,6 +133,7 @@ export const financeAccounts = sqliteTable('finance_accounts', {
   apr: real('apr').default(0), // annual rate as decimal e.g. 0.2499
   minPayment: real('min_payment').default(0),
   creditLimit: real('credit_limit'),
+  institution: text('institution').notNull().default(''),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 

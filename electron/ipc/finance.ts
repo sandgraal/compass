@@ -438,7 +438,7 @@ async function refreshFinanceKnowledge(): Promise<void> {
     accounts: accounts.map((a) => ({
       name: a.name,
       type: a.type,
-      institution: '',
+      institution: a.institution ?? '',
       active: true,
       notes: null
     })),
