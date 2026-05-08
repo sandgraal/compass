@@ -577,7 +577,7 @@ async function parseAmexXlsx(filePath: string): Promise<ParsedFile> {
       } else {
         dateStr = parseDate(String(rawDate))
       }
-      const amount = -Number(rawAmt) // AMEX export: positive = charge → make negative
+      const amount = -parseMoney(String(rawAmt)) // AMEX export: positive = charge → make negative
       const description = String(rawDesc).trim()
       const category = catI !== -1 ? String(cells[catI] ?? '').trim() || undefined : undefined
       txns.push({
