@@ -10,6 +10,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import { inArray } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
 
@@ -646,14 +647,7 @@ export async function ingestFinanceFiles(
     perFile: []
   }
 
-  // Prefetch existing hashes + accounts for fast dedupe
-  const existingHashes = new Set(
-    db
-      .select({ h: schema.financeTransactions.hash })
-      .from(schema.financeTransactions)
-      .all()
-      .map((r) => r.h)
-  )
+  // Prefetch existing accounts (lightweight, needed for cross-file account dedup)
   const existingAccounts = db.select().from(schema.financeAccounts).all()
   const accountIdByName = new Map(existingAccounts.map((a) => [a.name, a.id]))
   const detected: (DetectedAccount & { dbId: number })[] = []
@@ -693,7 +687,21 @@ export async function ingestFinanceFiles(
     }
 
     const categorized = rules.length ? categorize(txns, rules) : txns
-    const fresh = categorized.filter((t) => !existingHashes.has(t.hash))
+
+    // Scope hash lookup to only this batch's candidates — avoids full-table scan
+    const candidateHashes = categorized.map((t) => t.hash)
+    const existingInBatch =
+      candidateHashes.length > 0
+        ? new Set(
+            db
+              .select({ h: schema.financeTransactions.hash })
+              .from(schema.financeTransactions)
+              .where(inArray(schema.financeTransactions.hash, candidateHashes))
+              .all()
+              .map((r) => r.h)
+          )
+        : new Set<string>()
+    const fresh = categorized.filter((t) => !existingInBatch.has(t.hash))
 
     for (const t of fresh) {
       db.insert(schema.financeTransactions)
@@ -711,7 +719,6 @@ export async function ingestFinanceFiles(
         })
         .onConflictDoNothing()
         .run()
-      existingHashes.add(t.hash)
     }
 
     result.filesProcessed++
