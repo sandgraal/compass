@@ -116,6 +116,11 @@ export default function Weekly(): JSX.Element {
     .filter((i) => i.checked).length
   const completionPct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
 
+  const now = new Date()
+  const totalEvents = events.length
+  const attendedEvents = events.filter((e) => e.startAt && new Date(e.startAt) < now).length
+  const isPastWeek = weekEnd < now
+
   return (
     <div className="p-8 pt-14 max-w-5xl mx-auto animate-fade-in">
       {/* Header */}
@@ -183,6 +188,14 @@ export default function Weekly(): JSX.Element {
                 </span>
               )
             })()}
+          {totalEvents > 0 && (
+            <span className="flex items-center gap-1.5">
+              <Calendar size={14} className="text-sky-400" />
+              {isPastWeek
+                ? `${attendedEvents} events attended`
+                : `${attendedEvents} / ${totalEvents} events`}
+            </span>
+          )}
         </div>
       </div>
 

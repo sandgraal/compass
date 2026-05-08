@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { and, desc, eq, gte, lt } from 'drizzle-orm'
+import { and, desc, eq, gte, lt, sql } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
 import {
@@ -153,7 +153,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
         category?: string
         subcategory?: string
         notes?: string
-        accountId?: number
+        accountId?: number | null
       }
     ) => {
       const db = getDb()
@@ -215,6 +215,17 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   // ── Delete account ────────────────────────────────────────────────────────
   ipcMain.handle('finance:delete-account', (_event, id: number) => {
     const db = getDb()
+    const transactionCountResult = db
+      .select({ count: sql<number>`count(*)` })
+      .from(financeTransactions)
+      .where(eq(financeTransactions.accountId, id))
+      .get()
+    const transactionCount = Number(transactionCountResult?.count ?? 0)
+    if (transactionCount > 0) {
+      throw new Error(
+        `Can't delete this account while ${transactionCount} transaction${transactionCount === 1 ? '' : 's'} still reference it.`
+      )
+    }
     db.delete(financeAccounts).where(eq(financeAccounts.id, id)).run()
     return { success: true }
   })

@@ -128,7 +128,12 @@ const api = {
     }) => ipcRenderer.invoke('finance:get-transactions', opts),
     updateTransaction: (
       id: number,
-      updates: { category?: string; subcategory?: string; notes?: string; accountId?: number }
+      updates: {
+        category?: string
+        subcategory?: string
+        notes?: string
+        accountId?: number | null
+      }
     ) => ipcRenderer.invoke('finance:update-transaction', id, updates),
     deleteTransaction: (id: number) => ipcRenderer.invoke('finance:delete-transaction', id),
     getAccounts: () => ipcRenderer.invoke('finance:get-accounts'),
