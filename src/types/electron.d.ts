@@ -239,7 +239,12 @@ declare global {
         >
         updateTransaction(
           id: number,
-          updates: { category?: string; subcategory?: string; notes?: string; accountId?: number }
+          updates: {
+            category?: string
+            subcategory?: string
+            notes?: string
+            accountId?: number | null
+          }
         ): Promise<{ success: boolean }>
         deleteTransaction(id: number): Promise<{ success: boolean }>
         getAccounts(): Promise<
