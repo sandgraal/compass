@@ -1,7 +1,8 @@
 import { and, desc, eq } from 'drizzle-orm'
-import { BrowserWindow, type IpcMain } from 'electron'
+import { BrowserWindow, type IpcMain, Notification } from 'electron'
 import { getDb } from '../db/client'
 import {
+  appSettings,
   calendarEvents,
   driveFiles,
   githubItems,
@@ -44,6 +45,32 @@ function getIntegrationId(db: ReturnType<typeof getDb>, service: string): number
     .where(eq(integrations.service, service))
     .get()
   return row?.id ?? null
+}
+
+function maybeSendNotification(service: string, recordsUpdated: number, error?: string): void {
+  // Skip if nothing happened and no error
+  if (recordsUpdated === 0 && !error) return
+
+  if (!Notification.isSupported()) return
+
+  try {
+    const db = getDb()
+    const row = db
+      .select()
+      .from(appSettings)
+      .where(eq(appSettings.key, 'notificationsEnabled'))
+      .get()
+    const enabled = row ? row.value !== 'false' : true // default is 'true' per DEFAULTS
+    if (!enabled) return
+
+    const serviceLabel = service === 'google' ? 'Google' : 'GitHub'
+    const title = `Compass — ${serviceLabel} synced`
+    const body = error ? `Sync failed: ${error.slice(0, 80)}` : `${recordsUpdated} records updated`
+
+    new Notification({ title, body }).show()
+  } catch {
+    // Best-effort only: never let notification failures affect sync results.
+  }
 }
 
 export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
@@ -207,6 +234,7 @@ export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<Syn
       status: 'success',
       recordsUpdated
     })
+    maybeSendNotification('google', recordsUpdated)
     return { service: 'google', success: true, recordsUpdated }
   } catch (err) {
     const message = (err as Error).message
@@ -229,6 +257,7 @@ export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<Syn
       status: 'error',
       error: message
     })
+    maybeSendNotification('google', 0, message)
     return { service: 'google', success: false, error: message }
   }
 }
@@ -301,6 +330,7 @@ export async function syncGitHub(mainWindow?: BrowserWindow | null): Promise<Syn
       status: 'success',
       recordsUpdated
     })
+    maybeSendNotification('github', recordsUpdated)
     return { service: 'github', success: true, recordsUpdated }
   } catch (err) {
     const message = (err as Error).message
@@ -318,6 +348,7 @@ export async function syncGitHub(mainWindow?: BrowserWindow | null): Promise<Syn
         })
         .run()
     }
+    maybeSendNotification('github', 0, message)
     return { service: 'github', success: false, error: message }
   }
 }
