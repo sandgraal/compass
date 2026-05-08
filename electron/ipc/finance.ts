@@ -195,12 +195,12 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   // ── Delete account ────────────────────────────────────────────────────────
   ipcMain.handle('finance:delete-account', (_event, id: number) => {
     const db = getDb()
-    const transactionCount =
-      db
-        .select({ count: sql<number>`count(*)` })
-        .from(financeTransactions)
-        .where(eq(financeTransactions.accountId, id))
-        .get()?.count ?? 0
+    const transactionCountResult = db
+      .select({ count: sql<number>`count(*)` })
+      .from(financeTransactions)
+      .where(eq(financeTransactions.accountId, id))
+      .get()
+    const transactionCount = transactionCountResult?.count ?? 0
     if (transactionCount > 0) {
       throw new Error(
         `Can't delete this account while ${transactionCount} transaction${transactionCount === 1 ? '' : 's'} still reference it.`
