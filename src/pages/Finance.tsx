@@ -82,11 +82,7 @@ export default function Finance(): JSX.Element {
     if (!isElectron || !window.api.finance) return
     setIngesting(true)
     try {
-      const out = await window.api.finance.ingestWatchedNow()
-      setLastIngest(out.result)
-      setVaultSeeded(out.vaultSeeded)
-      setDetectedAccounts(out.detectedAccounts.map((a) => a.name))
-      await refresh()
+      await window.api.finance.ingestWatchedNow()
     } finally {
       setIngesting(false)
     }
