@@ -343,7 +343,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     } else {
       db.delete(appSettings).where(eq(appSettings.key, 'financeWatchFolder')).run()
     }
-    await startFinanceWatcher(folder ?? DEFAULT_MONEY_FOLDER)
+    await startFinanceWatcher(folder)
     return { success: true, path: getMoneyFolder() }
   })
 
