@@ -55,20 +55,24 @@ function maybeSendNotification(
   // Skip if nothing happened and no error
   if (recordsUpdated === 0 && !error) return
 
-  const db = getDb()
-  const row = db.select().from(appSettings).where(eq(appSettings.key, 'notificationsEnabled')).get()
-  const enabled = row ? row.value === 'true' : true // default is 'true' per DEFAULTS
-  if (!enabled) return
-
   if (!Notification.isSupported()) return
 
-  const serviceLabel = service === 'google' ? 'Google' : 'GitHub'
-  const title = `Compass — ${serviceLabel} synced`
-  const body = error
-    ? `Sync failed: ${error.slice(0, 80)}`
-    : `${recordsUpdated} records updated`
+  try {
+    const db = getDb()
+    const row = db.select().from(appSettings).where(eq(appSettings.key, 'notificationsEnabled')).get()
+    const enabled = row ? row.value === 'true' : true // default is 'true' per DEFAULTS
+    if (!enabled) return
 
-  new Notification({ title, body }).show()
+    const serviceLabel = service === 'google' ? 'Google' : 'GitHub'
+    const title = `Compass — ${serviceLabel} synced`
+    const body = error
+      ? `Sync failed: ${error.slice(0, 80)}`
+      : `${recordsUpdated} records updated`
+
+    new Notification({ title, body }).show()
+  } catch {
+    // Best-effort only: never let notification failures affect sync results.
+  }
 }
 
 export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
