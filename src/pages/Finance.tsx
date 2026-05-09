@@ -1343,7 +1343,7 @@ function RulesTab({
         <span>
           Rules apply automatically to <strong>newly ingested</strong> transactions. Use{' '}
           <strong>Re-apply to all</strong> to update existing transactions after adding or changing
-          rules. Lower priority numbers run first.
+          rules.
         </span>
       </div>
 
