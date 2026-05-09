@@ -20,7 +20,10 @@ import * as schema from '../db/schema'
 import { seedVaultFromDetectedAccounts } from '../ipc/vault'
 import { type DetectedAccount, ingestFinanceFiles } from './finance'
 
-const SUPPORTED_EXTS = ['.csv', '.xlsx']
+// PDF support added Phase-4 follow-up: many banks (USAA, AMEX, Chase, BofA,
+// Citi) deliver statements as PDF only. Extraction is handled by
+// `finance-pdf.ts`, dispatched lazily from `parseFinanceFile`.
+const SUPPORTED_EXTS = ['.csv', '.xlsx', '.pdf']
 
 let watcher: ReturnType<typeof chokidar.watch> | null = null
 let mainWindow: BrowserWindow | null = null

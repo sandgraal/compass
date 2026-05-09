@@ -1,0 +1,31 @@
+American Express
+Platinum Card
+Account Ending 1-31003
+Statement Period: 04/01/2026 to 04/30/2026
+Closing Date: 04/30/2026
+
+Account Summary
+Previous Balance                       $2,143.21
+Payments / Credits                    -$2,143.21
+New Charges                            $1,876.49
+Fees                                       $0.00
+Interest Charged                           $0.00
+New Balance                            $1,876.49
+
+Payments and Credits
+04/05/26   PAYMENT - THANK YOU                       -$2,143.21
+
+New Charges
+04/02/26   AMERICAN AIRLINES PHOENIX AZ              $487.20
+04/03/26*  EUROSTAR LONDON GB                        $312.45
+04/07/26   UBER TRIP 415-555-1234                    $42.18
+04/09/26   APPLE.COM/BILL CUPERTINO CA               $9.99
+04/12/26   WHOLEFDS AUSTIN AUSTIN TX                 $128.74
+04/15/26   DELTA AIR LINES ATLANTA GA                $356.20
+04/19/26   AMAZON.COM*M3K4L SEATTLE WA               $74.50
+04/22/26   STARBUCKS STORE 4567 AUSTIN TX            $7.85
+04/25/26   NETFLIX.COM LOS GATOS CA                  $19.99
+04/27/26   AT&T MOBILITY DALLAS TX                   $145.00
+04/28/26   COSTCO WHSE #0987 AUSTIN TX               $292.39
+
+Total Charges                                       $1,876.49
