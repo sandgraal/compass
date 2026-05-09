@@ -36,6 +36,14 @@ export function getMoneyFolder(): string {
 const INBOX_DIR = join(DATA_DIR, 'finance-inbox')
 const ARCHIVE_DIR = join(DATA_DIR, 'finance-archive')
 
+function scheduleReapplyRulesBackground(): void {
+  setImmediate(() => {
+    void reapplyRulesBackground().catch((e) => {
+      console.error('[finance] background rule reapply failed:', e)
+    })
+  })
+}
+
 export function registerFinanceHandlers(ipcMain: IpcMain): void {
   // Ensure directories exist on first registration
   for (const d of [INBOX_DIR, ARCHIVE_DIR]) {
@@ -322,7 +330,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
         db.insert(categorizationRules).values(payload).run()
       }
       // Re-apply rules in background so existing transactions stay in sync
-      void reapplyRulesBackground()
+      scheduleReapplyRulesBackground()
       return { success: true }
     }
   )
@@ -331,7 +339,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     const db = getDb()
     db.delete(categorizationRules).where(eq(categorizationRules.id, id)).run()
     // Re-apply rules in background so existing transactions stay in sync
-    void reapplyRulesBackground()
+    scheduleReapplyRulesBackground()
     return { success: true }
   })
 
@@ -569,6 +577,11 @@ async function reapplyRulesBackground(): Promise<{ updated: number; scanned: num
     scanned += rows.length
     offset += BATCH
     if (rows.length < BATCH) break
+
+    // Yield to keep the event loop responsive while processing large datasets.
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve)
+    })
   }
 
   return { updated, scanned }
