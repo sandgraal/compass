@@ -92,6 +92,16 @@ export function tryParseStatementDate(s: string, defaultYear?: number): string |
   } catch {
     /* fall through */
   }
+  // Numeric "M/D" or "MM/DD" (no year) with a defaultYear from the
+  // statement header.
+  const numMD = t.match(/^(\d{1,2})\/(\d{1,2})$/)
+  if (numMD) {
+    if (!defaultYear) return null
+    const month = Number.parseInt(numMD[1], 10)
+    const day = Number.parseInt(numMD[2], 10)
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null
+    return `${defaultYear}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  }
   // "Mon DD" or "Mon DD, YYYY" or "Mon DD YYYY"
   const m = t.match(/^([A-Za-z]{3,4})[.\s]+(\d{1,2})(?:[,\s]+(\d{2,4}))?$/)
   if (m) {
