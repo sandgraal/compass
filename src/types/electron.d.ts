@@ -25,6 +25,19 @@ declare global {
     snippet?: string
   }
 
+  interface KnowledgeSuggestion {
+    id: number
+    proposedAt: Date
+    source: 'gmail' | 'github' | 'calendar'
+    sourceId: string | null
+    targetPath: string
+    kind: 'contact' | 'employer' | 'date' | 'note'
+    proposedContent: string
+    context: string | null
+    status: 'pending' | 'accepted' | 'dismissed'
+    reviewedAt: Date | null
+  }
+
   interface IntegrationStatus {
     id: number
     service: string
@@ -141,6 +154,9 @@ declare global {
         search(query: string): Promise<Array<KnowledgeFile & { snippet: string }>>
         getPrev(path: string): Promise<string | null>
         onFileChanged(cb: (path: string) => void): () => void
+        listSuggestions(targetPath?: string): Promise<KnowledgeSuggestion[]>
+        acceptSuggestion(id: number): Promise<{ success: boolean }>
+        dismissSuggestion(id: number): Promise<{ success: boolean }>
       }
       vault: {
         getCategories(): Promise<VaultCategory[]>
@@ -314,6 +330,32 @@ declare global {
         }): Promise<{ success: boolean }>
         deleteRule(id: number): Promise<{ success: boolean }>
         getInboxPath(): Promise<string>
+
+        // Watched folder
+        getWatchFolder(): Promise<{ path: string; isWatching: boolean; exists: boolean }>
+        setWatchFolder(folder: string | null): Promise<{ success: boolean; path: string }>
+        pickWatchFolder(): Promise<{ canceled: boolean; path?: string }>
+        ingestWatchedNow(): Promise<{
+          result: {
+            filesProcessed: number
+            newTransactions: number
+            duplicatesDropped: number
+            perFile: Array<{ file: string; bank: string; parsed: number; new: number }>
+          }
+          detectedAccounts: Array<{
+            name: string
+            type: string
+            institution: string
+            lastFour?: string
+            isDebt: boolean
+            sourceFile: string
+            dbId: number
+          }>
+          vaultSeeded: number
+        }>
+        stopWatching(): Promise<{ success: boolean }>
+        onIngestComplete(cb: (data: unknown) => void): () => void
+        onIngestError(cb: (data: unknown) => void): () => void
       }
     }
   }

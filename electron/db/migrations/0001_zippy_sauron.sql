@@ -1,1 +1,0 @@
-ALTER TABLE `finance_accounts` ADD `institution` text DEFAULT '' NOT NULL;

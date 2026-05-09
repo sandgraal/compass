@@ -1,12 +1,15 @@
 import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, extname, join, relative } from 'node:path'
 import chokidar from 'chokidar'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
 import type { BrowserWindow } from 'electron'
 import { getDb } from '../db/client'
-import { knowledgeFiles } from '../db/schema'
+import { knowledgeFiles, knowledgeSuggestions } from '../db/schema'
 import { KNOWLEDGE_DIR } from '../paths'
+
+// Target paths that are user-owned and safe to auto-append via suggestions
+const SUGGESTION_ALLOWED_TARGETS = new Set(['profile/relationships.md', 'work/employers.md'])
 
 let watcher: ReturnType<typeof chokidar.watch> | null = null
 
@@ -144,5 +147,84 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
         return { ...f, snippet }
       })
       .filter(Boolean)
+  })
+
+  // ---- Knowledge Suggestions ----
+
+  ipcMain.handle('knowledge:list-suggestions', (_event, targetPath?: string) => {
+    const db = getDb()
+    const rows = db
+      .select()
+      .from(knowledgeSuggestions)
+      .where(
+        targetPath
+          ? and(
+              eq(knowledgeSuggestions.status, 'pending'),
+              eq(knowledgeSuggestions.targetPath, targetPath)
+            )
+          : eq(knowledgeSuggestions.status, 'pending')
+      )
+      .all()
+    return rows
+  })
+
+  ipcMain.handle('knowledge:accept-suggestion', (_event, id: number) => {
+    const db = getDb()
+    const suggestion = db
+      .select()
+      .from(knowledgeSuggestions)
+      .where(eq(knowledgeSuggestions.id, id))
+      .get()
+
+    if (!suggestion) throw new Error('Suggestion not found')
+    if (suggestion.status !== 'pending') throw new Error('Suggestion already reviewed')
+
+    // Path safety: only allow pre-approved target paths
+    if (!SUGGESTION_ALLOWED_TARGETS.has(suggestion.targetPath)) {
+      throw new Error('Target path not in allowlist')
+    }
+
+    const fullPath = join(KNOWLEDGE_DIR, suggestion.targetPath)
+    if (!fullPath.startsWith(KNOWLEDGE_DIR)) throw new Error('Path traversal blocked')
+
+    // Append the proposed content to the target file
+    if (existsSync(fullPath)) {
+      const existing = readFileSync(fullPath, 'utf8')
+      const normalizedExisting = `\n${existing.replace(/\r\n/g, '\n')}\n`
+      const normalizedProposedContent = suggestion.proposedContent.trimEnd()
+      const alreadyPresent = normalizedExisting.includes(`\n${normalizedProposedContent}\n`)
+      if (!alreadyPresent) {
+        const separator = existing.endsWith('\n') ? '' : '\n'
+        writeFileSync(fullPath, `${existing}${separator}${suggestion.proposedContent}\n`, 'utf8')
+      }
+    } else {
+      writeFileSync(fullPath, `${suggestion.proposedContent}\n`, 'utf8')
+    }
+
+    db.update(knowledgeSuggestions)
+      .set({ status: 'accepted', reviewedAt: new Date() })
+      .where(eq(knowledgeSuggestions.id, id))
+      .run()
+
+    return { success: true }
+  })
+
+  ipcMain.handle('knowledge:dismiss-suggestion', (_event, id: number) => {
+    const db = getDb()
+    const suggestion = db
+      .select()
+      .from(knowledgeSuggestions)
+      .where(eq(knowledgeSuggestions.id, id))
+      .get()
+
+    if (!suggestion) throw new Error('Suggestion not found')
+    if (suggestion.status !== 'pending') return { success: true }
+
+    db.update(knowledgeSuggestions)
+      .set({ status: 'dismissed', reviewedAt: new Date() })
+      .where(eq(knowledgeSuggestions.id, id))
+      .run()
+
+    return { success: true }
   })
 }

@@ -12,6 +12,7 @@ import { registerKnowledgeHandlers } from './ipc/knowledge'
 import { registerSettingsHandlers } from './ipc/settings'
 import { registerSyncHandlers } from './ipc/sync'
 import { registerVaultHandlers } from './ipc/vault'
+import { initMenuBar } from './menu-bar'
 import { APP_DATA_DIR, DATA_DIR, KNOWLEDGE_DIR, VAULT_DIR } from './paths'
 
 export { APP_DATA_DIR, DATA_DIR, VAULT_DIR, KNOWLEDGE_DIR }
@@ -132,11 +133,27 @@ app.whenReady().then(async () => {
     )
   })
 
+  const startOrRefreshFinanceWatcher = async (): Promise<void> => {
+    // Start or refresh the finance folder watcher (defaults to ~/Documents/Money)
+    try {
+      const { getMoneyFolder } = await import('./ipc/finance')
+      const { startFinanceWatcher } = await import('./integrations/finance-watcher')
+      void startFinanceWatcher(getMoneyFolder(), mainWindow)
+    } catch (err) {
+      console.error('[main] finance watcher failed to start:', err)
+    }
+  }
+
   createWindow()
   startCronJobs()
+  await startOrRefreshFinanceWatcher()
+  initMenuBar(__dirname)
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow()
+      void startOrRefreshFinanceWatcher()
+    }
   })
 })
 
