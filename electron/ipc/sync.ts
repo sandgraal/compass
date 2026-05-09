@@ -498,7 +498,9 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
       syncGitHub(win, false)
     ])
     if (googleResult.success || githubResult.success) {
-      runSuggestionExtractors(githubResult.githubSuggestionInputs ?? [])
+      runSuggestionExtractors(
+        githubResult.success ? (githubResult.githubSuggestionInputs ?? []) : undefined
+      )
     }
     return [toPublicSyncResult(googleResult), toPublicSyncResult(githubResult)]
   })

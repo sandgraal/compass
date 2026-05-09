@@ -190,10 +190,9 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
     // Append the proposed content to the target file
     if (existsSync(fullPath)) {
       const existing = readFileSync(fullPath, 'utf8')
-      const alreadyPresent = existing
-        .replace(/\r\n/g, '\n')
-        .split('\n')
-        .some((line) => line.trimEnd() === suggestion.proposedContent.trimEnd())
+      const normalizedExisting = `\n${existing.replace(/\r\n/g, '\n')}\n`
+      const normalizedProposedContent = suggestion.proposedContent.trimEnd()
+      const alreadyPresent = normalizedExisting.includes(`\n${normalizedProposedContent}\n`)
       if (!alreadyPresent) {
         const separator = existing.endsWith('\n') ? '' : '\n'
         writeFileSync(fullPath, `${existing}${separator}${suggestion.proposedContent}\n`, 'utf8')
