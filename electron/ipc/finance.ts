@@ -547,27 +547,34 @@ async function reapplyRulesBackground(): Promise<{ updated: number; scanned: num
     if (rows.length === 0) break
 
     for (const row of rows) {
-      // Run categorize on a synthetic RawTxn with just the description
+      const currentCategory = row.category ?? 'Uncategorized'
+      const currentSubcategory = row.subcategory ?? null
+      const isCurrentlyUncategorized = currentCategory === 'Uncategorized' && currentSubcategory == null
+
+      // Run categorize on a synthetic RawTxn with just the description.
+      // Clear category/subcategory so rule application is evaluated independently
+      // from any existing manual categorization on the transaction.
       const fakeRaw = [
         {
           date: row.date,
           amount: row.amount,
           description: row.description,
           account: '',
-          category: row.category ?? undefined,
-          subcategory: row.subcategory ?? undefined,
+          category: undefined,
+          subcategory: undefined,
           sourceFile: '',
           hash: row.hash
         }
       ]
       const [result] = ruleArgs.length ? categorize(fakeRaw, ruleArgs) : fakeRaw
 
-      const newCategory = result.category ?? 'Uncategorized'
-      const newSubcategory = result.subcategory ?? null
+      const matchedCategory = result.category ?? 'Uncategorized'
+      const matchedSubcategory = result.subcategory ?? null
+      const hasRuleMatch = matchedCategory !== 'Uncategorized' || matchedSubcategory !== null
 
-      if (newCategory !== (row.category ?? 'Uncategorized') || newSubcategory !== row.subcategory) {
+      if (isCurrentlyUncategorized && hasRuleMatch) {
         db.update(financeTransactions)
-          .set({ category: newCategory, subcategory: newSubcategory })
+          .set({ category: matchedCategory, subcategory: matchedSubcategory })
           .where(eq(financeTransactions.id, row.id))
           .run()
         updated++
