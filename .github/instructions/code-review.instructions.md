@@ -93,7 +93,7 @@ Compass has already evaluated alternatives. **Don't suggest swapping these out.*
 | `if (!confirm('Delete?')) return` | Native dialogs, no styling, no a11y | `if (!await confirm({ title: 'Delete?', destructive: true })) return` (from `useConfirm`) |
 | `alert('Error: ' + e)` | Same | `toast(\`Error: \${e}\`, 'error')` (from `useToast`) |
 | `import Database from 'better-sqlite3'` in `src/` | Renderer can't access native modules | New IPC handler |
-| `readFileSync('/some/path')` in `electron/ipc/*.ts` without path validation | Path traversal | Validate `fullPath.startsWith(KNOWLEDGE_DIR)` |
+| `readFileSync('/some/path')` in `electron/ipc/*.ts` without path validation | Path traversal | Validate containment with `const rel = path.relative(KNOWLEDGE_DIR, fullPath)` and reject when `rel` starts with `..` or is absolute |
 | `db.run('INSERT INTO ...')` (raw SQL) | Bypasses Drizzle types | `db.insert(table).values(...).run()` |
 | `<input style={{ color: '#fff' }}>` | Bypasses theme tokens | `<input className="text-foreground">` |
 | `useEffect(() => { ... }, [someState])` writing back to `someState` | Render loop | `useMemo` for derived state, or move logic out of effect |
