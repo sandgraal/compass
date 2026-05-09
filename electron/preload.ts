@@ -43,7 +43,11 @@ const api = {
       const listener = (_event: Electron.IpcRendererEvent, path: string) => cb(path)
       ipcRenderer.on('knowledge:file-changed', listener)
       return () => ipcRenderer.removeListener('knowledge:file-changed', listener)
-    }
+    },
+    listSuggestions: (targetPath?: string) =>
+      ipcRenderer.invoke('knowledge:list-suggestions', targetPath),
+    acceptSuggestion: (id: number) => ipcRenderer.invoke('knowledge:accept-suggestion', id),
+    dismissSuggestion: (id: number) => ipcRenderer.invoke('knowledge:dismiss-suggestion', id)
   },
 
   // --- Vault (Sensitive Data) ---

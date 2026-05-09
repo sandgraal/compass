@@ -8,6 +8,7 @@ import {
   githubItems,
   gmailActions,
   integrations,
+  knowledgeSuggestions,
   syncEvents
 } from '../db/schema'
 import {
@@ -16,6 +17,13 @@ import {
   updateGitHubKnowledge,
   updateGmailKnowledge
 } from '../knowledge/extractor'
+import {
+  extractContactsFromGithub,
+  extractContactsFromGmail,
+  extractOrgsFromGmail
+} from '../knowledge/suggestions'
+import { readKnowledgeFile } from '../knowledge/writer'
+import { KNOWLEDGE_DIR } from '../paths'
 import { getValidGoogleToken, loadToken } from './auth'
 
 type SyncResult = {
@@ -45,6 +53,88 @@ function getIntegrationId(db: ReturnType<typeof getDb>, service: string): number
     .where(eq(integrations.service, service))
     .get()
   return row?.id ?? null
+}
+
+/**
+ * Run all pattern-based suggestion extractors against the latest synced data and
+ * persist new candidates to `knowledge_suggestions`. Idempotent: skips any
+ * (targetPath + proposedContent) pair that already exists in the table.
+ */
+export function runSuggestionExtractors(): void {
+  try {
+    const db = getDb()
+
+    // Load existing knowledge files for deduplication
+    const relationshipsContent = readKnowledgeFile(KNOWLEDGE_DIR, 'profile/relationships.md')
+    const employersContent = readKnowledgeFile(KNOWLEDGE_DIR, 'work/employers.md')
+
+    // Load recently synced data
+    const gmailRows = db.select().from(gmailActions).all()
+    const githubRows = db.select().from(githubItems).all()
+
+    // Build input shapes expected by extractors
+    const gmailInputs = gmailRows.map((r) => ({
+      id: String(r.id),
+      threadId: r.threadId,
+      subject: r.subject,
+      from: r.fromAddress,
+      snippet: r.snippet ?? undefined,
+      date: r.receivedAt ? r.receivedAt.toISOString() : undefined
+    }))
+
+    const githubInputs = githubRows.map((r) => ({
+      id: r.id,
+      html_url: r.url,
+      type: r.type as 'issue' | 'pr',
+      repo: r.repo,
+      assignee: null,
+      user: null,
+      labels: r.labels ? (JSON.parse(r.labels) as string[]).map((n) => ({ name: n })) : []
+    }))
+
+    const candidates = [
+      ...extractContactsFromGmail(gmailInputs, relationshipsContent),
+      ...extractOrgsFromGmail(gmailInputs, employersContent),
+      ...extractContactsFromGithub(githubInputs, relationshipsContent)
+    ]
+
+    // Load existing suggestions to avoid duplicates
+    const existingSuggestions = db
+      .select({
+        targetPath: knowledgeSuggestions.targetPath,
+        proposedContent: knowledgeSuggestions.proposedContent
+      })
+      .from(knowledgeSuggestions)
+      .all()
+
+    const existingKeys = new Set(
+      existingSuggestions.map((s) => `${s.targetPath}|${s.proposedContent}`)
+    )
+
+    const now = new Date()
+    for (const candidate of candidates) {
+      const key = `${candidate.targetPath}|${candidate.proposedContent}`
+      if (existingKeys.has(key)) continue
+
+      db.insert(knowledgeSuggestions)
+        .values({
+          proposedAt: now,
+          source: candidate.source,
+          sourceId: candidate.sourceId,
+          targetPath: candidate.targetPath,
+          kind: candidate.kind,
+          proposedContent: candidate.proposedContent,
+          context: candidate.context,
+          status: 'pending'
+        })
+        .run()
+
+      existingKeys.add(key) // prevent dupes within this same run
+    }
+  } catch (err) {
+    // Suggestion extraction is best-effort — never let it break a sync
+    console.warn('[suggestions] extractor error:', (err as Error).message)
+  }
 }
 
 function maybeSendNotification(service: string, recordsUpdated: number, error?: string): void {
@@ -234,6 +324,9 @@ export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<Syn
       status: 'success',
       recordsUpdated
     })
+    // Run pattern-based suggestion extractors after a successful Google sync
+    runSuggestionExtractors()
+
     maybeSendNotification('google', recordsUpdated)
     return { service: 'google', success: true, recordsUpdated }
   } catch (err) {
@@ -330,6 +423,9 @@ export async function syncGitHub(mainWindow?: BrowserWindow | null): Promise<Syn
       status: 'success',
       recordsUpdated
     })
+    // Run pattern-based suggestion extractors after a successful GitHub sync
+    runSuggestionExtractors()
+
     maybeSendNotification('github', recordsUpdated)
     return { service: 'github', success: true, recordsUpdated }
   } catch (err) {
