@@ -56,6 +56,18 @@ function ensureNewTables(sqlite: Database.Database): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT, pattern TEXT NOT NULL, category TEXT NOT NULL,
       subcategory TEXT, priority INTEGER DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS knowledge_suggestions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      proposed_at INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      source_id TEXT,
+      target_path TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      proposed_content TEXT NOT NULL,
+      context TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      reviewed_at INTEGER
+    );
   `)
 
   // Backfill new columns on pre-existing tables (safe no-op when columns already exist).
@@ -268,6 +280,19 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       path, title, content,
       content='knowledge_files',
       content_rowid='id'
+    );
+
+    CREATE TABLE IF NOT EXISTS knowledge_suggestions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      proposed_at INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      source_id TEXT,
+      target_path TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      proposed_content TEXT NOT NULL,
+      context TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      reviewed_at INTEGER
     );
   `)
 }

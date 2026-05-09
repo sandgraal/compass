@@ -182,3 +182,17 @@ export const habitEntries = sqliteTable('habit_entries', {
   date: text('date').notNull(), // ISO date 'YYYY-MM-DD'
   completed: integer('completed', { mode: 'boolean' }).default(false)
 })
+
+// ---- Knowledge Suggestions ----
+export const knowledgeSuggestions = sqliteTable('knowledge_suggestions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  proposedAt: integer('proposed_at', { mode: 'timestamp_ms' }).notNull(),
+  source: text('source').notNull(), // 'gmail' | 'github' | 'calendar'
+  sourceId: text('source_id'), // optional ID back to the source row
+  targetPath: text('target_path').notNull(), // 'profile/relationships.md' or 'work/employers.md'
+  kind: text('kind').notNull(), // 'contact' | 'employer' | 'date' | 'note'
+  proposedContent: text('proposed_content').notNull(), // a markdown snippet to insert
+  context: text('context'), // why we proposed it (e.g., "appeared 3x in inbox")
+  status: text('status').notNull().default('pending'), // 'pending' | 'accepted' | 'dismissed'
+  reviewedAt: integer('reviewed_at', { mode: 'timestamp_ms' })
+})

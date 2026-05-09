@@ -8,14 +8,17 @@ import StarterKit from '@tiptap/starter-kit'
 import {
   BookOpen,
   Bot,
+  Check,
   ChevronRight,
   FileText,
   Folder,
   GitCompare,
+  Lightbulb,
   Plus,
   RefreshCw,
   Save,
-  Search
+  Search,
+  X
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDebounce } from '../hooks/useDebounce'
@@ -42,6 +45,8 @@ export default function KnowledgeBase(): JSX.Element {
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [showDiff, setShowDiff] = useState(false)
   const [diffOld, setDiffOld] = useState<string | null>(null) // content before last sync
+  const [suggestions, setSuggestions] = useState<KnowledgeSuggestion[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
   const isLoadingRef = useRef(false)
   const currentRawRef = useRef<string>('') // raw markdown of currently open file
   const selectedPathRef = useRef<string | null>(null)
@@ -141,12 +146,22 @@ export default function KnowledgeBase(): JSX.Element {
     }
   }
 
+  async function loadSuggestions(path: string) {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron) return
+    const items = await window.api.knowledge.listSuggestions(path)
+    if (selectedPathRef.current === path) setSuggestions(items)
+  }
+
   function selectFile(path: string) {
     selectedPathRef.current = path
     setSelectedPath(path)
     setDiffOld(null)
     setShowDiff(false)
+    setShowSuggestions(false)
+    setSuggestions([])
     loadFileContent(path)
+    loadSuggestions(path)
     // Load persisted prev snapshot for diff view
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (isElectron) {
@@ -175,6 +190,22 @@ export default function KnowledgeBase(): JSX.Element {
   useEffect(() => {
     if (debouncedContent && selectedPath) saveContent()
   }, [debouncedContent])
+
+  async function handleAcceptSuggestion(id: number) {
+    if (!window.api) return
+    await window.api.knowledge.acceptSuggestion(id)
+    // Reload the file content and refresh suggestions
+    if (selectedPath) {
+      loadFileContent(selectedPath)
+      loadSuggestions(selectedPath)
+    }
+  }
+
+  async function handleDismissSuggestion(id: number) {
+    if (!window.api) return
+    await window.api.knowledge.dismissSuggestion(id)
+    if (selectedPath) loadSuggestions(selectedPath)
+  }
 
   // Grouped by category
   const grouped = files.reduce<Record<string, FileNode[]>>((acc, f) => {
@@ -293,6 +324,24 @@ export default function KnowledgeBase(): JSX.Element {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {suggestions.length > 0 && (
+                  <button
+                    aria-label={`${suggestions.length} suggestion${suggestions.length === 1 ? '' : 's'} — click to review`}
+                    onClick={() => setShowSuggestions((v) => !v)}
+                    className={cn(
+                      'relative flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors',
+                      showSuggestions
+                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                        : 'bg-secondary hover:bg-secondary/80 text-amber-400'
+                    )}
+                  >
+                    <Lightbulb size={12} />
+                    Suggestions
+                    <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-white">
+                      {suggestions.length}
+                    </span>
+                  </button>
+                )}
                 {diffOld !== null && (
                   <button
                     onClick={() => setShowDiff((v) => !v)}
@@ -314,6 +363,34 @@ export default function KnowledgeBase(): JSX.Element {
                 </button>
               </div>
             </div>
+
+            {/* Suggestions panel */}
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="border-b border-border bg-amber-500/5 max-h-80 overflow-y-auto">
+                <div className="px-4 py-2 flex items-center justify-between border-b border-amber-500/10">
+                  <span className="text-xs font-medium text-amber-400 flex items-center gap-1.5">
+                    <Lightbulb size={11} /> Suggested additions for this file
+                  </span>
+                  <button
+                    aria-label="Close suggestions panel"
+                    onClick={() => setShowSuggestions(false)}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+                <div className="divide-y divide-border/40">
+                  {suggestions.map((s) => (
+                    <SuggestionItem
+                      key={s.id}
+                      suggestion={s}
+                      onAccept={handleAcceptSuggestion}
+                      onDismiss={handleDismissSuggestion}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Inline diff panel (shown after sync updates the file) */}
             {showDiff && diffOld !== null && (
@@ -410,6 +487,56 @@ function FileTreeItem({
         <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0 ml-auto" />
       )}
     </button>
+  )
+}
+
+// ── Suggestion Item ───────────────────────────────────────────────────────────
+
+function SuggestionItem({
+  suggestion,
+  onAccept,
+  onDismiss
+}: {
+  suggestion: KnowledgeSuggestion
+  onAccept: (id: number) => void
+  onDismiss: (id: number) => void
+}): JSX.Element {
+  const sourceLabel =
+    suggestion.source === 'gmail' ? 'Gmail' : suggestion.source === 'github' ? 'GitHub' : 'Calendar'
+
+  return (
+    <div className="px-4 py-3 flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground px-1.5 py-0.5 rounded bg-secondary">
+          {sourceLabel}
+        </span>
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground px-1.5 py-0.5 rounded bg-secondary">
+          {suggestion.kind}
+        </span>
+        {suggestion.context && (
+          <span className="text-xs text-muted-foreground truncate">{suggestion.context}</span>
+        )}
+      </div>
+      <code className="block text-xs bg-card/80 border border-border rounded px-2 py-1.5 text-foreground/80 font-mono whitespace-pre-wrap break-all">
+        {suggestion.proposedContent}
+      </code>
+      <div className="flex items-center gap-2">
+        <button
+          aria-label="Accept suggestion"
+          onClick={() => onAccept(suggestion.id)}
+          className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors border border-emerald-500/20"
+        >
+          <Check size={11} /> Accept
+        </button>
+        <button
+          aria-label="Dismiss suggestion"
+          onClick={() => onDismiss(suggestion.id)}
+          className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-secondary text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors"
+        >
+          <X size={11} /> Dismiss
+        </button>
+      </div>
+    </div>
   )
 }
 
