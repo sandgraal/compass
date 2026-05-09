@@ -306,11 +306,10 @@ function Toggle({
 
 const DEFAULT_SHORTCUT = 'CommandOrControl+Shift+Space'
 
-/** Map a KeyboardEvent to an Electron accelerator modifier token. */
+/** Map a KeyboardEvent to canonical Electron accelerator modifier tokens. */
 function eventModifiers(e: KeyboardEvent): string[] {
   const mods: string[] = []
-  if (e.metaKey) mods.push('Command')
-  if (e.ctrlKey) mods.push('Control')
+  if (e.metaKey || e.ctrlKey) mods.push('CommandOrControl')
   if (e.altKey) mods.push('Alt')
   if (e.shiftKey) mods.push('Shift')
   return mods
