@@ -190,8 +190,14 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
     // Append the proposed content to the target file
     if (existsSync(fullPath)) {
       const existing = readFileSync(fullPath, 'utf8')
-      const separator = existing.endsWith('\n') ? '' : '\n'
-      writeFileSync(fullPath, `${existing}${separator}${suggestion.proposedContent}\n`, 'utf8')
+      const alreadyPresent = existing
+        .replace(/\r\n/g, '\n')
+        .split('\n')
+        .some((line) => line.trimEnd() === suggestion.proposedContent.trimEnd())
+      if (!alreadyPresent) {
+        const separator = existing.endsWith('\n') ? '' : '\n'
+        writeFileSync(fullPath, `${existing}${separator}${suggestion.proposedContent}\n`, 'utf8')
+      }
     } else {
       writeFileSync(fullPath, `${suggestion.proposedContent}\n`, 'utf8')
     }
@@ -213,6 +219,7 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
       .get()
 
     if (!suggestion) throw new Error('Suggestion not found')
+    if (suggestion.status !== 'pending') return { success: true }
 
     db.update(knowledgeSuggestions)
       .set({ status: 'dismissed', reviewedAt: new Date() })

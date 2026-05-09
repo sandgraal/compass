@@ -80,7 +80,7 @@ function parseFromHeader(
   return { displayName, email, domain }
 }
 
-/** Capitalise first letter of each word that isn't an article/preposition. */
+/** Capitalize the first letter of each word. */
 function titleCase(name: string): string {
   return name
     .split(/\s+/)

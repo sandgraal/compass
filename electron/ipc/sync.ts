@@ -18,6 +18,7 @@ import {
   updateGmailKnowledge
 } from '../knowledge/extractor'
 import {
+  type GitHubInputItem,
   extractContactsFromGithub,
   extractContactsFromGmail,
   extractOrgsFromGmail
@@ -31,6 +32,10 @@ type SyncResult = {
   success: boolean
   recordsUpdated?: number
   error?: string
+}
+
+type SyncResultInternal = SyncResult & {
+  githubSuggestionInputs?: GitHubInputItem[]
 }
 
 const SUPPORTED_SYNC_SERVICES = new Set(['google', 'github'])
@@ -60,7 +65,7 @@ function getIntegrationId(db: ReturnType<typeof getDb>, service: string): number
  * persist new candidates to `knowledge_suggestions`. Idempotent: skips any
  * (targetPath + proposedContent) pair that already exists in the table.
  */
-export function runSuggestionExtractors(): void {
+export function runSuggestionExtractors(githubInputsOverride?: GitHubInputItem[]): void {
   try {
     const db = getDb()
 
@@ -70,8 +75,6 @@ export function runSuggestionExtractors(): void {
 
     // Load recently synced data
     const gmailRows = db.select().from(gmailActions).all()
-    const githubRows = db.select().from(githubItems).all()
-
     // Build input shapes expected by extractors
     const gmailInputs = gmailRows.map((r) => ({
       id: String(r.id),
@@ -82,15 +85,21 @@ export function runSuggestionExtractors(): void {
       date: r.receivedAt ? r.receivedAt.toISOString() : undefined
     }))
 
-    const githubInputs = githubRows.map((r) => ({
-      id: r.id,
-      html_url: r.url,
-      type: r.type as 'issue' | 'pr',
-      repo: r.repo,
-      assignee: null,
-      user: null,
-      labels: r.labels ? (JSON.parse(r.labels) as string[]).map((n) => ({ name: n })) : []
-    }))
+    const githubInputs =
+      githubInputsOverride ??
+      db
+        .select()
+        .from(githubItems)
+        .all()
+        .map((r) => ({
+          id: r.id,
+          html_url: r.url,
+          type: r.type as 'issue' | 'pr',
+          repo: r.repo,
+          assignee: null,
+          user: null,
+          labels: r.labels ? (JSON.parse(r.labels) as string[]).map((n) => ({ name: n })) : []
+        }))
 
     const candidates = [
       ...extractContactsFromGmail(gmailInputs, relationshipsContent),
@@ -163,7 +172,10 @@ function maybeSendNotification(service: string, recordsUpdated: number, error?: 
   }
 }
 
-export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
+export async function syncGoogle(
+  mainWindow?: BrowserWindow | null,
+  runExtractors = true
+): Promise<SyncResult> {
   const tokens = loadToken('google') as { access_token?: string; refresh_token?: string } | null
   if (!tokens?.access_token) return { service: 'google', success: false, error: 'Not connected' }
 
@@ -325,7 +337,9 @@ export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<Syn
       recordsUpdated
     })
     // Run pattern-based suggestion extractors after a successful Google sync
-    runSuggestionExtractors()
+    if (runExtractors) {
+      runSuggestionExtractors()
+    }
 
     maybeSendNotification('google', recordsUpdated)
     return { service: 'google', success: true, recordsUpdated }
@@ -355,13 +369,17 @@ export async function syncGoogle(mainWindow?: BrowserWindow | null): Promise<Syn
   }
 }
 
-export async function syncGitHub(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
+export async function syncGitHub(
+  mainWindow?: BrowserWindow | null,
+  runExtractors = true
+): Promise<SyncResultInternal> {
   const tokens = loadToken('github') as { access_token?: string } | null
   if (!tokens?.access_token) return { service: 'github', success: false, error: 'Not connected' }
 
   const db = getDb()
   const integrationId = getIntegrationId(db, 'github')
   let recordsUpdated = 0
+  let githubSuggestionInputs: GitHubInputItem[] = []
 
   try {
     const headers = {
@@ -377,6 +395,15 @@ export async function syncGitHub(mainWindow?: BrowserWindow | null): Promise<Syn
 
     if (issuesResp.ok) {
       const issues = (await issuesResp.json()) as GitHubIssue[]
+      githubSuggestionInputs = issues.map((issue) => ({
+        id: issue.id,
+        html_url: issue.html_url,
+        type: issue.pull_request ? 'pr' : 'issue',
+        repo: issue.repository?.full_name || issue.html_url.split('/').slice(3, 5).join('/'),
+        assignee: issue.assignee ? { login: issue.assignee.login } : null,
+        user: issue.user ? { login: issue.user.login } : null,
+        labels: issue.labels?.map((l) => ({ name: l.name })) ?? []
+      }))
       const items: GitHubIssue[] = []
       for (const issue of issues) {
         const isPR = !!issue.pull_request
@@ -424,10 +451,12 @@ export async function syncGitHub(mainWindow?: BrowserWindow | null): Promise<Syn
       recordsUpdated
     })
     // Run pattern-based suggestion extractors after a successful GitHub sync
-    runSuggestionExtractors()
+    if (runExtractors) {
+      runSuggestionExtractors(githubSuggestionInputs)
+    }
 
     maybeSendNotification('github', recordsUpdated)
-    return { service: 'github', success: true, recordsUpdated }
+    return { service: 'github', success: true, recordsUpdated, githubSuggestionInputs }
   } catch (err) {
     const message = (err as Error).message
     db.update(integrations)
@@ -450,17 +479,28 @@ export async function syncGitHub(mainWindow?: BrowserWindow | null): Promise<Syn
 }
 
 export function registerSyncHandlers(ipcMain: IpcMain): void {
+  const toPublicSyncResult = (result: SyncResultInternal): SyncResult => {
+    const { service, success, recordsUpdated, error } = result
+    return { service, success, recordsUpdated, error }
+  }
+
   ipcMain.handle('sync:trigger', async (_event, service: string) => {
     const win = BrowserWindow.getAllWindows()[0]
     if (service === 'google') return syncGoogle(win)
-    if (service === 'github') return syncGitHub(win)
+    if (service === 'github') return toPublicSyncResult(await syncGitHub(win))
     return { error: 'Unknown service' }
   })
 
   ipcMain.handle('sync:trigger-all', async () => {
     const win = BrowserWindow.getAllWindows()[0]
-    const results = await Promise.all([syncGoogle(win), syncGitHub(win)])
-    return results
+    const [googleResult, githubResult] = await Promise.all([
+      syncGoogle(win, false),
+      syncGitHub(win, false)
+    ])
+    if (googleResult.success || githubResult.success) {
+      runSuggestionExtractors(githubResult.githubSuggestionInputs ?? [])
+    }
+    return [toPublicSyncResult(googleResult), toPublicSyncResult(githubResult)]
   })
 
   ipcMain.handle('sync:set-interval', async (_event, service: string, minutes: number) => {
@@ -601,5 +641,7 @@ interface GitHubIssue {
   body?: string
   labels?: Array<{ name: string }>
   repository?: { full_name: string }
+  assignee?: { login: string } | null
+  user?: { login: string } | null
   pull_request?: object
 }
