@@ -12,6 +12,7 @@ import { registerKnowledgeHandlers } from './ipc/knowledge'
 import { registerSettingsHandlers } from './ipc/settings'
 import { registerSyncHandlers } from './ipc/sync'
 import { registerVaultHandlers } from './ipc/vault'
+import { initMenuBar } from './menu-bar'
 import { APP_DATA_DIR, DATA_DIR, KNOWLEDGE_DIR, VAULT_DIR } from './paths'
 
 export { APP_DATA_DIR, DATA_DIR, VAULT_DIR, KNOWLEDGE_DIR }
@@ -146,6 +147,7 @@ app.whenReady().then(async () => {
   createWindow()
   startCronJobs()
   await startOrRefreshFinanceWatcher()
+  initMenuBar(__dirname, ipcMain)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

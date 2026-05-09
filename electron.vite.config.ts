@@ -21,7 +21,8 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
-          index: resolve('electron/preload.ts')
+          index: resolve('electron/preload.ts'),
+          'quick-capture': resolve('electron/preload-quick-capture.ts')
         }
       }
     }
@@ -30,7 +31,10 @@ export default defineConfig({
     root: '.',
     build: {
       rollupOptions: {
-        input: resolve('index.html')
+        input: {
+          index: resolve('index.html'),
+          'quick-capture': resolve('src/quickCapture/index.html')
+        }
       }
     },
     resolve: {
