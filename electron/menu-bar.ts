@@ -241,6 +241,7 @@ function registerIpc(): void {
  * Unregisters the current global shortcut and registers the new one.
  * Returns a structured success/failure result so callers can show a specific
  * error message for unsupported platform/tray state vs registration conflicts.
+ * Quick Capture shortcut management is currently macOS-only.
  */
 function tryRegisterShortcut(chord: string): boolean {
   try {
@@ -261,8 +262,6 @@ export function restartQuickCaptureShortcut(newChord: string): RestartQuickCaptu
     return { success: false, reason: 'tray_unavailable' }
   }
 
-  const fallback = loadShortcut()
-
   // Unregister whatever is currently active
   try {
     globalShortcut.unregisterAll()
@@ -275,6 +274,7 @@ export function restartQuickCaptureShortcut(newChord: string): RestartQuickCaptu
   }
 
   // Registration failed — fall back to previous shortcut loaded from DB
+  const fallback = loadShortcut()
   if (fallback !== newChord) {
     tryRegisterShortcut(fallback)
   }
