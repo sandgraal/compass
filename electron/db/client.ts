@@ -119,7 +119,7 @@ function normalizeRecordedMigrationTimestamps(
 
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS __drizzle_migrations (
-      id SERIAL PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       hash TEXT NOT NULL,
       created_at NUMERIC
     );
