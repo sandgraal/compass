@@ -222,6 +222,7 @@ declare global {
           canceled?: boolean
           error?: string
         }>
+        setQuickCaptureShortcut(accelerator: string): Promise<{ success: boolean; error?: string }>
       }
       theme: {
         getNativeTheme(): Promise<'dark' | 'light'>
