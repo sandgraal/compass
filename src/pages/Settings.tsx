@@ -1,4 +1,14 @@
-import { Bell, Database, Download, Keyboard, Monitor, Moon, Shield, Sun, Trash2 } from 'lucide-react'
+import {
+  Bell,
+  Database,
+  Download,
+  Keyboard,
+  Monitor,
+  Moon,
+  Shield,
+  Sun,
+  Trash2
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
