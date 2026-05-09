@@ -101,8 +101,21 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
       return { success: false, error: `"${chord}" is not a valid accelerator string` }
     }
 
-    const ok = restartQuickCaptureShortcut(chord)
-    if (!ok) {
+    const result = restartQuickCaptureShortcut(chord)
+    if (!result.success) {
+      if (result.reason === 'unsupported_platform') {
+        return {
+          success: false,
+          error: 'Quick Capture shortcut editing is currently supported on macOS only'
+        }
+      }
+      if (result.reason === 'tray_unavailable') {
+        return {
+          success: false,
+          error:
+            'Quick Capture is not initialized yet. Please wait for the menu bar to load and try again.'
+        }
+      }
       return {
         success: false,
         error: `Could not register "${chord}" — it may be in use by another app or macOS`

@@ -28,6 +28,13 @@ const DEFAULT_SHORTCUT = 'CommandOrControl+Shift+Space'
 let tray: Tray | null = null
 let captureWindow: BrowserWindow | null = null
 
+export type RestartQuickCaptureShortcutResult =
+  | { success: true }
+  | {
+      success: false
+      reason: 'unsupported_platform' | 'tray_unavailable' | 'register_failed'
+    }
+
 const FALLBACK_TRAY_ICON_SVG = `
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
     <path
@@ -232,10 +239,30 @@ function registerIpc(): void {
 
 /**
  * Unregisters the current global shortcut and registers the new one.
- * Returns `true` on success, `false` if the chord could not be registered
- * (conflict with another app or invalid accelerator).
+ * Returns a structured success/failure result so callers can show a specific
+ * error message for unsupported platform/tray state vs registration conflicts.
  */
-export function restartQuickCaptureShortcut(newChord: string): boolean {
+function tryRegisterShortcut(chord: string): boolean {
+  try {
+    return globalShortcut.register(chord, () => {
+      if (tray) toggleCaptureWindow(tray)
+    })
+  } catch {
+    return false
+  }
+}
+
+export function restartQuickCaptureShortcut(newChord: string): RestartQuickCaptureShortcutResult {
+  if (process.platform !== 'darwin') {
+    return { success: false, reason: 'unsupported_platform' }
+  }
+
+  if (!tray) {
+    return { success: false, reason: 'tray_unavailable' }
+  }
+
+  const fallback = loadShortcut()
+
   // Unregister whatever is currently active
   try {
     globalShortcut.unregisterAll()
@@ -243,28 +270,16 @@ export function restartQuickCaptureShortcut(newChord: string): boolean {
     // ignore
   }
 
-  try {
-    const registered = globalShortcut.register(newChord, () => {
-      if (tray) toggleCaptureWindow(tray)
-    })
-    if (!registered) {
-      // Registration failed — fall back to previous shortcut loaded from DB
-      const fallback = loadShortcut()
-      if (fallback !== newChord) {
-        try {
-          globalShortcut.register(fallback, () => {
-            if (tray) toggleCaptureWindow(tray)
-          })
-        } catch {
-          // best-effort fallback
-        }
-      }
-      return false
-    }
-    return true
-  } catch {
-    return false
+  if (tryRegisterShortcut(newChord)) {
+    return { success: true }
   }
+
+  // Registration failed — fall back to previous shortcut loaded from DB
+  if (fallback !== newChord) {
+    tryRegisterShortcut(fallback)
+  }
+
+  return { success: false, reason: 'register_failed' }
 }
 
 // ---------------------------------------------------------------------------
