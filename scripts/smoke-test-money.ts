@@ -9,7 +9,7 @@ import { parseFinanceFile } from '../electron/integrations/finance'
 
 async function main() {
   const folder = join(homedir(), 'Documents', 'Money')
-  const files = readdirSync(folder).filter((f) => /\.(csv|xlsx)$/i.test(f))
+  const files = readdirSync(folder).filter((f) => /\.(csv|xlsx|pdf)$/i.test(f))
 
   console.log(`Scanning ${folder} — ${files.length} files\n`)
 
