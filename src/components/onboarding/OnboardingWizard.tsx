@@ -15,12 +15,10 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Ele
   const [step, setStep] = useState(1)
   const [animating, setAnimating] = useState(false)
   const transitionTimeoutRef = useRef<number | null>(null)
-  const isMountedRef = useRef(true)
   const { toast } = useToast()
 
   useEffect(() => {
     return () => {
-      isMountedRef.current = false
       if (transitionTimeoutRef.current !== null) {
         window.clearTimeout(transitionTimeoutRef.current)
       }
@@ -34,7 +32,6 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Ele
       window.clearTimeout(transitionTimeoutRef.current)
     }
     transitionTimeoutRef.current = window.setTimeout(() => {
-      if (!isMountedRef.current) return
       setStep(next)
       setAnimating(false)
       transitionTimeoutRef.current = null
