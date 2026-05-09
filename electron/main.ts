@@ -132,11 +132,26 @@ app.whenReady().then(async () => {
     )
   })
 
+  const startOrRefreshFinanceWatcher = async (): Promise<void> => {
+    // Start or refresh the finance folder watcher (defaults to ~/Documents/Money)
+    try {
+      const { getMoneyFolder } = await import('./ipc/finance')
+      const { startFinanceWatcher } = await import('./integrations/finance-watcher')
+      void startFinanceWatcher(getMoneyFolder(), mainWindow)
+    } catch (err) {
+      console.error('[main] finance watcher failed to start:', err)
+    }
+  }
+
   createWindow()
   startCronJobs()
+  await startOrRefreshFinanceWatcher()
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow()
+      void startOrRefreshFinanceWatcher()
+    }
   })
 })
 

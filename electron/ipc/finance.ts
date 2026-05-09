@@ -1,17 +1,37 @@
 import { existsSync, mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { and, desc, eq, gte, lt, sql } from 'drizzle-orm'
-import type { IpcMain } from 'electron'
+import { type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
 import {
+  appSettings,
   budgetRules,
   categorizationRules,
   financeAccounts,
   financeTransactions
 } from '../db/schema'
 import { ingestCsvFolder } from '../integrations/finance'
+import {
+  getWatchedFolder,
+  ingestWatchedFolderNow,
+  startFinanceWatcher,
+  stopFinanceWatcher
+} from '../integrations/finance-watcher'
 import { writeAllFinanceKnowledge } from '../knowledge/finance-extractor'
 import { DATA_DIR } from '../paths'
+
+const DEFAULT_MONEY_FOLDER = join(homedir(), 'Documents', 'Money')
+
+export function getMoneyFolder(): string {
+  try {
+    const db = getDb()
+    const row = db.select().from(appSettings).where(eq(appSettings.key, 'financeWatchFolder')).get()
+    return row?.value || DEFAULT_MONEY_FOLDER
+  } catch {
+    return DEFAULT_MONEY_FOLDER
+  }
+}
 
 const INBOX_DIR = join(DATA_DIR, 'finance-inbox')
 const ARCHIVE_DIR = join(DATA_DIR, 'finance-archive')
@@ -313,6 +333,65 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
 
   // ── Get inbox path ────────────────────────────────────────────────────────
   ipcMain.handle('finance:get-inbox-path', () => INBOX_DIR)
+
+  // ── Watched folder (~/Documents/Money by default) ─────────────────────────
+  ipcMain.handle('finance:get-watch-folder', () => ({
+    path: getMoneyFolder(),
+    isWatching: getWatchedFolder() !== null,
+    exists: existsSync(getMoneyFolder())
+  }))
+
+  ipcMain.handle('finance:set-watch-folder', async (_event, folder: string | null) => {
+    const db = getDb()
+    if (folder) {
+      db.insert(appSettings)
+        .values({ key: 'financeWatchFolder', value: folder, updatedAt: new Date() })
+        .onConflictDoUpdate({
+          target: appSettings.key,
+          set: { value: folder, updatedAt: new Date() }
+        })
+        .run()
+    } else {
+      db.delete(appSettings).where(eq(appSettings.key, 'financeWatchFolder')).run()
+    }
+    await startFinanceWatcher(folder)
+    return { success: true, path: getMoneyFolder() }
+  })
+
+  ipcMain.handle('finance:pick-watch-folder', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: 'Pick a folder to watch for finance documents',
+      properties: ['openDirectory', 'createDirectory'],
+      defaultPath: getMoneyFolder()
+    })
+    if (canceled || filePaths.length === 0) return { canceled: true }
+    const folder = filePaths[0]
+    const db = getDb()
+    db.insert(appSettings)
+      .values({ key: 'financeWatchFolder', value: folder, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: appSettings.key,
+        set: { value: folder, updatedAt: new Date() }
+      })
+      .run()
+    await startFinanceWatcher(folder)
+    return { canceled: false, path: folder }
+  })
+
+  ipcMain.handle('finance:ingest-watched-now', async () => {
+    const out = await ingestWatchedFolderNow()
+    try {
+      await refreshFinanceKnowledge()
+    } catch (e) {
+      console.error('[finance] knowledge refresh failed:', e)
+    }
+    return out
+  })
+
+  ipcMain.handle('finance:stop-watching', async () => {
+    await stopFinanceWatcher()
+    return { success: true }
+  })
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

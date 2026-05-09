@@ -1,6 +1,8 @@
 import { format } from 'date-fns'
 import {
   AlertCircle,
+  Eye,
+  FolderOpen,
   Inbox,
   Info,
   Pencil,
@@ -9,10 +11,11 @@ import {
   Target,
   Trash2,
   TrendingDown,
-  Wallet,
-  X
+  Wallet
 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useConfirm } from '../components/ui/ConfirmDialog'
+import { useToast } from '../components/ui/Toast'
 import { cn } from '../lib/utils'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -95,21 +98,16 @@ export default function Finance(): JSX.Element {
     newTransactions: number
     duplicatesDropped: number
   } | null>(null)
+  const [watchFolder, setWatchFolder] = useState<{
+    path: string
+    isWatching: boolean
+    exists: boolean
+  } | null>(null)
+  const [vaultSeeded, setVaultSeeded] = useState(0)
+  const [detectedAccounts, setDetectedAccounts] = useState<string[]>([])
 
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const showToast = useCallback((message: string, type: 'success' | 'error') => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-    setToast({ message, type })
-    toastTimerRef.current = setTimeout(() => setToast(null), 4000)
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-    }
-  }, [])
+  const { toast: showToast } = useToast()
+  const confirm = useConfirm()
 
   const month = new Date().toISOString().slice(0, 7)
 
@@ -140,16 +138,43 @@ export default function Finance(): JSX.Element {
     if (!isElectron || !window.api.finance) return
     setIngesting(true)
     try {
-      const result = await window.api.finance.ingestFolder()
-      setLastIngest(result)
-      await refresh()
+      await window.api.finance.ingestWatchedNow()
     } finally {
       setIngesting(false)
     }
   }
 
+  const pickFolder = async () => {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron || !window.api.finance) return
+    const r = await window.api.finance.pickWatchFolder()
+    if (!r.canceled && r.path) {
+      const status = await window.api.finance.getWatchFolder()
+      setWatchFolder(status)
+    }
+  }
+
   useEffect(() => {
     void refresh()
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron || !window.api.finance) return
+
+    // Initial watch folder status
+    window.api.finance.getWatchFolder().then(setWatchFolder)
+
+    // Listen for ingest events from the watcher
+    const unsub = window.api.finance.onIngestComplete((data) => {
+      const d = data as {
+        result: typeof lastIngest
+        detectedAccounts: { name: string }[]
+        vaultSeeded: number
+      }
+      if (d.result) setLastIngest(d.result)
+      setVaultSeeded(d.vaultSeeded)
+      setDetectedAccounts(d.detectedAccounts.map((a) => a.name))
+      void refresh()
+    })
+    return unsub
   }, [refresh])
 
   // ── Derived totals ────────────────────────────────────────────────────────
@@ -191,8 +216,13 @@ export default function Finance(): JSX.Element {
   }
 
   async function deleteAccount(id: number) {
-    if (!confirm('Delete this account? This only works when no transactions still reference it.'))
-      return
+    const ok = await confirm({
+      title: 'Delete account?',
+      description: 'This only works when no transactions still reference it.',
+      confirmLabel: 'Delete',
+      destructive: true
+    })
+    if (!ok) return
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
     try {
@@ -224,7 +254,13 @@ export default function Finance(): JSX.Element {
   }
 
   async function deleteTxn(id: number) {
-    if (!confirm('Delete this transaction? This cannot be undone.')) return
+    const ok = await confirm({
+      title: 'Delete transaction?',
+      description: 'This cannot be undone.',
+      confirmLabel: 'Delete',
+      destructive: true
+    })
+    if (!ok) return
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
     try {
@@ -259,7 +295,13 @@ export default function Finance(): JSX.Element {
   }
 
   async function deleteRule(id: number) {
-    if (!confirm('Delete this rule?')) return
+    const ok = await confirm({
+      title: 'Delete rule?',
+      description: 'The rule will be removed and transactions will no longer be auto-categorized by it.',
+      confirmLabel: 'Delete',
+      destructive: true
+    })
+    if (!ok) return
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
     try {
@@ -280,16 +322,65 @@ export default function Finance(): JSX.Element {
           <h1 className="text-xl font-semibold text-foreground">Finance</h1>
           <p className="text-sm text-muted-foreground">{format(new Date(), 'MMMM yyyy')}</p>
         </div>
-        <button
-          type="button"
-          onClick={ingest}
-          disabled={ingesting}
-          className="inline-flex items-center gap-2 text-sm px-3 py-1.5 rounded bg-primary text-primary-foreground disabled:opacity-50"
-        >
-          {ingesting ? <RefreshCw size={14} className="animate-spin" /> : <Inbox size={14} />}
-          {ingesting ? 'Ingesting…' : 'Process inbox'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={pickFolder}
+            className="inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded border border-border text-muted-foreground hover:text-foreground"
+            title={watchFolder?.path}
+          >
+            <FolderOpen size={13} />
+            {watchFolder?.path
+              ? watchFolder.path.replace(/^.*?\/Documents\//, '~/Documents/')
+              : 'Pick folder'}
+          </button>
+          <button
+            onClick={ingest}
+            disabled={ingesting}
+            className="inline-flex items-center gap-2 text-sm px-3 py-1.5 rounded bg-primary text-primary-foreground disabled:opacity-50"
+          >
+            {ingesting ? <RefreshCw size={14} className="animate-spin" /> : <Inbox size={14} />}
+            {ingesting ? 'Processing…' : 'Process now'}
+          </button>
+        </div>
       </div>
+
+      {/* Watch folder status */}
+      {watchFolder && (
+        <div className="mb-4 px-4 py-3 rounded-lg border border-border bg-card flex items-center gap-3 text-xs">
+          <Eye
+            size={13}
+            className={cn(watchFolder.isWatching ? 'text-emerald-400' : 'text-muted-foreground/50')}
+          />
+          <span className="text-foreground font-medium">
+            {watchFolder.isWatching ? 'Watching' : 'Not watching'}
+          </span>
+          <span className="text-muted-foreground font-mono">{watchFolder.path}</span>
+          {!watchFolder.exists && (
+            <span className="ml-auto text-amber-400">folder doesn't exist</span>
+          )}
+          {watchFolder.exists && watchFolder.isWatching && (
+            <span className="ml-auto text-muted-foreground/70">
+              Drop CSVs / xlsx here — auto-processes
+            </span>
+          )}
+        </div>
+      )}
+
+      {detectedAccounts.length > 0 && (
+        <div className="mb-4 px-4 py-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-xs">
+          <p className="text-emerald-300 font-medium mb-1">
+            🎉 Detected {detectedAccounts.length} new account
+            {detectedAccounts.length > 1 ? 's' : ''}
+          </p>
+          <p className="text-foreground/80">{detectedAccounts.join(' · ')}</p>
+          {vaultSeeded > 0 && (
+            <p className="text-muted-foreground mt-1">
+              Created {vaultSeeded} stub{vaultSeeded > 1 ? 's' : ''} in Vault → Financial. Open the
+              Vault to fill in account numbers.
+            </p>
+          )}
+        </div>
+      )}
 
       {lastIngest && (
         <div className="mb-4 px-3 py-2 rounded bg-secondary text-sm text-muted-foreground">
@@ -352,27 +443,6 @@ export default function Finance(): JSX.Element {
       )}
 
       {tab === 'rules' && <RulesTab rules={rules} onSave={saveRule} onDelete={deleteRule} />}
-
-      {toast && (
-        <div
-          className={cn(
-            'fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all',
-            toast.type === 'success'
-              ? 'bg-emerald-500/90 text-white'
-              : 'bg-destructive/90 text-destructive-foreground'
-          )}
-        >
-          {toast.message}
-          <button
-            type="button"
-            onClick={() => setToast(null)}
-            aria-label="Close notification"
-            className="ml-2 opacity-70 hover:opacity-100 text-xs"
-          >
-            <X size={12} />
-          </button>
-        </div>
-      )}
     </div>
   )
 }
@@ -420,7 +490,7 @@ function Overview({
         <Tile
           label="Spent (mo)"
           value={fmtMoney(monthExpense)}
-          sub={`${budget.length && totalBudget > 0 ? Math.round((totalActual / totalBudget) * 100) : 0}% of budget`}
+          sub={`${totalBudget > 0 ? Math.round((totalActual / totalBudget) * 100) : 0}% of budget`}
           icon={<Target size={14} />}
         />
         <Tile
