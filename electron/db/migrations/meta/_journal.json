@@ -15,6 +15,13 @@
       "when": 1778288493397,
       "tag": "0001_small_blob",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1778283523634,
+      "tag": "0002_zippy_sauron",
+      "breakpoints": true
     }
   ]
 }
