@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { and, desc, eq, gte, lt, sql } from 'drizzle-orm'
-import { type IpcMain, dialog } from 'electron'
+import { and, desc, eq, gt, gte, lt, sql } from 'drizzle-orm'
+import { BrowserWindow, type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
 import {
   appSettings,
@@ -11,7 +11,7 @@ import {
   financeAccounts,
   financeTransactions
 } from '../db/schema'
-import { ingestCsvFolder } from '../integrations/finance'
+import { categorize, ingestCsvFolder } from '../integrations/finance'
 import {
   getWatchedFolder,
   ingestWatchedFolderNow,
@@ -35,6 +35,28 @@ export function getMoneyFolder(): string {
 
 const INBOX_DIR = join(DATA_DIR, 'finance-inbox')
 const ARCHIVE_DIR = join(DATA_DIR, 'finance-archive')
+
+function emitRulesReapplied(payload: {
+  updated: number
+  scanned: number
+  source: 'save-rule' | 'delete-rule'
+}): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('finance:rules-reapplied', payload)
+  }
+}
+
+function scheduleReapplyRulesBackground(source: 'save-rule' | 'delete-rule'): void {
+  setImmediate(() => {
+    void reapplyRulesBackground()
+      .then((result) => {
+        emitRulesReapplied({ ...result, source })
+      })
+      .catch((e) => {
+        console.error('[finance] background rule reapply failed:', e)
+      })
+  })
+}
 
 export function registerFinanceHandlers(ipcMain: IpcMain): void {
   // Ensure directories exist on first registration
@@ -321,6 +343,8 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       } else {
         db.insert(categorizationRules).values(payload).run()
       }
+      // Re-apply rules in background so existing transactions stay in sync
+      scheduleReapplyRulesBackground('save-rule')
       return { success: true }
     }
   )
@@ -328,7 +352,13 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('finance:delete-rule', (_event, id: number) => {
     const db = getDb()
     db.delete(categorizationRules).where(eq(categorizationRules.id, id)).run()
+    // Re-apply rules in background so existing transactions stay in sync
+    scheduleReapplyRulesBackground('delete-rule')
     return { success: true }
+  })
+
+  ipcMain.handle('finance:reapply-rules', async () => {
+    return reapplyRulesBackground()
   })
 
   // ── Get inbox path ────────────────────────────────────────────────────────
@@ -504,6 +534,85 @@ function computeBudgetStatus(
   }
 
   return { lines, totals }
+}
+
+/**
+ * Re-run categorize() over ALL existing transactions in batches of 500.
+ * Only writes rows where the computed category actually differs from the
+ * stored one — safe to call at any time (idempotent).
+ * Returns { updated, scanned }.
+ */
+async function reapplyRulesBackground(): Promise<{ updated: number; scanned: number }> {
+  const BATCH = 500
+  const db = getDb()
+  const rules = db.select().from(categorizationRules).orderBy(categorizationRules.priority).all()
+  const ruleArgs = rules.map((r) => ({
+    pattern: r.pattern,
+    category: r.category,
+    subcategory: r.subcategory
+  }))
+
+  let lastSeenId = 0
+  let scanned = 0
+  let updated = 0
+
+  while (true) {
+    const rows = db
+      .select()
+      .from(financeTransactions)
+      .where(gt(financeTransactions.id, lastSeenId))
+      .orderBy(financeTransactions.id)
+      .limit(BATCH)
+      .all()
+    if (rows.length === 0) break
+
+    for (const row of rows) {
+      const currentCategory = row.category ?? 'Uncategorized'
+      const currentSubcategory = row.subcategory ?? null
+      const isCurrentlyUncategorized =
+        currentCategory === 'Uncategorized' && currentSubcategory == null
+
+      // Run categorize on a synthetic RawTxn with just the description.
+      // Clear category/subcategory so rule application is evaluated independently
+      // from any existing manual categorization on the transaction.
+      const fakeRaw = [
+        {
+          date: row.date,
+          amount: row.amount,
+          description: row.description,
+          account: '',
+          category: undefined,
+          subcategory: undefined,
+          sourceFile: '',
+          hash: row.hash
+        }
+      ]
+      const [result] = ruleArgs.length ? categorize(fakeRaw, ruleArgs) : fakeRaw
+
+      const matchedCategory = result.category ?? 'Uncategorized'
+      const matchedSubcategory = result.subcategory ?? null
+      const hasRuleMatch = matchedCategory !== 'Uncategorized' || matchedSubcategory !== null
+
+      if (isCurrentlyUncategorized && hasRuleMatch) {
+        db.update(financeTransactions)
+          .set({ category: matchedCategory, subcategory: matchedSubcategory })
+          .where(eq(financeTransactions.id, row.id))
+          .run()
+        updated++
+      }
+    }
+
+    scanned += rows.length
+    lastSeenId = rows[rows.length - 1].id
+    if (rows.length < BATCH) break
+
+    // Yield to keep the event loop responsive while processing large datasets.
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve)
+    })
+  }
+
+  return { updated, scanned }
 }
 
 async function refreshFinanceKnowledge(): Promise<void> {

@@ -9,7 +9,7 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, join, parse } from 'node:path'
 import { inArray } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
@@ -34,14 +34,17 @@ type Parser = {
 }
 
 // ---------- Helpers ----------
-const parseMoney = (s: string): number => {
+// Exported for reuse by `finance-pdf.ts` (PDF extractors share these).
+export const parseMoney = (s: string): number => {
   const t = s.trim().replace(/[$,]/g, '')
   if (!t) return 0
   if (t.startsWith('(') && t.endsWith(')')) return -Number.parseFloat(t.slice(1, -1))
+  // Trailing minus (e.g. "500.00-") is used by some banks (USAA) to denote credits.
+  if (t.endsWith('-')) return -Number.parseFloat(t.slice(0, -1))
   return Number.parseFloat(t)
 }
 
-const parseDate = (s: string): string => {
+export const parseDate = (s: string): string => {
   const t = s.trim()
   // Try ISO, then US, then 2-digit year, then ISO with slashes, then EU
   const fmts = [
@@ -62,7 +65,7 @@ const parseDate = (s: string): string => {
   throw new Error(`Unrecognized date: ${s}`)
 }
 
-const hashTxn = (date: string, amount: number, desc: string, account: string): string =>
+export const hashTxn = (date: string, amount: number, desc: string, account: string): string =>
   createHash('sha1')
     .update(`${date}|${amount.toFixed(2)}|${desc.trim().toLowerCase()}|${account}`)
     .digest('hex')
@@ -478,6 +481,7 @@ export type ParsedFile = {
  */
 function detectAccount(file: string, peek?: { acctNumber?: string }): DetectedAccount | undefined {
   const name = basename(file).toLowerCase()
+  const acctNumber = peek?.acctNumber
   // USAA: USAA_Checking_2026_bk_download.csv / USAA_Savings_*.csv
   if (name.includes('usaa')) {
     if (name.includes('checking')) {
@@ -499,9 +503,9 @@ function detectAccount(file: string, peek?: { acctNumber?: string }): DetectedAc
       }
     }
   }
-  // AMEX: detect from peek (xlsx header cells) for the last 4 of card
-  if (name.includes('amex') || name.includes('american') || peek?.acctNumber) {
-    const lastFour = peek?.acctNumber?.match(/(\d{4,5})\s*$/)?.[1]
+  // AMEX: detect from peek (xlsx header cells or PDF text) for the last 4 of card
+  if (name.includes('amex') || name.includes('american') || acctNumber) {
+    const lastFour = acctNumber?.match(/(\d{4,5})\s*$/)?.[1]
     let displayName = 'American Express'
     if (name.includes('platinum')) displayName = 'Amex Platinum'
     else if (name.includes('gold')) displayName = 'Amex Gold'
@@ -616,6 +620,25 @@ function parseCsvFile(filePath: string): ParsedFile {
 }
 
 /**
+ * Build a filename-only account hint that PDF extractors can use as a
+ * starting display name. Best-effort — extractors may override with a
+ * better name discovered in the PDF text.
+ */
+function pdfAccountHint(filePath: string): string {
+  // `parse().name` strips the extension regardless of case (.pdf or .PDF).
+  const stem = parse(filePath).name
+  // Strip trailing month/date noise like "Statement_April_2026" → "Statement"
+  return stem
+    .replace(
+      /[-_]?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)[_\-\s\d]*$/i,
+      ''
+    )
+    .replace(/[\d_\-\s]+$/i, '')
+    .replace(/[-_]+/g, ' ')
+    .trim()
+}
+
+/**
  * Dispatch on extension. Returns parsed transactions + best-effort account
  * detection. Pure: no DB writes, no file moves.
  */
@@ -623,6 +646,12 @@ export async function parseFinanceFile(filePath: string): Promise<ParsedFile | n
   const lower = filePath.toLowerCase()
   if (lower.endsWith('.csv')) return parseCsvFile(filePath)
   if (lower.endsWith('.xlsx')) return parseAmexXlsx(filePath)
+  if (lower.endsWith('.pdf')) {
+    // Lazy import keeps `pdf-parse`/pdfjs-dist out of any code path that
+    // doesn't need it.
+    const { parsePdfFile } = await import('./finance-pdf')
+    return parsePdfFile(filePath, pdfAccountHint(filePath))
+  }
   return null
 }
 
