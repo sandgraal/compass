@@ -14,8 +14,8 @@ These are enforced by hooks and CI; treat any PR that breaks them as red.
 - **Renderer never imports Node or Electron.** All filesystem, IPC, native code goes through `electron/preload.ts` → `window.api`. Flag any `import 'fs'` / `import 'electron'` in `src/`.
 - **Vault data is AES-256-GCM encrypted.** Key lives in OS Keychain via `safeStorage`. Never write plaintext vault contents to disk, logs, or telemetry. See [`electron/ipc/vault.ts`](../electron/ipc/vault.ts).
 - **OAuth tokens encrypted via `safeStorage` only.** Never in `.env`, never in plaintext on disk.
-- **No telemetry, analytics, or outbound network calls** except OAuth and integration API calls (Google APIs, GitHub API). New `fetch`/`axios` calls to other hosts must be flagged.
-- **Path traversal on filesystem IPC.** Every handler that takes a relative path must validate `fullPath.startsWith(KNOWLEDGE_DIR)` (or equivalent) before reading/writing. See `electron/ipc/knowledge.ts` for the canonical pattern.
+- **No telemetry, analytics, or outbound network calls** except OAuth and integration API calls (Google APIs, GitHub API), plus the existing Google Fonts hosts already allowlisted for the app shell (`fonts.googleapis.com`, `fonts.gstatic.com`). New runtime network calls or host allowlist additions should be flagged.
+- **Path traversal on filesystem IPC.** Every handler that takes a relative path must validate containment with a separator-boundary or `path.relative()`-style guard (for example `fullPath === KNOWLEDGE_DIR || fullPath.startsWith(KNOWLEDGE_DIR + sep)` or rejecting relatives that start with `..`) before reading/writing. A bare `startsWith(KNOWLEDGE_DIR)` check is not sufficient.
 - **Never write to** `knowledge-base/`, `.vault/`, `.data/`, `.env*`, `*.db*` from the working tree. Lefthook blocks commits; CI blocks merges.
 
 ## Stack — don't suggest replacements
@@ -60,7 +60,7 @@ For each finding, include:
 
 These are intentional, documented, or already tracked:
 
-- **Demoted Biome rules** (warnings, not errors): `useExhaustiveDependencies`, `noAssignInExpressions` (in CSV date parsers), `noArrayIndexKey`, `useButtonType`, `noLabelWithoutControl`. They're warnings on purpose during the cleanup transition. A wholesale fix is tracked as a separate tech-debt PR.
+- **Demoted Biome rules** (warnings, not errors): `useExhaustiveDependencies`, `noAssignInExpressions` (in CSV date parsers), `noArrayIndexKey`, `useButtonType`, `noLabelWithoutControl`. They're warnings on purpose during the cleanup transition. A wholesale fix is tracked as a separate tech-debt PR, so don't raise these as standalone review findings on untouched existing code.
 - **`as any` in `electron/ipc/finance.ts:56`** — Drizzle generic limitation, documented.
 - **Lockfile churn during npm-version drift** — when `npm install` drops Linux-platform optional deps (`@emnapi/*`, `@electron/windows-sign`, etc.), the fix is `rm -rf node_modules package-lock.json && npm install --include=optional`. Don't suggest pinning npm or adding shims — this is a known pattern.
 - **`alert()` / `confirm()` migrations** — most have been replaced; remaining ones are tracked. Don't propose half-replacements.
@@ -68,8 +68,8 @@ These are intentional, documented, or already tracked:
 
 ## Performance & accessibility expectations
 
-- Lists with stable keys (no `key={i}` from `.map((_, i) => ...)` — use a stable id when possible).
-- Buttons get `type="button"` unless they're inside a `<form>` and meant to submit.
+- Prefer stable list keys over `key={i}` from `.map((_, i) => ...)`; use a stable id when possible, especially in new or edited UI.
+- Prefer `type="button"` for non-submit buttons, especially in new or edited UI.
 - Icon-only buttons need `aria-label`.
 - Click-only handlers on non-button elements (e.g. divs) need a corresponding `onKeyDown` / `role="button"` for keyboard parity.
 
