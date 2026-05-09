@@ -330,6 +330,7 @@ declare global {
           priority?: number
         }): Promise<{ success: boolean }>
         deleteRule(id: number): Promise<{ success: boolean }>
+        reapplyRules(): Promise<{ updated: number; scanned: number }>
         getInboxPath(): Promise<string>
 
         // Watched folder
@@ -357,6 +358,7 @@ declare global {
         stopWatching(): Promise<{ success: boolean }>
         onIngestComplete(cb: (data: unknown) => void): () => void
         onIngestError(cb: (data: unknown) => void): () => void
+        onRulesReapplied(cb: (data: unknown) => void): () => void
       }
     }
   }
