@@ -21,6 +21,7 @@ import {
 } from 'electron'
 import { getDb } from './db/client'
 import { appSettings } from './db/schema'
+import { getQuickCaptureHtmlPath, getQuickCaptureHtmlUrl } from './quick-capture-path'
 
 const DEFAULT_SHORTCUT = 'CommandOrControl+Shift+Space'
 
@@ -136,9 +137,9 @@ function createCaptureWindow(__dirname: string): BrowserWindow {
   // Load the quick-capture renderer
   if (is.dev && process.env.ELECTRON_RENDERER_URL) {
     // Dev server serves from root; quick-capture has its own entry
-    win.loadURL(`${process.env.ELECTRON_RENDERER_URL}/src/quickCapture/index.html`)
+    win.loadURL(getQuickCaptureHtmlUrl(process.env.ELECTRON_RENDERER_URL))
   } else {
-    win.loadFile(join(__dirname, '../renderer/quick-capture.html'))
+    win.loadFile(getQuickCaptureHtmlPath(__dirname))
   }
 
   return win
