@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
@@ -6,6 +8,16 @@ import { DATA_DIR } from '../paths'
 import * as schema from './schema'
 
 let _db: ReturnType<typeof drizzle> | null = null
+const MIGRATIONS_FOLDER = join(__dirname, 'migrations')
+const PREVIOUS_MIGRATION_TAG = '0001_small_blob'
+const INSTITUTION_MIGRATION_TAG = '0002_zippy_sauron'
+
+type MigrationJournal = {
+  entries: Array<{
+    tag: string
+    when: number
+  }>
+}
 
 export function getDb(): ReturnType<typeof drizzle<typeof schema>> {
   if (!_db) throw new Error('DB not initialized. Call initDb() first.')
@@ -21,11 +33,12 @@ export async function initDb(): Promise<void> {
   sqlite.pragma('foreign_keys = ON')
 
   _db = drizzle(sqlite, { schema })
+  reconcileBackfilledInstitutionMigration(sqlite)
 
   // Run migrations
   try {
     migrate(_db as ReturnType<typeof drizzle>, {
-      migrationsFolder: join(__dirname, 'migrations')
+      migrationsFolder: MIGRATIONS_FOLDER
     })
   } catch {
     // Migrations folder may not exist yet; create schema directly on first run
@@ -106,6 +119,55 @@ function ensureColumn(
   if (cols.some((c) => c.name === column)) return false
   sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`)
   return true
+}
+
+function reconcileBackfilledInstitutionMigration(sqlite: Database.Database): void {
+  if (!hasTable(sqlite, '__drizzle_migrations')) return
+  if (!hasColumn(sqlite, 'finance_accounts', 'institution')) return
+
+  const previousMigration = getMigrationMetadata(PREVIOUS_MIGRATION_TAG)
+  const institutionMigration = getMigrationMetadata(INSTITUTION_MIGRATION_TAG)
+  if (!previousMigration || !institutionMigration) return
+
+  const hasPreviousMigration = sqlite
+    .prepare('SELECT 1 FROM __drizzle_migrations WHERE hash = ? LIMIT 1')
+    .get(previousMigration.hash)
+  if (!hasPreviousMigration) return
+
+  const hasInstitutionMigration = sqlite
+    .prepare('SELECT 1 FROM __drizzle_migrations WHERE hash = ? LIMIT 1')
+    .get(institutionMigration.hash)
+  if (hasInstitutionMigration) return
+
+  sqlite
+    .prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)')
+    .run(institutionMigration.hash, institutionMigration.when)
+}
+
+function hasTable(sqlite: Database.Database, table: string): boolean {
+  const row = sqlite
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1")
+    .get(table)
+  return Boolean(row)
+}
+
+function hasColumn(sqlite: Database.Database, table: string, column: string): boolean {
+  const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  return columns.some((entry) => entry.name === column)
+}
+
+function getMigrationMetadata(tag: string): { hash: string; when: number } | null {
+  const journal = JSON.parse(
+    readFileSync(join(MIGRATIONS_FOLDER, 'meta', '_journal.json'), 'utf8')
+  ) as MigrationJournal
+  const entry = journal.entries.find((migration) => migration.tag === tag)
+  if (!entry) return null
+
+  const sql = readFileSync(join(MIGRATIONS_FOLDER, `${tag}.sql`), 'utf8')
+  return {
+    hash: createHash('sha256').update(sql).digest('hex'),
+    when: entry.when
+  }
 }
 
 function createTablesIfNeeded(sqlite: Database.Database): void {
