@@ -308,6 +308,8 @@ function StepFinance({
         setWatchFolderState(status)
         toast('Watch folder updated.', 'success')
       }
+    } catch {
+      toast('Could not update watch folder.', 'error')
     } finally {
       setPicking(false)
     }
