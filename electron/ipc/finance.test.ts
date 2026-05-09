@@ -81,7 +81,7 @@ describe('registerFinanceHandlers', () => {
     startFinanceWatcherMock.mockReset()
   })
 
-  it('restarts the watcher on the default folder when clearing the custom watch folder', async () => {
+  it('restarts the watcher on the default folder when clearing the custom watch folder override', async () => {
     settings.set('financeWatchFolder', '/tmp/custom-money')
 
     const handlers = new Map<string, (...args: unknown[]) => unknown>()
