@@ -9,7 +9,7 @@
  * so users who dropped files in before launching the app still see them
  * processed.
  */
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { type Dirent, existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import chokidar from 'chokidar'
 import { eq } from 'drizzle-orm'
@@ -106,21 +106,51 @@ function queueFile(path: string): void {
 }
 
 /**
- * Scan an existing directory for all supported files and queue them.
- * Called once when the watcher starts so previously-dropped files are
- * processed without requiring the user to re-save.
+ * Recursively scan a directory (up to MAX_SCAN_DEPTH levels) for
+ * supported finance files and queue them. Called once when the watcher
+ * starts so previously-dropped files are processed without requiring
+ * the user to re-save.
+ *
+ * Note: deeper than MAX_SCAN_DEPTH is intentionally not watched —
+ * performance guardrail for large directory trees.
  */
+const MAX_SCAN_DEPTH = 3
+
+function walkFilesWithDepthLimit(
+  rootFolder: string,
+  maxDepth: number,
+  onFile: (path: string) => void
+): void {
+  const walk = (currentFolder: string, depth: number): void => {
+    let entries: Dirent<string>[]
+    try {
+      entries = readdirSync(currentFolder, { withFileTypes: true, encoding: 'utf8' })
+    } catch {
+      return
+    }
+
+    for (const entry of entries) {
+      const fullPath = join(currentFolder, entry.name)
+      if (entry.isFile()) {
+        onFile(fullPath)
+        continue
+      }
+      if (entry.isDirectory() && depth < maxDepth) {
+        walk(fullPath, depth + 1)
+      }
+    }
+  }
+
+  walk(rootFolder, 0)
+}
+
 function initialScan(folder: string): void {
   if (!existsSync(folder)) return
   try {
-    for (const entry of readdirSync(folder)) {
-      const full = join(folder, entry)
-      try {
-        if (statSync(full).isFile()) queueFile(full)
-      } catch {
-        /* skip unreadable entries */
-      }
-    }
+    walkFilesWithDepthLimit(folder, MAX_SCAN_DEPTH, (path) => {
+      if (!SUPPORTED_EXTS.some((ext) => path.toLowerCase().endsWith(ext))) return
+      queueFile(path)
+    })
   } catch (err) {
     console.error('[finance-watcher] initial scan failed:', err)
   }
@@ -151,7 +181,7 @@ export async function startFinanceWatcher(
 
   watcher = chokidar.watch(folder, {
     ignoreInitial: true, // initial files handled by initialScan above
-    depth: 0, // top-level only
+    depth: MAX_SCAN_DEPTH, // keep watcher depth aligned with the initial scan depth cap
     awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 100 }
   })
 
@@ -201,18 +231,13 @@ export async function ingestWatchedFolderNow(): Promise<{
   }
 
   const files: string[] = []
-  for (const entry of readdirSync(watchedFolder)) {
-    const full = join(watchedFolder, entry)
-    try {
-      if (
-        statSync(full).isFile() &&
-        SUPPORTED_EXTS.some((ext) => entry.toLowerCase().endsWith(ext))
-      ) {
-        files.push(full)
-      }
-    } catch {
-      /* skip */
-    }
+  try {
+    walkFilesWithDepthLimit(watchedFolder, MAX_SCAN_DEPTH, (path) => {
+      if (!SUPPORTED_EXTS.some((ext) => path.toLowerCase().endsWith(ext))) return
+      files.push(path)
+    })
+  } catch {
+    /* folder disappeared between check and scan */
   }
 
   const db = getDb()

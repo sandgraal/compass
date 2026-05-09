@@ -104,7 +104,9 @@ const api = {
     openDataDir: () => ipcRenderer.invoke('settings:open-data-dir'),
     wipeKnowledge: () => ipcRenderer.invoke('settings:wipe-knowledge'),
     wipeVault: () => ipcRenderer.invoke('settings:wipe-vault'),
-    exportData: () => ipcRenderer.invoke('settings:export-data')
+    exportData: () => ipcRenderer.invoke('settings:export-data'),
+    setQuickCaptureShortcut: (accelerator: string) =>
+      ipcRenderer.invoke('settings:set-quick-capture-shortcut', accelerator)
   },
 
   // --- Habits ---
@@ -165,6 +167,7 @@ const api = {
       priority?: number
     }) => ipcRenderer.invoke('finance:save-rule', rule),
     deleteRule: (id: number) => ipcRenderer.invoke('finance:delete-rule', id),
+    reapplyRules: () => ipcRenderer.invoke('finance:reapply-rules'),
     getInboxPath: () => ipcRenderer.invoke('finance:get-inbox-path'),
 
     // Watched folder (source-of-truth, e.g. ~/Documents/Money)
@@ -183,6 +186,11 @@ const api = {
       const listener = (_event: Electron.IpcRendererEvent, data: unknown) => cb(data)
       ipcRenderer.on('finance-watcher:ingest-error', listener)
       return () => ipcRenderer.removeListener('finance-watcher:ingest-error', listener)
+    },
+    onRulesReapplied: (cb: (data: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: unknown) => cb(data)
+      ipcRenderer.on('finance:rules-reapplied', listener)
+      return () => ipcRenderer.removeListener('finance:rules-reapplied', listener)
     }
   },
 
