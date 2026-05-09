@@ -27,7 +27,7 @@ export function AppLayout(): JSX.Element {
       window.api.settings.get(LEGACY_ONBOARDING_COMPLETED_KEY)
     ])
       .then(([value, legacyValue]) => {
-        // Show wizard only when both keys are absent or not 'true'
+        // Show wizard only when neither key is set to 'true'
         setShowWizard(value !== 'true' && legacyValue !== 'true')
       })
       .catch(() => {
