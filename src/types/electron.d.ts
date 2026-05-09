@@ -329,6 +329,7 @@ declare global {
           priority?: number
         }): Promise<{ success: boolean }>
         deleteRule(id: number): Promise<{ success: boolean }>
+        reapplyRules(): Promise<{ updated: number; scanned: number }>
         getInboxPath(): Promise<string>
 
         // Watched folder

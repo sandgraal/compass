@@ -11,7 +11,7 @@ import {
   financeAccounts,
   financeTransactions
 } from '../db/schema'
-import { ingestCsvFolder } from '../integrations/finance'
+import { categorize, ingestCsvFolder } from '../integrations/finance'
 import {
   getWatchedFolder,
   ingestWatchedFolderNow,
@@ -321,6 +321,8 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       } else {
         db.insert(categorizationRules).values(payload).run()
       }
+      // Re-apply rules in background so existing transactions stay in sync
+      void reapplyRulesBackground()
       return { success: true }
     }
   )
@@ -328,7 +330,13 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('finance:delete-rule', (_event, id: number) => {
     const db = getDb()
     db.delete(categorizationRules).where(eq(categorizationRules.id, id)).run()
+    // Re-apply rules in background so existing transactions stay in sync
+    void reapplyRulesBackground()
     return { success: true }
+  })
+
+  ipcMain.handle('finance:reapply-rules', async () => {
+    return reapplyRulesBackground()
   })
 
   // ── Get inbox path ────────────────────────────────────────────────────────
@@ -504,6 +512,66 @@ function computeBudgetStatus(
   }
 
   return { lines, totals }
+}
+
+/**
+ * Re-run categorize() over ALL existing transactions in batches of 500.
+ * Only writes rows where the computed category actually differs from the
+ * stored one — safe to call at any time (idempotent).
+ * Returns { updated, scanned }.
+ */
+async function reapplyRulesBackground(): Promise<{ updated: number; scanned: number }> {
+  const BATCH = 500
+  const db = getDb()
+  const rules = db.select().from(categorizationRules).orderBy(categorizationRules.priority).all()
+  const ruleArgs = rules.map((r) => ({
+    pattern: r.pattern,
+    category: r.category,
+    subcategory: r.subcategory
+  }))
+
+  let offset = 0
+  let scanned = 0
+  let updated = 0
+
+  while (true) {
+    const rows = db.select().from(financeTransactions).limit(BATCH).offset(offset).all()
+    if (rows.length === 0) break
+
+    for (const row of rows) {
+      // Run categorize on a synthetic RawTxn with just the description
+      const fakeRaw = [
+        {
+          date: row.date,
+          amount: row.amount,
+          description: row.description,
+          account: '',
+          category: row.category ?? undefined,
+          subcategory: row.subcategory ?? undefined,
+          sourceFile: '',
+          hash: row.hash
+        }
+      ]
+      const [result] = ruleArgs.length ? categorize(fakeRaw, ruleArgs) : fakeRaw
+
+      const newCategory = result.category ?? 'Uncategorized'
+      const newSubcategory = result.subcategory ?? null
+
+      if (newCategory !== (row.category ?? 'Uncategorized') || newSubcategory !== row.subcategory) {
+        db.update(financeTransactions)
+          .set({ category: newCategory, subcategory: newSubcategory })
+          .where(eq(financeTransactions.id, row.id))
+          .run()
+        updated++
+      }
+    }
+
+    scanned += rows.length
+    offset += BATCH
+    if (rows.length < BATCH) break
+  }
+
+  return { updated, scanned }
 }
 
 async function refreshFinanceKnowledge(): Promise<void> {

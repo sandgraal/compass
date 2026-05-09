@@ -165,6 +165,7 @@ const api = {
       priority?: number
     }) => ipcRenderer.invoke('finance:save-rule', rule),
     deleteRule: (id: number) => ipcRenderer.invoke('finance:delete-rule', id),
+    reapplyRules: () => ipcRenderer.invoke('finance:reapply-rules'),
     getInboxPath: () => ipcRenderer.invoke('finance:get-inbox-path'),
 
     // Watched folder (source-of-truth, e.g. ~/Documents/Money)
