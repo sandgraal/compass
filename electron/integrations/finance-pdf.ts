@@ -59,6 +59,22 @@ function lower(lines: string[]): string[] {
   return lines.map((l) => l.toLowerCase())
 }
 
+function isValidDateParts(year: number, month: number, day: number): boolean {
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  )
+}
+
+function resolveYearlessStatementYear(
+  month: number,
+  defaultYear?: number,
+  closingMonth?: number
+): number | undefined {
+  if (defaultYear === undefined) return undefined
+  return closingMonth !== undefined && month > closingMonth ? defaultYear - 1 : defaultYear
+}
+
 const MONTHS: Record<string, string> = {
   jan: '01',
   feb: '02',
@@ -102,11 +118,11 @@ export function tryParseStatementDate(
   // statement header.
   const numMD = t.match(/^(\d{1,2})\/(\d{1,2})$/)
   if (numMD) {
-    if (!defaultYear) return null
     const month = Number.parseInt(numMD[1], 10)
     const day = Number.parseInt(numMD[2], 10)
     if (month < 1 || month > 12 || day < 1 || day > 31) return null
-    const year = closingMonth && month > closingMonth ? defaultYear - 1 : defaultYear
+    const year = resolveYearlessStatementYear(month, defaultYear, closingMonth)
+    if (year === undefined || !isValidDateParts(year, month, day)) return null
     return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
   }
   // "Mon DD" or "Mon DD, YYYY" or "Mon DD YYYY"
@@ -120,10 +136,11 @@ export function tryParseStatementDate(
     if (m[3]) {
       const y = Number.parseInt(m[3], 10)
       year = y < 100 ? (y < 50 ? 2000 + y : 1900 + y) : y
-    } else if (defaultYear) {
-      year = closingMonth && month > closingMonth ? defaultYear - 1 : defaultYear
+    } else {
+      year = resolveYearlessStatementYear(month, defaultYear, closingMonth)
     }
-    if (!year) return null
+    const dayNum = Number.parseInt(day, 10)
+    if (year === undefined || !isValidDateParts(year, month, dayNum)) return null
     return `${year}-${mon}-${day}`
   }
   return null
