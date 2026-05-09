@@ -174,11 +174,17 @@ function StepIntegrations({
   useEffect(() => {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
-    window.api.auth.getStatus().then((rows) => {
-      const map: Record<string, string> = {}
-      for (const r of rows) map[r.service] = r.status
-      setStatuses(map)
-    })
+    window.api.auth
+      .getStatus()
+      .then((rows) => {
+        const map: Record<string, string> = {}
+        for (const r of rows) map[r.service] = r.status
+        setStatuses(map)
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error)
+        toast(`Failed to load connection status: ${message}`, 'error')
+      })
   }, [])
 
   async function connect(service: string) {
