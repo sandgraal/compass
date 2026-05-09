@@ -156,6 +156,30 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
     return { success: true }
   })
 
+  // Quick-capture: used only by the tray popover window
+  ipcMain.handle('checklist:quick-add', (_event, title: string) => {
+    try {
+      const db = getDb()
+      const today = new Date().toISOString().slice(0, 10)
+      const trimmed = String(title).trim()
+      if (!trimmed) return { success: false, error: 'Title cannot be empty' }
+      db.insert(checklistItems)
+        .values({
+          listType: 'daily',
+          listDate: today,
+          title: trimmed.slice(0, 500),
+          category: 'personal',
+          sortOrder: 999,
+          source: 'manual',
+          createdAt: new Date()
+        })
+        .run()
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
   // ---- Data management ----
   ipcMain.handle('settings:open-data-dir', async () => {
     const error = await shell.openPath(DATA_DIR)
