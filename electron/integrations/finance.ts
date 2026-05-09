@@ -34,14 +34,15 @@ type Parser = {
 }
 
 // ---------- Helpers ----------
-const parseMoney = (s: string): number => {
+// Exported for reuse by `finance-pdf.ts` (PDF extractors share these).
+export const parseMoney = (s: string): number => {
   const t = s.trim().replace(/[$,]/g, '')
   if (!t) return 0
   if (t.startsWith('(') && t.endsWith(')')) return -Number.parseFloat(t.slice(1, -1))
   return Number.parseFloat(t)
 }
 
-const parseDate = (s: string): string => {
+export const parseDate = (s: string): string => {
   const t = s.trim()
   // Try ISO, then US, then 2-digit year, then ISO with slashes, then EU
   const fmts = [
@@ -62,7 +63,7 @@ const parseDate = (s: string): string => {
   throw new Error(`Unrecognized date: ${s}`)
 }
 
-const hashTxn = (date: string, amount: number, desc: string, account: string): string =>
+export const hashTxn = (date: string, amount: number, desc: string, account: string): string =>
   createHash('sha1')
     .update(`${date}|${amount.toFixed(2)}|${desc.trim().toLowerCase()}|${account}`)
     .digest('hex')
@@ -476,8 +477,22 @@ export type ParsedFile = {
  * the file's header rows. Best-effort — returns undefined if we can't
  * confidently tell what the account is.
  */
-function detectAccount(file: string, peek?: { acctNumber?: string }): DetectedAccount | undefined {
+function detectAccount(
+  file: string,
+  peek?: { acctNumber?: string; pdfText?: string }
+): DetectedAccount | undefined {
   const name = basename(file).toLowerCase()
+  // PDFs: scrape last-N from text content if filename didn't carry it.
+  // This populates `acctNumber` from `peek.pdfText` so downstream logic
+  // (the AMEX branch below) works the same way it does for xlsx.
+  let acctNumber = peek?.acctNumber
+  if (!acctNumber && peek?.pdfText) {
+    const pdfTextSlice = peek.pdfText.slice(0, 4000)
+    const m =
+      pdfTextSlice.match(/account\s+ending(?:\s+in)?\s*[:#-]?\s*[\dx*-]*?(\d{4,5})\b/i) ??
+      pdfTextSlice.match(/ending\s+in\s*[:#-]?\s*(\d{4,5})\b/i)
+    if (m) acctNumber = m[1]
+  }
   // USAA: USAA_Checking_2026_bk_download.csv / USAA_Savings_*.csv
   if (name.includes('usaa')) {
     if (name.includes('checking')) {
@@ -499,9 +514,9 @@ function detectAccount(file: string, peek?: { acctNumber?: string }): DetectedAc
       }
     }
   }
-  // AMEX: detect from peek (xlsx header cells) for the last 4 of card
-  if (name.includes('amex') || name.includes('american') || peek?.acctNumber) {
-    const lastFour = peek?.acctNumber?.match(/(\d{4,5})\s*$/)?.[1]
+  // AMEX: detect from peek (xlsx header cells or PDF text) for the last 4 of card
+  if (name.includes('amex') || name.includes('american') || acctNumber) {
+    const lastFour = acctNumber?.match(/(\d{4,5})\s*$/)?.[1]
     let displayName = 'American Express'
     if (name.includes('platinum')) displayName = 'Amex Platinum'
     else if (name.includes('gold')) displayName = 'Amex Gold'
@@ -616,6 +631,20 @@ function parseCsvFile(filePath: string): ParsedFile {
 }
 
 /**
+ * Build a filename-only account hint that PDF extractors can use as a
+ * starting display name. Best-effort — extractors may override with a
+ * better name discovered in the PDF text.
+ */
+function pdfAccountHint(filePath: string): string {
+  const stem = basename(filePath, '.pdf')
+  // Strip trailing month/date noise like "Statement_April_2026" → "Statement"
+  return stem
+    .replace(/[\d_\-\s]+$/i, '')
+    .replace(/[_-]+/g, ' ')
+    .trim()
+}
+
+/**
  * Dispatch on extension. Returns parsed transactions + best-effort account
  * detection. Pure: no DB writes, no file moves.
  */
@@ -623,6 +652,12 @@ export async function parseFinanceFile(filePath: string): Promise<ParsedFile | n
   const lower = filePath.toLowerCase()
   if (lower.endsWith('.csv')) return parseCsvFile(filePath)
   if (lower.endsWith('.xlsx')) return parseAmexXlsx(filePath)
+  if (lower.endsWith('.pdf')) {
+    // Lazy import keeps `pdf-parse`/pdfjs-dist out of any code path that
+    // doesn't need it.
+    const { parsePdfFile } = await import('./finance-pdf')
+    return parsePdfFile(filePath, pdfAccountHint(filePath))
+  }
   return null
 }
 
