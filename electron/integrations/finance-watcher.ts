@@ -167,7 +167,7 @@ export async function startFinanceWatcher(
 
   watcher = chokidar.watch(folder, {
     ignoreInitial: true, // initial files handled by initialScan above
-    depth: 3, // watch up to 3 sub-folder levels; deeper intentionally skipped (perf guardrail)
+    depth: MAX_SCAN_DEPTH, // keep watcher depth aligned with the initial scan depth cap
     awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 100 }
   })
 
