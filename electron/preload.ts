@@ -186,6 +186,11 @@ const api = {
       const listener = (_event: Electron.IpcRendererEvent, data: unknown) => cb(data)
       ipcRenderer.on('finance-watcher:ingest-error', listener)
       return () => ipcRenderer.removeListener('finance-watcher:ingest-error', listener)
+    },
+    onRulesReapplied: (cb: (data: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: unknown) => cb(data)
+      ipcRenderer.on('finance:rules-reapplied', listener)
+      return () => ipcRenderer.removeListener('finance:rules-reapplied', listener)
     }
   },
 

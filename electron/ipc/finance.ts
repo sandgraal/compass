@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { and, desc, eq, gte, lt, sql } from 'drizzle-orm'
-import { type IpcMain, dialog } from 'electron'
+import { and, desc, eq, gt, gte, lt, sql } from 'drizzle-orm'
+import { BrowserWindow, type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
 import {
   appSettings,
@@ -36,11 +36,25 @@ export function getMoneyFolder(): string {
 const INBOX_DIR = join(DATA_DIR, 'finance-inbox')
 const ARCHIVE_DIR = join(DATA_DIR, 'finance-archive')
 
-function scheduleReapplyRulesBackground(): void {
+function emitRulesReapplied(payload: {
+  updated: number
+  scanned: number
+  source: 'save-rule' | 'delete-rule'
+}): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('finance:rules-reapplied', payload)
+  }
+}
+
+function scheduleReapplyRulesBackground(source: 'save-rule' | 'delete-rule'): void {
   setImmediate(() => {
-    void reapplyRulesBackground().catch((e) => {
-      console.error('[finance] background rule reapply failed:', e)
-    })
+    void reapplyRulesBackground()
+      .then((result) => {
+        emitRulesReapplied({ ...result, source })
+      })
+      .catch((e) => {
+        console.error('[finance] background rule reapply failed:', e)
+      })
   })
 }
 
@@ -330,7 +344,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
         db.insert(categorizationRules).values(payload).run()
       }
       // Re-apply rules in background so existing transactions stay in sync
-      scheduleReapplyRulesBackground()
+      scheduleReapplyRulesBackground('save-rule')
       return { success: true }
     }
   )
@@ -339,7 +353,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     const db = getDb()
     db.delete(categorizationRules).where(eq(categorizationRules.id, id)).run()
     // Re-apply rules in background so existing transactions stay in sync
-    scheduleReapplyRulesBackground()
+    scheduleReapplyRulesBackground('delete-rule')
     return { success: true }
   })
 
@@ -538,18 +552,25 @@ async function reapplyRulesBackground(): Promise<{ updated: number; scanned: num
     subcategory: r.subcategory
   }))
 
-  let offset = 0
+  let lastSeenId = 0
   let scanned = 0
   let updated = 0
 
   while (true) {
-    const rows = db.select().from(financeTransactions).limit(BATCH).offset(offset).all()
+    const rows = db
+      .select()
+      .from(financeTransactions)
+      .where(gt(financeTransactions.id, lastSeenId))
+      .orderBy(financeTransactions.id)
+      .limit(BATCH)
+      .all()
     if (rows.length === 0) break
 
     for (const row of rows) {
       const currentCategory = row.category ?? 'Uncategorized'
       const currentSubcategory = row.subcategory ?? null
-      const isCurrentlyUncategorized = currentCategory === 'Uncategorized' && currentSubcategory == null
+      const isCurrentlyUncategorized =
+        currentCategory === 'Uncategorized' && currentSubcategory == null
 
       // Run categorize on a synthetic RawTxn with just the description.
       // Clear category/subcategory so rule application is evaluated independently
@@ -582,7 +603,7 @@ async function reapplyRulesBackground(): Promise<{ updated: number; scanned: num
     }
 
     scanned += rows.length
-    offset += BATCH
+    lastSeenId = rows[rows.length - 1].id
     if (rows.length < BATCH) break
 
     // Yield to keep the event loop responsive while processing large datasets.

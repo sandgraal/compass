@@ -175,8 +175,16 @@ export default function Finance(): JSX.Element {
       setDetectedAccounts(d.detectedAccounts.map((a) => a.name))
       void refresh()
     })
-    return unsub
-  }, [refresh])
+    const unsubRulesReapplied = window.api.finance.onRulesReapplied((data) => {
+      const d = data as { updated: number }
+      showToast(`Recategorized ${d.updated} transaction${d.updated === 1 ? '' : 's'}.`, 'success')
+      void refresh()
+    })
+    return () => {
+      unsub()
+      unsubRulesReapplied()
+    }
+  }, [refresh, showToast])
 
   // ── Derived totals ────────────────────────────────────────────────────────
   const totalDebt = debts.reduce((a, d) => a + (d.balance ?? 0), 0)

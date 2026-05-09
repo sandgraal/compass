@@ -9,7 +9,7 @@
  * so users who dropped files in before launching the app still see them
  * processed.
  */
-import { existsSync, readdirSync } from 'node:fs'
+import { type Dirent, existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import chokidar from 'chokidar'
 import { eq } from 'drizzle-orm'
@@ -113,30 +113,41 @@ function queueFile(path: string): void {
  */
 const MAX_SCAN_DEPTH = 3
 
+function walkFilesWithDepthLimit(
+  rootFolder: string,
+  maxDepth: number,
+  onFile: (path: string) => void
+): void {
+  const walk = (currentFolder: string, depth: number): void => {
+    let entries: Dirent<string>[]
+    try {
+      entries = readdirSync(currentFolder, { withFileTypes: true, encoding: 'utf8' })
+    } catch {
+      return
+    }
+
+    for (const entry of entries) {
+      const fullPath = join(currentFolder, entry.name)
+      if (entry.isFile()) {
+        onFile(fullPath)
+        continue
+      }
+      if (entry.isDirectory() && depth < maxDepth) {
+        walk(fullPath, depth + 1)
+      }
+    }
+  }
+
+  walk(rootFolder, 0)
+}
+
 function initialScan(folder: string): void {
   if (!existsSync(folder)) return
   try {
-    // Node 18+ supports { recursive: true } on readdirSync — use it so we
-    // get flat list of all descendant entries without manual recursion.
-    const entries = readdirSync(folder, { withFileTypes: true, recursive: true })
-    for (const entry of entries) {
-      if (!entry.isFile()) continue
-      // entry.parentPath is available in Node 20+; fall back to entry.path (Node 18-19)
-      const dir =
-        (entry as { parentPath?: string; path?: string }).parentPath ??
-        (entry as { path?: string }).path ??
-        folder
-      const full = join(dir, entry.name)
-      // Guard against symlink loops or entries beyond our depth cap
-      try {
-        const rel = full.slice(folder.length + 1)
-        const depth = rel.split(/[/\\]/).length - 1
-        if (depth > MAX_SCAN_DEPTH) continue
-        queueFile(full)
-      } catch {
-        /* skip unreadable entries */
-      }
-    }
+    walkFilesWithDepthLimit(folder, MAX_SCAN_DEPTH, (path) => {
+      if (!SUPPORTED_EXTS.some((ext) => path.toLowerCase().endsWith(ext))) return
+      queueFile(path)
+    })
   } catch (err) {
     console.error('[finance-watcher] initial scan failed:', err)
   }
@@ -218,24 +229,10 @@ export async function ingestWatchedFolderNow(): Promise<{
 
   const files: string[] = []
   try {
-    const entries = readdirSync(watchedFolder, { withFileTypes: true, recursive: true })
-    for (const entry of entries) {
-      if (!entry.isFile()) continue
-      if (!SUPPORTED_EXTS.some((ext) => entry.name.toLowerCase().endsWith(ext))) continue
-      const dir =
-        (entry as { parentPath?: string; path?: string }).parentPath ??
-        (entry as { path?: string }).path ??
-        watchedFolder
-      const full = join(dir, entry.name)
-      try {
-        const rel = full.slice(watchedFolder.length + 1)
-        const depth = rel.split(/[/\\]/).length - 1
-        if (depth > MAX_SCAN_DEPTH) continue
-        files.push(full)
-      } catch {
-        /* skip unreadable entries */
-      }
-    }
+    walkFilesWithDepthLimit(watchedFolder, MAX_SCAN_DEPTH, (path) => {
+      if (!SUPPORTED_EXTS.some((ext) => path.toLowerCase().endsWith(ext))) return
+      files.push(path)
+    })
   } catch {
     /* folder disappeared between check and scan */
   }

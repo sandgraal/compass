@@ -358,6 +358,7 @@ declare global {
         stopWatching(): Promise<{ success: boolean }>
         onIngestComplete(cb: (data: unknown) => void): () => void
         onIngestError(cb: (data: unknown) => void): () => void
+        onRulesReapplied(cb: (data: unknown) => void): () => void
       }
     }
   }
