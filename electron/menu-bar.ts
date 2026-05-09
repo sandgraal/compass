@@ -28,14 +28,43 @@ const DEFAULT_SHORTCUT = 'CommandOrControl+Shift+Space'
 let tray: Tray | null = null
 let captureWindow: BrowserWindow | null = null
 
+const FALLBACK_TRAY_ICON_SVG = `
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+    <path
+      fill="black"
+      d="M8 1.25 10.1 5.9 14.75 8 10.1 10.1 8 14.75 5.9 10.1 1.25 8 5.9 5.9 8 1.25Zm0 2.73L6.95 6.95 3.98 8l2.97 1.05L8 12.02l1.05-2.97L12.02 8 9.05 6.95 8 3.98Z"
+    />
+  </svg>
+`.trim()
+
+function createTrayImage(__dirname: string) {
+  const iconPaths = [
+    join(__dirname, '../../resources/tray-icon.png'),
+    join(__dirname, '../resources/tray-icon.png'),
+    join(process.resourcesPath, 'tray-icon.png')
+  ]
+
+  for (const iconPath of iconPaths) {
+    const img = nativeImage.createFromPath(iconPath)
+    if (!img.isEmpty()) {
+      img.setTemplateImage(true)
+      return img
+    }
+  }
+
+  const fallbackImg = nativeImage.createFromDataURL(
+    `data:image/svg+xml;base64,${Buffer.from(FALLBACK_TRAY_ICON_SVG).toString('base64')}`
+  )
+  fallbackImg.setTemplateImage(true)
+  return fallbackImg
+}
+
 // ---------------------------------------------------------------------------
 // Tray icon
 // ---------------------------------------------------------------------------
 
 function createTray(__dirname: string): Tray {
-  const iconPath = join(__dirname, '../../resources/tray-icon.png')
-  const img = nativeImage.createFromPath(iconPath)
-  img.setTemplateImage(true)
+  const img = createTrayImage(__dirname)
 
   const t = new Tray(img)
   t.setToolTip('Compass — quick capture')
