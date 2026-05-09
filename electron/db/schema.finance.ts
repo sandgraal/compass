@@ -18,7 +18,7 @@ export const financeAccounts = sqliteTable('finance_accounts', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull().unique(), // 'Chase Sapphire'
   type: text('type').notNull(), // 'checking' | 'savings' | 'credit_card'
-  institution: text('institution').notNull(), // 'Chase'
+  institution: text('institution').notNull().default(''), // 'Chase'
   active: integer('active', { mode: 'boolean' }).default(true),
   vaultRef: text('vault_ref'), // optional pointer to a vault entry id
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())

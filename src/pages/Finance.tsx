@@ -297,7 +297,8 @@ export default function Finance(): JSX.Element {
   async function deleteRule(id: number) {
     const ok = await confirm({
       title: 'Delete rule?',
-      description: 'The rule will be removed and transactions will no longer be auto-categorized by it.',
+      description:
+        'The rule will be removed and transactions will no longer be auto-categorized by it.',
       confirmLabel: 'Delete',
       destructive: true
     })

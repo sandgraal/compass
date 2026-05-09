@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "25aad570-ab76-472c-908f-96e45b1098f5",
-  "prevId": "8e7aee80-9dde-4135-af9f-6d62767b036b",
+  "id": "f34d966b-be23-411d-aa43-c7ef2813eeae",
+  "prevId": "25aad570-ab76-472c-908f-96e45b1098f5",
   "tables": {
     "app_settings": {
       "name": "app_settings",
@@ -507,6 +507,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "institution": {
+          "name": "institution",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
         },
         "updated_at": {
           "name": "updated_at",
