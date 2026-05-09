@@ -20,18 +20,23 @@ describe('Drizzle migration journal', () => {
     }
   })
 
-  it('tracks the institution column migration as the latest entry', () => {
+  it('tracks the institution column migration in the journal', () => {
     const journal = JSON.parse(
       readFileSync(join(__dirname, 'migrations', 'meta', '_journal.json'), 'utf8')
     ) as MigrationJournal
-    const latestEntry = journal.entries.at(-1)
-    const latestMigrationSql = readFileSync(
+    const initialEntry = journal.entries.find((entry) => entry.tag === '0001_small_blob')
+    const institutionColumnEntry = journal.entries.find(
+      (entry) => entry.tag === '0002_zippy_sauron'
+    )
+    const institutionColumnMigrationSql = readFileSync(
       join(__dirname, 'migrations', '0002_zippy_sauron.sql'),
       'utf8'
     )
 
-    expect(latestEntry?.tag).toBe('0002_zippy_sauron')
-    expect(latestMigrationSql).toContain(
+    expect(initialEntry).toBeDefined()
+    expect(institutionColumnEntry).toBeDefined()
+    expect(institutionColumnEntry!.when).toBeGreaterThan(initialEntry!.when)
+    expect(institutionColumnMigrationSql).toContain(
       "ALTER TABLE `finance_accounts` ADD `institution` text DEFAULT '' NOT NULL;"
     )
   })
