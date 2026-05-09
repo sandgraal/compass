@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { cn } from '../../lib/utils'
 import { useAppStore } from '../../store/appStore'
+import { OnboardingWizard } from '../onboarding/OnboardingWizard'
 import { ConfirmDialogProvider } from '../ui/ConfirmDialog'
 import { ToastProvider } from '../ui/Toast'
 import { ContextDrawer } from './ContextDrawer'
@@ -8,6 +10,24 @@ import { Sidebar } from './Sidebar'
 
 export function AppLayout(): JSX.Element {
   const { contextDrawerOpen } = useAppStore()
+  // null = not yet loaded; true = show wizard; false = hidden
+  const [showWizard, setShowWizard] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron) {
+      setShowWizard(false)
+      return
+    }
+    window.api.settings.get('onboardingComplete').then((value) => {
+      // Show wizard only when the key is absent or not 'true'
+      setShowWizard(value !== 'true')
+    })
+  }, [])
+
+  function handleWizardComplete() {
+    setShowWizard(false)
+  }
 
   return (
     <ToastProvider>
@@ -33,6 +53,9 @@ export function AppLayout(): JSX.Element {
 
           {/* Right context drawer */}
           <ContextDrawer />
+
+          {/* Onboarding wizard — shown once on first launch */}
+          {showWizard === true && <OnboardingWizard onComplete={handleWizardComplete} />}
         </div>
       </ConfirmDialogProvider>
     </ToastProvider>
