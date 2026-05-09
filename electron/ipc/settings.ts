@@ -22,6 +22,7 @@ import {
   knowledgeFiles,
   syncEvents
 } from '../db/schema'
+import { restartQuickCaptureShortcut } from '../menu-bar'
 import { DATA_DIR, KNOWLEDGE_DIR, VAULT_DIR } from '../paths'
 
 const DEFAULTS: Record<string, string> = {
@@ -29,7 +30,39 @@ const DEFAULTS: Record<string, string> = {
   syncInterval: '15',
   knowledgeBaseLocation: 'default',
   showContextDrawer: 'true',
-  notificationsEnabled: 'true'
+  notificationsEnabled: 'true',
+  quickCaptureShortcut: 'CommandOrControl+Shift+Space'
+}
+
+/** Validates that a string looks like an Electron accelerator with at least one modifier. */
+function isValidAccelerator(value: string): boolean {
+  // Must be non-empty, contain at least one '+' separator, and end with a key name
+  if (!value || !value.includes('+')) return false
+  // Allowed modifier tokens (Electron accelerator spec)
+  const modifiers = new Set([
+    'Command',
+    'Cmd',
+    'Control',
+    'Ctrl',
+    'CommandOrControl',
+    'CmdOrCtrl',
+    'Alt',
+    'Option',
+    'AltGr',
+    'Shift',
+    'Super',
+    'Meta'
+  ])
+  const parts = value.split('+')
+  if (parts.length < 2) return false
+  // All parts except the last must be recognised modifiers
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (!modifiers.has(parts[i])) return false
+  }
+  // Final part must be a non-empty key name (letters, digits, Function keys, named keys)
+  const key = parts[parts.length - 1]
+  if (!key || key.trim() === '') return false
+  return true
 }
 
 export function registerSettingsHandlers(ipcMain: IpcMain): void {
@@ -59,6 +92,33 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
     if (key === 'syncInterval') {
       restartCronJobs()
     }
+    return { success: true }
+  })
+
+  ipcMain.handle('settings:set-quick-capture-shortcut', (_event, accelerator: unknown) => {
+    const chord = String(accelerator ?? '').trim()
+    if (!isValidAccelerator(chord)) {
+      return { success: false, error: `"${chord}" is not a valid accelerator string` }
+    }
+
+    const ok = restartQuickCaptureShortcut(chord)
+    if (!ok) {
+      return {
+        success: false,
+        error: `Could not register "${chord}" — it may be in use by another app or macOS`
+      }
+    }
+
+    // Persist to DB only after successful registration
+    const db = getDb()
+    db.insert(appSettings)
+      .values({ key: 'quickCaptureShortcut', value: chord, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: appSettings.key,
+        set: { value: chord, updatedAt: new Date() }
+      })
+      .run()
+
     return { success: true }
   })
 

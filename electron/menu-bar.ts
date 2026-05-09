@@ -227,6 +227,47 @@ function registerIpc(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Public: re-register shortcut (called by settings IPC handler)
+// ---------------------------------------------------------------------------
+
+/**
+ * Unregisters the current global shortcut and registers the new one.
+ * Returns `true` on success, `false` if the chord could not be registered
+ * (conflict with another app or invalid accelerator).
+ */
+export function restartQuickCaptureShortcut(newChord: string): boolean {
+  // Unregister whatever is currently active
+  try {
+    globalShortcut.unregisterAll()
+  } catch {
+    // ignore
+  }
+
+  try {
+    const registered = globalShortcut.register(newChord, () => {
+      if (tray) toggleCaptureWindow(tray)
+    })
+    if (!registered) {
+      // Registration failed — fall back to previous shortcut loaded from DB
+      const fallback = loadShortcut()
+      if (fallback !== newChord) {
+        try {
+          globalShortcut.register(fallback, () => {
+            if (tray) toggleCaptureWindow(tray)
+          })
+        } catch {
+          // best-effort fallback
+        }
+      }
+      return false
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public init
 // ---------------------------------------------------------------------------
 

@@ -1,5 +1,5 @@
-import { Bell, Database, Download, Monitor, Moon, Shield, Sun, Trash2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Bell, Database, Download, Keyboard, Monitor, Moon, Shield, Sun, Trash2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
 import { cn } from '../lib/utils'
@@ -174,6 +174,16 @@ export default function Settings(): JSX.Element {
         </SettingsRow>
       </SettingsSection>
 
+      {/* Quick Capture */}
+      <SettingsSection icon={<Keyboard size={16} />} title="Quick Capture">
+        <SettingsRow
+          label="Global shortcut"
+          description="Press this from anywhere in macOS to open the capture popover."
+        >
+          <ShortcutRecorder />
+        </SettingsRow>
+      </SettingsSection>
+
       {/* Danger zone */}
       <div className="border border-destructive/30 rounded-xl p-5 bg-destructive/5">
         <h3 className="text-sm font-semibold text-destructive mb-1 flex items-center gap-2">
@@ -287,5 +297,189 @@ function Toggle({
         )}
       />
     </button>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Shortcut recorder helpers
+// ---------------------------------------------------------------------------
+
+const DEFAULT_SHORTCUT = 'CommandOrControl+Shift+Space'
+
+/** Map a KeyboardEvent to an Electron accelerator modifier token. */
+function eventModifiers(e: KeyboardEvent): string[] {
+  const mods: string[] = []
+  if (e.metaKey) mods.push('Command')
+  if (e.ctrlKey) mods.push('Control')
+  if (e.altKey) mods.push('Alt')
+  if (e.shiftKey) mods.push('Shift')
+  return mods
+}
+
+/** Map a KeyboardEvent.key to an Electron accelerator key token. */
+function electronKey(e: KeyboardEvent): string | null {
+  const { key, code } = e
+  // Ignore bare modifier presses
+  if (['Meta', 'Control', 'Alt', 'Shift'].includes(key)) return null
+  // Space
+  if (key === ' ') return 'Space'
+  // Function keys
+  if (/^F\d+$/.test(key)) return key
+  // Named keys
+  const named: Record<string, string> = {
+    ArrowUp: 'Up',
+    ArrowDown: 'Down',
+    ArrowLeft: 'Left',
+    ArrowRight: 'Right',
+    Enter: 'Return',
+    Backspace: 'Backspace',
+    Delete: 'Delete',
+    Escape: 'Escape',
+    Tab: 'Tab',
+    Home: 'Home',
+    End: 'End',
+    PageUp: 'PageUp',
+    PageDown: 'PageDown',
+    Insert: 'Insert'
+  }
+  if (named[key]) return named[key]
+  // Digit keys via code (so Shift+1 → '1', not '!')
+  if (/^Digit(\d)$/.test(code)) return code.replace('Digit', '')
+  // Letter keys (uppercase single char)
+  if (key.length === 1) return key.toUpperCase()
+  return null
+}
+
+/** Convert an Electron accelerator string to macOS display glyphs. */
+function acceleratorToDisplay(acc: string): string {
+  return acc
+    .split('+')
+    .map((part) => {
+      switch (part) {
+        case 'CommandOrControl':
+        case 'CmdOrCtrl':
+        case 'Command':
+        case 'Cmd':
+          return '⌘'
+        case 'Control':
+        case 'Ctrl':
+          return '⌃'
+        case 'Alt':
+        case 'Option':
+          return '⌥'
+        case 'Shift':
+          return '⇧'
+        case 'Space':
+          return 'Space'
+        default:
+          return part
+      }
+    })
+    .join(' ')
+}
+
+// ---------------------------------------------------------------------------
+// ShortcutRecorder component
+// ---------------------------------------------------------------------------
+
+function ShortcutRecorder(): JSX.Element {
+  const [shortcut, setShortcut] = useState(DEFAULT_SHORTCUT)
+  const [recording, setRecording] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const { toast } = useToast()
+
+  // Load persisted shortcut on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.api) {
+      window.api.settings.get('quickCaptureShortcut').then((v) => {
+        if (v) setShortcut(v)
+      })
+    }
+  }, [])
+
+  function startRecording() {
+    setRecording(true)
+  }
+
+  function cancelRecording() {
+    setRecording(false)
+  }
+
+  async function applyShortcut(accelerator: string) {
+    setRecording(false)
+    setSaving(true)
+    try {
+      const r = await window.api?.settings.setQuickCaptureShortcut(accelerator)
+      if (r?.success) {
+        setShortcut(accelerator)
+        toast('Shortcut updated.', 'success')
+      } else {
+        toast(r?.error ?? 'Failed to register shortcut.', 'error')
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function resetToDefault() {
+    await applyShortcut(DEFAULT_SHORTCUT)
+  }
+
+  // Capture keydown while in recording mode
+  useEffect(() => {
+    if (!recording) return
+
+    function onKeyDown(e: KeyboardEvent) {
+      e.preventDefault()
+      e.stopPropagation()
+
+      if (e.key === 'Escape') {
+        cancelRecording()
+        return
+      }
+
+      const key = electronKey(e)
+      if (!key) return // bare modifier — keep waiting
+
+      const mods = eventModifiers(e)
+      if (mods.length === 0) return // require at least one modifier
+
+      const accelerator = [...mods, key].join('+')
+      void applyShortcut(accelerator)
+    }
+
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
+  }, [recording]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        ref={buttonRef}
+        onClick={recording ? cancelRecording : startRecording}
+        disabled={saving}
+        aria-label={recording ? 'Cancel shortcut recording' : 'Record new shortcut'}
+        className={cn(
+          'min-w-[120px] px-3 py-1.5 text-xs rounded-lg border transition-colors font-mono',
+          'focus:outline-none focus:ring-1 focus:ring-primary',
+          recording
+            ? 'border-primary bg-primary/10 text-primary animate-pulse'
+            : 'border-border bg-secondary text-foreground hover:border-primary/50',
+          saving && 'opacity-50 cursor-not-allowed'
+        )}
+      >
+        {saving ? 'Saving…' : recording ? 'Press keys…' : acceleratorToDisplay(shortcut)}
+      </button>
+      {!recording && !saving && shortcut !== DEFAULT_SHORTCUT && (
+        <button
+          onClick={resetToDefault}
+          aria-label="Reset shortcut to default"
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors focus:outline-none focus:ring-1 focus:ring-primary rounded"
+        >
+          Reset
+        </button>
+      )}
+    </div>
   )
 }
