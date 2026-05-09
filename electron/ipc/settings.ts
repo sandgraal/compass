@@ -53,15 +53,15 @@ function isValidAccelerator(value: string): boolean {
     'Super',
     'Meta'
   ])
-  const parts = value.split('+')
+  const parts = value.split('+').map((part) => part.trim())
   if (parts.length < 2) return false
   // All parts except the last must be recognised modifiers
   for (let i = 0; i < parts.length - 1; i++) {
     if (!modifiers.has(parts[i])) return false
   }
-  // Final part must be a non-empty key name (letters, digits, Function keys, named keys)
+  // Final part must be a non-empty key name, not another modifier
   const key = parts[parts.length - 1]
-  if (!key || key.trim() === '') return false
+  if (!key || modifiers.has(key)) return false
   return true
 }
 
