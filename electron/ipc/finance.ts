@@ -354,7 +354,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     } else {
       db.delete(appSettings).where(eq(appSettings.key, 'financeWatchFolder')).run()
     }
-    await startFinanceWatcher(folder)
+    await startFinanceWatcher(folder ?? getMoneyFolder())
     return { success: true, path: getMoneyFolder() }
   })
 
@@ -517,7 +517,7 @@ async function refreshFinanceKnowledge(): Promise<void> {
     accounts: accounts.map((a) => ({
       name: a.name,
       type: a.type,
-      institution: '',
+      institution: a.institution ?? '',
       active: true,
       notes: null
     })),

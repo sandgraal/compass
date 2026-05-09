@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
+import { QUICK_CAPTURE_HTML_ENTRY } from './electron/quick-capture-path'
 
 export default defineConfig({
   main: {
@@ -33,7 +34,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve('index.html'),
-          'quick-capture': resolve('src/quickCapture/index.html')
+          'quick-capture': resolve(QUICK_CAPTURE_HTML_ENTRY)
         }
       }
     },
