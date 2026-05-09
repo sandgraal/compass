@@ -161,11 +161,13 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
     try {
       const db = getDb()
       const today = new Date().toISOString().slice(0, 10)
+      const trimmed = String(title).trim()
+      if (!trimmed) return { success: false, error: 'Title cannot be empty' }
       db.insert(checklistItems)
         .values({
           listType: 'daily',
           listDate: today,
-          title: String(title).trim().slice(0, 500),
+          title: trimmed.slice(0, 500),
           category: 'personal',
           sortOrder: 999,
           source: 'manual',
