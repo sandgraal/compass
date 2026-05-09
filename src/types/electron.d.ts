@@ -25,6 +25,19 @@ declare global {
     snippet?: string
   }
 
+  interface KnowledgeSuggestion {
+    id: number
+    proposedAt: Date
+    source: 'gmail' | 'github' | 'calendar'
+    sourceId: string | null
+    targetPath: string
+    kind: 'contact' | 'employer' | 'date' | 'note'
+    proposedContent: string
+    context: string | null
+    status: 'pending' | 'accepted' | 'dismissed'
+    reviewedAt: Date | null
+  }
+
   interface IntegrationStatus {
     id: number
     service: string
@@ -141,6 +154,9 @@ declare global {
         search(query: string): Promise<Array<KnowledgeFile & { snippet: string }>>
         getPrev(path: string): Promise<string | null>
         onFileChanged(cb: (path: string) => void): () => void
+        listSuggestions(targetPath?: string): Promise<KnowledgeSuggestion[]>
+        acceptSuggestion(id: number): Promise<{ success: boolean }>
+        dismissSuggestion(id: number): Promise<{ success: boolean }>
       }
       vault: {
         getCategories(): Promise<VaultCategory[]>
