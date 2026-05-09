@@ -19,10 +19,15 @@ export function AppLayout(): JSX.Element {
       setShowWizard(false)
       return
     }
-    window.api.settings.get('onboardingComplete').then((value) => {
-      // Show wizard only when the key is absent or not 'true'
-      setShowWizard(value !== 'true')
-    })
+    window.api.settings
+      .get('onboardingComplete')
+      .then((value) => {
+        // Show wizard only when the key is absent or not 'true'
+        setShowWizard(value !== 'true')
+      })
+      .catch(() => {
+        setShowWizard(false)
+      })
   }, [])
 
   function handleWizardComplete() {
