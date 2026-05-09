@@ -180,7 +180,6 @@ export function toggleCaptureWindow(t: Tray): void {
   captureWindow.setPosition(x, y, false)
   captureWindow.show()
   captureWindow.focus()
-  captureWindow.webContents.send('quick-capture:focus')
 }
 
 // ---------------------------------------------------------------------------
