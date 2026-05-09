@@ -33,10 +33,10 @@ export async function initDb(): Promise<void> {
   sqlite.pragma('foreign_keys = ON')
 
   _db = drizzle(sqlite, { schema })
-  reconcileBackfilledInstitutionMigration(sqlite)
 
   // Run migrations
   try {
+    reconcileBackfilledInstitutionMigration(sqlite)
     migrate(_db as ReturnType<typeof drizzle>, {
       migrationsFolder: MIGRATIONS_FOLDER
     })
