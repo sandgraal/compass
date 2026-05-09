@@ -147,7 +147,7 @@ app.whenReady().then(async () => {
   createWindow()
   startCronJobs()
   await startOrRefreshFinanceWatcher()
-  initMenuBar(__dirname, ipcMain)
+  initMenuBar(__dirname)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

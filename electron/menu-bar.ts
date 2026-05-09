@@ -11,12 +11,11 @@ import { is } from '@electron-toolkit/utils'
 import { eq } from 'drizzle-orm'
 import {
   BrowserWindow,
-  type IpcMain,
   Menu,
   Tray,
-  ipcMain as _ipcMain,
   app,
   globalShortcut,
+  ipcMain,
   nativeImage,
   screen
 } from 'electron'
@@ -159,7 +158,8 @@ export function toggleCaptureWindow(t: Tray): void {
 
   // Position directly below the tray icon
   const trayBounds = t.getBounds()
-  const { height: screenH } = screen.getPrimaryDisplay().workAreaSize
+  const trayDisplay = screen.getDisplayMatching(trayBounds)
+  const { x: workAreaX, y: workAreaY, width: workAreaW, height: workAreaH } = trayDisplay.workArea
   const winW = 360
   const winH = 80
 
@@ -167,15 +167,16 @@ export function toggleCaptureWindow(t: Tray): void {
   // macOS: menu bar is at top; position window below tray icon
   let y = Math.round(trayBounds.y + trayBounds.height + 4)
 
-  // Ensure we don't fall off the right edge
-  const displayWidth = screen.getPrimaryDisplay().bounds.width
-  if (x + winW > displayWidth) x = displayWidth - winW - 4
-  if (x < 0) x = 4
+  // Ensure we don't fall off display edges
+  const minX = workAreaX + 4
+  const maxX = workAreaX + workAreaW - winW - 4
+  x = Math.max(minX, Math.min(x, maxX))
 
   // Edge case: if tray is at bottom (Linux/Windows) push window above
-  if (y + winH > screenH) {
+  if (y + winH > workAreaY + workAreaH) {
     y = Math.round(trayBounds.y - winH - 4)
   }
+  if (y < workAreaY) y = workAreaY + 4
 
   captureWindow.setPosition(x, y, false)
   captureWindow.show()
@@ -220,7 +221,7 @@ function registerShortcut(chord: string): void {
 // ---------------------------------------------------------------------------
 
 function registerIpc(): void {
-  _ipcMain.on('quick-capture:hide', () => {
+  ipcMain.on('quick-capture:hide', () => {
     captureWindow?.hide()
   })
 }
@@ -229,7 +230,7 @@ function registerIpc(): void {
 // Public init
 // ---------------------------------------------------------------------------
 
-export function initMenuBar(__dirname: string, _ipcMainArg: IpcMain): void {
+export function initMenuBar(__dirname: string): void {
   if (process.platform !== 'darwin') {
     // Tray works on all platforms but the spec is macOS-only; guard to keep
     // this safe on Linux/Windows CI where display servers may be absent.

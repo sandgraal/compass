@@ -39,10 +39,10 @@ export function QuickCapture() {
           hide()
         } else {
           setError(result.error ?? 'Failed to add task')
-          setSubmitting(false)
         }
       } catch (err) {
         setError(String(err))
+      } finally {
         setSubmitting(false)
       }
     },
