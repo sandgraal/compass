@@ -630,11 +630,11 @@ function pdfAccountHint(filePath: string): string {
   // Strip trailing month/date noise like "Statement_April_2026" → "Statement"
   return stem
     .replace(
-      /[_-]?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)[_\-\s\d]*$/i,
+      /[-_]?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)[_\-\s\d]*$/i,
       ''
     )
     .replace(/[\d_\-\s]+$/i, '')
-    .replace(/[_-]+/g, ' ')
+    .replace(/[-_]+/g, ' ')
     .trim()
 }
 
