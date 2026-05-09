@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { DATA_DIR } from '../paths'
 import * as schema from './schema'
 
@@ -14,6 +15,7 @@ export function getDb(): ReturnType<typeof drizzle<typeof schema>> {
 
 export async function initDb(): Promise<void> {
   const dbPath = join(DATA_DIR, 'compass.db')
+  const migrationsFolder = join(__dirname, 'migrations')
   const sqlite = new Database(dbPath)
 
   // WAL mode for better concurrent read performance
@@ -24,8 +26,9 @@ export async function initDb(): Promise<void> {
 
   // Run migrations
   try {
+    normalizeRecordedMigrationTimestamps(sqlite, migrationsFolder)
     migrate(_db as ReturnType<typeof drizzle>, {
-      migrationsFolder: join(__dirname, 'migrations')
+      migrationsFolder
     })
   } catch {
     // Migrations folder may not exist yet; create schema directly on first run
@@ -106,6 +109,32 @@ function ensureColumn(
   if (cols.some((c) => c.name === column)) return false
   sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`)
   return true
+}
+
+function normalizeRecordedMigrationTimestamps(
+  sqlite: Database.Database,
+  migrationsFolder: string
+): void {
+  const migrations = readMigrationFiles({ migrationsFolder })
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS __drizzle_migrations (
+      id SERIAL PRIMARY KEY,
+      hash TEXT NOT NULL,
+      created_at NUMERIC
+    );
+  `)
+
+  const updateMigrationTimestamp = sqlite.prepare(`
+    UPDATE __drizzle_migrations
+    SET created_at = ?
+    WHERE hash = ?
+      AND COALESCE(created_at, -1) <> ?
+  `)
+
+  for (const migration of migrations) {
+    updateMigrationTimestamp.run(migration.folderMillis, migration.hash, migration.folderMillis)
+  }
 }
 
 function createTablesIfNeeded(sqlite: Database.Database): void {
