@@ -343,10 +343,30 @@ function electronKey(e: KeyboardEvent): string | null {
     Insert: 'Insert'
   }
   if (named[key]) return named[key]
-  // Digit keys via code (so Shift+1 → '1', not '!')
+
+  // Printable keys via code to avoid shifted symbols producing invalid
+  // accelerator tokens (for example Shift+= yielding '+' instead of '=').
   if (/^Digit(\d)$/.test(code)) return code.replace('Digit', '')
-  // Letter keys (uppercase single char)
-  if (key.length === 1) return key.toUpperCase()
+  if (/^Key([A-Z])$/.test(code)) return code.replace('Key', '')
+
+  const printableByCode: Record<string, string> = {
+    Equal: '=',
+    Minus: '-',
+    BracketLeft: '[',
+    BracketRight: ']',
+    Backslash: '\\',
+    Semicolon: ';',
+    Quote: "'",
+    Comma: ',',
+    Period: '.',
+    Slash: '/',
+    Backquote: '`'
+  }
+  if (printableByCode[code]) return printableByCode[code]
+
+  // Fall back only for single alphanumeric characters; avoid punctuation
+  // such as '+' because Electron uses '+' as the accelerator separator.
+  if (/^[a-z0-9]$/i.test(key)) return key.toUpperCase()
   return null
 }
 
