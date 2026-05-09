@@ -104,7 +104,9 @@ const api = {
     openDataDir: () => ipcRenderer.invoke('settings:open-data-dir'),
     wipeKnowledge: () => ipcRenderer.invoke('settings:wipe-knowledge'),
     wipeVault: () => ipcRenderer.invoke('settings:wipe-vault'),
-    exportData: () => ipcRenderer.invoke('settings:export-data')
+    exportData: () => ipcRenderer.invoke('settings:export-data'),
+    setQuickCaptureShortcut: (accelerator: string) =>
+      ipcRenderer.invoke('settings:set-quick-capture-shortcut', accelerator)
   },
 
   // --- Habits ---
