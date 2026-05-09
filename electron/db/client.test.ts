@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import Database from 'better-sqlite3'
@@ -29,6 +30,23 @@ function readFinanceAccountColumns(dbPath: string): Array<{
   } finally {
     sqlite.close()
   }
+}
+
+function readMigrationRows(dbPath: string): Array<{ hash: string; created_at: number | null }> {
+  const sqlite = new Database(dbPath)
+  try {
+    return sqlite
+      .prepare('SELECT hash, created_at FROM __drizzle_migrations ORDER BY created_at, hash')
+      .all() as Array<{ hash: string; created_at: number | null }>
+  } finally {
+    sqlite.close()
+  }
+}
+
+function migrationHash(tag: string): string {
+  return createHash('sha256')
+    .update(readFileSync(join(__dirname, 'migrations', `${tag}.sql`), 'utf8'))
+    .digest('hex')
 }
 
 function expectInstitutionColumn(dbPath: string): void {
@@ -104,6 +122,29 @@ describe('initDb finance_accounts institution column', () => {
     const { initDb } = await loadClientForHome(home)
     await initDb()
 
+    expectInstitutionColumn(dbPath)
+  })
+
+  it('records the institution migration when the column was already backfilled', async () => {
+    const home = makeTempHome()
+    const dbPath = dbPathForHome(home)
+    mkdirSync(dirname(dbPath), { recursive: true })
+    const { initDb } = await loadClientForHome(home)
+
+    await initDb()
+
+    const originalMigrationRows = readMigrationRows(dbPath)
+    const institutionHash = migrationHash('0002_zippy_sauron')
+    const sqlite = new Database(dbPath)
+    try {
+      sqlite.prepare('DELETE FROM __drizzle_migrations WHERE hash = ?').run(institutionHash)
+    } finally {
+      sqlite.close()
+    }
+
+    await initDb()
+
+    expect(readMigrationRows(dbPath)).toEqual(originalMigrationRows)
     expectInstitutionColumn(dbPath)
   })
 })

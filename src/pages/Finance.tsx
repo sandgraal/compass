@@ -93,6 +93,7 @@ export default function Finance(): JSX.Element {
   const [budget, setBudget] = useState<BudgetLine[]>([])
   const [rules, setRules] = useState<Rule[]>([])
   const [ingesting, setIngesting] = useState(false)
+  const [reapplying, setReapplying] = useState(false)
   const [lastIngest, setLastIngest] = useState<{
     filesProcessed: number
     newTransactions: number
@@ -174,8 +175,16 @@ export default function Finance(): JSX.Element {
       setDetectedAccounts(d.detectedAccounts.map((a) => a.name))
       void refresh()
     })
-    return unsub
-  }, [refresh])
+    const unsubRulesReapplied = window.api.finance.onRulesReapplied((data) => {
+      const d = data as { updated: number }
+      showToast(`Recategorized ${d.updated} transaction${d.updated === 1 ? '' : 's'}.`, 'success')
+      void refresh()
+    })
+    return () => {
+      unsub()
+      unsubRulesReapplied()
+    }
+  }, [refresh, showToast])
 
   // ── Derived totals ────────────────────────────────────────────────────────
   const totalDebt = debts.reduce((a, d) => a + (d.balance ?? 0), 0)
@@ -315,6 +324,22 @@ export default function Finance(): JSX.Element {
     }
   }
 
+  async function reapplyRules() {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron || !window.api.finance) return
+    setReapplying(true)
+    try {
+      const { updated } = await window.api.finance.reapplyRules()
+      showToast(`Recategorized ${updated} transaction${updated === 1 ? '' : 's'}.`, 'success')
+      await refresh()
+    } catch (err) {
+      console.error('[finance] reapplyRules failed', err)
+      showToast('Failed to re-apply rules.', 'error')
+    } finally {
+      setReapplying(false)
+    }
+  }
+
   return (
     <div className="p-8 pt-14 max-w-6xl mx-auto animate-fade-in">
       {/* Header */}
@@ -443,7 +468,15 @@ export default function Finance(): JSX.Element {
         <AccountsTab accounts={accounts} onSave={saveAccount} onDelete={deleteAccount} />
       )}
 
-      {tab === 'rules' && <RulesTab rules={rules} onSave={saveRule} onDelete={deleteRule} />}
+      {tab === 'rules' && (
+        <RulesTab
+          rules={rules}
+          onSave={saveRule}
+          onDelete={deleteRule}
+          onReapply={reapplyRules}
+          reapplying={reapplying}
+        />
+      )}
     </div>
   )
 }
@@ -1195,7 +1228,9 @@ function emptyRuleForm(): RuleFormState {
 function RulesTab({
   rules,
   onSave,
-  onDelete
+  onDelete,
+  onReapply,
+  reapplying
 }: {
   rules: Rule[]
   onSave: (rule: {
@@ -1206,6 +1241,8 @@ function RulesTab({
     priority?: number
   }) => Promise<void>
   onDelete: (id: number) => Promise<void>
+  onReapply: () => Promise<void>
+  reapplying: boolean
 }): JSX.Element {
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -1286,23 +1323,35 @@ function RulesTab({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold">Categorization rules ({rules.length})</h3>
-        {!showForm && (
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={startAdd}
-            className="flex items-center gap-1.5 text-sm px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors"
+            onClick={() => void onReapply()}
+            disabled={reapplying}
+            className="flex items-center gap-1.5 text-sm px-3 py-1.5 border border-border text-muted-foreground hover:text-foreground rounded-lg transition-colors disabled:opacity-50"
+            title="Re-run all rules against every existing transaction"
           >
-            <Plus size={14} /> Add rule
+            <RefreshCw size={13} className={reapplying ? 'animate-spin' : ''} />
+            {reapplying ? 'Applying…' : 'Re-apply to all'}
           </button>
-        )}
+          {!showForm && (
+            <button
+              type="button"
+              onClick={startAdd}
+              className="flex items-center gap-1.5 text-sm px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors"
+            >
+              <Plus size={14} /> Add rule
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-secondary/60 text-xs text-muted-foreground">
         <Info size={14} className="mt-0.5 shrink-0" />
         <span>
-          Rules apply to <strong>newly ingested</strong> transactions. Existing transactions are not
-          re-categorized — edit them individually on the Transactions tab. Lower priority numbers
-          run first.
+          Rules apply automatically to <strong>newly ingested</strong> transactions. Use{' '}
+          <strong>Re-apply to all</strong> to update existing transactions after adding or changing
+          rules.
         </span>
       </div>
 
