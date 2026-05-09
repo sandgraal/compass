@@ -3,8 +3,10 @@
   "entry": [
     "electron/main.ts",
     "electron/preload.ts",
+    "electron/preload-quick-capture.ts",
     "src/main.tsx",
     "src/App.tsx",
+    "src/quickCapture/main.tsx",
     "vitest.config.ts",
     "playwright.config.ts",
     "mcp/compass-mcp/index.ts"
