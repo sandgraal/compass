@@ -195,9 +195,10 @@ export const usaaPdf: PdfExtractor = {
 
     // Pattern: <M/D or MM/DD>  [<M/D or MM/DD>]  <description...>  <amount>
     // The leading date is the transaction date. A second date (post date) may
-    // precede the description. Amount can be signed with parens, $, or '-'.
+    // precede the description. Amount can be signed with parens, $, '-', or a
+    // trailing '-' (e.g. "500.00-" = credit/payment on USAA statements).
     const txnLine =
-      /^(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\s+(?:\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\s+)?(.+?)\s+(-?\$?[\d,]+\.\d{2}|\([\d,]+\.\d{2}\))\s*-?$/
+      /^(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\s+(?:\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\s+)?(.+?)\s+(-?\$?[\d,]+\.\d{2}-?|\([\d,]+\.\d{2}\))\s*$/
 
     const txns: RawTxn[] = []
     let inSection = false
@@ -348,9 +349,9 @@ export const amexPdf: PdfExtractor = {
  *   <date> <description> <amount>
  * with date in ISO / M/D/YYYY / "Mon DD" form and amount as a signed decimal.
  *
- * Conservative on purpose: returns NO transactions if it can't anchor on a
- * statement year or if confidence is low. Better to miss data than to write
- * fake transactions to the ledger.
+ * Conservative on purpose: if fewer than 2 plausible transactions are found,
+ * returns empty to avoid writing junk data. "Mon DD" dates require a
+ * statement-year anchor; ISO and slash-delimited dates are parsed without one.
  */
 export const genericPdf: PdfExtractor = {
   name: 'Generic (PDF)',
@@ -363,8 +364,9 @@ export const genericPdf: PdfExtractor = {
     // ISO date OR M/D[/YY]] OR "Mon DD[ YYYY]" — captured as a single chunk.
     const dateChunk =
       '(\\d{4}-\\d{2}-\\d{2}|\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?|[A-Za-z]{3,4}\\.?\\s+\\d{1,2}(?:[,\\s]+\\d{2,4})?)'
-    const amtChunk = '(-?\\$?[\\d,]+\\.\\d{2}|\\(\\$?[\\d,]+\\.\\d{2}\\))'
-    const re = new RegExp(`^${dateChunk}\\s+(.+?)\\s+${amtChunk}\\s*-?$`)
+    // Trailing '-' (e.g. "500.00-") is a credit indicator used by some banks.
+    const amtChunk = '(-?\\$?[\\d,]+\\.\\d{2}-?|\\(\\$?[\\d,]+\\.\\d{2}\\))'
+    const re = new RegExp(`^${dateChunk}\\s+(.+?)\\s+${amtChunk}\\s*$`)
 
     const txns: RawTxn[] = []
     for (const raw of lines) {

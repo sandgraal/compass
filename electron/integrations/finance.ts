@@ -9,7 +9,7 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, join, parse } from 'node:path'
 import { inArray } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
@@ -39,6 +39,8 @@ export const parseMoney = (s: string): number => {
   const t = s.trim().replace(/[$,]/g, '')
   if (!t) return 0
   if (t.startsWith('(') && t.endsWith(')')) return -Number.parseFloat(t.slice(1, -1))
+  // Trailing minus (e.g. "500.00-") is used by some banks (USAA) to denote credits.
+  if (t.endsWith('-')) return -Number.parseFloat(t.slice(0, -1))
   return Number.parseFloat(t)
 }
 
@@ -477,22 +479,9 @@ export type ParsedFile = {
  * the file's header rows. Best-effort — returns undefined if we can't
  * confidently tell what the account is.
  */
-function detectAccount(
-  file: string,
-  peek?: { acctNumber?: string; pdfText?: string }
-): DetectedAccount | undefined {
+function detectAccount(file: string, peek?: { acctNumber?: string }): DetectedAccount | undefined {
   const name = basename(file).toLowerCase()
-  // PDFs: scrape last-N from text content if filename didn't carry it.
-  // This populates `acctNumber` from `peek.pdfText` so downstream logic
-  // (the AMEX branch below) works the same way it does for xlsx.
-  let acctNumber = peek?.acctNumber
-  if (!acctNumber && peek?.pdfText) {
-    const pdfTextSlice = peek.pdfText.slice(0, 4000)
-    const m =
-      pdfTextSlice.match(/account\s+ending(?:\s+in)?\s*[:#-]?\s*[\dx*-]*?(\d{4,5})\b/i) ??
-      pdfTextSlice.match(/ending\s+in\s*[:#-]?\s*(\d{4,5})\b/i)
-    if (m) acctNumber = m[1]
-  }
+  const acctNumber = peek?.acctNumber
   // USAA: USAA_Checking_2026_bk_download.csv / USAA_Savings_*.csv
   if (name.includes('usaa')) {
     if (name.includes('checking')) {
@@ -636,9 +625,14 @@ function parseCsvFile(filePath: string): ParsedFile {
  * better name discovered in the PDF text.
  */
 function pdfAccountHint(filePath: string): string {
-  const stem = basename(filePath, '.pdf')
+  // `parse().name` strips the extension regardless of case (.pdf or .PDF).
+  const stem = parse(filePath).name
   // Strip trailing month/date noise like "Statement_April_2026" → "Statement"
   return stem
+    .replace(
+      /[_-]?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)[_\-\s\d]*$/i,
+      ''
+    )
     .replace(/[\d_\-\s]+$/i, '')
     .replace(/[_-]+/g, ' ')
     .trim()

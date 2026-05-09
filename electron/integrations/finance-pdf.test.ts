@@ -112,11 +112,11 @@ describe('USAA PDF extractor', () => {
     const result = parsePdfText(usaaText, '/tmp/usaa-credit-statement.pdf', 'USAA')
     const payment = result.txns.find((t) => t.description === 'PAYMENT - THANK YOU')
     expect(payment).toBeDefined()
-    // The fixture has the payment as "500.00-" (trailing minus). After parseMoney
-    // the trailing dash is dropped, yielding +500. We then flip to -500.
-    // (The current USAA extractor flips every amount uniformly — known limitation
-    // documented in the PR; payment-credit sign correction is a follow-up.)
-    expect(payment?.amount).toBe(-500)
+    // The fixture has "500.00-" (trailing minus = credit/payment).
+    // parseMoney handles trailing minus → -500. The USAA extractor then flips
+    // (amount = -amount) → +500, which is correct: a payment returns money to
+    // the user (positive in the expense-negative convention).
+    expect(payment?.amount).toBe(500)
   })
 
   it('skips section headers and totals (no junk rows)', () => {
