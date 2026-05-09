@@ -80,6 +80,8 @@ function createTray(__dirname: string): Tray {
         if (wins.length > 0) {
           wins[0].show()
           wins[0].focus()
+        } else {
+          app.emit('activate')
         }
       }
     },
