@@ -8,6 +8,9 @@ import { ToastProvider } from '../ui/Toast'
 import { ContextDrawer } from './ContextDrawer'
 import { Sidebar } from './Sidebar'
 
+const ONBOARDING_COMPLETED_KEY = 'onboardingCompleted'
+const LEGACY_ONBOARDING_COMPLETED_KEY = 'onboardingComplete'
+
 export function AppLayout(): JSX.Element {
   const { contextDrawerOpen } = useAppStore()
   // null = not yet loaded; true = show wizard; false = hidden
@@ -19,11 +22,13 @@ export function AppLayout(): JSX.Element {
       setShowWizard(false)
       return
     }
-    window.api.settings
-      .get('onboardingComplete')
-      .then((value) => {
-        // Show wizard only when the key is absent or not 'true'
-        setShowWizard(value !== 'true')
+    Promise.all([
+      window.api.settings.get(ONBOARDING_COMPLETED_KEY),
+      window.api.settings.get(LEGACY_ONBOARDING_COMPLETED_KEY)
+    ])
+      .then(([value, legacyValue]) => {
+        // Show wizard only when both keys are absent or not 'true'
+        setShowWizard(value !== 'true' && legacyValue !== 'true')
       })
       .catch(() => {
         setShowWizard(false)

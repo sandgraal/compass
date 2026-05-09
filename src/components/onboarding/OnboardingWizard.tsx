@@ -1,10 +1,11 @@
 import { CheckCircle2, FolderOpen, Lock, Plug2, ShieldCheck } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '../../lib/utils'
 import { useToast } from '../ui/Toast'
 
 const TOTAL_STEPS = 4
 const STEP_KEYS = ['welcome', 'integrations', 'finance', 'vault'] as const
+const ONBOARDING_COMPLETED_KEY = 'onboardingCompleted'
 
 interface OnboardingWizardProps {
   onComplete: () => void
@@ -13,23 +14,46 @@ interface OnboardingWizardProps {
 export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Element {
   const [step, setStep] = useState(1)
   const [animating, setAnimating] = useState(false)
+  const transitionTimeoutRef = useRef<number | null>(null)
+  const isMountedRef = useRef(true)
+  const { toast } = useToast()
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false
+      if (transitionTimeoutRef.current !== null) {
+        window.clearTimeout(transitionTimeoutRef.current)
+      }
+    }
+  }, [])
 
   function goTo(next: number) {
     if (animating) return
     setAnimating(true)
-    setTimeout(() => {
+    if (transitionTimeoutRef.current !== null) {
+      window.clearTimeout(transitionTimeoutRef.current)
+    }
+    transitionTimeoutRef.current = window.setTimeout(() => {
+      if (!isMountedRef.current) return
       setStep(next)
       setAnimating(false)
+      transitionTimeoutRef.current = null
     }, 150)
   }
 
   const finish = useCallback(async () => {
     const isElectron = typeof window !== 'undefined' && !!window.api
-    if (isElectron) {
-      await window.api.settings.set('onboardingComplete', 'true')
+    try {
+      if (isElectron) {
+        await window.api.settings.set(ONBOARDING_COMPLETED_KEY, 'true')
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      toast(`Could not save onboarding status: ${message}`, 'error')
+    } finally {
+      onComplete()
     }
-    onComplete()
-  }, [onComplete])
+  }, [onComplete, toast])
 
   function advance() {
     if (step < TOTAL_STEPS) {
@@ -185,7 +209,7 @@ function StepIntegrations({
         const message = error instanceof Error ? error.message : String(error)
         toast(`Failed to load connection status: ${message}`, 'error')
       })
-  }, [])
+  }, [toast])
 
   async function connect(service: string) {
     const isElectron = typeof window !== 'undefined' && !!window.api
@@ -204,6 +228,9 @@ function StepIntegrations({
         for (const r of rows) map[r.service] = r.status
         setStatuses(map)
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      toast(`Connection failed: ${message}`, 'error')
     } finally {
       setConnecting(null)
     }
