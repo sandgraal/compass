@@ -50,6 +50,12 @@ describe('tryParseStatementDate', () => {
     expect(tryParseStatementDate('1/2', 2026, 1)).toBe('2026-01-02')
   })
 
+  it('returns null for impossible yearless dates', () => {
+    expect(tryParseStatementDate('2/30', 2026, 2)).toBeNull()
+    expect(tryParseStatementDate('Feb 29', 2025, 2)).toBeNull()
+    expect(tryParseStatementDate('Feb 29', 2024, 2)).toBe('2024-02-29')
+  })
+
   it('returns null for "Apr 03" with no defaultYear', () => {
     expect(tryParseStatementDate('Apr 03')).toBeNull()
   })
@@ -137,6 +143,22 @@ describe('USAA PDF extractor', () => {
     const a = parsePdfText(usaaText, '/tmp/usaa-credit-statement.pdf', 'USAA')
     const b = parsePdfText(usaaText, '/tmp/usaa-credit-statement.pdf', 'USAA')
     expect(a.txns.map((t) => t.hash)).toEqual(b.txns.map((t) => t.hash))
+  })
+
+  it('ignores malformed closing months when deriving rollover context', () => {
+    const malformedClosingMonth = [
+      'USAA SAVINGS BANK',
+      'Credit Card Statement',
+      'Closing Date: 13/14/2026',
+      '',
+      'Transactions',
+      '12/31  01/01  NEW YEARS EVE DINNER AUSTIN TX  98.76',
+      '01/02  01/03  COFFEE SHOP AUSTIN TX  7.50'
+    ].join('\n')
+
+    const result = parsePdfText(malformedClosingMonth, '/tmp/usaa-malformed.pdf', 'USAA')
+
+    expect(result.txns.map((t) => t.date)).toEqual(['2026-12-31', '2026-01-02'])
   })
 
   it('rolls December rows into the prior year for January-closing statements', () => {

@@ -161,8 +161,10 @@ function findLastFour(text: string): string | undefined {
 }
 
 /**
- * Pull a four-digit year out of "Statement Period: 04/15/2026 - 05/14/2026" or
- * "Closing Date: 05/14/2026" style lines. Used to disambiguate Mon-DD dates.
+ * Pull statement date context out of "Statement Period: 04/15/2026 - 05/14/2026"
+ * or "Closing Date: 05/14/2026" style lines. Returns the statement year plus a
+ * validated closing month when present so yearless dates can roll back across
+ * calendar-year boundaries safely.
  */
 function findStatementDateContext(lines: string[]): {
   defaultYear?: number
@@ -175,9 +177,10 @@ function findStatementDateContext(lines: string[]): {
   if (closing) {
     const month = Number.parseInt(closing[1], 10)
     const y = Number.parseInt(closing[2], 10)
+    const defaultYear = y < 100 ? (y < 50 ? 2000 + y : 1900 + y) : y
     return {
-      defaultYear: y < 100 ? (y < 50 ? 2000 + y : 1900 + y) : y,
-      closingMonth: month
+      defaultYear,
+      ...(month >= 1 && month <= 12 ? { closingMonth: month } : {})
     }
   }
   const period = headerSlice.match(
@@ -186,9 +189,10 @@ function findStatementDateContext(lines: string[]): {
   if (period) {
     const month = Number.parseInt(period[1], 10)
     const y = Number.parseInt(period[2], 10)
+    const defaultYear = y < 100 ? (y < 50 ? 2000 + y : 1900 + y) : y
     return {
-      defaultYear: y < 100 ? (y < 50 ? 2000 + y : 1900 + y) : y,
-      closingMonth: month
+      defaultYear,
+      ...(month >= 1 && month <= 12 ? { closingMonth: month } : {})
     }
   }
   // Fallback: any 4-digit year
