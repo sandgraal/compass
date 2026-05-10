@@ -64,10 +64,41 @@ function getIntegrationId(db: ReturnType<typeof getDb>, service: string): number
   return row?.id ?? null
 }
 
+function normalizeSemanticToken(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function firstCellFromMarkdownRow(content: string): string | null {
+  const match = content.match(/^\|\s*([^|]+?)\s*\|/)
+  if (!match) return null
+  const normalized = normalizeSemanticToken(match[1])
+  return normalized || null
+}
+
+function candidateSemanticKey(candidate: {
+  targetPath: string
+  kind: string
+  proposedContent: string
+}): string | null {
+  if (candidate.kind === 'contact' || candidate.kind === 'employer') {
+    const firstCell = firstCellFromMarkdownRow(candidate.proposedContent)
+    if (!firstCell) return null
+    return `${candidate.kind}|${candidate.targetPath}|${firstCell}`
+  }
+  return null
+}
+
+function isOllamaSource(source: string): boolean {
+  return source.startsWith('ollama:')
+}
+
 /**
  * Run all pattern-based suggestion extractors against the latest synced data and
  * persist new candidates to `knowledge_suggestions`. Idempotent: skips any
- * (targetPath + proposedContent) pair that already exists in the table.
+ * duplicate `(targetPath + proposedContent)` and stable Ollama source keys.
  *
  * If the user has enabled Ollama suggestions AND Ollama is running locally,
  * also runs the AI-augmented extractor — wrapped in its own try/catch so an
@@ -106,16 +137,18 @@ export async function runSuggestionExtractors(
           html_url: r.url,
           type: r.type as 'issue' | 'pr',
           repo: r.repo,
+          title: r.title,
           assignee: null,
           user: null,
           labels: r.labels ? (JSON.parse(r.labels) as string[]).map((n) => ({ name: n })) : []
         }))
 
-    const candidates = [
+    const regexCandidates = [
       ...extractContactsFromGmail(gmailInputs, relationshipsContent),
       ...extractOrgsFromGmail(gmailInputs, employersContent),
       ...extractContactsFromGithub(githubInputs, relationshipsContent)
     ]
+    const candidates = [...regexCandidates]
 
     // ── Optional: Ollama AI augmentation ──────────────────────────────────────
     // Only runs when the user has opted in. Failures are logged and ignored.
@@ -147,7 +180,15 @@ export async function runSuggestionExtractors(
           detectOllama,
           runOllamaPrompt
         })
-        candidates.push(...ollamaCandidates)
+        const regexSemanticKeys = new Set(
+          regexCandidates.map(candidateSemanticKey).filter((k): k is string => Boolean(k))
+        )
+        const filteredOllamaCandidates = ollamaCandidates.filter((candidate) => {
+          const semanticKey = candidateSemanticKey(candidate)
+          if (!semanticKey) return true
+          return !regexSemanticKeys.has(semanticKey)
+        })
+        candidates.push(...filteredOllamaCandidates)
       }
     } catch (ollamaErr) {
       // Ollama is best-effort — never propagate errors into the sync flow
@@ -158,6 +199,8 @@ export async function runSuggestionExtractors(
     // Load existing suggestions to avoid duplicates
     const existingSuggestions = db
       .select({
+        source: knowledgeSuggestions.source,
+        sourceId: knowledgeSuggestions.sourceId,
         targetPath: knowledgeSuggestions.targetPath,
         proposedContent: knowledgeSuggestions.proposedContent
       })
@@ -167,9 +210,24 @@ export async function runSuggestionExtractors(
     const existingKeys = new Set(
       existingSuggestions.map((s) => `${s.targetPath}|${s.proposedContent}`)
     )
+    const existingOllamaStableKeys = new Set(
+      existingSuggestions
+        .filter((s) => isOllamaSource(s.source) && typeof s.sourceId === 'string' && s.sourceId)
+        .map((s) => `${s.source}|${s.sourceId}`)
+    )
 
     const now = new Date()
     for (const candidate of candidates) {
+      if (
+        isOllamaSource(candidate.source) &&
+        typeof candidate.sourceId === 'string' &&
+        candidate.sourceId
+      ) {
+        const stableKey = `${candidate.source}|${candidate.sourceId}`
+        if (existingOllamaStableKeys.has(stableKey)) continue
+        existingOllamaStableKeys.add(stableKey)
+      }
+
       const key = `${candidate.targetPath}|${candidate.proposedContent}`
       if (existingKeys.has(key)) continue
 
@@ -448,6 +506,7 @@ export async function syncGitHub(
         html_url: issue.html_url,
         type: issue.pull_request ? 'pr' : 'issue',
         repo: issue.repository?.full_name || issue.html_url.split('/').slice(3, 5).join('/'),
+        title: issue.title,
         assignee: issue.assignee ? { login: issue.assignee.login } : null,
         user: issue.user ? { login: issue.user.login } : null,
         labels: issue.labels?.map((l) => ({ name: l.name })) ?? []

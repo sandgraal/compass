@@ -255,8 +255,8 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
   })
 
   // ---- Ollama detection ----
-  ipcMain.handle('settings:detect-ollama', async () => {
-    return detectOllama()
+  ipcMain.handle('settings:detect-ollama', async (_event, options?: { forceRefresh?: boolean }) => {
+    return detectOllama({ bypassCache: options?.forceRefresh === true })
   })
 
   // ---- Data management ----

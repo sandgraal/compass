@@ -30,33 +30,39 @@ export default function Settings(): JSX.Element {
   const [ollamaModel, setOllamaModel] = useState('')
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null)
   const [ollamaChecking, setOllamaChecking] = useState(false)
+  const loadedOllamaModelRef = useRef<string | null>(null)
 
   useEffect(() => {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (isElectron) {
       window.api.settings.getAll().then((s) => {
+        const savedModel = s.ollamaModel || ''
         setSyncInterval(s.syncInterval || '15')
         setNotifications(s.notificationsEnabled !== 'false')
         setContextDrawer(s.showContextDrawer !== 'false')
         setOllamaEnabled(s.ollamaSuggestionsEnabled === 'true')
-        setOllamaModel(s.ollamaModel || '')
+        setOllamaModel(savedModel)
+        loadedOllamaModelRef.current = savedModel
+        checkOllama({ currentModel: savedModel })
       })
-      // Probe Ollama status on load
-      checkOllama()
     }
   }, [])
 
-  async function checkOllama() {
+  async function checkOllama(options?: { forceRefresh?: boolean; currentModel?: string }) {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
     setOllamaChecking(true)
     try {
-      const status = await window.api.settings.detectOllama()
+      const status = await window.api.settings.detectOllama({
+        forceRefresh: options?.forceRefresh === true
+      })
       setOllamaStatus(status)
       // Auto-select first available model if none set
-      if (status.available && status.models && status.models.length > 0 && !ollamaModel) {
+      const currentModel = options?.currentModel ?? loadedOllamaModelRef.current ?? ollamaModel
+      if (status.available && status.models && status.models.length > 0 && !currentModel) {
         const preferred = status.models.find((m) => m.startsWith('llama3.2')) ?? status.models[0]
         setOllamaModel(preferred)
+        loadedOllamaModelRef.current = preferred
         await save('ollamaModel', preferred)
       }
     } finally {
@@ -273,7 +279,7 @@ export default function Settings(): JSX.Element {
               </span>
             )}
             <button
-              onClick={checkOllama}
+              onClick={() => checkOllama({ forceRefresh: true })}
               disabled={ollamaChecking}
               aria-label="Re-check Ollama status"
               className="text-xs text-muted-foreground hover:text-foreground transition-colors focus:outline-none focus:ring-1 focus:ring-primary rounded disabled:opacity-50"
@@ -293,6 +299,7 @@ export default function Settings(): JSX.Element {
               value={ollamaModel}
               onChange={(e) => {
                 setOllamaModel(e.target.value)
+                loadedOllamaModelRef.current = e.target.value
                 save('ollamaModel', e.target.value)
               }}
               aria-label="Select Ollama model"

@@ -229,7 +229,7 @@ declare global {
           error?: string
         }>
         setQuickCaptureShortcut(accelerator: string): Promise<{ success: boolean; error?: string }>
-        detectOllama(): Promise<OllamaStatus>
+        detectOllama(options?: { forceRefresh?: boolean }): Promise<OllamaStatus>
       }
       theme: {
         getNativeTheme(): Promise<'dark' | 'light'>

@@ -27,6 +27,10 @@ interface DetectionResult {
   models?: string[]
 }
 
+interface DetectOllamaOptions {
+  bypassCache?: boolean
+}
+
 let _cachedResult: DetectionResult | null = null
 let _cacheExpiry = 0
 const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes per process
@@ -37,9 +41,9 @@ const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes per process
  * Ping the local Ollama instance and return available models.
  * Result is cached for 5 minutes so the cron path doesn't hammer the socket.
  */
-export async function detectOllama(): Promise<DetectionResult> {
+export async function detectOllama(options: DetectOllamaOptions = {}): Promise<DetectionResult> {
   const now = Date.now()
-  if (_cachedResult && now < _cacheExpiry) {
+  if (!options.bypassCache && _cachedResult && now < _cacheExpiry) {
     return _cachedResult
   }
 

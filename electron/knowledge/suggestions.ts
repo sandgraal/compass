@@ -2,10 +2,11 @@
  * Pattern-based knowledge suggestion extractors — Phase 2.7 regex baseline.
  * Phase 4 adds opt-in Ollama AI augmentation.
  *
- * All extractors are PURE: they take input data and return KnowledgeSuggestionCandidate[].
- * No DB access, no file I/O. The caller (runSuggestionExtractors) handles persistence.
+ * The regex extractors are pure (no DB/file/network I/O). The Ollama extractor
+ * is async + impure (local network call only) but remains best-effort.
+ * Persistence is still handled by the caller (runSuggestionExtractors).
  *
- * The regex extractors remain the default path.  Ollama augmentation is only
+ * The regex extractors remain the default path. Ollama augmentation is only
  * active when the user has opted in AND Ollama is running locally.
  *
  * ── Prompt-injection threat model ────────────────────────────────────────────
@@ -136,6 +137,7 @@ export interface GitHubInputItem {
   html_url: string
   type: 'issue' | 'pr'
   repo: string
+  title?: string
   assignee?: { login: string } | null
   user?: { login: string } | null
   labels?: Array<{ name: string }>
@@ -336,17 +338,56 @@ interface OllamaFact {
   source: 'gmail' | 'github'
 }
 
+function sanitizePromptField(value: string, maxLen: number): string {
+  const withoutControlChars = Array.from(value)
+    .map((ch) => {
+      const code = ch.charCodeAt(0)
+      return code < 32 || code === 127 ? ' ' : ch
+    })
+    .join('')
+
+  return withoutControlChars.replace(/\s+/g, ' ').replace(/[<>]/g, '').trim().slice(0, maxLen)
+}
+
+function sanitizeFactField(value: string, maxLen: number): string {
+  const withoutControlChars = Array.from(value)
+    .map((ch) => {
+      const code = ch.charCodeAt(0)
+      return code < 32 || code === 127 ? ' ' : ch
+    })
+    .join('')
+
+  return withoutControlChars
+    .replace(/\r?\n/g, ' ')
+    .replace(/\|/g, ' ')
+    .replace(/[<>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLen)
+}
+
+function canonicalName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
 /** Strict validation: returns null if the fact is unusable. */
 function validateFact(raw: unknown): OllamaFact | null {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
   if (!['contact', 'employer', 'date'].includes(r.kind as string)) return null
-  if (typeof r.name !== 'string' || r.name.trim().length < 2) return null
+  if (typeof r.name !== 'string') return null
+  const name = sanitizeFactField(r.name, 120)
+  if (name.length < 2) return null
   if (!['gmail', 'github'].includes(r.source as string)) return null
+  const detail =
+    typeof r.detail === 'string' ? sanitizeFactField(r.detail, 240) || undefined : undefined
   return {
     kind: r.kind as OllamaFact['kind'],
-    name: r.name.trim(),
-    detail: typeof r.detail === 'string' ? r.detail.trim() : undefined,
+    name,
+    detail,
     source: r.source as 'gmail' | 'github'
   }
 }
@@ -364,12 +405,9 @@ function buildPromptData(ctx: OllamaSyncContext): string {
   if (recentGmail.length > 0) {
     lines.push('## Recent Gmail (subject + sender name only)')
     for (const m of recentGmail) {
-      // Strip angle-bracket email to avoid leaking email addresses in logs
-      const fromName = m.from
-        .replace(/<[^>]+>/, '')
-        .trim()
-        .slice(0, 60)
-      const subject = m.subject.slice(0, 80)
+      const parsedFrom = parseFromHeader(m.from)
+      const fromName = sanitizePromptField(parsedFrom?.displayName || '(no display name)', 60)
+      const subject = sanitizePromptField(m.subject, 80)
       lines.push(`- From: ${fromName} | Subject: ${subject}`)
     }
   }
@@ -379,8 +417,9 @@ function buildPromptData(ctx: OllamaSyncContext): string {
   if (recentGH.length > 0) {
     lines.push('\n## Recent GitHub items (title + repo only)')
     for (const item of recentGH) {
-      const login = item.user?.login ?? item.assignee?.login ?? ''
-      lines.push(`- [${item.type.toUpperCase()}] ${item.repo} | author: ${login}`)
+      const title = sanitizePromptField(item.title ?? '(untitled)', 100)
+      const repo = sanitizePromptField(item.repo, 80)
+      lines.push(`- [${item.type.toUpperCase()}] ${repo} | Title: ${title}`)
     }
   }
 
@@ -491,6 +530,7 @@ JSON array only:`
 
     ollamaCandidates.push({
       source: ollamaSource,
+      sourceId: `${fact.source}:${fact.kind}:${canonicalName(fact.name)}`,
       targetPath,
       kind: fact.kind,
       proposedContent,

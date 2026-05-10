@@ -371,4 +371,78 @@ describe('extractFactsViaOllama', () => {
     expect(results[0].proposedContent).toContain('Alice')
     expect(results[0].source).toBe('ollama:github')
   })
+
+  it('uses sender display names only in prompt data when from header is bare email', async () => {
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: true }),
+      runOllamaPrompt: vi.fn().mockResolvedValue('[]')
+    }
+    await extractFactsViaOllama(
+      makeCtx({
+        gmailMessages: [
+          {
+            id: 'm-email',
+            threadId: 't-email',
+            subject: 'Need follow up',
+            from: 'bare.sender@example.com'
+          }
+        ]
+      }),
+      deps
+    )
+    const prompt = deps.runOllamaPrompt.mock.calls[0]?.[1] as string
+    expect(prompt).toContain('(no display name)')
+    expect(prompt).not.toContain('bare.sender@example.com')
+  })
+
+  it('includes GitHub title + repo in prompt data', async () => {
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: true }),
+      runOllamaPrompt: vi.fn().mockResolvedValue('[]')
+    }
+    await extractFactsViaOllama(
+      makeCtx({
+        gmailMessages: [],
+        githubItems: [
+          {
+            id: 99,
+            html_url: 'https://github.com/org/repo/issues/99',
+            type: 'issue',
+            repo: 'org/repo',
+            title: 'Fix flaky knowledge extraction test',
+            user: { login: 'octocat' },
+            assignee: null,
+            labels: []
+          }
+        ]
+      }),
+      deps
+    )
+    const prompt = deps.runOllamaPrompt.mock.calls[0]?.[1] as string
+    expect(prompt).toContain('org/repo')
+    expect(prompt).toContain('Title: Fix flaky knowledge extraction test')
+    expect(prompt).not.toContain('author:')
+  })
+
+  it('sanitizes markdown-breaking characters in model output', async () => {
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: true }),
+      runOllamaPrompt: vi.fn().mockResolvedValue(
+        JSON.stringify([
+          {
+            kind: 'contact',
+            name: 'A|lice\n<script>',
+            detail: 'Lead|\nEng <b>',
+            source: 'gmail'
+          }
+        ])
+      )
+    }
+    const results = await extractFactsViaOllama(makeCtx(), deps)
+    expect(results).toHaveLength(1)
+    expect(results[0].sourceId).toBe('gmail:contact:a lice script')
+    expect(results[0].proposedContent).toContain('| A lice script | Lead Eng b |')
+    expect(results[0].proposedContent).not.toContain('<')
+    expect(results[0].proposedContent).not.toContain('|lice')
+  })
 })

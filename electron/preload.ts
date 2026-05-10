@@ -107,7 +107,8 @@ const api = {
     exportData: () => ipcRenderer.invoke('settings:export-data'),
     setQuickCaptureShortcut: (accelerator: string) =>
       ipcRenderer.invoke('settings:set-quick-capture-shortcut', accelerator),
-    detectOllama: () => ipcRenderer.invoke('settings:detect-ollama')
+    detectOllama: (options?: { forceRefresh?: boolean }) =>
+      ipcRenderer.invoke('settings:detect-ollama', options)
   },
 
   // --- Habits ---
