@@ -1,5 +1,6 @@
 import {
   Bell,
+  Bot,
   Database,
   Download,
   Keyboard,
@@ -24,6 +25,12 @@ export default function Settings(): JSX.Element {
   const { toast } = useToast()
   const confirm = useConfirm()
 
+  // AI assist (Ollama)
+  const [ollamaEnabled, setOllamaEnabled] = useState(false)
+  const [ollamaModel, setOllamaModel] = useState('')
+  const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null)
+  const [ollamaChecking, setOllamaChecking] = useState(false)
+
   useEffect(() => {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (isElectron) {
@@ -31,9 +38,31 @@ export default function Settings(): JSX.Element {
         setSyncInterval(s.syncInterval || '15')
         setNotifications(s.notificationsEnabled !== 'false')
         setContextDrawer(s.showContextDrawer !== 'false')
+        setOllamaEnabled(s.ollamaSuggestionsEnabled === 'true')
+        setOllamaModel(s.ollamaModel || '')
       })
+      // Probe Ollama status on load
+      checkOllama()
     }
   }, [])
+
+  async function checkOllama() {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron) return
+    setOllamaChecking(true)
+    try {
+      const status = await window.api.settings.detectOllama()
+      setOllamaStatus(status)
+      // Auto-select first available model if none set
+      if (status.available && status.models && status.models.length > 0 && !ollamaModel) {
+        const preferred = status.models.find((m) => m.startsWith('llama3.2')) ?? status.models[0]
+        setOllamaModel(preferred)
+        await save('ollamaModel', preferred)
+      }
+    } finally {
+      setOllamaChecking(false)
+    }
+  }
 
   async function save(key: string, value: string) {
     const isElectron = typeof window !== 'undefined' && !!window.api
@@ -192,6 +221,91 @@ export default function Settings(): JSX.Element {
         >
           <ShortcutRecorder />
         </SettingsRow>
+      </SettingsSection>
+
+      {/* AI Assist (Ollama) */}
+      <SettingsSection icon={<Bot size={16} />} title="AI assist (optional)">
+        <SettingsRow
+          label="Use local Ollama for knowledge suggestions"
+          description="Opt-in only. Ollama runs entirely on your machine — no data leaves your device."
+        >
+          <Toggle
+            enabled={ollamaEnabled}
+            onChange={(v) => {
+              setOllamaEnabled(v)
+              save('ollamaSuggestionsEnabled', String(v))
+            }}
+          />
+        </SettingsRow>
+
+        {/* Ollama status row */}
+        <SettingsRow
+          label="Ollama status"
+          description={
+            ollamaChecking
+              ? 'Checking…'
+              : ollamaStatus?.available
+                ? `Running — ${ollamaStatus.models?.length ?? 0} model(s) available`
+                : 'Not detected'
+          }
+        >
+          <div className="flex items-center gap-2">
+            {ollamaChecking ? (
+              <span className="text-xs text-muted-foreground px-2 py-1 rounded-full bg-secondary">
+                Checking…
+              </span>
+            ) : ollamaStatus?.available ? (
+              <span className="text-xs text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded-full">
+                Running
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span className="text-xs bg-secondary px-2 py-1 rounded-full">Not running</span>
+                <a
+                  href="https://ollama.ai"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-primary underline underline-offset-2"
+                  aria-label="Install Ollama (opens ollama.ai in browser)"
+                >
+                  Install
+                </a>
+              </span>
+            )}
+            <button
+              onClick={checkOllama}
+              disabled={ollamaChecking}
+              aria-label="Re-check Ollama status"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors focus:outline-none focus:ring-1 focus:ring-primary rounded disabled:opacity-50"
+            >
+              Refresh
+            </button>
+          </div>
+        </SettingsRow>
+
+        {/* Model selector — only shown when Ollama is available */}
+        {ollamaStatus?.available && (ollamaStatus.models?.length ?? 0) > 0 && (
+          <SettingsRow
+            label="Model"
+            description="Which Ollama model to use for suggestion extraction"
+          >
+            <select
+              value={ollamaModel}
+              onChange={(e) => {
+                setOllamaModel(e.target.value)
+                save('ollamaModel', e.target.value)
+              }}
+              aria-label="Select Ollama model"
+              className="bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+            >
+              {ollamaStatus.models?.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </SettingsRow>
+        )}
       </SettingsSection>
 
       {/* Danger zone */}

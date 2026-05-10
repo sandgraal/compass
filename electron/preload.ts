@@ -106,7 +106,8 @@ const api = {
     wipeVault: () => ipcRenderer.invoke('settings:wipe-vault'),
     exportData: () => ipcRenderer.invoke('settings:export-data'),
     setQuickCaptureShortcut: (accelerator: string) =>
-      ipcRenderer.invoke('settings:set-quick-capture-shortcut', accelerator)
+      ipcRenderer.invoke('settings:set-quick-capture-shortcut', accelerator),
+    detectOllama: () => ipcRenderer.invoke('settings:detect-ollama')
   },
 
   // --- Habits ---
