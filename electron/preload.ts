@@ -155,6 +155,8 @@ const api = {
     }) => ipcRenderer.invoke('finance:upsert-account', account),
     deleteAccount: (id: number) => ipcRenderer.invoke('finance:delete-account', id),
     getDebtSummary: () => ipcRenderer.invoke('finance:get-debt-summary'),
+    getUpcomingPayments: (daysAhead?: number) =>
+      ipcRenderer.invoke('finance:get-upcoming-payments', daysAhead),
     getBudgetStatus: (month?: string) => ipcRenderer.invoke('finance:get-budget-status', month),
     setBudget: (line: { category: string; subcategory?: string; monthlyAmount: number }) =>
       ipcRenderer.invoke('finance:set-budget', line),

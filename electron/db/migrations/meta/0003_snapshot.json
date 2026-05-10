@@ -166,9 +166,7 @@
       "indexes": {
         "calendar_events_external_id_unique": {
           "name": "calendar_events_external_id_unique",
-          "columns": [
-            "external_id"
-          ],
+          "columns": ["external_id"],
           "isUnique": true
         }
       },
@@ -365,9 +363,7 @@
       "indexes": {
         "checklist_templates_list_type_unique": {
           "name": "checklist_templates_list_type_unique",
-          "columns": [
-            "list_type"
-          ],
+          "columns": ["list_type"],
           "isUnique": true
         }
       },
@@ -439,9 +435,7 @@
       "indexes": {
         "drive_files_external_id_unique": {
           "name": "drive_files_external_id_unique",
-          "columns": [
-            "external_id"
-          ],
+          "columns": ["external_id"],
           "isUnique": true
         }
       },
@@ -635,9 +629,7 @@
       "indexes": {
         "finance_transactions_hash_unique": {
           "name": "finance_transactions_hash_unique",
-          "columns": [
-            "hash"
-          ],
+          "columns": ["hash"],
           "isUnique": true
         }
       },
@@ -646,12 +638,8 @@
           "name": "finance_transactions_account_id_finance_accounts_id_fk",
           "tableFrom": "finance_transactions",
           "tableTo": "finance_accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -744,9 +732,7 @@
       "indexes": {
         "github_items_external_id_unique": {
           "name": "github_items_external_id_unique",
-          "columns": [
-            "external_id"
-          ],
+          "columns": ["external_id"],
           "isUnique": true
         }
       },
@@ -833,9 +819,7 @@
       "indexes": {
         "gmail_actions_thread_id_unique": {
           "name": "gmail_actions_thread_id_unique",
-          "columns": [
-            "thread_id"
-          ],
+          "columns": ["thread_id"],
           "isUnique": true
         }
       },
@@ -883,12 +867,8 @@
           "name": "habit_entries_habit_id_habits_id_fk",
           "tableFrom": "habit_entries",
           "tableTo": "habits",
-          "columnsFrom": [
-            "habit_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["habit_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1016,9 +996,7 @@
       "indexes": {
         "integrations_service_unique": {
           "name": "integrations_service_unique",
-          "columns": [
-            "service"
-          ],
+          "columns": ["service"],
           "isUnique": true
         }
       },
@@ -1085,9 +1063,7 @@
       "indexes": {
         "knowledge_files_path_unique": {
           "name": "knowledge_files_path_unique",
-          "columns": [
-            "path"
-          ],
+          "columns": ["path"],
           "isUnique": true
         }
       },
@@ -1223,12 +1199,8 @@
           "name": "sync_events_integration_id_integrations_id_fk",
           "tableFrom": "sync_events",
           "tableTo": "integrations",
-          "columnsFrom": [
-            "integration_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["integration_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }

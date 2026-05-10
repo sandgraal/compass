@@ -1,5 +1,14 @@
 import { format } from 'date-fns'
-import { ArrowRight, Calendar, Clock, GitBranch, Plus, RefreshCw } from 'lucide-react'
+import {
+  AlertCircle,
+  ArrowRight,
+  Calendar,
+  Clock,
+  GitBranch,
+  Plus,
+  RefreshCw,
+  Wallet
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { cn, formatRelative, formatTime, todayISO } from '../lib/utils'
@@ -11,6 +20,16 @@ interface DashStat {
   color?: string
 }
 
+type UpcomingPayment = {
+  id: number
+  name: string
+  institution: string
+  paymentDueDate: string
+  minPayment: number
+  balance: number
+  daysRemaining: number
+}
+
 export default function Dashboard(): JSX.Element {
   const [greeting, setGreeting] = useState('')
   const [stats, setStats] = useState<DashStat[]>([])
@@ -18,6 +37,7 @@ export default function Dashboard(): JSX.Element {
   const [tasks, setTasks] = useState<ChecklistItem[]>([])
   const [githubItems, setGithubItems] = useState<GitHubItem[]>([])
   const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus[]>([])
+  const [upcomingPayments, setUpcomingPayments] = useState<UpcomingPayment[]>([])
   const [isSyncing, setIsSyncing] = useState(false)
   const [quickAdd, setQuickAdd] = useState(false)
   const [quickAddText, setQuickAddText] = useState('')
@@ -38,12 +58,16 @@ export default function Dashboard(): JSX.Element {
       window.api.calendar.getEvents(now.toISOString(), sevenDaysOut.toISOString()),
       window.api.github.getItems('open'),
       window.api.gmail.getActions(false),
-      window.api.sync.getSyncStatus()
-    ]).then(([checkItems, calEvents, ghItems, gmailItems, integrations]) => {
+      window.api.sync.getSyncStatus(),
+      window.api.finance?.getUpcomingPayments
+        ? window.api.finance.getUpcomingPayments(14).catch(() => [])
+        : Promise.resolve([])
+    ]).then(([checkItems, calEvents, ghItems, gmailItems, integrations, payments]) => {
       setTasks(checkItems.slice(0, 5))
       setEvents(calEvents)
       setGithubItems(ghItems.slice(0, 4))
       setIntegrationStatus(integrations)
+      setUpcomingPayments(payments as UpcomingPayment[])
 
       const done = checkItems.filter((i) => i.checked).length
       setStats([
@@ -157,6 +181,63 @@ export default function Dashboard(): JSX.Element {
           </div>
         ))}
       </div>
+
+      {/* Payments Due — surfaced from PDF statement metadata. Only shown when
+          at least one debt account has a payment_due_date within ~14 days. */}
+      {upcomingPayments.length > 0 ? (
+        <div className="bg-card border border-border rounded-xl mb-6">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Wallet size={15} /> Payments Due
+            </h2>
+            <Link
+              to="/finance"
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
+            >
+              View accounts <ArrowRight size={12} />
+            </Link>
+          </div>
+          <div className="divide-y divide-border">
+            {upcomingPayments.map((p) => (
+              <Link
+                key={p.id}
+                to="/finance"
+                className="flex items-center gap-3 px-5 py-3 hover:bg-secondary/40 transition-colors"
+              >
+                <PaymentDueBadge daysRemaining={p.daysRemaining} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-foreground truncate">{p.name}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Due {format(new Date(`${p.paymentDueDate}T00:00:00`), 'EEE, MMM d')}
+                    {p.minPayment > 0
+                      ? ` · Min ${p.minPayment.toLocaleString('en-US', {
+                          style: 'currency',
+                          currency: 'USD'
+                        })}`
+                      : ''}
+                  </p>
+                </div>
+                <span
+                  className={cn(
+                    'text-xs font-medium shrink-0',
+                    p.daysRemaining < 0
+                      ? 'text-rose-400'
+                      : p.daysRemaining <= 3
+                        ? 'text-amber-400'
+                        : 'text-muted-foreground'
+                  )}
+                >
+                  {p.daysRemaining < 0
+                    ? `${Math.abs(p.daysRemaining)}d overdue`
+                    : p.daysRemaining === 0
+                      ? 'Due today'
+                      : `in ${p.daysRemaining}d`}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {/* Two-column grid */}
       <div className="grid grid-cols-2 gap-6">
@@ -382,6 +463,25 @@ function EmptyState({
           {action.label}
         </Link>
       )}
+    </div>
+  )
+}
+
+function PaymentDueBadge({ daysRemaining }: { daysRemaining: number }): JSX.Element {
+  const overdue = daysRemaining < 0
+  const soon = daysRemaining >= 0 && daysRemaining <= 3
+  return (
+    <div
+      className={cn(
+        'w-7 h-7 rounded-full shrink-0 flex items-center justify-center',
+        overdue
+          ? 'bg-rose-500/15 text-rose-400'
+          : soon
+            ? 'bg-amber-500/15 text-amber-400'
+            : 'bg-secondary text-muted-foreground'
+      )}
+    >
+      <AlertCircle size={14} />
     </div>
   )
 }
