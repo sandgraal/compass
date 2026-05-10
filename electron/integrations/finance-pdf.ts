@@ -59,6 +59,22 @@ function lower(lines: string[]): string[] {
   return lines.map((l) => l.toLowerCase())
 }
 
+function isValidDateParts(year: number, month: number, day: number): boolean {
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  )
+}
+
+function resolveYearlessStatementYear(
+  month: number,
+  defaultYear?: number,
+  closingMonth?: number
+): number | undefined {
+  if (defaultYear === undefined) return undefined
+  return closingMonth !== undefined && month > closingMonth ? defaultYear - 1 : defaultYear
+}
+
 const MONTHS: Record<string, string> = {
   jan: '01',
   feb: '02',
@@ -81,10 +97,16 @@ const MONTHS: Record<string, string> = {
  *   - M/D/YYYY or MM/DD/YYYY (and 2-digit-year variants)
  *   - "Mon DD" or "Mon DD YYYY" (e.g. "Apr 03" or "Apr 03 2026")
  *
- * For "Mon DD" without a year, caller must pass `defaultYear` (typically the
- * statement year, parsed out of the header). Returns null on no-match.
+ * For yearless dates, caller can also pass `closingMonth` so statements that
+ * span a year boundary (e.g. closing in January with a `12/31` row) roll back
+ * into the prior year instead of blindly using the closing year.
+ * Returns null on no-match.
  */
-export function tryParseStatementDate(s: string, defaultYear?: number): string | null {
+export function tryParseStatementDate(
+  s: string,
+  defaultYear?: number,
+  closingMonth?: number
+): string | null {
   const t = s.trim()
   // Try the strict CSV parsers first — they cover ISO + M/D/YYYY + 2-digit-year.
   try {
@@ -96,26 +118,29 @@ export function tryParseStatementDate(s: string, defaultYear?: number): string |
   // statement header.
   const numMD = t.match(/^(\d{1,2})\/(\d{1,2})$/)
   if (numMD) {
-    if (!defaultYear) return null
     const month = Number.parseInt(numMD[1], 10)
     const day = Number.parseInt(numMD[2], 10)
     if (month < 1 || month > 12 || day < 1 || day > 31) return null
-    return `${defaultYear}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    const year = resolveYearlessStatementYear(month, defaultYear, closingMonth)
+    if (year === undefined || !isValidDateParts(year, month, day)) return null
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
   }
   // "Mon DD" or "Mon DD, YYYY" or "Mon DD YYYY"
   const m = t.match(/^([A-Za-z]{3,4})[.\s]+(\d{1,2})(?:[,\s]+(\d{2,4}))?$/)
   if (m) {
     const mon = MONTHS[m[1].toLowerCase()]
     if (!mon) return null
+    const month = Number.parseInt(mon, 10)
     const day = m[2].padStart(2, '0')
     let year: number | undefined
     if (m[3]) {
       const y = Number.parseInt(m[3], 10)
       year = y < 100 ? (y < 50 ? 2000 + y : 1900 + y) : y
-    } else if (defaultYear) {
-      year = defaultYear
+    } else {
+      year = resolveYearlessStatementYear(month, defaultYear, closingMonth)
     }
-    if (!year) return null
+    const dayNum = Number.parseInt(day, 10)
+    if (year === undefined || !isValidDateParts(year, month, dayNum)) return null
     return `${year}-${mon}-${day}`
   }
   return null
@@ -136,29 +161,44 @@ function findLastFour(text: string): string | undefined {
 }
 
 /**
- * Pull a four-digit year out of "Statement Period: 04/15/2026 - 05/14/2026" or
- * "Closing Date: 05/14/2026" style lines. Used to disambiguate Mon-DD dates.
+ * Pull statement date context out of "Statement Period: 04/15/2026 - 05/14/2026"
+ * or "Closing Date: 05/14/2026" style lines. Returns the statement year plus a
+ * validated closing month when present so yearless dates can roll back across
+ * calendar-year boundaries safely.
  */
-function findStatementYear(lines: string[]): number | undefined {
+function findStatementDateContext(lines: string[]): {
+  defaultYear?: number
+  closingMonth?: number
+} {
   const headerSlice = lines.slice(0, 60).join(' ')
   // Prefer "closing date" since that matches the statement period for the
   // majority of transactions on the page.
-  const closing = headerSlice.match(/closing\s+date[:\s-]+\d{1,2}\/\d{1,2}\/(\d{2,4})/i)
+  const closing = headerSlice.match(/closing\s+date[:\s-]+(\d{1,2})\/\d{1,2}\/(\d{2,4})/i)
   if (closing) {
-    const y = Number.parseInt(closing[1], 10)
-    return y < 100 ? (y < 50 ? 2000 + y : 1900 + y) : y
+    const month = Number.parseInt(closing[1], 10)
+    const y = Number.parseInt(closing[2], 10)
+    const defaultYear = y < 100 ? (y < 50 ? 2000 + y : 1900 + y) : y
+    return {
+      defaultYear,
+      ...(month >= 1 && month <= 12 ? { closingMonth: month } : {})
+    }
   }
   const period = headerSlice.match(
-    /(\d{1,2}\/\d{1,2}\/(\d{2,4}))\s*[-–]\s*\d{1,2}\/\d{1,2}\/(\d{2,4})/
+    /\d{1,2}\/\d{1,2}\/\d{2,4}\s*[-–]\s*(\d{1,2})\/\d{1,2}\/(\d{2,4})/
   )
   if (period) {
-    const y = Number.parseInt(period[3], 10)
-    return y < 100 ? (y < 50 ? 2000 + y : 1900 + y) : y
+    const month = Number.parseInt(period[1], 10)
+    const y = Number.parseInt(period[2], 10)
+    const defaultYear = y < 100 ? (y < 50 ? 2000 + y : 1900 + y) : y
+    return {
+      defaultYear,
+      ...(month >= 1 && month <= 12 ? { closingMonth: month } : {})
+    }
   }
   // Fallback: any 4-digit year
   const year = headerSlice.match(/\b(20\d{2})\b/)
-  if (year) return Number.parseInt(year[1], 10)
-  return undefined
+  if (year) return { defaultYear: Number.parseInt(year[1], 10) }
+  return {}
 }
 
 // ---------- Extractor: USAA ----------
@@ -180,7 +220,7 @@ export const usaaPdf: PdfExtractor = {
   },
   parse: (text, file, hint) => {
     const lines = normalizeLines(text)
-    const year = findStatementYear(lines)
+    const { defaultYear, closingMonth } = findStatementDateContext(lines)
     const lastFour = findLastFour(lines.slice(0, 80).join(' '))
     const accountName = lastFour ? `${hint || 'USAA'} (****${lastFour})` : hint || 'USAA'
 
@@ -230,7 +270,7 @@ export const usaaPdf: PdfExtractor = {
       if (!m) continue
 
       const [, dateStr, descRaw, amtRaw] = m
-      const date = tryParseStatementDate(dateStr, year)
+      const date = tryParseStatementDate(dateStr, defaultYear, closingMonth)
       if (!date) continue
       let amount: number
       try {
@@ -282,7 +322,7 @@ export const amexPdf: PdfExtractor = {
   parse: (text, file, hint) => {
     const lines = normalizeLines(text)
     const headerJoined = lines.slice(0, 80).join(' ')
-    const year = findStatementYear(lines)
+    const { defaultYear, closingMonth } = findStatementDateContext(lines)
     const lastFive =
       headerJoined.match(/account\s+ending\s+[\dx*-]*?(\d{5})\b/i)?.[1] ??
       findLastFour(headerJoined)
@@ -315,7 +355,7 @@ export const amexPdf: PdfExtractor = {
       const m = raw.match(txnLine)
       if (!m) continue
       const [, dateStr, descRaw, amtRaw] = m
-      const date = tryParseStatementDate(dateStr, year)
+      const date = tryParseStatementDate(dateStr, defaultYear, closingMonth)
       if (!date) continue
       let amount: number
       try {
@@ -358,7 +398,7 @@ export const genericPdf: PdfExtractor = {
   matches: () => true,
   parse: (text, file, hint) => {
     const lines = normalizeLines(text)
-    const year = findStatementYear(lines)
+    const { defaultYear, closingMonth } = findStatementDateContext(lines)
     const accountName = hint || basename(file, '.pdf')
 
     // ISO date OR M/D[/YY]] OR "Mon DD[ YYYY]" — captured as a single chunk.
@@ -373,7 +413,7 @@ export const genericPdf: PdfExtractor = {
       const m = raw.match(re)
       if (!m) continue
       const [, dateStr, descRaw, amtRaw] = m
-      const date = tryParseStatementDate(dateStr, year)
+      const date = tryParseStatementDate(dateStr, defaultYear, closingMonth)
       if (!date) continue
       let amount: number
       try {

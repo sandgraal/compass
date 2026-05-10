@@ -44,6 +44,18 @@ describe('tryParseStatementDate', () => {
     expect(tryParseStatementDate('Apr 03', 2026)).toBe('2026-04-03')
   })
 
+  it('rolls yearless dates back when the month is after the closing month', () => {
+    expect(tryParseStatementDate('12/31', 2026, 1)).toBe('2025-12-31')
+    expect(tryParseStatementDate('Dec 31', 2026, 1)).toBe('2025-12-31')
+    expect(tryParseStatementDate('1/2', 2026, 1)).toBe('2026-01-02')
+  })
+
+  it('returns null for impossible yearless dates', () => {
+    expect(tryParseStatementDate('2/30', 2026, 2)).toBeNull()
+    expect(tryParseStatementDate('Feb 29', 2025, 2)).toBeNull()
+    expect(tryParseStatementDate('Feb 29', 2024, 2)).toBe('2024-02-29')
+  })
+
   it('returns null for "Apr 03" with no defaultYear', () => {
     expect(tryParseStatementDate('Apr 03')).toBeNull()
   })
@@ -131,6 +143,42 @@ describe('USAA PDF extractor', () => {
     const a = parsePdfText(usaaText, '/tmp/usaa-credit-statement.pdf', 'USAA')
     const b = parsePdfText(usaaText, '/tmp/usaa-credit-statement.pdf', 'USAA')
     expect(a.txns.map((t) => t.hash)).toEqual(b.txns.map((t) => t.hash))
+  })
+
+  it('ignores malformed closing months when deriving rollover context', () => {
+    const malformedClosingMonth = [
+      'USAA SAVINGS BANK',
+      'Credit Card Statement',
+      'Closing Date: 13/14/2026',
+      '',
+      'Transactions',
+      '12/31  01/01  NEW YEARS EVE DINNER AUSTIN TX  98.76',
+      '01/02  01/03  COFFEE SHOP AUSTIN TX  7.50'
+    ].join('\n')
+
+    const result = parsePdfText(malformedClosingMonth, '/tmp/usaa-malformed.pdf', 'USAA')
+
+    expect(result.txns.map((t) => t.date)).toEqual(['2026-12-31', '2026-01-02'])
+  })
+
+  it('rolls December rows into the prior year for January-closing statements', () => {
+    const crossYearUsaaText = [
+      'USAA SAVINGS BANK',
+      'Credit Card Statement',
+      'Account ending in 4321',
+      'Statement Period: 12/15/2025 - 01/14/2026',
+      'Closing Date: 01/14/2026',
+      '',
+      'Transactions',
+      '12/31  01/01  NEW YEARS EVE DINNER AUSTIN TX  98.76',
+      '01/02  01/03  COFFEE SHOP AUSTIN TX  7.50'
+    ].join('\n')
+
+    const result = parsePdfText(crossYearUsaaText, '/tmp/usaa-cross-year.pdf', 'USAA')
+
+    expect(result.bank).toBe('USAA (PDF)')
+    expect(result.txns).toHaveLength(2)
+    expect(result.txns.map((t) => t.date)).toEqual(['2025-12-31', '2026-01-02'])
   })
 })
 
