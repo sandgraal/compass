@@ -117,9 +117,11 @@ function ensureColumn(
   column: string,
   ddl: string
 ): boolean {
-  const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  const quotedTable = quoteSqliteIdentifier(table)
+  const quotedColumn = quoteSqliteIdentifier(column)
+  const cols = sqlite.prepare(`PRAGMA table_info(${quotedTable})`).all() as Array<{ name: string }>
   if (cols.some((c) => c.name === column)) return false
-  sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`)
+  sqlite.exec(`ALTER TABLE ${quotedTable} ADD COLUMN ${quotedColumn} ${ddl}`)
   return true
 }
 
@@ -180,8 +182,19 @@ function hasTable(sqlite: Database.Database, table: string): boolean {
 }
 
 function hasColumn(sqlite: Database.Database, table: string, column: string): boolean {
-  const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  const quotedTable = quoteSqliteIdentifier(table)
+  const columns = sqlite.prepare(`PRAGMA table_info(${quotedTable})`).all() as Array<{
+    name: string
+  }>
   return columns.some((entry) => entry.name === column)
+}
+
+function quoteSqliteIdentifier(identifier: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) {
+    throw new Error(`Invalid SQLite identifier: ${identifier}`)
+  }
+
+  return `"${identifier}"`
 }
 
 function getMigrationMetadata(tag: string): { hash: string; when: number } | null {
