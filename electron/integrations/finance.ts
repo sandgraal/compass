@@ -10,7 +10,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, parse, relative, resolve } from 'node:path'
-import { inArray } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
 
@@ -468,10 +468,44 @@ export type DetectedAccount = {
   sourceFile: string
 }
 
+/**
+ * Statement-level metadata pulled out of a PDF (or other format) alongside
+ * the transaction rows. Used to auto-populate `financeAccounts` columns so
+ * the user doesn't have to type balance/APR/credit-limit by hand.
+ *
+ * Every field is optional — extractors only report what they confidently
+ * parsed. Missing fields are NOT applied as zeros / nulls; downstream code
+ * leaves the existing column value alone.
+ */
+export type StatementMetadata = {
+  /** Current statement balance. Positive = amount owed for credit, deposit balance for checking/savings. */
+  balance?: number
+  /** Minimum payment due, for credit accounts. Always positive. */
+  minimumPayment?: number
+  /** Payment due date as ISO 'YYYY-MM-DD'. */
+  paymentDueDate?: string
+  /** Credit limit, for credit accounts. */
+  creditLimit?: number
+  /** Annual percentage rate as a decimal (e.g. 0.2299 for 22.99%). */
+  apr?: number
+  /** Statement closing date as ISO 'YYYY-MM-DD'. */
+  statementClosingDate?: string
+  /** Statement period start as ISO 'YYYY-MM-DD'. */
+  statementPeriodStart?: string
+  /** Statement period end as ISO 'YYYY-MM-DD'. */
+  statementPeriodEnd?: string
+}
+
 export type ParsedFile = {
   bank: string
   txns: RawTxn[]
   account?: DetectedAccount
+  /**
+   * Statement-level numbers (balance, APR, due date, …). Populated by PDF
+   * extractors; CSV/xlsx parsers leave it undefined since those formats
+   * don't include statement-summary rows.
+   */
+  metadata?: StatementMetadata
 }
 
 /**
@@ -828,6 +862,68 @@ export async function parseFinanceFile(
 }
 
 /**
+ * Update an existing financeAccounts row with statement metadata, respecting
+ * the "don't overwrite manual edits" policy:
+ *   - balance / apr / minPayment / creditLimit: only written when the
+ *     existing column is null OR 0 (i.e. never been set).
+ *   - paymentDueDate: always refreshed when metadata supplies one — the date
+ *     advances per statement cycle and isn't typically user-edited.
+ *   - lastStatementSyncedAt + updatedAt: always refreshed.
+ *
+ * Idempotent: re-running with the same metadata produces the same row state
+ * (the value-based gating means once balance is non-zero, subsequent runs
+ * skip it; lastStatementSyncedAt timestamp drift is acceptable).
+ *
+ * Exported for unit tests; production callers go through `ingestFinanceFiles`.
+ */
+export function applyStatementMetadata(
+  db: BetterSQLite3Database<typeof schema>,
+  accountId: number,
+  metadata: StatementMetadata
+): void {
+  const existing = db
+    .select()
+    .from(schema.financeAccounts)
+    .where(eq(schema.financeAccounts.id, accountId))
+    .get()
+  if (!existing) return
+
+  const updates: Partial<typeof schema.financeAccounts.$inferInsert> = {}
+
+  if (metadata.balance !== undefined && (existing.balance === null || existing.balance === 0)) {
+    updates.balance = metadata.balance
+  }
+  if (metadata.apr !== undefined && (existing.apr === null || existing.apr === 0)) {
+    updates.apr = metadata.apr
+  }
+  if (
+    metadata.minimumPayment !== undefined &&
+    (existing.minPayment === null || existing.minPayment === 0)
+  ) {
+    updates.minPayment = metadata.minimumPayment
+  }
+  if (
+    metadata.creditLimit !== undefined &&
+    (existing.creditLimit === null || existing.creditLimit === 0)
+  ) {
+    updates.creditLimit = metadata.creditLimit
+  }
+  if (metadata.paymentDueDate !== undefined) {
+    updates.paymentDueDate = metadata.paymentDueDate
+  }
+
+  // Always refresh the sync timestamp + updatedAt when we processed metadata,
+  // even if every field was gated out — gives the UI a "last synced" hook.
+  updates.lastStatementSyncedAt = new Date()
+  updates.updatedAt = new Date()
+
+  db.update(schema.financeAccounts)
+    .set(updates)
+    .where(eq(schema.financeAccounts.id, accountId))
+    .run()
+}
+
+/**
  * Ingest one or more files into the DB. Idempotent (dedupes by hash).
  * Does NOT move/delete the source files — designed for a folder the
  * user owns (e.g. ~/Documents/Money). Auto-creates a `financeAccounts`
@@ -857,14 +953,22 @@ export async function ingestFinanceFiles(
   for (const fp of filePaths) {
     const parsed = await parseFinanceFile(fp, watchRoot)
     if (!parsed) continue
-    const { bank, txns, account } = parsed
+    const { bank, txns, account, metadata } = parsed
     const f = basename(fp)
 
-    // Auto-create the account if we detected one and it doesn't exist yet
+    // Auto-create the account if we detected one and it doesn't exist yet.
+    // When metadata is present on a fresh insert we seed the financial fields
+    // directly so the account row is useful from the first import (no need
+    // for a follow-up "if value is 0 then update" pass below).
     let accountDbId: number | null = null
     if (account) {
       let id = accountIdByName.get(account.name)
       if (id === undefined) {
+        const seedBalance = metadata?.balance ?? 0
+        const seedApr = metadata?.apr ?? 0
+        const seedMin = metadata?.minimumPayment ?? 0
+        const seedLimit = metadata?.creditLimit ?? null
+        const seedDue = metadata?.paymentDueDate ?? null
         const inserted = db
           .insert(schema.financeAccounts)
           .values({
@@ -872,10 +976,12 @@ export async function ingestFinanceFiles(
             type: account.type,
             institution: account.institution,
             isDebt: account.isDebt,
-            balance: 0,
-            apr: 0,
-            minPayment: 0,
-            creditLimit: null
+            balance: seedBalance,
+            apr: seedApr,
+            minPayment: seedMin,
+            creditLimit: seedLimit,
+            paymentDueDate: seedDue,
+            lastStatementSyncedAt: metadata ? new Date() : null
           } as typeof schema.financeAccounts.$inferInsert)
           .returning({ id: schema.financeAccounts.id })
           .get()
@@ -884,6 +990,18 @@ export async function ingestFinanceFiles(
           accountIdByName.set(account.name, id)
           detected.push({ ...account, dbId: id })
         }
+      } else if (metadata && account.isDebt) {
+        // Existing row + new statement metadata.
+        //
+        // Policy: only overwrite a financial field when the existing value is
+        // null or 0. This preserves manual edits the user made via the
+        // Finance UI. If the user explicitly set a field to 0 (e.g. a paid-
+        // off card with $0 minPayment) future statements will stomp it back
+        // in — accepted trade-off versus stomping legitimate manual edits.
+        // paymentDueDate is the exception: it advances with every statement
+        // and is rarely user-edited, so we always refresh when the new
+        // metadata supplies one.
+        applyStatementMetadata(db, id, metadata)
       }
       accountDbId = id ?? null
     }
