@@ -174,7 +174,7 @@ describe('initDb finance_accounts institution column', () => {
       throw new Error('Expected migrations through 0002_zippy_sauron to exist')
     }
     const appliedMigrations = migrations.slice(0, institutionMigrationIndex + 1)
-    const previousMigration = appliedMigrations[appliedMigrations.length - 2]
+    const migrationBeforeInstitution = appliedMigrations[appliedMigrations.length - 2]
     const institutionMigration = appliedMigrations[appliedMigrations.length - 1]
     mkdirSync(dirname(dbPath), { recursive: true })
 
@@ -216,7 +216,9 @@ describe('initDb finance_accounts institution column', () => {
       )
       for (const migration of appliedMigrations) {
         const createdAt =
-          migration.tag === institutionMigration.tag ? previousMigration.when - 1 : migration.when
+          migration.tag === institutionMigration.tag
+            ? migrationBeforeInstitution.when - 1
+            : migration.when
         insertMigration.run(migration.hash, createdAt)
       }
     } finally {
