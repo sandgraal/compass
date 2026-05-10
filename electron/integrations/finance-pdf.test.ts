@@ -411,6 +411,11 @@ describe('extractStatementMetadata (direct)', () => {
     expect(meta.apr).toBeCloseTo(0.1999, 4)
   })
 
+  it('parses APR values even when the percent sign is omitted', () => {
+    const meta = extractStatementMetadata('APR: 19.99')
+    expect(meta.apr).toBeCloseTo(0.1999, 4)
+  })
+
   it('treats absent fields as undefined (not zero)', () => {
     const meta = extractStatementMetadata('New Balance: $100.00')
     expect(meta.balance).toBe(100)

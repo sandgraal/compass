@@ -267,10 +267,12 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('finance:get-upcoming-payments', (_event, daysAhead = 14) => {
     const db = getDb()
     const debts = db.select().from(financeAccounts).where(eq(financeAccounts.isDebt, true)).all()
+    const normalizedDaysAhead = Number.isFinite(daysAhead) ? Math.floor(daysAhead) : 14
+    const clampedDaysAhead = Math.min(365, Math.max(0, normalizedDaysAhead))
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     const cutoff = new Date(today)
-    cutoff.setDate(cutoff.getDate() + Math.max(0, Math.floor(daysAhead)))
+    cutoff.setDate(cutoff.getDate() + clampedDaysAhead)
     const upcoming = debts
       .filter((d): d is typeof d & { paymentDueDate: string } => Boolean(d.paymentDueDate))
       .map((d) => {
