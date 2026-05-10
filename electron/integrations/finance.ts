@@ -9,7 +9,7 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync } from 'node:fs'
-import { basename, dirname, join, parse } from 'node:path'
+import { basename, dirname, isAbsolute, join, parse, relative, resolve } from 'node:path'
 import { inArray } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
@@ -486,14 +486,28 @@ export type ParsedFile = {
  *   getAccountHintFromPath('/Money/stmt.csv',      '/Money') → undefined
  */
 export function getAccountHintFromPath(filePath: string, watchRoot: string): string | undefined {
-  const parentDir = dirname(filePath)
-  // Normalize away trailing slashes before comparing
-  const root = watchRoot.replace(/[\\/]+$/, '')
-  const parent = parentDir.replace(/[\\/]+$/, '')
-  // Direct child of root: parent === root
-  if (parent === root) return undefined
-  // The immediate parent name is the directory the file lives in
-  return basename(parentDir) || undefined
+  if (!watchRoot.trim()) return undefined
+
+  const root = resolve(watchRoot)
+  const absoluteFilePath = resolve(filePath)
+  const relativeFilePath = relative(root, absoluteFilePath)
+
+  // Reject files outside root and cross-volume Windows paths.
+  if (
+    relativeFilePath === '' ||
+    relativeFilePath === '.' ||
+    relativeFilePath.startsWith('..') ||
+    isAbsolute(relativeFilePath)
+  ) {
+    return undefined
+  }
+
+  const parentWithinRoot = dirname(relativeFilePath)
+  // Direct child of root has no useful subdirectory signal.
+  if (parentWithinRoot === '.') return undefined
+
+  // The immediate parent name is the directory the file lives in.
+  return basename(parentWithinRoot) || undefined
 }
 
 /** Known institution patterns for directory-name matching. */

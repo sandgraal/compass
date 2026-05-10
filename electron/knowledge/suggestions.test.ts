@@ -175,6 +175,16 @@ describe('extractContactsFromCalendar', () => {
     expect(results[0].source).toBe('calendar')
   })
 
+  it('does NOT count duplicate mentions inside one event as multiple events', () => {
+    const events = [
+      makeEvent({
+        externalId: 'ev1',
+        description: 'Alice <alice@acme.com> and again Alice <alice@acme.com>'
+      })
+    ]
+    expect(extractContactsFromCalendar(events, '')).toHaveLength(0)
+  })
+
   it('does NOT propose when the contact is already in relationships.md', () => {
     const events = [
       makeEvent({

@@ -9,9 +9,11 @@
  * directly since it is exported.
  */
 
-import { join } from 'node:path'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { getAccountHintFromPath } from './finance'
+import { getAccountHintFromPath, parseFinanceFile } from './finance'
 
 // ── getAccountHintFromPath ────────────────────────────────────────────────────
 
@@ -48,54 +50,39 @@ describe('getAccountHintFromPath', () => {
   })
 
   it('returns undefined when watchRoot is empty string (no root context)', () => {
-    // When no root is available an empty string is passed; the parent of the
-    // file is unlikely to equal '' so we get the basename of the parent dir.
-    // The important thing is no crash.
-    expect(() => getAccountHintFromPath('/a/b/c.csv', '')).not.toThrow()
+    expect(getAccountHintFromPath('/a/b/c.csv', '')).toBeUndefined()
+  })
+
+  it('returns undefined when filePath is outside watchRoot', () => {
+    const result = getAccountHintFromPath('/Elsewhere/USAA/statement.csv', '/Money')
+    expect(result).toBeUndefined()
   })
 })
 
-// ── detectAccount via directory hint (integration-level) ─────────────────────
-// We test this indirectly: a file with a generic name (e.g. "statement.csv")
-// placed under a directory named after a known institution should be picked up.
-// We use `parseFinanceFile` with a temp CSV file created in memory, but since
-// we can't easily create real files in tests we instead test the shape of the
-// return from `getAccountHintFromPath` + the noise-word guard below.
+function writeTestCsv(filePath: string): void {
+  mkdirSync(dirname(filePath), { recursive: true })
+  writeFileSync(filePath, 'date,description,amount\n2026-04-20,Coffee,4.50\n', 'utf8')
+}
 
-describe('directory-name institution signal', () => {
-  const NOISE_NAMES = [
-    '2026',
-    'statements',
-    'documents',
-    'files',
-    'archive',
-    'exports',
-    'downloads',
-    'misc'
-  ]
+describe('parseFinanceFile directory-name institution signal', () => {
+  it('detects institution from nested folder name when filename is generic', async () => {
+    const watchRoot = mkdtempSync(join(tmpdir(), 'compass-finance-test-'))
+    const csvPath = join(watchRoot, 'USAA', 'statement.csv')
+    writeTestCsv(csvPath)
 
-  it('treats generic directory names as non-signals (noise words)', () => {
-    // These should not produce a strong institution hint
-    for (const noise of NOISE_NAMES) {
-      const result = getAccountHintFromPath(`/Money/${noise}/stmt.csv`, '/Money')
-      // getAccountHintFromPath returns the name — the noise-word guard lives
-      // inside detectAccount (private). We can at least confirm the hint name
-      // comes back unchanged and non-null so the guard has something to filter.
-      expect(result).toBe(noise)
-    }
+    const parsed = await parseFinanceFile(csvPath, watchRoot)
+
+    expect(parsed?.account?.institution).toBe('USAA')
+    expect(parsed?.account?.sourceFile).toBe('statement.csv')
   })
 
-  it('returns a meaningful dir name for known institutions', () => {
-    const cases = [
-      ['/Money/USAA/stmt.csv', '/Money', 'USAA'],
-      ['/Money/Amex/feb.csv', '/Money', 'Amex'],
-      ['/Money/Chase/march.csv', '/Money', 'Chase'],
-      ['/Money/BofA/apr.csv', '/Money', 'BofA'],
-      ['/Money/Discover/q1.csv', '/Money', 'Discover'],
-      ['/Money/Citi/jan.csv', '/Money', 'Citi']
-    ] as const
-    for (const [file, root, expected] of cases) {
-      expect(getAccountHintFromPath(file, root)).toBe(expected)
-    }
+  it('ignores noise-word folders when trying directory-based account detection', async () => {
+    const watchRoot = mkdtempSync(join(tmpdir(), 'compass-finance-test-'))
+    const csvPath = join(watchRoot, 'statements', 'statement.csv')
+    writeTestCsv(csvPath)
+
+    const parsed = await parseFinanceFile(csvPath, watchRoot)
+
+    expect(parsed?.account).toBeUndefined()
   })
 })

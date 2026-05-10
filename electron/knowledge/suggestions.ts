@@ -291,8 +291,11 @@ export function extractContactsFromCalendar(
 ): KnowledgeSuggestionCandidate[] {
   const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000
 
-  // email → { name, count, eventId }
-  const emailCounts = new Map<string, { name: string; count: number; eventId: string }>()
+  // email → { name, distinctEventIds, firstEventId }
+  const emailCounts = new Map<
+    string,
+    { name: string; eventIds: Set<string>; firstEventId: string }
+  >()
 
   for (const ev of events) {
     // Filter to last 30 days when we have a date
@@ -304,6 +307,7 @@ export function extractContactsFromCalendar(
     if (!ev.description) continue
 
     const contacts = extractEmailsFromText(ev.description)
+    const seenInEvent = new Set<string>()
     for (const { name, email } of contacts) {
       // Skip noisy / machine senders
       const atIdx = email.lastIndexOf('@')
@@ -311,21 +315,28 @@ export function extractContactsFromCalendar(
       const domain = email.slice(atIdx + 1)
       if (IGNORED_DOMAINS.has(domain)) continue
       if (/noreply|no-reply|donotreply|notification|automated|mailer/i.test(email)) continue
+      if (seenInEvent.has(email)) continue
+      seenInEvent.add(email)
 
       const existing = emailCounts.get(email)
       if (existing) {
-        existing.count++
+        existing.eventIds.add(ev.externalId)
         // Prefer the longer/better name
         if (name.length > existing.name.length) existing.name = name
       } else {
-        emailCounts.set(email, { name, count: 1, eventId: ev.externalId })
+        emailCounts.set(email, {
+          name,
+          eventIds: new Set([ev.externalId]),
+          firstEventId: ev.externalId
+        })
       }
     }
   }
 
   const candidates: KnowledgeSuggestionCandidate[] = []
 
-  for (const [email, { name, count, eventId }] of emailCounts) {
+  for (const [email, { name, eventIds, firstEventId }] of emailCounts) {
+    const count = eventIds.size
     if (count < 2) continue
     if (alreadyMentioned(existingRelationships, email)) continue
 
@@ -335,7 +346,7 @@ export function extractContactsFromCalendar(
     const proposedContent = `| ${displayName} | (from calendar) | ${email} |`
     candidates.push({
       source: 'calendar',
-      sourceId: eventId,
+      sourceId: firstEventId,
       targetPath: 'profile/relationships.md',
       kind: 'contact',
       proposedContent,
