@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { and, desc, eq, gt, gte, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, gte, isNull, lt, ne, or, sql } from 'drizzle-orm'
 import { BrowserWindow, type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
 import {
@@ -12,6 +12,7 @@ import {
   financeTransactions
 } from '../db/schema'
 import { categorize, ingestCsvFolder } from '../integrations/finance'
+import { auditSubscriptions } from '../integrations/finance-subscriptions'
 import {
   getWatchedFolder,
   ingestWatchedFolderNow,
@@ -22,6 +23,25 @@ import { writeAllFinanceKnowledge } from '../knowledge/finance-extractor'
 import { DATA_DIR } from '../paths'
 
 const DEFAULT_MONEY_FOLDER = join(homedir(), 'Documents', 'Money')
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+function validateGeoSince(since: string): string {
+  if (!ISO_DATE_RE.test(since)) {
+    throw new Error('Invalid since date. Expected YYYY-MM-DD.')
+  }
+  const parsed = new Date(`${since}T00:00:00.000Z`)
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== since) {
+    throw new Error('Invalid since date. Expected a real calendar date.')
+  }
+  if (since < '2000-01-01') {
+    throw new Error('Invalid since date. Earliest supported date is 2000-01-01.')
+  }
+  const today = new Date().toISOString().slice(0, 10)
+  if (since > today) {
+    throw new Error('Invalid since date. Date cannot be in the future.')
+  }
+  return since
+}
 
 export function getMoneyFolder(): string {
   try {
@@ -258,6 +278,69 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     const debts = db.select().from(financeAccounts).where(eq(financeAccounts.isDebt, true)).all()
     const projection = simulateAvalanche(debts, 500)
     return { debts, projection }
+  })
+
+  // ── Subscription audit (active, zombies, duplicates) ──────────────────────
+  ipcMain.handle('finance:get-subscriptions', () => {
+    const db = getDb()
+    return auditSubscriptions(db)
+  })
+
+  // ── Geo / CR purpose summary across the whole ledger ──────────────────────
+  // Reads geo:X | purpose:Y tokens from the notes column (set by finance-geo
+  // tagger during ingest). Returns aggregates the Finance page renders as the
+  // "Geography" + "Costa Rica purpose" cards.
+  ipcMain.handle('finance:get-geo-summary', (_event, opts?: { since?: string }) => {
+    const db = getDb()
+    const cutoff = opts?.since ? validateGeoSince(opts.since) : null
+    const whereClause = and(
+      lt(financeTransactions.amount, 0),
+      or(
+        isNull(financeTransactions.category),
+        and(ne(financeTransactions.category, 'Transfers'), ne(financeTransactions.category, 'Cash'))
+      ),
+      cutoff ? gte(financeTransactions.date, cutoff) : undefined
+    )
+    const rows = db
+      .select({
+        amount: financeTransactions.amount,
+        notes: financeTransactions.notes
+      })
+      .from(financeTransactions)
+      .where(whereClause)
+      .all()
+    const geoMap = new Map<string, { amount: number; count: number }>()
+    const purposeMap = new Map<string, number>()
+    let crCapex = 0
+    for (const r of rows) {
+      let geo = 'US'
+      let purpose = ''
+      for (const tok of (r.notes ?? '').split('|')) {
+        const t = tok.trim()
+        if (t.startsWith('geo:')) geo = t.slice(4)
+        else if (t.startsWith('purpose:')) purpose = t.slice(8)
+      }
+      const cell = geoMap.get(geo) ?? { amount: 0, count: 0 }
+      cell.amount += -r.amount
+      cell.count += 1
+      geoMap.set(geo, cell)
+      if (geo === 'CR' && purpose) {
+        purposeMap.set(purpose, (purposeMap.get(purpose) ?? 0) + -r.amount)
+        if (purpose === 'capex') crCapex += -r.amount
+      }
+    }
+    const geo = [...geoMap.entries()].map(([name, v]) => ({
+      name,
+      amount: Math.round(v.amount * 100) / 100,
+      count: v.count
+    }))
+    geo.sort((a, b) => b.amount - a.amount)
+    const purpose = [...purposeMap.entries()].map(([name, amt]) => ({
+      name,
+      amount: Math.round(amt * 100) / 100
+    }))
+    purpose.sort((a, b) => b.amount - a.amount)
+    return { geo, purpose, crCapex: Math.round(crCapex * 100) / 100, since: cutoff }
   })
 
   // ── Upcoming payments (Dashboard "Payments Due" card) ────────────────────

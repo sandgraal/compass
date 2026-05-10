@@ -172,6 +172,9 @@ const api = {
     }) => ipcRenderer.invoke('finance:save-rule', rule),
     deleteRule: (id: number) => ipcRenderer.invoke('finance:delete-rule', id),
     reapplyRules: () => ipcRenderer.invoke('finance:reapply-rules'),
+    getSubscriptions: () => ipcRenderer.invoke('finance:get-subscriptions'),
+    getGeoSummary: (opts?: { since?: string }) =>
+      ipcRenderer.invoke('finance:get-geo-summary', opts),
     getInboxPath: () => ipcRenderer.invoke('finance:get-inbox-path'),
 
     // Watched folder (source-of-truth, e.g. ~/Documents/Money)

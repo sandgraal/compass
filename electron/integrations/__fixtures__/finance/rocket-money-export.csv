@@ -1,0 +1,7 @@
+Date,Original Date,Account Type,Account Name,Account Number,Institution Name,Name,Custom Name,Amount,Description,Category,Note,Ignored From,Tax Deductible,Transaction Tags
+2026-04-15,2026-04-15,Credit Card,Platinum Card®,1003,American Express,STARBUCKS STORE 12345,,5.75,STARBUCKS STORE 12345,Coffee Shops,,,,
+2026-04-16,2026-04-16,Cash,Chris Checking,0991,USAA,BANCO POPULAR C SAN JOSE,,675.31,BANCO POPULAR C SAN JOSE,Cash & Checks,,,,
+2026-04-17,2026-04-17,Cash,PayPal,,PayPal,Payment to Apple Services,,9.99,Payment to Apple Services,Subscriptions,,,,everything-tag-test
+2025-08-04,2025-08-04,Cash,PayPal,,PayPal,Payment to Temu.com,,112976,Payment to Temu.com,Shopping,,everything,,
+2026-04-18,2026-04-18,Credit Card,Hilton Honors Surpass® Card,3002,American Express,CLAUDE.AI SUBSCRIPTISAN FRANCISCO,,80.56,CLAUDE.AI SUBSCRIPTISAN FRANCISCO CA,Software,,,,
+2026-04-19,2026-04-19,Cash,Chris Savings,5934,USAA,USAA FUNDS TRANSFER CR,,1500.00,USAA FUNDS TRANSFER CR,Transfer,,,,

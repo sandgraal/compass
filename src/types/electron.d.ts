@@ -352,6 +352,41 @@ declare global {
         }): Promise<{ success: boolean }>
         deleteRule(id: number): Promise<{ success: boolean }>
         reapplyRules(): Promise<{ updated: number; scanned: number }>
+        getSubscriptions(): Promise<{
+          totalActiveAnnual: number
+          active: Array<{
+            merchant: string
+            account: string
+            category: string
+            subcategory: string
+            cadence: 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'semi-annual' | 'yearly'
+            medianAmount: number
+            minAmount: number
+            maxAmount: number
+            annualCost: number
+            firstSeen: string
+            lastSeen: string
+            daysSinceLast: number
+            nCharges: number
+            status: 'active' | 'zombie' | 'expired'
+            priceBump: boolean
+          }>
+          zombies: Array<{
+            merchant: string
+            account: string
+            cadence: string
+            annualCost: number
+            lastSeen: string
+          }>
+          expired: Array<{ merchant: string }>
+          duplicates: Array<{ merchant: string; accounts: string[]; combinedAnnual: number }>
+        }>
+        getGeoSummary(opts?: { since?: string }): Promise<{
+          geo: Array<{ name: string; amount: number; count: number }>
+          purpose: Array<{ name: string; amount: number }>
+          crCapex: number
+          since: string | null
+        }>
         getInboxPath(): Promise<string>
 
         // Watched folder
