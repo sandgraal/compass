@@ -28,7 +28,8 @@ describe('Rocket Money parser', () => {
     if (!result) throw new Error('expected parse result')
     const starbucks = result.txns.find((t) => t.description === 'STARBUCKS STORE 12345')
     expect(starbucks?.amount).toBe(-5.75)
-    // Income (a transfer credit in this fixture) stays positive after flip.
+    // Rocket Money exports this credit row as +1500; we invert signs uniformly
+    // on import so every outflow/inflow follows Compass's signed convention.
     const transfer = result.txns.find((t) => t.description === 'USAA FUNDS TRANSFER CR')
     expect(transfer?.amount).toBe(-1500) // export shows positive 1500 for the credit row → flip to -1500
   })

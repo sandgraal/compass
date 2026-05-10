@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { and, desc, eq, gt, gte, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, gte, isNull, lt, ne, or, sql } from 'drizzle-orm'
 import { BrowserWindow, type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
 import {
@@ -23,6 +23,25 @@ import { writeAllFinanceKnowledge } from '../knowledge/finance-extractor'
 import { DATA_DIR } from '../paths'
 
 const DEFAULT_MONEY_FOLDER = join(homedir(), 'Documents', 'Money')
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+function validateGeoSince(since: string): string {
+  if (!ISO_DATE_RE.test(since)) {
+    throw new Error('Invalid since date. Expected YYYY-MM-DD.')
+  }
+  const parsed = new Date(`${since}T00:00:00.000Z`)
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== since) {
+    throw new Error('Invalid since date. Expected a real calendar date.')
+  }
+  if (since < '2000-01-01') {
+    throw new Error('Invalid since date. Earliest supported date is 2000-01-01.')
+  }
+  const today = new Date().toISOString().slice(0, 10)
+  if (since > today) {
+    throw new Error('Invalid since date. Date cannot be in the future.')
+  }
+  return since
+}
 
 export function getMoneyFolder(): string {
   try {
@@ -273,23 +292,27 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   // "Geography" + "Costa Rica purpose" cards.
   ipcMain.handle('finance:get-geo-summary', (_event, opts?: { since?: string }) => {
     const db = getDb()
-    const cutoff = opts?.since ?? null
+    const cutoff = opts?.since ? validateGeoSince(opts.since) : null
+    const whereClause = and(
+      lt(financeTransactions.amount, 0),
+      or(
+        isNull(financeTransactions.category),
+        and(ne(financeTransactions.category, 'Transfers'), ne(financeTransactions.category, 'Cash'))
+      ),
+      cutoff ? gte(financeTransactions.date, cutoff) : undefined
+    )
     const rows = db
       .select({
         amount: financeTransactions.amount,
-        date: financeTransactions.date,
-        category: financeTransactions.category,
         notes: financeTransactions.notes
       })
       .from(financeTransactions)
+      .where(whereClause)
       .all()
     const geoMap = new Map<string, { amount: number; count: number }>()
     const purposeMap = new Map<string, number>()
     let crCapex = 0
     for (const r of rows) {
-      if (cutoff && r.date < cutoff) continue
-      if (r.amount >= 0) continue
-      if (r.category === 'Transfers' || r.category === 'Cash') continue
       let geo = 'US'
       let purpose = ''
       for (const tok of (r.notes ?? '').split('|')) {

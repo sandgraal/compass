@@ -23,7 +23,7 @@
  * Override the source dir with FINANCE_PROJECT_DIR env var.
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
@@ -31,6 +31,7 @@ import { eq } from 'drizzle-orm'
 import { getDb, initDb } from '../electron/db/client'
 import { categorizationRules, financeAccounts, financeTransactions } from '../electron/db/schema'
 import { tagGeoAndPurpose } from '../electron/integrations/finance-geo'
+import { DATA_DIR } from '../electron/paths'
 
 const PROJECT_DIR =
   process.env.FINANCE_PROJECT_DIR ??
@@ -108,6 +109,9 @@ function inferInstitution(name: string): string {
 async function main(): Promise<void> {
   console.log(`Importing from ${PROJECT_DIR}`)
 
+  if (!existsSync(DATA_DIR)) {
+    mkdirSync(DATA_DIR, { recursive: true })
+  }
   await initDb()
   const db = getDb()
 

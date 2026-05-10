@@ -20,6 +20,7 @@ import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
+import { classifyGeo, classifyPurpose, upsertNotesTags } from './finance-geo'
 
 export const SPLIT_PROJECT = 0.7
 export const SPLIT_MARKER_PROJECT = '70% project split'
@@ -95,7 +96,18 @@ export function applyAtmSplit(db: BetterSQLite3Database<typeof schema>): AtmSpli
 
       // Mutate the original to the project portion.
       const prefix = row.notes ? `${row.notes} | ` : ''
-      const projectNotes = `${prefix}${SPLIT_MARKER_PROJECT} (Airbnb construction estimate)`
+      const projectGeo = classifyGeo(row.description)
+      const projectPurpose = classifyPurpose(
+        projectGeo,
+        'Property',
+        'Construction — labor (est)',
+        row.description
+      )
+      const projectNotes = upsertNotesTags(
+        `${prefix}${SPLIT_MARKER_PROJECT} (Airbnb construction estimate)`,
+        projectGeo,
+        projectPurpose
+      )
       t.update(schema.financeTransactions)
         .set({
           amount: project,
@@ -112,6 +124,13 @@ export function applyAtmSplit(db: BetterSQLite3Database<typeof schema>): AtmSpli
         .update(`${row.hash}|split_personal`)
         .digest('hex')
         .slice(0, 16)
+      const siblingGeo = classifyGeo(row.description)
+      const siblingPurpose = classifyPurpose(
+        siblingGeo,
+        'Cash',
+        'Personal — split sibling',
+        row.description
+      )
       t.insert(schema.financeTransactions)
         .values({
           hash: siblingHash,
@@ -121,7 +140,11 @@ export function applyAtmSplit(db: BetterSQLite3Database<typeof schema>): AtmSpli
           accountId: row.accountId,
           category: 'Cash',
           subcategory: 'Personal — split sibling',
-          notes: `${SPLIT_MARKER_PERSONAL} (sibling of ${row.hash})`,
+          notes: upsertNotesTags(
+            `${SPLIT_MARKER_PERSONAL} (sibling of ${row.hash})`,
+            siblingGeo,
+            siblingPurpose
+          ),
           sourceFile: row.sourceFile,
           ingestedAt: new Date()
         })

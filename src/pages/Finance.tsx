@@ -57,23 +57,7 @@ type Rule = {
   subcategory: string | null
   priority: number | null
 }
-type Subscription = {
-  merchant: string
-  account: string
-  category: string
-  subcategory: string
-  cadence: string
-  medianAmount: number
-  minAmount: number
-  maxAmount: number
-  annualCost: number
-  firstSeen: string
-  lastSeen: string
-  daysSinceLast: number
-  nCharges: number
-  status: 'active' | 'zombie' | 'expired'
-  priceBump: boolean
-}
+type SubscriptionsData = Awaited<ReturnType<Window['api']['finance']['getSubscriptions']>>
 type GeoSummary = {
   geo: { name: string; amount: number; count: number }[]
   purpose: { name: string; amount: number }[]
@@ -129,18 +113,7 @@ export default function Finance(): JSX.Element {
   } | null>(null)
   const [vaultSeeded, setVaultSeeded] = useState(0)
   const [detectedAccounts, setDetectedAccounts] = useState<string[]>([])
-  const [subscriptions, setSubscriptions] = useState<{
-    active: Subscription[]
-    zombies: {
-      merchant: string
-      account: string
-      cadence: string
-      annualCost: number
-      lastSeen: string
-    }[]
-    duplicates: { merchant: string; accounts: string[]; combinedAnnual: number }[]
-    totalActiveAnnual: number
-  } | null>(null)
+  const [subscriptions, setSubscriptions] = useState<SubscriptionsData | null>(null)
   const [geoSummary, setGeoSummary] = useState<GeoSummary | null>(null)
   const [excludeProperty, setExcludeProperty] = useState(false)
 
@@ -172,14 +145,7 @@ export default function Finance(): JSX.Element {
       setDebts(d.debts as Account[])
       setBudget(b.lines)
       setRules(r)
-      if (s) {
-        setSubscriptions({
-          active: s.active as Subscription[],
-          zombies: s.zombies,
-          duplicates: s.duplicates,
-          totalActiveAnnual: s.totalActiveAnnual
-        })
-      }
+      if (s) setSubscriptions(s)
       if (g) setGeoSummary(g)
     } catch (err) {
       console.error('[finance] refresh failed', err)
@@ -716,18 +682,7 @@ function CrSubsTab({
   subscriptions
 }: {
   geoSummary: GeoSummary | null
-  subscriptions: {
-    active: Subscription[]
-    zombies: {
-      merchant: string
-      account: string
-      cadence: string
-      annualCost: number
-      lastSeen: string
-    }[]
-    duplicates: { merchant: string; accounts: string[]; combinedAnnual: number }[]
-    totalActiveAnnual: number
-  } | null
+  subscriptions: SubscriptionsData | null
 }): JSX.Element {
   const totalGeo = geoSummary?.geo.reduce((s, g) => s + g.amount, 0) ?? 0
   return (

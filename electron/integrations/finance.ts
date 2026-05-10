@@ -1229,9 +1229,10 @@ export async function ingestFinanceFiles(
     }
 
     const categorized = rules.length ? categorize(txns, rules) : txns
+    const tagged = tagGeoAndPurpose(categorized)
 
     // Scope hash lookup to only this batch's candidates — avoids full-table scan
-    const candidateHashes = categorized.map((t) => t.hash)
+    const candidateHashes = tagged.map((t) => t.hash)
     const existingInBatch =
       candidateHashes.length > 0
         ? new Set(
@@ -1243,7 +1244,7 @@ export async function ingestFinanceFiles(
               .map((r) => r.h)
           )
         : new Set<string>()
-    const fresh = categorized.filter((t) => !existingInBatch.has(t.hash))
+    const fresh = tagged.filter((t) => !existingInBatch.has(t.hash))
 
     for (const t of fresh) {
       db.insert(schema.financeTransactions)
@@ -1265,8 +1266,12 @@ export async function ingestFinanceFiles(
 
     result.filesProcessed++
     result.newTransactions += fresh.length
-    result.duplicatesDropped += categorized.length - fresh.length
-    result.perFile.push({ file: f, bank, parsed: categorized.length, new: fresh.length })
+    result.duplicatesDropped += tagged.length - fresh.length
+    result.perFile.push({ file: f, bank, parsed: tagged.length, new: fresh.length })
+  }
+
+  if (result.newTransactions > 0) {
+    applyAtmSplit(db)
   }
 
   return { result, detectedAccounts: detected }
