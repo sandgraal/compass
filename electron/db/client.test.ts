@@ -54,12 +54,12 @@ function expectInstitutionColumn(dbPath: string): void {
   }
 }
 
-function readRecordedMigrations(dbPath: string): Array<{ hash: string; created_at: number }> {
+function readRecordedMigrations(dbPath: string): Array<{ hash: string; created_at: number | null }> {
   const sqlite = new Database(dbPath)
   try {
     return sqlite
-      .prepare('SELECT hash, created_at FROM __drizzle_migrations ORDER BY created_at ASC')
-      .all() as Array<{ hash: string; created_at: number }>
+      .prepare('SELECT hash, created_at FROM __drizzle_migrations ORDER BY COALESCE(created_at, 0) ASC')
+      .all() as Array<{ hash: string; created_at: number | null }>
   } finally {
     sqlite.close()
   }
