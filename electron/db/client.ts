@@ -189,6 +189,10 @@ function hasColumn(sqlite: Database.Database, table: string, column: string): bo
   return columns.some((entry) => entry.name === column)
 }
 
+/**
+ * Validates and quotes SQLite identifiers used in PRAGMA/ALTER TABLE statements.
+ * Only simple alphanumeric identifiers starting with a letter or underscore are allowed.
+ */
 function quoteSqliteIdentifier(identifier: string): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) {
     throw new Error(`Invalid SQLite identifier: ${identifier}`)
