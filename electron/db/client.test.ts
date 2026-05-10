@@ -1,11 +1,25 @@
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import Database from 'better-sqlite3'
-import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const originalHome = process.env.HOME
+const MIGRATIONS_FOLDER = join(__dirname, 'migrations')
+
+type MigrationJournal = {
+  entries: Array<{
+    tag: string
+    when: number
+  }>
+}
+
+type MigrationMetadata = {
+  tag: string
+  hash: string
+  when: number
+}
 
 function makeTempHome(): string {
   return mkdtempSync(join(tmpdir(), 'compass-db-test-'))
@@ -54,15 +68,34 @@ function expectInstitutionColumn(dbPath: string): void {
   }
 }
 
-function readRecordedMigrations(dbPath: string): Array<{ hash: string; created_at: number | null }> {
+function readRecordedMigrations(
+  dbPath: string
+): Array<{ hash: string; created_at: number | null }> {
   const sqlite = new Database(dbPath)
   try {
     return sqlite
-      .prepare('SELECT hash, created_at FROM __drizzle_migrations ORDER BY COALESCE(created_at, 0) ASC')
+      .prepare(
+        'SELECT hash, created_at FROM __drizzle_migrations ORDER BY COALESCE(created_at, 0) ASC'
+      )
       .all() as Array<{ hash: string; created_at: number | null }>
   } finally {
     sqlite.close()
   }
+}
+
+function readMigrationMetadata(): MigrationMetadata[] {
+  const journal = JSON.parse(
+    readFileSync(join(MIGRATIONS_FOLDER, 'meta', '_journal.json'), 'utf8')
+  ) as MigrationJournal
+
+  return journal.entries.map((entry) => {
+    const sql = readFileSync(join(MIGRATIONS_FOLDER, `${entry.tag}.sql`), 'utf8')
+    return {
+      tag: entry.tag,
+      hash: createHash('sha256').update(sql).digest('hex'),
+      when: entry.when
+    }
+  })
 }
 
 async function loadClientForHome(home: string): Promise<typeof import('./client')> {
@@ -133,12 +166,16 @@ describe('initDb finance_accounts institution column', () => {
   it('normalizes stale recorded migration timestamps before rerunning migrations', async () => {
     const home = makeTempHome()
     const dbPath = dbPathForHome(home)
-    const migrations = readMigrationFiles({ migrationsFolder: join(__dirname, 'migrations') })
-    const secondMigration = migrations[1]
-    const institutionMigration = migrations[2]
-    if (!secondMigration || !institutionMigration) {
-      throw new Error('Expected seeded migrations to exist')
+    const migrations = readMigrationMetadata()
+    const institutionMigrationIndex = migrations.findIndex(
+      (migration) => migration.tag === '0002_zippy_sauron'
+    )
+    if (institutionMigrationIndex < 1) {
+      throw new Error('Expected migrations through 0002_zippy_sauron to exist')
     }
+    const appliedMigrations = migrations.slice(0, institutionMigrationIndex + 1)
+    const previousMigration = appliedMigrations[appliedMigrations.length - 2]
+    const institutionMigration = appliedMigrations[appliedMigrations.length - 1]
     mkdirSync(dirname(dbPath), { recursive: true })
 
     const sqlite = new Database(dbPath)
@@ -174,14 +211,14 @@ describe('initDb finance_accounts institution column', () => {
           created_at NUMERIC
         );
       `)
-      sqlite
-        .prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?), (?, ?)')
-        .run(
-          secondMigration.hash,
-          secondMigration.folderMillis,
-          institutionMigration.hash,
-          1778283523634
-        )
+      const insertMigration = sqlite.prepare(
+        'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)'
+      )
+      for (const migration of appliedMigrations) {
+        const createdAt =
+          migration.tag === institutionMigration.tag ? previousMigration.when - 1 : migration.when
+        insertMigration.run(migration.hash, createdAt)
+      }
     } finally {
       sqlite.close()
     }
@@ -190,9 +227,11 @@ describe('initDb finance_accounts institution column', () => {
     await initDb()
 
     const recordedMigrations = readRecordedMigrations(dbPath)
-    expect(recordedMigrations).toEqual([
-      { hash: secondMigration.hash, created_at: secondMigration.folderMillis },
-      { hash: institutionMigration.hash, created_at: institutionMigration.folderMillis }
-    ])
+    expect(recordedMigrations).toEqual(
+      appliedMigrations.map((migration) => ({
+        hash: migration.hash,
+        created_at: migration.when
+      }))
+    )
   })
 })
