@@ -9,7 +9,7 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync } from 'node:fs'
-import { basename, join, parse } from 'node:path'
+import { basename, dirname, join, parse } from 'node:path'
 import { inArray } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
@@ -475,11 +475,150 @@ export type ParsedFile = {
 }
 
 /**
- * Infer an account hint and metadata from the filename and (if xlsx)
- * the file's header rows. Best-effort — returns undefined if we can't
- * confidently tell what the account is.
+ * Return the immediate parent directory name when `filePath` is nested inside
+ * `watchRoot`. Returns `undefined` when the file is a direct child of the root
+ * (no useful subdirectory signal) or when `watchRoot` is not provided.
+ *
+ * Exported so tests can exercise it directly.
+ *
+ * Example:
+ *   getAccountHintFromPath('/Money/USAA/stmt.csv', '/Money') → 'USAA'
+ *   getAccountHintFromPath('/Money/stmt.csv',      '/Money') → undefined
  */
-function detectAccount(file: string, peek?: { acctNumber?: string }): DetectedAccount | undefined {
+export function getAccountHintFromPath(filePath: string, watchRoot: string): string | undefined {
+  const parentDir = dirname(filePath)
+  // Normalize away trailing slashes before comparing
+  const root = watchRoot.replace(/[\\/]+$/, '')
+  const parent = parentDir.replace(/[\\/]+$/, '')
+  // Direct child of root: parent === root
+  if (parent === root) return undefined
+  // The immediate parent name is the directory the file lives in
+  return basename(parentDir) || undefined
+}
+
+/** Known institution patterns for directory-name matching. */
+const DIR_INSTITUTION_HINTS: Array<{
+  patterns: RegExp
+  build: (dirName: string) => DetectedAccount
+}> = [
+  {
+    patterns: /\busaa\b/i,
+    build: (dirName) => ({
+      name: /checking/i.test(dirName)
+        ? 'USAA Checking'
+        : /savings/i.test(dirName)
+          ? 'USAA Savings'
+          : 'USAA',
+      type: /savings/i.test(dirName) ? 'savings' : 'checking',
+      institution: 'USAA',
+      isDebt: false,
+      sourceFile: ''
+    })
+  },
+  {
+    patterns: /\bamex\b|american\s*express/i,
+    build: (dirName) => {
+      let displayName = 'American Express'
+      if (/platinum/i.test(dirName)) displayName = 'Amex Platinum'
+      else if (/gold/i.test(dirName)) displayName = 'Amex Gold'
+      else if (/green/i.test(dirName)) displayName = 'Amex Green'
+      else if (/blue/i.test(dirName)) displayName = 'Amex Blue'
+      return {
+        name: displayName,
+        type: 'credit',
+        institution: 'American Express',
+        isDebt: true,
+        sourceFile: ''
+      }
+    }
+  },
+  {
+    patterns: /\bchase\b/i,
+    build: () => ({
+      name: 'Chase',
+      type: 'credit',
+      institution: 'Chase',
+      isDebt: true,
+      sourceFile: ''
+    })
+  },
+  {
+    patterns: /\bbofa\b|bank\s*of\s*america\b/i,
+    build: () => ({
+      name: 'Bank of America',
+      type: 'checking',
+      institution: 'Bank of America',
+      isDebt: false,
+      sourceFile: ''
+    })
+  },
+  {
+    patterns: /\bcapital\s*one\b/i,
+    build: () => ({
+      name: 'Capital One',
+      type: 'credit',
+      institution: 'Capital One',
+      isDebt: true,
+      sourceFile: ''
+    })
+  },
+  {
+    patterns: /\bdiscover\b/i,
+    build: () => ({
+      name: 'Discover',
+      type: 'credit',
+      institution: 'Discover',
+      isDebt: true,
+      sourceFile: ''
+    })
+  },
+  {
+    patterns: /\bciti\b|citibank\b/i,
+    build: () => ({
+      name: 'Citi',
+      type: 'credit',
+      institution: 'Citi',
+      isDebt: true,
+      sourceFile: ''
+    })
+  }
+]
+
+/** Generic noise words that should NOT be treated as institution signals. */
+const DIR_NOISE_RE =
+  /^(\d{4}|statements?|documents?|files?|data|archive|exports?|downloads?|misc|other|new)$/i
+
+/**
+ * Try to match a directory name against known institution patterns.
+ * Returns a partial DetectedAccount template (sourceFile is filled in by caller)
+ * or undefined if no strong signal found.
+ */
+function accountFromDirName(dirName: string): Omit<DetectedAccount, 'sourceFile'> | undefined {
+  if (!dirName || DIR_NOISE_RE.test(dirName.trim())) return undefined
+
+  for (const hint of DIR_INSTITUTION_HINTS) {
+    if (hint.patterns.test(dirName)) {
+      const { sourceFile: _sf, ...partial } = hint.build(dirName)
+      return partial
+    }
+  }
+  return undefined
+}
+
+/**
+ * Infer an account hint and metadata from the filename and (if xlsx)
+ * the file's header rows. When the filename alone doesn't match a known
+ * institution, falls back to the immediate parent directory name (when
+ * `watchRoot` is provided and the file is nested under it).
+ *
+ * Best-effort — returns undefined if we can't confidently tell what the
+ * account is.
+ */
+function detectAccount(
+  file: string,
+  peek?: { acctNumber?: string },
+  watchRoot?: string
+): DetectedAccount | undefined {
   const name = basename(file).toLowerCase()
   const acctNumber = peek?.acctNumber
   // USAA: USAA_Checking_2026_bk_download.csv / USAA_Savings_*.csv
@@ -521,6 +660,18 @@ function detectAccount(file: string, peek?: { acctNumber?: string }): DetectedAc
       sourceFile: basename(file)
     }
   }
+
+  // Fall back to parent directory name when filename alone has no signal
+  if (watchRoot) {
+    const dirName = getAccountHintFromPath(file, watchRoot)
+    if (dirName) {
+      const fromDir = accountFromDirName(dirName)
+      if (fromDir) {
+        return { ...fromDir, sourceFile: basename(file) }
+      }
+    }
+  }
+
   return undefined
 }
 
@@ -528,7 +679,7 @@ function detectAccount(file: string, peek?: { acctNumber?: string }): DetectedAc
  * Parse an AMEX exported xlsx with the standard "Transaction Details"
  * sheet (columns: Date, Description, Amount, ...). Header row is at index 6.
  */
-async function parseAmexXlsx(filePath: string): Promise<ParsedFile> {
+async function parseAmexXlsx(filePath: string, watchRoot?: string): Promise<ParsedFile> {
   const wb = new ExcelJS.Workbook()
   await wb.xlsx.readFile(filePath)
   const ws = wb.getWorksheet('Transaction Details') ?? wb.worksheets[0]
@@ -544,7 +695,7 @@ async function parseAmexXlsx(filePath: string): Promise<ParsedFile> {
     })
     if (acctNumber) break
   }
-  const account = detectAccount(filePath, { acctNumber })
+  const account = detectAccount(filePath, { acctNumber }, watchRoot)
   const accountName = account?.name ?? 'Amex'
 
   // Detect the header row by scanning for one that contains 'Date' and 'Amount'
@@ -604,11 +755,11 @@ async function parseAmexXlsx(filePath: string): Promise<ParsedFile> {
 /**
  * Parse a single CSV file using the existing parser pipeline.
  */
-function parseCsvFile(filePath: string): ParsedFile {
+function parseCsvFile(filePath: string, watchRoot?: string): ParsedFile {
   const { headers, rows } = readCsv(filePath)
   const hLower = headers.map((c) => c.trim().toLowerCase())
   const parser = PARSERS.find((p) => p.matches(hLower)) || generic
-  const account = detectAccount(filePath)
+  const account = detectAccount(filePath, undefined, watchRoot)
   const hint =
     account?.name ??
     basename(filePath, '.csv')
@@ -641,11 +792,18 @@ function pdfAccountHint(filePath: string): string {
 /**
  * Dispatch on extension. Returns parsed transactions + best-effort account
  * detection. Pure: no DB writes, no file moves.
+ *
+ * Pass `watchRoot` when the file lives inside a user-owned folder so that
+ * parent-directory names can be used as institution hints when the filename
+ * alone is ambiguous.
  */
-export async function parseFinanceFile(filePath: string): Promise<ParsedFile | null> {
+export async function parseFinanceFile(
+  filePath: string,
+  watchRoot?: string
+): Promise<ParsedFile | null> {
   const lower = filePath.toLowerCase()
-  if (lower.endsWith('.csv')) return parseCsvFile(filePath)
-  if (lower.endsWith('.xlsx')) return parseAmexXlsx(filePath)
+  if (lower.endsWith('.csv')) return parseCsvFile(filePath, watchRoot)
+  if (lower.endsWith('.xlsx')) return parseAmexXlsx(filePath, watchRoot)
   if (lower.endsWith('.pdf')) {
     // Lazy import keeps `pdf-parse`/pdfjs-dist out of any code path that
     // doesn't need it.
@@ -664,7 +822,8 @@ export async function parseFinanceFile(filePath: string): Promise<ParsedFile | n
 export async function ingestFinanceFiles(
   db: BetterSQLite3Database<typeof schema>,
   filePaths: string[],
-  rules: { pattern: string; category: string; subcategory?: string | null }[] = []
+  rules: { pattern: string; category: string; subcategory?: string | null }[] = [],
+  watchRoot?: string
 ): Promise<{
   result: IngestResult
   detectedAccounts: (DetectedAccount & { dbId: number })[]
@@ -682,7 +841,7 @@ export async function ingestFinanceFiles(
   const detected: (DetectedAccount & { dbId: number })[] = []
 
   for (const fp of filePaths) {
-    const parsed = await parseFinanceFile(fp)
+    const parsed = await parseFinanceFile(fp, watchRoot)
     if (!parsed) continue
     const { bank, txns, account } = parsed
     const f = basename(fp)
