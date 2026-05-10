@@ -28,7 +28,7 @@ declare global {
   interface KnowledgeSuggestion {
     id: number
     proposedAt: Date
-    source: 'gmail' | 'github' | 'calendar'
+    source: 'gmail' | 'github' | 'calendar' | 'ollama:gmail' | 'ollama:github'
     sourceId: string | null
     targetPath: string
     kind: 'contact' | 'employer' | 'date' | 'note'
@@ -36,6 +36,12 @@ declare global {
     context: string | null
     status: 'pending' | 'accepted' | 'dismissed'
     reviewedAt: Date | null
+  }
+
+  interface OllamaStatus {
+    available: boolean
+    baseUrl?: string
+    models?: string[]
   }
 
   interface IntegrationStatus {
@@ -223,6 +229,7 @@ declare global {
           error?: string
         }>
         setQuickCaptureShortcut(accelerator: string): Promise<{ success: boolean; error?: string }>
+        detectOllama(options?: { forceRefresh?: boolean }): Promise<OllamaStatus>
       }
       theme: {
         getNativeTheme(): Promise<'dark' | 'light'>
