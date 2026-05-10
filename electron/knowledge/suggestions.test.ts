@@ -185,6 +185,22 @@ describe('extractContactsFromCalendar', () => {
     expect(extractContactsFromCalendar(events, '')).toHaveLength(0)
   })
 
+  it('counts the same contact across distinct events even when one event repeats it', () => {
+    const events = [
+      makeEvent({
+        externalId: 'ev1',
+        description: 'Alice <alice@acme.com> and again Alice <alice@acme.com>'
+      }),
+      makeEvent({
+        externalId: 'ev2',
+        description: 'Follow-up with Alice <alice@acme.com>'
+      })
+    ]
+    const results = extractContactsFromCalendar(events, '')
+    expect(results).toHaveLength(1)
+    expect(results[0].context).toContain('2 calendar event')
+  })
+
   it('does NOT propose when the contact is already in relationships.md', () => {
     const events = [
       makeEvent({
