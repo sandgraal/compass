@@ -12,6 +12,7 @@ import {
   financeTransactions
 } from '../db/schema'
 import { categorize, ingestCsvFolder } from '../integrations/finance'
+import { auditSubscriptions } from '../integrations/finance-subscriptions'
 import {
   getWatchedFolder,
   ingestWatchedFolderNow,
@@ -258,6 +259,65 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     const debts = db.select().from(financeAccounts).where(eq(financeAccounts.isDebt, true)).all()
     const projection = simulateAvalanche(debts, 500)
     return { debts, projection }
+  })
+
+  // ── Subscription audit (active, zombies, duplicates) ──────────────────────
+  ipcMain.handle('finance:get-subscriptions', () => {
+    const db = getDb()
+    return auditSubscriptions(db)
+  })
+
+  // ── Geo / CR purpose summary across the whole ledger ──────────────────────
+  // Reads geo:X | purpose:Y tokens from the notes column (set by finance-geo
+  // tagger during ingest). Returns aggregates the Finance page renders as the
+  // "Geography" + "Costa Rica purpose" cards.
+  ipcMain.handle('finance:get-geo-summary', (_event, opts?: { since?: string }) => {
+    const db = getDb()
+    const cutoff = opts?.since ?? null
+    const rows = db
+      .select({
+        amount: financeTransactions.amount,
+        date: financeTransactions.date,
+        category: financeTransactions.category,
+        notes: financeTransactions.notes
+      })
+      .from(financeTransactions)
+      .all()
+    const geoMap = new Map<string, { amount: number; count: number }>()
+    const purposeMap = new Map<string, number>()
+    let crCapex = 0
+    for (const r of rows) {
+      if (cutoff && r.date < cutoff) continue
+      if (r.amount >= 0) continue
+      if (r.category === 'Transfers' || r.category === 'Cash') continue
+      let geo = 'US'
+      let purpose = ''
+      for (const tok of (r.notes ?? '').split('|')) {
+        const t = tok.trim()
+        if (t.startsWith('geo:')) geo = t.slice(4)
+        else if (t.startsWith('purpose:')) purpose = t.slice(8)
+      }
+      const cell = geoMap.get(geo) ?? { amount: 0, count: 0 }
+      cell.amount += -r.amount
+      cell.count += 1
+      geoMap.set(geo, cell)
+      if (geo === 'CR' && purpose) {
+        purposeMap.set(purpose, (purposeMap.get(purpose) ?? 0) + -r.amount)
+        if (purpose === 'capex') crCapex += -r.amount
+      }
+    }
+    const geo = [...geoMap.entries()].map(([name, v]) => ({
+      name,
+      amount: Math.round(v.amount * 100) / 100,
+      count: v.count
+    }))
+    geo.sort((a, b) => b.amount - a.amount)
+    const purpose = [...purposeMap.entries()].map(([name, amt]) => ({
+      name,
+      amount: Math.round(amt * 100) / 100
+    }))
+    purpose.sort((a, b) => b.amount - a.amount)
+    return { geo, purpose, crCapex: Math.round(crCapex * 100) / 100, since: cutoff }
   })
 
   // ── Budget status (actual vs planned for a month) ─────────────────────────

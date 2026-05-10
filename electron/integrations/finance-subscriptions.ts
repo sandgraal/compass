@@ -1,0 +1,209 @@
+/**
+ * Subscription audit — detects recurring charges, computes annualized cost,
+ * and surfaces zombies (no charge in 60-180 days but historically recurring)
+ * + duplicates (same merchant on multiple accounts) + price-bump suspects.
+ *
+ * Filters to subscription-like categories so groceries/restaurants don't
+ * pollute the result. Only-monthly/weekly/biweekly/quarterly/semi-annual/yearly
+ * cadences get reported; "irregular" is dropped.
+ */
+
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
+import * as schema from '../db/schema'
+
+const SUB_CATEGORIES = new Set([
+  'Subscriptions',
+  'Housing', // phone, internet, utilities — recurring fees
+  'Insurance',
+  'Education',
+  'Charity',
+  'Gifts',
+  'Entertainment',
+  'Fees'
+])
+
+export type SubscriptionStatus = 'active' | 'zombie' | 'expired'
+export type Cadence = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'semi-annual' | 'yearly'
+
+export type Subscription = {
+  merchant: string
+  account: string
+  category: string
+  subcategory: string
+  cadence: Cadence
+  medianAmount: number
+  minAmount: number
+  maxAmount: number
+  annualCost: number
+  firstSeen: string
+  lastSeen: string
+  daysSinceLast: number
+  nCharges: number
+  status: SubscriptionStatus
+  priceBump: boolean
+}
+
+export type SubscriptionAudit = {
+  totalActiveAnnual: number
+  active: Subscription[]
+  zombies: Subscription[]
+  expired: Subscription[]
+  duplicates: { merchant: string; accounts: string[]; combinedAnnual: number }[]
+}
+
+const PER_YEAR: Record<Cadence, number> = {
+  weekly: 52,
+  biweekly: 26,
+  monthly: 12,
+  quarterly: 4,
+  'semi-annual': 2,
+  yearly: 1
+}
+
+function normalizeMerchant(desc: string): string {
+  let d = desc.toLowerCase().trim()
+  d = d.replace(/^payment to /, '')
+  d = d.replace(/^aplpay\s+/, '')
+  d = d.replace(/\b\d{4,}\b/g, '') // strip transaction IDs
+  d = d.replace(/\b(inc|llc|ltd|corp|co)\.?\b/g, '')
+  d = d.replace(/[*#]/g, ' ')
+  d = d.replace(/\b(com|net|io|co|ai)\b/g, '')
+  d = d.replace(/\s+/g, ' ').trim()
+  d = d.replace(/^[,.\-/]+|[,.\-/]+$/g, '').trim()
+  return d.split(' ').slice(0, 4).join(' ')
+}
+
+function median(nums: number[]): number {
+  const sorted = [...nums].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
+}
+
+function detectCadence(dates: Date[]): Cadence | null {
+  if (dates.length < 2) return null
+  const gaps: number[] = []
+  for (let i = 0; i < dates.length - 1; i++) {
+    const ms = dates[i + 1].getTime() - dates[i].getTime()
+    gaps.push(Math.round(ms / 86400000))
+  }
+  const med = median(gaps)
+  if (med >= 25 && med <= 35) return 'monthly'
+  if (med >= 6 && med <= 9) return 'weekly'
+  if (med >= 12 && med <= 16) return 'biweekly'
+  if (med >= 80 && med <= 100) return 'quarterly'
+  if (med >= 175 && med <= 200) return 'semi-annual'
+  if (med >= 350 && med <= 380) return 'yearly'
+  return null
+}
+
+export function auditSubscriptions(
+  db: BetterSQLite3Database<typeof schema>,
+  options: { today?: Date; activeWindowDays?: number; zombieWindowDays?: number } = {}
+): SubscriptionAudit {
+  const today = options.today ?? new Date()
+  const activeWindow = options.activeWindowDays ?? 60
+  const zombieWindow = options.zombieWindowDays ?? 180
+
+  // Pull rows from sub-like categories, expenses only.
+  const rows = db
+    .select({
+      date: schema.financeTransactions.date,
+      amount: schema.financeTransactions.amount,
+      description: schema.financeTransactions.description,
+      account: schema.financeTransactions.accountId,
+      category: schema.financeTransactions.category,
+      subcategory: schema.financeTransactions.subcategory
+    })
+    .from(schema.financeTransactions)
+    .all()
+
+  // Resolve account names (the FK lookup once)
+  const accounts = db.select().from(schema.financeAccounts).all()
+  const accountById = new Map(accounts.map((a) => [a.id, a.name]))
+
+  const groups = new Map<string, typeof rows>()
+  for (const r of rows) {
+    if (r.amount >= 0) continue
+    const cat = r.category ?? 'Uncategorized'
+    if (!SUB_CATEGORIES.has(cat)) continue
+    if ((r.subcategory ?? '') === 'Interest') continue // CC interest, not a sub
+    const m = normalizeMerchant(r.description)
+    if (!m) continue
+    const acctName = (r.account != null && accountById.get(r.account)) || '—'
+    const key = `${m}::${acctName}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(r)
+  }
+
+  const subs: Subscription[] = []
+  for (const [key, entries] of groups) {
+    if (entries.length < 3) continue
+    const sorted = entries.sort((a, b) => a.date.localeCompare(b.date))
+    const dates = sorted.map((e) => new Date(e.date))
+    const cadence = detectCadence(dates)
+    if (!cadence) continue
+    const amounts = sorted.map((e) => Math.abs(e.amount))
+    const med = median(amounts)
+    const min = Math.min(...amounts)
+    const max = Math.max(...amounts)
+    const last = dates[dates.length - 1]
+    const daysSinceLast = Math.floor((today.getTime() - last.getTime()) / 86400000)
+    let status: SubscriptionStatus
+    if (daysSinceLast > zombieWindow) status = 'expired'
+    else if (daysSinceLast > activeWindow) status = 'zombie'
+    else status = 'active'
+    const priceBump = max - min > 0.5 * med && med > 5
+
+    const [merchant, account] = key.split('::')
+    subs.push({
+      merchant,
+      account,
+      category: sorted[0].category ?? 'Uncategorized',
+      subcategory: sorted[0].subcategory ?? '',
+      cadence,
+      medianAmount: Math.round(med * 100) / 100,
+      minAmount: Math.round(min * 100) / 100,
+      maxAmount: Math.round(max * 100) / 100,
+      annualCost: Math.round(med * PER_YEAR[cadence] * 100) / 100,
+      firstSeen: sorted[0].date,
+      lastSeen: sorted[sorted.length - 1].date,
+      daysSinceLast,
+      nCharges: entries.length,
+      status,
+      priceBump
+    })
+  }
+
+  subs.sort((a, b) => b.annualCost - a.annualCost)
+  const active = subs.filter((s) => s.status === 'active')
+  const zombies = subs.filter((s) => s.status === 'zombie')
+  const expired = subs.filter((s) => s.status === 'expired')
+
+  // Duplicates: same merchant key on >1 account.
+  const byMerchant = new Map<string, Subscription[]>()
+  for (const s of subs) {
+    if (!byMerchant.has(s.merchant)) byMerchant.set(s.merchant, [])
+    byMerchant.get(s.merchant)!.push(s)
+  }
+  const duplicates: SubscriptionAudit['duplicates'] = []
+  for (const [m, list] of byMerchant) {
+    if (list.length < 2) continue
+    duplicates.push({
+      merchant: m,
+      accounts: list.map((s) => s.account),
+      combinedAnnual: Math.round(list.reduce((sum, s) => sum + s.annualCost, 0) * 100) / 100
+    })
+  }
+  duplicates.sort((a, b) => b.combinedAnnual - a.combinedAnnual)
+
+  return {
+    totalActiveAnnual: Math.round(active.reduce((sum, s) => sum + s.annualCost, 0) * 100) / 100,
+    active,
+    zombies,
+    expired,
+    duplicates
+  }
+}
+
+// Exported for unit tests on pure helpers.
+export const _internal = { normalizeMerchant, detectCadence, median }

@@ -13,6 +13,8 @@ import { basename, join, parse } from 'node:path'
 import { inArray } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
+import { applyAtmSplit } from './finance-atm-split'
+import { tagGeoAndPurpose } from './finance-geo'
 
 // ---------- Types ----------
 export type RawTxn = {
@@ -282,6 +284,97 @@ const usaa: Parser = {
   }
 }
 
+// ---------- Rocket Money ----------
+// Export aggregator (rocketmoney.com) → 15-column CSV. Sign convention: expenses
+// are POSITIVE in RM exports (we flip so expenses are negative, matching every
+// other parser). Account names are user-defined and need normalizing to the
+// canonical labels other parsers emit. Rows the user has flagged "Ignored From:
+// everything" in RM are skipped — those are disputes / data errors RM has
+// already told us to ignore.
+const RM_ACCOUNT_NORMALIZE: Record<string, string> = {
+  'chris checking': 'USAA Checking',
+  'chris savings': 'USAA Savings',
+  'platinum card®': 'Amex Platinum',
+  'platinum card': 'Amex Platinum',
+  'american express card': 'Amex Everyday',
+  'hilton honors card': 'Amex Hilton',
+  'hilton honors surpass® card': 'Amex Hilton Surpass',
+  'hilton honors surpass card': 'Amex Hilton Surpass',
+  paypal: 'PayPal',
+  'paypal credit': 'PayPal Credit',
+  'yami checking': 'Yami Checking',
+  'enndustrious checking': 'Enndustrious Checking'
+}
+
+const rocketMoney: Parser = {
+  name: 'Rocket Money',
+  matches: (h) =>
+    h.includes('original date') && h.includes('account name') && h.includes('institution name'),
+  parse: (headers, rows, file, _hint) => {
+    const h = headers.map((c) => c.trim().toLowerCase())
+    const di = h.indexOf('date')
+    const ai = h.indexOf('amount')
+    const accI = h.indexOf('account name')
+    const descI = h.indexOf('description')
+    const nameI = h.indexOf('name')
+    const customI = h.indexOf('custom name')
+    const catI = h.indexOf('category')
+    const ignoredI = h.indexOf('ignored from')
+    const tagsI = h.indexOf('transaction tags')
+
+    return rows.flatMap((r) => {
+      try {
+        // Skip txns the user already told RM to ignore from everything.
+        if (ignoredI !== -1 && (r[ignoredI] ?? '').trim().toLowerCase() === 'everything') {
+          return []
+        }
+
+        const amount = -parseMoney(r[ai]) // flip RM's expense-positive convention
+        const acctRaw = (r[accI] ?? '').trim()
+        const account = RM_ACCOUNT_NORMALIZE[acctRaw.toLowerCase()] ?? acctRaw
+
+        // Description preference: Custom Name > Description > Name.
+        let description = ''
+        for (const idx of [customI, descI, nameI]) {
+          if (idx !== -1 && (r[idx] ?? '').trim()) {
+            description = r[idx].trim()
+            break
+          }
+        }
+        if (!description) return []
+
+        // Carry RM's own category as a `rm:` token in notes so the categorizer
+        // can use it as a fallback when no merchant rule matches.
+        const notesParts: string[] = []
+        if (catI !== -1 && (r[catI] ?? '').trim()) {
+          notesParts.push(`rm:${r[catI].trim()}`)
+        }
+        if (tagsI !== -1 && (r[tagsI] ?? '').trim()) {
+          notesParts.push(`tags:${r[tagsI].trim()}`)
+        }
+        if (ignoredI !== -1 && (r[ignoredI] ?? '').trim()) {
+          notesParts.push(`ignored-from:${r[ignoredI].trim()}`)
+        }
+
+        const date = parseDate(r[di])
+        return [
+          {
+            date,
+            amount,
+            description,
+            account,
+            notes: notesParts.length ? notesParts.join(' | ') : undefined,
+            sourceFile: file,
+            hash: hashTxn(date, amount, description, account)
+          }
+        ]
+      } catch {
+        return []
+      }
+    })
+  }
+}
+
 const generic: Parser = {
   name: 'Generic',
   matches: () => true,
@@ -317,7 +410,9 @@ const generic: Parser = {
   }
 }
 
-const PARSERS: Parser[] = [chase, capitalOne, discover, amex, boa, usaa, generic]
+// Rocket Money first — its 15-column signature (Original Date + Account Name +
+// Institution Name together) is unambiguous and must match before generic.
+const PARSERS: Parser[] = [rocketMoney, chase, capitalOne, discover, amex, boa, usaa, generic]
 
 // ---------- CSV reader (minimal, no external dep) ----------
 function readCsv(path: string): { headers: string[]; rows: string[][] } {
@@ -403,7 +498,11 @@ export async function ingestCsvFolder(
         .replace(/[_-]+/g, ' ')
         .trim()
     const parsed = parser.parse(headers, rows, f, hint)
-    const txns = rules.length ? categorize(parsed, rules) : parsed
+    const categorized = rules.length ? categorize(parsed, rules) : parsed
+    // Tag every categorized txn with geo (CR/US/etc.) + purpose (capex/household/…
+    // for CR rows). Stored in `notes` as `geo:X | purpose:Y` tokens so queries
+    // can filter without a schema migration. Idempotent on re-ingest.
+    const txns = tagGeoAndPurpose(categorized)
     const fresh = txns.filter((t) => !existingHashes.has(t.hash))
 
     for (const t of fresh) {
@@ -431,10 +530,125 @@ export async function ingestCsvFolder(
     result.duplicatesDropped += txns.length - fresh.length
     result.perFile.push({ file: f, bank: parser.name, parsed: txns.length, new: fresh.length })
   }
+
+  // After all files are ingested, run the CR ATM 70/30 split. Idempotent.
+  if (result.newTransactions > 0) {
+    applyAtmSplit(db)
+  }
+
   return result
 }
 
-// Categorizer — apply rules to a freshly-parsed batch.
+// Smart-fallback regex for Costa Rica ATM IDs. Rocket Money / USAA tag ATM
+// withdrawals with descriptions like "020004031 CARTAGO" or "020029116 SAN JOSE".
+// Catching these without per-machine rules keeps categories.json from bloating
+// with hundreds of one-off ATM IDs.
+const ATM_ID_RE = /\b020\d{4,6}\b/
+
+// Map Rocket Money's auto-categorization taxonomy to Compass's (category, subcategory).
+// Used as a fallback when no merchant rule matches AND the txn carries an
+// `rm:CATEGORY` token in its notes (set by the Rocket Money parser). This buys
+// us decent coverage on long-tail merchants without needing a hand-written rule
+// for every taqueria in Cartago.
+const RM_CATEGORY_MAP: Record<string, [string, string]> = {
+  groceries: ['Food & Drink', 'Groceries'],
+  restaurants: ['Food & Drink', 'Restaurants'],
+  'coffee shops': ['Food & Drink', 'Coffee'],
+  'fast food': ['Food & Drink', 'Restaurants'],
+  'alcohol & bars': ['Food & Drink', 'Bars'],
+  'food delivery': ['Food & Drink', 'Delivery'],
+  'dining & drinks': ['Food & Drink', 'Restaurants'],
+  shopping: ['Shopping', ''],
+  clothing: ['Shopping', 'Clothing'],
+  electronics: ['Shopping', 'Electronics'],
+  'home improvement': ['Property', 'Construction — materials'],
+  'home & garden': ['Property', 'Construction — materials'],
+  furnishings: ['Property', 'Furnishings'],
+  'household supplies': ['Property', 'Supplies'],
+  'personal care': ['Personal', 'Care'],
+  pharmacy: ['Health', 'Pharmacy'],
+  medical: ['Health', 'Medical'],
+  doctor: ['Health', 'Doctor'],
+  dentist: ['Health', 'Dentist'],
+  'gas & fuel': ['Transportation', 'Gas'],
+  'auto & transport': ['Transportation', 'Auto'],
+  'auto payment': ['Transportation', 'Auto'],
+  'service & parts': ['Transportation', 'Service'],
+  parking: ['Transportation', 'Parking'],
+  'public transit': ['Transportation', 'Transit'],
+  'taxi & ride share': ['Transportation', 'Rideshare'],
+  'air travel': ['Travel', 'Flights'],
+  hotel: ['Travel', 'Hotel'],
+  'rental car': ['Travel', 'Car Rental'],
+  vacation: ['Travel', 'Other'],
+  'travel & vacation': ['Travel', 'Other'],
+  rent: ['Housing', 'Rent'],
+  mortgage: ['Housing', 'Mortgage'],
+  utilities: ['Housing', 'Utilities'],
+  'bills & utilities': ['Housing', 'Utilities'],
+  internet: ['Housing', 'Internet'],
+  'mobile phone': ['Housing', 'Phone'],
+  'costa rica bills': ['Housing', 'Utilities'],
+  subscriptions: ['Subscriptions', ''],
+  software: ['Subscriptions', 'Software'],
+  entertainment: ['Entertainment', ''],
+  'entertainment & rec.': ['Entertainment', 'Recreation'],
+  'entertainment & rec': ['Entertainment', 'Recreation'],
+  'movies & dvds': ['Entertainment', 'Movies'],
+  music: ['Entertainment', 'Music'],
+  'newspapers & magazines': ['Entertainment', 'Media'],
+  fitness: ['Health', 'Fitness'],
+  gym: ['Health', 'Fitness'],
+  education: ['Education', ''],
+  books: ['Education', 'Books'],
+  'atm fee': ['Fees', 'ATM'],
+  'bank fee': ['Fees', 'Bank'],
+  'service fee': ['Fees', 'Service'],
+  'finance charge': ['Fees', 'Interest'],
+  'credit card payment': ['Transfers', 'CC Payment'],
+  'loan payment': ['Transfers', 'Loan Payment'],
+  transfer: ['Transfers', ''],
+  cash: ['Cash', 'ATM'],
+  'cash & checks': ['Cash', 'ATM'],
+  atm: ['Cash', 'ATM'],
+  check: ['Transfers', 'Check'],
+  income: ['Income', ''],
+  paycheck: ['Income', 'Salary'],
+  'interest income': ['Income', 'Interest'],
+  'investment income': ['Income', 'Investment'],
+  'business income': ['Income', 'Business'],
+  reimbursement: ['Income', 'Reimbursement'],
+  gift: ['Gifts', ''],
+  charity: ['Gifts', 'Charity'],
+  'charitable donations': ['Gifts', 'Charity'],
+  taxes: ['Taxes', ''],
+  pets: ['Pets', ''],
+  kids: ['Kids', ''],
+  'home services': ['Property', 'Services'],
+  'lawn & garden': ['Property', 'Garden'],
+  'office supplies': ['Business', 'Supplies'],
+  advertising: ['Business', 'Advertising'],
+  legal: ['Business', 'Legal'],
+  miscellaneous: ['Uncategorized', ''],
+  uncategorized: ['Uncategorized', '']
+}
+
+function rmCategoryFromNotes(notes: string | undefined): [string, string] | null {
+  if (!notes) return null
+  for (const tok of notes.split('|')) {
+    const t = tok.trim()
+    if (t.startsWith('rm:')) {
+      const k = t.slice(3).trim().toLowerCase()
+      if (RM_CATEGORY_MAP[k]) return RM_CATEGORY_MAP[k]
+    }
+  }
+  return null
+}
+
+// Categorizer — apply rules to a freshly-parsed batch with two smart fallbacks:
+//   1. CR ATM ID regex (`020\d{4,6}`) → Cash / ATM withdrawal
+//   2. Rocket Money's own auto-category, translated via RM_CATEGORY_MAP
+// Both fire only after every user/seed rule has missed.
 export function categorize(
   txns: RawTxn[],
   rules: { pattern: string; category: string; subcategory?: string | null }[]
@@ -444,6 +658,14 @@ export function categorize(
     const desc = t.description.toLowerCase()
     const hit = sorted.find((r) => desc.includes(r.pattern.toLowerCase()))
     if (hit) return { ...t, category: hit.category, subcategory: hit.subcategory ?? undefined }
+    if (ATM_ID_RE.test(desc)) {
+      return { ...t, category: 'Cash', subcategory: 'ATM withdrawal' }
+    }
+    const fallback = rmCategoryFromNotes(t.notes)
+    if (fallback) {
+      const [cat, sub] = fallback
+      return { ...t, category: cat, subcategory: sub || undefined }
+    }
     return { ...t, category: 'Uncategorized' }
   })
 }

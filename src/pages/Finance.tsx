@@ -57,8 +57,31 @@ type Rule = {
   subcategory: string | null
   priority: number | null
 }
+type Subscription = {
+  merchant: string
+  account: string
+  category: string
+  subcategory: string
+  cadence: string
+  medianAmount: number
+  minAmount: number
+  maxAmount: number
+  annualCost: number
+  firstSeen: string
+  lastSeen: string
+  daysSinceLast: number
+  nCharges: number
+  status: 'active' | 'zombie' | 'expired'
+  priceBump: boolean
+}
+type GeoSummary = {
+  geo: { name: string; amount: number; count: number }[]
+  purpose: { name: string; amount: number }[]
+  crCapex: number
+  since: string | null
+}
 
-type Tab = 'overview' | 'transactions' | 'accounts' | 'rules'
+type Tab = 'overview' | 'transactions' | 'accounts' | 'rules' | 'crsubs'
 
 const ACCOUNT_TYPES = [
   { value: 'checking', label: 'Checking' },
@@ -106,6 +129,20 @@ export default function Finance(): JSX.Element {
   } | null>(null)
   const [vaultSeeded, setVaultSeeded] = useState(0)
   const [detectedAccounts, setDetectedAccounts] = useState<string[]>([])
+  const [subscriptions, setSubscriptions] = useState<{
+    active: Subscription[]
+    zombies: {
+      merchant: string
+      account: string
+      cadence: string
+      annualCost: number
+      lastSeen: string
+    }[]
+    duplicates: { merchant: string; accounts: string[]; combinedAnnual: number }[]
+    totalActiveAnnual: number
+  } | null>(null)
+  const [geoSummary, setGeoSummary] = useState<GeoSummary | null>(null)
+  const [excludeProperty, setExcludeProperty] = useState(false)
 
   const { toast: showToast } = useToast()
   const confirm = useConfirm()
@@ -116,18 +153,34 @@ export default function Finance(): JSX.Element {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron || !window.api.finance) return
     try {
-      const [t, a, d, b, r] = await Promise.all([
+      // Last-12-months window for the geo summary so the headline reflects
+      // the bulk of activity, not just the few days of the current month.
+      const since = new Date()
+      since.setFullYear(since.getFullYear() - 1)
+      const sinceIso = since.toISOString().slice(0, 10)
+      const [t, a, d, b, r, s, g] = await Promise.all([
         window.api.finance.getTransactions({ month, limit: 200 }),
         window.api.finance.getAccounts(),
         window.api.finance.getDebtSummary(),
         window.api.finance.getBudgetStatus(month),
-        window.api.finance.getRules()
+        window.api.finance.getRules(),
+        window.api.finance.getSubscriptions().catch(() => null),
+        window.api.finance.getGeoSummary({ since: sinceIso }).catch(() => null)
       ])
       setTxns(t)
       setAccounts(a)
       setDebts(d.debts as Account[])
       setBudget(b.lines)
       setRules(r)
+      if (s) {
+        setSubscriptions({
+          active: s.active as Subscription[],
+          zombies: s.zombies,
+          duplicates: s.duplicates,
+          totalActiveAnnual: s.totalActiveAnnual
+        })
+      }
+      if (g) setGeoSummary(g)
     } catch (err) {
       console.error('[finance] refresh failed', err)
       showToast('Failed to load finance data.', 'error')
@@ -422,7 +475,8 @@ export default function Finance(): JSX.Element {
             ['overview', 'Overview'],
             ['transactions', 'Transactions'],
             ['accounts', 'Accounts'],
-            ['rules', 'Rules']
+            ['rules', 'Rules'],
+            ['crsubs', 'CR & Subs']
           ] as const
         ).map(([key, label]) => (
           <button
@@ -452,8 +506,14 @@ export default function Finance(): JSX.Element {
           totalActual={totalActual}
           debts={debts}
           budget={budget}
+          crCapex={geoSummary?.crCapex ?? 0}
+          subsAnnual={subscriptions?.totalActiveAnnual ?? 0}
+          excludeProperty={excludeProperty}
+          onToggleExcludeProperty={() => setExcludeProperty((v) => !v)}
         />
       )}
+
+      {tab === 'crsubs' && <CrSubsTab geoSummary={geoSummary} subscriptions={subscriptions} />}
 
       {tab === 'transactions' && (
         <TransactionsTab
@@ -492,7 +552,11 @@ function Overview({
   totalBudget,
   totalActual,
   debts,
-  budget
+  budget,
+  crCapex,
+  subsAnnual,
+  excludeProperty,
+  onToggleExcludeProperty
 }: {
   totalDebt: number
   wAPR: number
@@ -503,7 +567,15 @@ function Overview({
   totalActual: number
   debts: Account[]
   budget: BudgetLine[]
+  crCapex: number
+  subsAnnual: number
+  excludeProperty: boolean
+  onToggleExcludeProperty: () => void
 }): JSX.Element {
+  // Property/Construction is the Costa Rica Airbnb capex — at 30-40% of total
+  // spend it dominates every category view, so the user can toggle it out to
+  // see the actual household-spend pattern.
+  const visibleBudget = excludeProperty ? budget.filter((b) => b.category !== 'Property') : budget
   return (
     <>
       <div className="grid grid-cols-4 gap-3 mb-6">
@@ -535,6 +607,25 @@ function Overview({
         />
       </div>
 
+      {(crCapex > 0 || subsAnnual > 0) && (
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          {crCapex > 0 && (
+            <Tile
+              label="CR build (capex, 12mo)"
+              value={fmtMoney(crCapex)}
+              sub="Airbnb construction investment"
+            />
+          )}
+          {subsAnnual > 0 && (
+            <Tile
+              label="Subscriptions"
+              value={`${fmtMoney(subsAnnual / 12)}/mo`}
+              sub={`${fmtMoney(subsAnnual)}/yr active`}
+            />
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-6 mb-6">
         <div className="bg-card border border-border rounded-xl p-5">
           <h3 className="text-sm font-semibold mb-3">Debts (avalanche order)</h3>
@@ -565,12 +656,27 @@ function Overview({
         </div>
 
         <div className="bg-card border border-border rounded-xl p-5">
-          <h3 className="text-sm font-semibold mb-3">This month — top categories</h3>
-          {budget.length === 0 ? (
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold">This month — top categories</h3>
+            <button
+              type="button"
+              onClick={onToggleExcludeProperty}
+              className={cn(
+                'text-xs px-2 py-1 rounded border transition-colors',
+                excludeProperty
+                  ? 'bg-primary/10 text-primary border-primary/40'
+                  : 'border-border text-muted-foreground hover:text-foreground'
+              )}
+              title="Hide CR Airbnb construction (Property) from the category view — its scale distorts everything else."
+            >
+              {excludeProperty ? '✓ ' : ''}Hide Property
+            </button>
+          </div>
+          {visibleBudget.length === 0 ? (
             <p className="text-sm text-muted-foreground">No budget configured.</p>
           ) : (
             <div className="space-y-2">
-              {[...budget]
+              {[...visibleBudget]
                 .sort((a, b) => b.actual - a.actual)
                 .slice(0, 6)
                 .map((b) => (
@@ -600,6 +706,176 @@ function Overview({
         </div>
       </div>
     </>
+  )
+}
+
+// ─── CR & Subscriptions Tab ──────────────────────────────────────────────────
+
+function CrSubsTab({
+  geoSummary,
+  subscriptions
+}: {
+  geoSummary: GeoSummary | null
+  subscriptions: {
+    active: Subscription[]
+    zombies: {
+      merchant: string
+      account: string
+      cadence: string
+      annualCost: number
+      lastSeen: string
+    }[]
+    duplicates: { merchant: string; accounts: string[]; combinedAnnual: number }[]
+    totalActiveAnnual: number
+  } | null
+}): JSX.Element {
+  const totalGeo = geoSummary?.geo.reduce((s, g) => s + g.amount, 0) ?? 0
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-6">
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h3 className="text-sm font-semibold mb-1">Geography of spend</h3>
+          <p className="text-xs text-muted-foreground mb-3">
+            Last 12 months · derived from <code>geo:</code> tags on each transaction
+          </p>
+          {!geoSummary || geoSummary.geo.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No geography tags yet — re-ingest a CSV to populate.
+            </p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="text-xs text-muted-foreground">
+                <tr>
+                  <th className="text-left">Country</th>
+                  <th className="text-right">Spend</th>
+                  <th className="text-right">Txns</th>
+                  <th className="text-right">Share</th>
+                </tr>
+              </thead>
+              <tbody>
+                {geoSummary.geo.map((g) => (
+                  <tr key={g.name} className="border-t border-border">
+                    <td className="py-1.5">{g.name}</td>
+                    <td className="text-right">{fmtMoney(g.amount)}</td>
+                    <td className="text-right">{g.count.toLocaleString()}</td>
+                    <td className="text-right">
+                      {totalGeo > 0 ? `${((g.amount / totalGeo) * 100).toFixed(1)}%` : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h3 className="text-sm font-semibold mb-1">Costa Rica purpose breakdown</h3>
+          <p className="text-xs text-muted-foreground mb-3">
+            Capex (Airbnb build) · Operating · Household · Travel
+          </p>
+          {!geoSummary || geoSummary.purpose.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No CR transactions tagged.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="text-xs text-muted-foreground">
+                <tr>
+                  <th className="text-left">Purpose</th>
+                  <th className="text-right">Spend</th>
+                </tr>
+              </thead>
+              <tbody>
+                {geoSummary.purpose.map((p) => (
+                  <tr key={p.name} className="border-t border-border">
+                    <td className="py-1.5 capitalize">{p.name}</td>
+                    <td className="text-right">{fmtMoney(p.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold">Active subscriptions</h3>
+          {subscriptions && (
+            <span className="text-xs text-muted-foreground">
+              {subscriptions.active.length} active · {fmtMoney(subscriptions.totalActiveAnnual)}/yr
+              · {fmtMoney(subscriptions.totalActiveAnnual / 12)}/mo
+            </span>
+          )}
+        </div>
+        {!subscriptions || subscriptions.active.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No subscriptions detected. Need ≥3 charges with consistent cadence to qualify.
+          </p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="text-xs text-muted-foreground">
+              <tr>
+                <th className="text-left">Merchant</th>
+                <th className="text-left">Account</th>
+                <th className="text-left">Cadence</th>
+                <th className="text-right">Each</th>
+                <th className="text-right">Annual</th>
+                <th className="text-left">Last seen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {subscriptions.active.map((s) => (
+                <tr key={`${s.merchant}::${s.account}`} className="border-t border-border">
+                  <td className="py-1.5">{s.merchant}</td>
+                  <td className="text-muted-foreground">{s.account}</td>
+                  <td>{s.cadence}</td>
+                  <td className="text-right">{fmtMoney(s.medianAmount)}</td>
+                  <td className="text-right font-medium">{fmtMoney(s.annualCost)}</td>
+                  <td className="text-muted-foreground">{s.lastSeen}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {subscriptions && subscriptions.zombies.length > 0 && (
+        <div className="bg-card border border-amber-500/30 rounded-xl p-5">
+          <h3 className="text-sm font-semibold mb-1">
+            Zombie subscriptions{' '}
+            <span className="text-xs text-muted-foreground">— verify cancellation</span>
+          </h3>
+          <p className="text-xs text-muted-foreground mb-3">
+            No charge in 60-180 days but historically recurring.
+          </p>
+          <ul className="space-y-1 text-sm">
+            {subscriptions.zombies.map((z) => (
+              <li key={`${z.merchant}::${z.account}`} className="text-muted-foreground">
+                <span className="text-foreground font-medium">{z.merchant}</span> ({z.account},{' '}
+                {z.cadence}) — last seen {z.lastSeen}, was {fmtMoney(z.annualCost)}/yr
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {subscriptions && subscriptions.duplicates.length > 0 && (
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h3 className="text-sm font-semibold mb-1">Possible duplicates</h3>
+          <p className="text-xs text-muted-foreground mb-3">
+            Same merchant billed across multiple accounts (could be PayPal-funded card showing on
+            both).
+          </p>
+          <ul className="space-y-1 text-sm">
+            {subscriptions.duplicates.slice(0, 10).map((d) => (
+              <li key={d.merchant} className="text-muted-foreground">
+                <span className="text-foreground font-medium">{d.merchant}</span> on{' '}
+                {d.accounts.join(', ')} — combined {fmtMoney(d.combinedAnnual)}/yr
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   )
 }
 
