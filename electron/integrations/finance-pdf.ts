@@ -77,25 +77,36 @@ function resolveYearlessStatementYear(
 
 const MONTHS: Record<string, string> = {
   jan: '01',
+  january: '01',
   feb: '02',
+  february: '02',
   mar: '03',
+  march: '03',
   apr: '04',
+  april: '04',
   may: '05',
   jun: '06',
+  june: '06',
   jul: '07',
+  july: '07',
   aug: '08',
+  august: '08',
   sep: '09',
   sept: '09',
+  september: '09',
   oct: '10',
+  october: '10',
   nov: '11',
-  dec: '12'
+  november: '11',
+  dec: '12',
+  december: '12'
 }
 
 /**
  * Try to parse a date in any of the formats statement PDFs use:
  *   - ISO YYYY-MM-DD
  *   - M/D/YYYY or MM/DD/YYYY (and 2-digit-year variants)
- *   - "Mon DD" or "Mon DD YYYY" (e.g. "Apr 03" or "Apr 03 2026")
+ *   - "Mon DD" / "Month DD" with optional year (e.g. "Apr 03" or "September 10, 2026")
  *
  * For yearless dates, caller can also pass `closingMonth` so statements that
  * span a year boundary (e.g. closing in January with a `12/31` row) roll back
@@ -125,8 +136,8 @@ export function tryParseStatementDate(
     if (year === undefined || !isValidDateParts(year, month, day)) return null
     return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
   }
-  // "Mon DD" or "Mon DD, YYYY" or "Mon DD YYYY"
-  const m = t.match(/^([A-Za-z]{3,4})[.\s]+(\d{1,2})(?:[,\s]+(\d{2,4}))?$/)
+  // "Mon DD" / "Month DD" with optional comma+year
+  const m = t.match(/^([A-Za-z]{3,9})[.\s]+(\d{1,2})(?:[,\s]+(\d{2,4}))?$/)
   if (m) {
     const mon = MONTHS[m[1].toLowerCase()]
     if (!mon) return null
@@ -572,9 +583,9 @@ export const genericPdf: PdfExtractor = {
     const { defaultYear, closingMonth } = findStatementDateContext(lines)
     const accountName = hint || basename(file, '.pdf')
 
-    // ISO date OR M/D[/YY]] OR "Mon DD[ YYYY]" — captured as a single chunk.
+    // ISO date OR M/D[/YY]] OR month-name date — captured as a single chunk.
     const dateChunk =
-      '(\\d{4}-\\d{2}-\\d{2}|\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?|[A-Za-z]{3,4}\\.?\\s+\\d{1,2}(?:[,\\s]+\\d{2,4})?)'
+      '(\\d{4}-\\d{2}-\\d{2}|\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?|[A-Za-z]{3,9}\\.?\\s+\\d{1,2}(?:[,\\s]+\\d{2,4})?)'
     // Trailing '-' (e.g. "500.00-") is a credit indicator used by some banks.
     const amtChunk = '(-?\\$?[\\d,]+\\.\\d{2}-?|\\(\\$?[\\d,]+\\.\\d{2}\\))'
     const re = new RegExp(`^${dateChunk}\\s+(.+?)\\s+${amtChunk}\\s*$`)

@@ -41,6 +41,11 @@ describe('tryParseStatementDate', () => {
     expect(tryParseStatementDate('Apr 03 2026')).toBe('2026-04-03')
   })
 
+  it('parses full month names', () => {
+    expect(tryParseStatementDate('September 10, 2026')).toBe('2026-09-10')
+    expect(tryParseStatementDate('December 31', 2026, 1)).toBe('2025-12-31')
+  })
+
   it('parses "Apr 03" with defaultYear', () => {
     expect(tryParseStatementDate('Apr 03', 2026)).toBe('2026-04-03')
   })
@@ -284,6 +289,17 @@ describe('Generic PDF extractor', () => {
     const result = parsePdfText(text, '/tmp/x.pdf', 'Anonymous')
     expect(result.bank).toBe('Generic (PDF)')
     expect(result.txns.length).toBe(3)
+  })
+
+  it('accepts full month-name dates in generic rows', () => {
+    const text = [
+      'Anonymous Bank',
+      'September 10, 2026 FOO 10.00',
+      'September 11, 2026 BAR 20.00'
+    ].join('\n')
+    const result = parsePdfText(text, '/tmp/x.pdf', 'Anonymous')
+    expect(result.bank).toBe('Generic (PDF)')
+    expect(result.txns.map((t) => t.date)).toEqual(['2026-09-10', '2026-09-11'])
   })
 })
 
