@@ -46,6 +46,23 @@ function readFinanceAccountColumns(dbPath: string): Array<{
   }
 }
 
+function readMigrationRows(dbPath: string): Array<{ hash: string; created_at: number | null }> {
+  const sqlite = new Database(dbPath)
+  try {
+    return sqlite
+      .prepare('SELECT hash, created_at FROM __drizzle_migrations ORDER BY created_at, hash')
+      .all() as Array<{ hash: string; created_at: number | null }>
+  } finally {
+    sqlite.close()
+  }
+}
+
+function migrationHash(tag: string): string {
+  return createHash('sha256')
+    .update(readFileSync(join(__dirname, 'migrations', `${tag}.sql`), 'utf8'))
+    .digest('hex')
+}
+
 function expectInstitutionColumn(dbPath: string): void {
   const columns = readFinanceAccountColumns(dbPath)
   const institution = columns.find((column) => column.name === 'institution')
@@ -235,5 +252,28 @@ describe('initDb finance_accounts institution column', () => {
         created_at: migration.when
       }))
     )
+  })
+
+  it('records the institution migration when the column was already backfilled', async () => {
+    const home = makeTempHome()
+    const dbPath = dbPathForHome(home)
+    mkdirSync(dirname(dbPath), { recursive: true })
+    const { initDb } = await loadClientForHome(home)
+
+    await initDb()
+
+    const originalMigrationRows = readMigrationRows(dbPath)
+    const institutionHash = migrationHash('0002_zippy_sauron')
+    const sqlite = new Database(dbPath)
+    try {
+      sqlite.prepare('DELETE FROM __drizzle_migrations WHERE hash = ?').run(institutionHash)
+    } finally {
+      sqlite.close()
+    }
+
+    await initDb()
+
+    expect(readMigrationRows(dbPath)).toEqual(originalMigrationRows)
+    expectInstitutionColumn(dbPath)
   })
 })
