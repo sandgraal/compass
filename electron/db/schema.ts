@@ -134,6 +134,14 @@ export const financeAccounts = sqliteTable('finance_accounts', {
   minPayment: real('min_payment').default(0),
   creditLimit: real('credit_limit'),
   institution: text('institution').notNull().default(''),
+  // ISO 'YYYY-MM-DD'. Surfaced as a "Payments Due" reminder on the Dashboard
+  // when within the next 14 days. Populated from PDF statement metadata.
+  paymentDueDate: text('payment_due_date'),
+  // Wall-clock ms of the last successful statement-metadata auto-update. Used
+  // by Finance UI to show "synced X days ago" — auto-update gating is value-
+  // based (only writes when the existing column is null/0), not timestamp-
+  // based.
+  lastStatementSyncedAt: integer('last_statement_synced_at', { mode: 'timestamp_ms' }),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 

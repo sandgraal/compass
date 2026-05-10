@@ -21,7 +21,7 @@
 
 import { readFileSync } from 'node:fs'
 import { basename } from 'node:path'
-import type { DetectedAccount, ParsedFile, RawTxn } from './finance'
+import type { DetectedAccount, ParsedFile, RawTxn, StatementMetadata } from './finance'
 import { hashTxn, parseDate, parseMoney } from './finance'
 
 // ---------- Extractor type ----------
@@ -77,25 +77,36 @@ function resolveYearlessStatementYear(
 
 const MONTHS: Record<string, string> = {
   jan: '01',
+  january: '01',
   feb: '02',
+  february: '02',
   mar: '03',
+  march: '03',
   apr: '04',
+  april: '04',
   may: '05',
   jun: '06',
+  june: '06',
   jul: '07',
+  july: '07',
   aug: '08',
+  august: '08',
   sep: '09',
   sept: '09',
+  september: '09',
   oct: '10',
+  october: '10',
   nov: '11',
-  dec: '12'
+  november: '11',
+  dec: '12',
+  december: '12'
 }
 
 /**
  * Try to parse a date in any of the formats statement PDFs use:
  *   - ISO YYYY-MM-DD
  *   - M/D/YYYY or MM/DD/YYYY (and 2-digit-year variants)
- *   - "Mon DD" or "Mon DD YYYY" (e.g. "Apr 03" or "Apr 03 2026")
+ *   - "Mon DD" / "Month DD" with optional year (e.g. "Apr 03" or "September 10, 2026")
  *
  * For yearless dates, caller can also pass `closingMonth` so statements that
  * span a year boundary (e.g. closing in January with a `12/31` row) roll back
@@ -125,8 +136,8 @@ export function tryParseStatementDate(
     if (year === undefined || !isValidDateParts(year, month, day)) return null
     return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
   }
-  // "Mon DD" or "Mon DD, YYYY" or "Mon DD YYYY"
-  const m = t.match(/^([A-Za-z]{3,4})[.\s]+(\d{1,2})(?:[,\s]+(\d{2,4}))?$/)
+  // "Mon DD" / "Month DD" with optional comma+year
+  const m = t.match(/^([A-Za-z]{3,9})[.\s]+(\d{1,2})(?:[,\s]+(\d{2,4}))?$/)
   if (m) {
     const mon = MONTHS[m[1].toLowerCase()]
     if (!mon) return null
@@ -199,6 +210,175 @@ function findStatementDateContext(lines: string[]): {
   const year = headerSlice.match(/\b(20\d{2})\b/)
   if (year) return { defaultYear: Number.parseInt(year[1], 10) }
   return {}
+}
+
+// ---------- Statement metadata helpers ----------
+
+/**
+ * Parse a money string that may include $, commas, parens, leading minus,
+ * trailing minus. Returns `undefined` rather than NaN/throwing — metadata
+ * extractors prefer to omit a field over emitting a wrong number.
+ */
+function tryParseMoney(s: string | undefined): number | undefined {
+  if (!s) return undefined
+  try {
+    const v = parseMoney(s)
+    return Number.isFinite(v) ? v : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Parse a percentage string like "22.99%" or "22.99 %" into a decimal
+ * (0.2299). Tolerant of extra whitespace and missing percent sign.
+ * Returns undefined when the input doesn't look numeric.
+ */
+function tryParsePercent(s: string | undefined): number | undefined {
+  if (!s) return undefined
+  const m = s.replace(/[,\s]/g, '').match(/^(-?\d+(?:\.\d+)?)\s*%?/)
+  if (!m) return undefined
+  const v = Number.parseFloat(m[1])
+  if (!Number.isFinite(v)) return undefined
+  return v / 100
+}
+
+/**
+ * Search the joined statement text for a named field whose value follows on
+ * the same line (after a colon or whitespace). Patterns are tried in order;
+ * first match wins. The `valueRe` portion must match the value chunk and put
+ * the value text in capture group 1.
+ *
+ * Lines are joined with '\n' so ^/$ in patterns are line-anchored when the
+ * caller uses the `m` flag.
+ */
+function findField(
+  text: string,
+  labels: string[],
+  valueRe: string
+): { value: string; label: string } | undefined {
+  for (const label of labels) {
+    // Allow optional separator (colon, dash) and arbitrary horizontal
+    // whitespace between label and value. Restrict matching to a single line
+    // so a "label" on one line and a value on a different one doesn't
+    // collide with the next field.
+    // `\b` only fires at word-character boundaries; the label may end in `)`
+    // (e.g. "annual percentage rate (apr)") so trailing \b is unsafe. Anchor
+    // only the leading boundary.
+    const re = new RegExp(`(?:^|[^A-Za-z])${label}\\s*[:\\-]?\\s*(${valueRe})`, 'im')
+    const m = text.match(re)
+    if (m) return { value: m[1].trim(), label }
+  }
+  return undefined
+}
+
+const MONEY_RE = '\\(?-?\\$?[\\d,]+(?:\\.\\d{1,2})?\\)?-?'
+const PERCENT_RE = '-?\\d+(?:\\.\\d+)?\\s*%?'
+const DATE_RE =
+  '(?:\\d{1,2}\\/\\d{1,2}\\/\\d{2,4}|\\d{4}-\\d{2}-\\d{2}|[A-Za-z]{3,9}\\.?\\s+\\d{1,2}(?:[,\\s]+\\d{2,4})?)'
+
+/**
+ * Common metadata extraction helpers. Each bank extractor passes the joined
+ * text and gets back a partially-populated metadata object. Bank extractors
+ * call out to specific helpers and merge the results.
+ */
+function extractCommonMetadata(text: string): StatementMetadata {
+  const out: StatementMetadata = {}
+
+  // Closing date
+  const closing = findField(text, ['closing\\s+date', 'statement\\s+closing\\s+date'], DATE_RE)
+  if (closing) {
+    const d = tryParseStatementDate(closing.value)
+    if (d) out.statementClosingDate = d
+  }
+
+  // Statement period: "MM/DD/YYYY - MM/DD/YYYY" or "MM/DD/YYYY to MM/DD/YYYY"
+  const period = text.match(
+    new RegExp(
+      `statement\\s+period\\s*[:\\-]?\\s*(${DATE_RE})\\s*(?:[-–to]+)\\s*(${DATE_RE})`,
+      'im'
+    )
+  )
+  if (period) {
+    const start = tryParseStatementDate(period[1])
+    const end = tryParseStatementDate(period[2])
+    if (start) out.statementPeriodStart = start
+    if (end) out.statementPeriodEnd = end
+  }
+
+  // Payment due date — must come before "Payment Due" balance check so the
+  // date-shaped value wins over the money matcher.
+  const dueDate = findField(text, ['payment\\s+due\\s+date', 'due\\s+date'], DATE_RE)
+  if (dueDate) {
+    const d = tryParseStatementDate(dueDate.value)
+    if (d) out.paymentDueDate = d
+  }
+
+  // Minimum payment
+  const minPay = findField(
+    text,
+    [
+      'minimum\\s+payment\\s+due',
+      'minimum\\s+payment',
+      'minimum\\s+amount\\s+due',
+      'amount\\s+due'
+    ],
+    MONEY_RE
+  )
+  const minPayVal = tryParseMoney(minPay?.value)
+  if (minPayVal !== undefined) out.minimumPayment = Math.abs(minPayVal)
+
+  // New balance — try several phrasings used by banks.
+  const balance = findField(
+    text,
+    [
+      'new\\s+balance(?:\\s+total)?',
+      'statement\\s+balance',
+      'current\\s+balance',
+      'balance\\s+due',
+      'total\\s+due'
+    ],
+    MONEY_RE
+  )
+  const balanceVal = tryParseMoney(balance?.value)
+  if (balanceVal !== undefined) out.balance = Math.abs(balanceVal)
+
+  // Credit limit
+  const limit = findField(
+    text,
+    ['total\\s+credit\\s+limit', 'credit\\s+limit', 'credit\\s+line'],
+    MONEY_RE
+  )
+  const limitVal = tryParseMoney(limit?.value)
+  if (limitVal !== undefined) out.creditLimit = Math.abs(limitVal)
+
+  // APR — accept "Annual Percentage Rate", "APR", "Variable APR", etc.
+  // Take the first one we find; statements with multiple APR rows
+  // (purchases / cash advances) just report the headline rate.
+  const apr = findField(
+    text,
+    [
+      'annual\\s+percentage\\s+rate(?:\\s*\\(apr\\))?',
+      'standard\\s+purchase\\s+apr',
+      'purchase\\s+apr',
+      'variable\\s+apr',
+      'apr'
+    ],
+    PERCENT_RE
+  )
+  const aprVal = tryParsePercent(apr?.value)
+  if (aprVal !== undefined && aprVal >= 0 && aprVal < 1) out.apr = aprVal
+
+  return out
+}
+
+/**
+ * Public hook: given the full statement text and a bank name, return a
+ * best-effort StatementMetadata. Exported for tests and for CSV/xlsx
+ * pipelines that may want to opportunistically scan a sibling PDF.
+ */
+export function extractStatementMetadata(text: string): StatementMetadata {
+  return extractCommonMetadata(text)
 }
 
 // ---------- Extractor: USAA ----------
@@ -297,7 +477,8 @@ export const usaaPdf: PdfExtractor = {
       })
     }
 
-    return { bank: 'USAA (PDF)', txns, account }
+    const metadata = extractCommonMetadata(text)
+    return { bank: 'USAA (PDF)', txns, account, metadata }
   }
 }
 
@@ -378,7 +559,8 @@ export const amexPdf: PdfExtractor = {
       })
     }
 
-    return { bank: 'AMEX (PDF)', txns, account }
+    const metadata = extractCommonMetadata(text)
+    return { bank: 'AMEX (PDF)', txns, account, metadata }
   }
 }
 
@@ -401,9 +583,9 @@ export const genericPdf: PdfExtractor = {
     const { defaultYear, closingMonth } = findStatementDateContext(lines)
     const accountName = hint || basename(file, '.pdf')
 
-    // ISO date OR M/D[/YY]] OR "Mon DD[ YYYY]" — captured as a single chunk.
+    // ISO date OR M/D[/YY]] OR month-name date — captured as a single chunk.
     const dateChunk =
-      '(\\d{4}-\\d{2}-\\d{2}|\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?|[A-Za-z]{3,4}\\.?\\s+\\d{1,2}(?:[,\\s]+\\d{2,4})?)'
+      '(\\d{4}-\\d{2}-\\d{2}|\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?|[A-Za-z]{3,9}\\.?\\s+\\d{1,2}(?:[,\\s]+\\d{2,4})?)'
     // Trailing '-' (e.g. "500.00-") is a credit indicator used by some banks.
     const amtChunk = '(-?\\$?[\\d,]+\\.\\d{2}-?|\\(\\$?[\\d,]+\\.\\d{2}\\))'
     const re = new RegExp(`^${dateChunk}\\s+(.+?)\\s+${amtChunk}\\s*$`)
@@ -463,7 +645,14 @@ export const genericPdf: PdfExtractor = {
         }
       : undefined
 
-    return { bank: 'Generic (PDF)', txns, account }
+    // Conservative metadata pass: only emit if we found at least a balance OR
+    // a minimum payment value. Otherwise the regex hits on a stray "APR" or
+    // "credit limit" mention in marketing text could pollute the account row.
+    const meta = extractCommonMetadata(text)
+    const metadata =
+      meta.balance !== undefined || meta.minimumPayment !== undefined ? meta : undefined
+
+    return { bank: 'Generic (PDF)', txns, account, metadata }
   }
 }
 

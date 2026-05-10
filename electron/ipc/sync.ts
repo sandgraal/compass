@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, gte, isNotNull, isNull, or } from 'drizzle-orm'
 import { BrowserWindow, type IpcMain, Notification } from 'electron'
 import { getDb } from '../db/client'
 import {
@@ -17,10 +17,16 @@ import {
   updateGitHubKnowledge,
   updateGmailKnowledge
 } from '../knowledge/extractor'
+import { DEFAULT_OLLAMA_MODEL, detectOllama, runOllamaPrompt } from '../knowledge/ollama'
 import {
+  type CalendarInputEvent,
   type GitHubInputItem,
+  type GmailInputMessage,
+  type OllamaSyncContext,
+  extractContactsFromCalendar,
   extractContactsFromGithub,
   extractContactsFromGmail,
+  extractFactsViaOllama,
   extractOrgsFromGmail
 } from '../knowledge/suggestions'
 import { readKnowledgeFile } from '../knowledge/writer'
@@ -60,12 +66,49 @@ function getIntegrationId(db: ReturnType<typeof getDb>, service: string): number
   return row?.id ?? null
 }
 
+function normalizeSemanticToken(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function firstCellFromMarkdownRow(content: string): string | null {
+  const match = content.match(/^\|\s*([^|]+?)\s*\|/)
+  if (!match) return null
+  const normalized = normalizeSemanticToken(match[1])
+  return normalized === '' ? null : normalized
+}
+
+function candidateSemanticKey(candidate: {
+  targetPath: string
+  kind: string
+  proposedContent: string
+}): string | null {
+  if (candidate.kind === 'contact' || candidate.kind === 'employer') {
+    const firstCell = firstCellFromMarkdownRow(candidate.proposedContent)
+    if (!firstCell) return null
+    return `${candidate.kind}|${candidate.targetPath}|${firstCell}`
+  }
+  return null
+}
+
+function isOllamaSource(source: string): boolean {
+  return source.startsWith('ollama:')
+}
+
 /**
  * Run all pattern-based suggestion extractors against the latest synced data and
  * persist new candidates to `knowledge_suggestions`. Idempotent: skips any
- * (targetPath + proposedContent) pair that already exists in the table.
+ * duplicate `(targetPath + proposedContent)` and stable Ollama source keys.
+ *
+ * If the user has enabled Ollama suggestions AND Ollama is running locally,
+ * also runs the AI-augmented extractor — wrapped in its own try/catch so an
+ * Ollama failure can never block or fail the sync flow.
  */
-export function runSuggestionExtractors(githubInputsOverride?: GitHubInputItem[]): void {
+export async function runSuggestionExtractors(
+  githubInputsOverride?: GitHubInputItem[]
+): Promise<void> {
   try {
     const db = getDb()
 
@@ -76,7 +119,7 @@ export function runSuggestionExtractors(githubInputsOverride?: GitHubInputItem[]
     // Load recently synced data
     const gmailRows = db.select().from(gmailActions).all()
     // Build input shapes expected by extractors
-    const gmailInputs = gmailRows.map((r) => ({
+    const gmailInputs: GmailInputMessage[] = gmailRows.map((r) => ({
       id: String(r.id),
       threadId: r.threadId,
       subject: r.subject,
@@ -85,7 +128,7 @@ export function runSuggestionExtractors(githubInputsOverride?: GitHubInputItem[]
       date: r.receivedAt ? r.receivedAt.toISOString() : undefined
     }))
 
-    const githubInputs =
+    const githubInputs: GitHubInputItem[] =
       githubInputsOverride ??
       db
         .select()
@@ -96,20 +139,88 @@ export function runSuggestionExtractors(githubInputsOverride?: GitHubInputItem[]
           html_url: r.url,
           type: r.type as 'issue' | 'pr',
           repo: r.repo,
+          title: r.title,
           assignee: null,
           user: null,
           labels: r.labels ? (JSON.parse(r.labels) as string[]).map((n) => ({ name: n })) : []
         }))
 
-    const candidates = [
+    const calendarCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    const calendarInputs: CalendarInputEvent[] = db
+      .select({
+        externalId: calendarEvents.externalId,
+        title: calendarEvents.title,
+        description: calendarEvents.description,
+        startAt: calendarEvents.startAt
+      })
+      .from(calendarEvents)
+      .where(
+        and(
+          isNotNull(calendarEvents.description),
+          or(isNull(calendarEvents.startAt), gte(calendarEvents.startAt, calendarCutoff))
+        )
+      )
+      .all()
+
+    const regexCandidates = [
       ...extractContactsFromGmail(gmailInputs, relationshipsContent),
       ...extractOrgsFromGmail(gmailInputs, employersContent),
-      ...extractContactsFromGithub(githubInputs, relationshipsContent)
+      ...extractContactsFromGithub(githubInputs, relationshipsContent),
+      ...extractContactsFromCalendar(calendarInputs, relationshipsContent)
     ]
+    const candidates = [...regexCandidates]
+
+    // ── Optional: Ollama AI augmentation ──────────────────────────────────────
+    // Only runs when the user has opted in. Failures are logged and ignored.
+    try {
+      const ollamaEnabledRow = db
+        .select()
+        .from(appSettings)
+        .where(eq(appSettings.key, 'ollamaSuggestionsEnabled'))
+        .get()
+      const ollamaEnabled = ollamaEnabledRow?.value === 'true'
+
+      if (ollamaEnabled) {
+        const ollamaModelRow = db
+          .select()
+          .from(appSettings)
+          .where(eq(appSettings.key, 'ollamaModel'))
+          .get()
+        const model = ollamaModelRow?.value ?? DEFAULT_OLLAMA_MODEL
+
+        const ollamaCtx: OllamaSyncContext = {
+          gmailMessages: gmailInputs,
+          githubItems: githubInputs,
+          existingRelationships: relationshipsContent,
+          existingEmployers: employersContent,
+          model
+        }
+
+        const ollamaCandidates = await extractFactsViaOllama(ollamaCtx, {
+          detectOllama,
+          runOllamaPrompt
+        })
+        const regexSemanticKeys = new Set(
+          regexCandidates.map(candidateSemanticKey).filter((k): k is string => Boolean(k))
+        )
+        const filteredOllamaCandidates = ollamaCandidates.filter((candidate) => {
+          const semanticKey = candidateSemanticKey(candidate)
+          if (!semanticKey) return true
+          return !regexSemanticKeys.has(semanticKey)
+        })
+        candidates.push(...filteredOllamaCandidates)
+      }
+    } catch (ollamaErr) {
+      // Ollama is best-effort — never propagate errors into the sync flow
+      console.warn('[ollama] extractor error:', (ollamaErr as Error).message)
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Load existing suggestions to avoid duplicates
     const existingSuggestions = db
       .select({
+        source: knowledgeSuggestions.source,
+        sourceId: knowledgeSuggestions.sourceId,
         targetPath: knowledgeSuggestions.targetPath,
         proposedContent: knowledgeSuggestions.proposedContent
       })
@@ -119,9 +230,24 @@ export function runSuggestionExtractors(githubInputsOverride?: GitHubInputItem[]
     const existingKeys = new Set(
       existingSuggestions.map((s) => `${s.targetPath}|${s.proposedContent}`)
     )
+    const existingOllamaStableKeys = new Set(
+      existingSuggestions
+        .filter((s) => isOllamaSource(s.source) && typeof s.sourceId === 'string' && s.sourceId)
+        .map((s) => `${s.source}|${s.sourceId}`)
+    )
 
     const now = new Date()
     for (const candidate of candidates) {
+      if (
+        isOllamaSource(candidate.source) &&
+        typeof candidate.sourceId === 'string' &&
+        candidate.sourceId
+      ) {
+        const stableKey = `${candidate.source}|${candidate.sourceId}`
+        if (existingOllamaStableKeys.has(stableKey)) continue
+        existingOllamaStableKeys.add(stableKey)
+      }
+
       const key = `${candidate.targetPath}|${candidate.proposedContent}`
       if (existingKeys.has(key)) continue
 
@@ -338,7 +464,7 @@ export async function syncGoogle(
     })
     // Run pattern-based suggestion extractors after a successful Google sync
     if (runExtractors) {
-      runSuggestionExtractors()
+      await runSuggestionExtractors()
     }
 
     maybeSendNotification('google', recordsUpdated)
@@ -400,6 +526,7 @@ export async function syncGitHub(
         html_url: issue.html_url,
         type: issue.pull_request ? 'pr' : 'issue',
         repo: issue.repository?.full_name || issue.html_url.split('/').slice(3, 5).join('/'),
+        title: issue.title,
         assignee: issue.assignee ? { login: issue.assignee.login } : null,
         user: issue.user ? { login: issue.user.login } : null,
         labels: issue.labels?.map((l) => ({ name: l.name })) ?? []
@@ -452,7 +579,7 @@ export async function syncGitHub(
     })
     // Run pattern-based suggestion extractors after a successful GitHub sync
     if (runExtractors) {
-      runSuggestionExtractors(githubSuggestionInputs)
+      await runSuggestionExtractors(githubSuggestionInputs)
     }
 
     maybeSendNotification('github', recordsUpdated)
@@ -498,7 +625,7 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
       syncGitHub(win, false)
     ])
     if (googleResult.success || githubResult.success) {
-      runSuggestionExtractors(githubResult.githubSuggestionInputs ?? [])
+      await runSuggestionExtractors(githubResult.githubSuggestionInputs ?? [])
     }
     return [toPublicSyncResult(googleResult), toPublicSyncResult(githubResult)]
   })

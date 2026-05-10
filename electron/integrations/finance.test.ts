@@ -1,15 +1,15 @@
 /**
- * Unit tests for the CSV parser registry. Loads each bank's fixture, runs the
- * full parser-detection + parse pipeline via `parseFinanceFile`, and asserts
- * the parsed `RawTxn[]` shape.
- *
- * Fixtures live in `__fixtures__/finance/` as .csv files with a few rows
- * representative of that bank's export format.
+ * Unit tests for finance parser helpers and parser selection:
+ * - parser coverage via fixtures (including Rocket Money)
+ * - categorize fallback behavior
+ * - folder-based account hint behavior
  */
 
-import { join } from 'node:path'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { type RawTxn, categorize, parseFinanceFile } from './finance'
+import { type RawTxn, categorize, getAccountHintFromPath, parseFinanceFile } from './finance'
 
 const FIXTURES = join(__dirname, '__fixtures__', 'finance')
 
@@ -111,5 +111,77 @@ describe('categorize fallbacks', () => {
   it('marks Uncategorized when no rule and no fallback applies', () => {
     const out = categorize([txn('OBSCURE NEW MERCHANT')], [])
     expect(out[0].category).toBe('Uncategorized')
+  })
+})
+
+// ── getAccountHintFromPath ────────────────────────────────────────────────────
+
+describe('getAccountHintFromPath', () => {
+  it('returns the parent directory name when the file is nested under the root', () => {
+    const result = getAccountHintFromPath('/Money/USAA/statement-2026-04.csv', '/Money')
+    expect(result).toBe('USAA')
+  })
+
+  it('returns undefined when the file is a direct child of the root', () => {
+    const result = getAccountHintFromPath('/Money/statement.csv', '/Money')
+    expect(result).toBeUndefined()
+  })
+
+  it('returns the immediate parent (not a grandparent) for deeply-nested files', () => {
+    const result = getAccountHintFromPath('/Money/Chase/2026/march.csv', '/Money')
+    expect(result).toBe('2026')
+  })
+
+  it('handles trailing slashes on the watchRoot', () => {
+    const result = getAccountHintFromPath('/Money/Amex/feb.csv', '/Money/')
+    expect(result).toBe('Amex')
+  })
+
+  it('is case-sensitive — returns the directory name as-is', () => {
+    const result = getAccountHintFromPath('/docs/Discover/stmt.pdf', '/docs')
+    expect(result).toBe('Discover')
+  })
+
+  it('returns the parent dir name using join-style paths', () => {
+    const root = '/home/user/Documents/Money'
+    const file = join(root, 'Chase', 'statement.csv')
+    expect(getAccountHintFromPath(file, root)).toBe('Chase')
+  })
+
+  it('returns undefined when watchRoot is empty string (no root context)', () => {
+    expect(getAccountHintFromPath('/a/b/c.csv', '')).toBeUndefined()
+  })
+
+  it('returns undefined when filePath is outside watchRoot', () => {
+    const result = getAccountHintFromPath('/Elsewhere/USAA/statement.csv', '/Money')
+    expect(result).toBeUndefined()
+  })
+})
+
+function writeTestCsv(filePath: string): void {
+  mkdirSync(dirname(filePath), { recursive: true })
+  writeFileSync(filePath, 'date,description,amount\n2026-04-20,Coffee,4.50\n', 'utf8')
+}
+
+describe('parseFinanceFile directory-name institution signal', () => {
+  it('detects institution from nested folder name when filename is generic', async () => {
+    const watchRoot = mkdtempSync(join(tmpdir(), 'compass-finance-test-'))
+    const csvPath = join(watchRoot, 'USAA', 'statement.csv')
+    writeTestCsv(csvPath)
+
+    const parsed = await parseFinanceFile(csvPath, watchRoot)
+
+    expect(parsed?.account?.institution).toBe('USAA')
+    expect(parsed?.account?.sourceFile).toBe('statement.csv')
+  })
+
+  it('ignores noise-word folders when trying directory-based account detection', async () => {
+    const watchRoot = mkdtempSync(join(tmpdir(), 'compass-finance-test-'))
+    const csvPath = join(watchRoot, 'statements', 'statement.csv')
+    writeTestCsv(csvPath)
+
+    const parsed = await parseFinanceFile(csvPath, watchRoot)
+
+    expect(parsed?.account).toBeUndefined()
   })
 })

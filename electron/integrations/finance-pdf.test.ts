@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   amexPdf,
+  extractStatementMetadata,
   genericPdf,
   normalizeLines,
   parsePdfText,
@@ -38,6 +39,11 @@ describe('tryParseStatementDate', () => {
 
   it('parses "Apr 03 2026"', () => {
     expect(tryParseStatementDate('Apr 03 2026')).toBe('2026-04-03')
+  })
+
+  it('parses full month names', () => {
+    expect(tryParseStatementDate('September 10, 2026')).toBe('2026-09-10')
+    expect(tryParseStatementDate('December 31', 2026, 1)).toBe('2025-12-31')
   })
 
   it('parses "Apr 03" with defaultYear', () => {
@@ -284,6 +290,17 @@ describe('Generic PDF extractor', () => {
     expect(result.bank).toBe('Generic (PDF)')
     expect(result.txns.length).toBe(3)
   })
+
+  it('accepts full month-name dates in generic rows', () => {
+    const text = [
+      'Anonymous Bank',
+      'September 10, 2026 FOO 10.00',
+      'September 11, 2026 BAR 20.00'
+    ].join('\n')
+    const result = parsePdfText(text, '/tmp/x.pdf', 'Anonymous')
+    expect(result.bank).toBe('Generic (PDF)')
+    expect(result.txns.map((t) => t.date)).toEqual(['2026-09-10', '2026-09-11'])
+  })
 })
 
 describe('parsePdfText dispatch', () => {
@@ -302,5 +319,157 @@ describe('extractor invariants', () => {
   it('generic always matches', () => {
     expect(genericPdf.matches([])).toBe(true)
     expect(genericPdf.matches(['anything'])).toBe(true)
+  })
+})
+
+describe('statement metadata extraction (USAA)', () => {
+  it('populates metadata on the ParsedFile', () => {
+    const result = parsePdfText(usaaText, '/tmp/usaa-credit-statement.pdf', 'USAA')
+    expect(result.metadata).toBeDefined()
+  })
+
+  it('extracts the new balance', () => {
+    const result = parsePdfText(usaaText, '/tmp/usaa-credit-statement.pdf', 'USAA')
+    expect(result.metadata?.balance).toBe(1284.55)
+  })
+
+  it('extracts the minimum payment', () => {
+    const result = parsePdfText(usaaText, '/tmp/usaa-credit-statement.pdf', 'USAA')
+    expect(result.metadata?.minimumPayment).toBe(42)
+  })
+
+  it('extracts the payment due date as ISO', () => {
+    const result = parsePdfText(usaaText, '/tmp/usaa-credit-statement.pdf', 'USAA')
+    expect(result.metadata?.paymentDueDate).toBe('2026-06-10')
+  })
+
+  it('extracts the credit limit', () => {
+    const result = parsePdfText(usaaText, '/tmp/usaa-credit-statement.pdf', 'USAA')
+    expect(result.metadata?.creditLimit).toBe(5000)
+  })
+
+  it('extracts the APR as a decimal', () => {
+    const result = parsePdfText(usaaText, '/tmp/usaa-credit-statement.pdf', 'USAA')
+    expect(result.metadata?.apr).toBeCloseTo(0.1899, 4)
+  })
+
+  it('extracts the statement closing date', () => {
+    const result = parsePdfText(usaaText, '/tmp/usaa-credit-statement.pdf', 'USAA')
+    expect(result.metadata?.statementClosingDate).toBe('2026-05-14')
+  })
+
+  it('extracts the statement period dates', () => {
+    const result = parsePdfText(usaaText, '/tmp/usaa-credit-statement.pdf', 'USAA')
+    expect(result.metadata?.statementPeriodStart).toBe('2026-04-15')
+    expect(result.metadata?.statementPeriodEnd).toBe('2026-05-14')
+  })
+})
+
+describe('statement metadata extraction (AMEX)', () => {
+  it('populates metadata on the ParsedFile', () => {
+    const result = parsePdfText(amexText, '/tmp/amex-platinum.pdf', 'amex platinum')
+    expect(result.metadata).toBeDefined()
+  })
+
+  it('extracts the new balance', () => {
+    const result = parsePdfText(amexText, '/tmp/amex-platinum.pdf', 'amex platinum')
+    expect(result.metadata?.balance).toBe(1876.49)
+  })
+
+  it('extracts the minimum payment', () => {
+    const result = parsePdfText(amexText, '/tmp/amex-platinum.pdf', 'amex platinum')
+    expect(result.metadata?.minimumPayment).toBe(40)
+  })
+
+  it('extracts the payment due date as ISO', () => {
+    const result = parsePdfText(amexText, '/tmp/amex-platinum.pdf', 'amex platinum')
+    expect(result.metadata?.paymentDueDate).toBe('2026-05-27')
+  })
+
+  it('extracts the credit limit', () => {
+    const result = parsePdfText(amexText, '/tmp/amex-platinum.pdf', 'amex platinum')
+    expect(result.metadata?.creditLimit).toBe(25000)
+  })
+
+  it('extracts the APR as a decimal', () => {
+    const result = parsePdfText(amexText, '/tmp/amex-platinum.pdf', 'amex platinum')
+    expect(result.metadata?.apr).toBeCloseTo(0.2299, 4)
+  })
+
+  it('extracts the closing date', () => {
+    const result = parsePdfText(amexText, '/tmp/amex-platinum.pdf', 'amex platinum')
+    expect(result.metadata?.statementClosingDate).toBe('2026-04-30')
+  })
+})
+
+describe('extractStatementMetadata (direct)', () => {
+  it('returns an empty object when nothing matches', () => {
+    expect(extractStatementMetadata('hello world')).toEqual({})
+  })
+
+  it('parses a simple synthetic statement', () => {
+    const meta = extractStatementMetadata(
+      [
+        'Some Bank',
+        'New Balance: $250.00',
+        'Minimum Payment Due: $25.00',
+        'Payment Due Date: 06/15/2026',
+        'Credit Limit: $5,000.00',
+        'APR: 19.99%'
+      ].join('\n')
+    )
+    expect(meta).toMatchObject({
+      balance: 250,
+      minimumPayment: 25,
+      paymentDueDate: '2026-06-15',
+      creditLimit: 5000
+    })
+    expect(meta.apr).toBeCloseTo(0.1999, 4)
+  })
+
+  it('parses APR values even when the percent sign is omitted', () => {
+    const meta = extractStatementMetadata('APR: 19.99')
+    expect(meta.apr).toBeCloseTo(0.1999, 4)
+  })
+
+  it('treats absent fields as undefined (not zero)', () => {
+    const meta = extractStatementMetadata('New Balance: $100.00')
+    expect(meta.balance).toBe(100)
+    expect(meta.minimumPayment).toBeUndefined()
+    expect(meta.creditLimit).toBeUndefined()
+    expect(meta.apr).toBeUndefined()
+  })
+
+  it('rejects sentinel APR values that fall outside [0, 1)', () => {
+    // A line like "APR: 200%" would be obvious junk. Helper drops it.
+    const meta = extractStatementMetadata('APR: 200%')
+    expect(meta.apr).toBeUndefined()
+  })
+})
+
+describe('Generic PDF metadata gating', () => {
+  it('emits metadata when balance or minimum payment is found', () => {
+    const generic = [
+      'Tiny Bank',
+      'Statement Period: 04/01/2026 - 04/30/2026',
+      'New Balance: $123.45',
+      '04/02/2026 GROCERY 12.34',
+      '04/05/2026 GAS 45.67',
+      '04/10/2026 SHOP 89.10'
+    ].join('\n')
+    const result = parsePdfText(generic, '/tmp/g.pdf', 'tiny')
+    expect(result.metadata?.balance).toBe(123.45)
+  })
+
+  it('omits metadata when neither balance nor minimum payment was found', () => {
+    const generic = [
+      'Tiny Bank',
+      'Statement 04/30/2026',
+      '04/02/2026 LEGIT 10.00',
+      '04/05/2026 ANOTHER 20.00',
+      '04/06/2026 ALSO 30.00'
+    ].join('\n')
+    const result = parsePdfText(generic, '/tmp/g.pdf', 'tiny')
+    expect(result.metadata).toBeUndefined()
   })
 })

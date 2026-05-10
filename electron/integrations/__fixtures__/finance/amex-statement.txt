@@ -3,6 +3,10 @@ Platinum Card
 Account Ending 1-31003
 Statement Period: 04/01/2026 to 04/30/2026
 Closing Date: 04/30/2026
+Payment Due Date: 05/27/2026
+Minimum Payment Due: $40.00
+Credit Limit: $25,000.00
+APR: 22.99%
 
 Account Summary
 Previous Balance                       $2,143.21
