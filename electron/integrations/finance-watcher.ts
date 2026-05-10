@@ -60,7 +60,12 @@ async function flushQueue(): Promise<void> {
   }))
 
   try {
-    const { result, detectedAccounts } = await ingestFinanceFiles(db, files, ruleArgs)
+    const { result, detectedAccounts } = await ingestFinanceFiles(
+      db,
+      files,
+      ruleArgs,
+      watchedFolder ?? undefined
+    )
 
     // Seed stub Vault entries for any newly-detected accounts (idempotent)
     const vaultSeeded = seedVaultFromDetectedAccounts(detectedAccounts)
@@ -251,7 +256,7 @@ export async function ingestWatchedFolderNow(): Promise<{
     category: r.category,
     subcategory: r.subcategory
   }))
-  const out = await ingestFinanceFiles(db, files, ruleArgs)
+  const out = await ingestFinanceFiles(db, files, ruleArgs, watchedFolder ?? undefined)
   const vaultSeeded = seedVaultFromDetectedAccounts(out.detectedAccounts)
   const payload = { ...out, vaultSeeded }
   emit('ingest-complete', payload)

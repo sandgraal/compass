@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, gte, isNotNull, isNull, or } from 'drizzle-orm'
 import { BrowserWindow, type IpcMain, Notification } from 'electron'
 import { getDb } from '../db/client'
 import {
@@ -18,7 +18,9 @@ import {
   updateGmailKnowledge
 } from '../knowledge/extractor'
 import {
+  type CalendarInputEvent,
   type GitHubInputItem,
+  extractContactsFromCalendar,
   extractContactsFromGithub,
   extractContactsFromGmail,
   extractOrgsFromGmail
@@ -101,10 +103,28 @@ export function runSuggestionExtractors(githubInputsOverride?: GitHubInputItem[]
           labels: r.labels ? (JSON.parse(r.labels) as string[]).map((n) => ({ name: n })) : []
         }))
 
+    const calendarCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    const calendarInputs: CalendarInputEvent[] = db
+      .select({
+        externalId: calendarEvents.externalId,
+        title: calendarEvents.title,
+        description: calendarEvents.description,
+        startAt: calendarEvents.startAt
+      })
+      .from(calendarEvents)
+      .where(
+        and(
+          isNotNull(calendarEvents.description),
+          or(isNull(calendarEvents.startAt), gte(calendarEvents.startAt, calendarCutoff))
+        )
+      )
+      .all()
+
     const candidates = [
       ...extractContactsFromGmail(gmailInputs, relationshipsContent),
       ...extractOrgsFromGmail(gmailInputs, employersContent),
-      ...extractContactsFromGithub(githubInputs, relationshipsContent)
+      ...extractContactsFromGithub(githubInputs, relationshipsContent),
+      ...extractContactsFromCalendar(calendarInputs, relationshipsContent)
     ]
 
     // Load existing suggestions to avoid duplicates
