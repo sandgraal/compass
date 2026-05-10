@@ -58,7 +58,7 @@ export default function Settings(): JSX.Element {
       })
       setOllamaStatus(status)
       // Auto-select first available model if none set
-      const currentModel = options?.currentModel ?? loadedOllamaModelRef.current ?? ollamaModel
+      const currentModel = options?.currentModel ?? loadedOllamaModelRef.current
       if (status.available && status.models && status.models.length > 0 && !currentModel) {
         const preferred = status.models.find((m) => m.startsWith('llama3.2')) ?? status.models[0]
         setOllamaModel(preferred)

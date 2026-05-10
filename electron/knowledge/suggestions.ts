@@ -338,24 +338,23 @@ interface OllamaFact {
   source: 'gmail' | 'github'
 }
 
-function sanitizePromptField(value: string, maxLen: number): string {
-  const withoutControlChars = Array.from(value)
+function removeControlChars(value: string): string {
+  return Array.from(value)
     .map((ch) => {
       const code = ch.charCodeAt(0)
       return code < 32 || code === 127 ? ' ' : ch
     })
     .join('')
+}
+
+function sanitizePromptField(value: string, maxLen: number): string {
+  const withoutControlChars = removeControlChars(value)
 
   return withoutControlChars.replace(/\s+/g, ' ').replace(/[<>]/g, '').trim().slice(0, maxLen)
 }
 
 function sanitizeFactField(value: string, maxLen: number): string {
-  const withoutControlChars = Array.from(value)
-    .map((ch) => {
-      const code = ch.charCodeAt(0)
-      return code < 32 || code === 127 ? ' ' : ch
-    })
-    .join('')
+  const withoutControlChars = removeControlChars(value)
 
   return withoutControlChars
     .replace(/\r?\n/g, ' ')

@@ -75,7 +75,7 @@ function firstCellFromMarkdownRow(content: string): string | null {
   const match = content.match(/^\|\s*([^|]+?)\s*\|/)
   if (!match) return null
   const normalized = normalizeSemanticToken(match[1])
-  return normalized || null
+  return normalized === '' ? null : normalized
 }
 
 function candidateSemanticKey(candidate: {
