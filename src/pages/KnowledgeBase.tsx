@@ -492,6 +492,29 @@ function FileTreeItem({
 
 // ── Suggestion Item ───────────────────────────────────────────────────────────
 
+/** Map the raw source string to a human-readable label and visual style. */
+function sourceBadgeProps(source: KnowledgeSuggestion['source']): {
+  label: string
+  className: string
+} {
+  if (source === 'gmail') return { label: 'Gmail', className: 'bg-secondary text-muted-foreground' }
+  if (source === 'github')
+    return { label: 'GitHub', className: 'bg-secondary text-muted-foreground' }
+  if (source === 'calendar')
+    return { label: 'Calendar', className: 'bg-secondary text-muted-foreground' }
+  if (source === 'ollama:gmail')
+    return {
+      label: 'AI · Gmail',
+      className: 'bg-violet-500/15 text-violet-400 border border-violet-500/25'
+    }
+  if (source === 'ollama:github')
+    return {
+      label: 'AI · GitHub',
+      className: 'bg-violet-500/15 text-violet-400 border border-violet-500/25'
+    }
+  return { label: source, className: 'bg-secondary text-muted-foreground' }
+}
+
 function SuggestionItem({
   suggestion,
   onAccept,
@@ -501,14 +524,19 @@ function SuggestionItem({
   onAccept: (id: number) => void
   onDismiss: (id: number) => void
 }): JSX.Element {
-  const sourceLabel =
-    suggestion.source === 'gmail' ? 'Gmail' : suggestion.source === 'github' ? 'GitHub' : 'Calendar'
+  const badge = sourceBadgeProps(suggestion.source)
 
   return (
     <div className="px-4 py-3 flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground px-1.5 py-0.5 rounded bg-secondary">
-          {sourceLabel}
+        <span
+          className={cn(
+            'text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded',
+            badge.className
+          )}
+          title={`Source: ${suggestion.source}`}
+        >
+          {badge.label}
         </span>
         <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground px-1.5 py-0.5 rounded bg-secondary">
           {suggestion.kind}

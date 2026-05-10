@@ -1,11 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   type CalendarInputEvent,
   type GitHubInputItem,
   type GmailInputMessage,
+  type OllamaSyncContext,
   extractContactsFromCalendar,
   extractContactsFromGithub,
   extractContactsFromGmail,
+  extractFactsViaOllama,
   extractOrgsFromGmail
 } from './suggestions'
 
@@ -311,5 +313,261 @@ describe('extractContactsFromGithub', () => {
 
   it('returns empty array when there are no items', () => {
     expect(extractContactsFromGithub([], '')).toHaveLength(0)
+  })
+})
+
+// ── extractFactsViaOllama ─────────────────────────────────────────────────────
+
+describe('extractFactsViaOllama', () => {
+  // Minimal context used by most tests
+  function makeCtx(overrides: Partial<OllamaSyncContext> = {}): OllamaSyncContext {
+    return {
+      gmailMessages: [
+        {
+          id: 'm1',
+          threadId: 't1',
+          subject: 'Q3 proposal',
+          from: 'Jane Doe <jane@acme.com>',
+          date: new Date().toISOString()
+        }
+      ],
+      githubItems: [],
+      existingRelationships: '',
+      existingEmployers: '',
+      model: 'llama3.2:3b',
+      ...overrides
+    }
+  }
+
+  it('returns [] when Ollama is unavailable', async () => {
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: false }),
+      runOllamaPrompt: vi.fn()
+    }
+    const results = await extractFactsViaOllama(makeCtx(), deps)
+    expect(results).toHaveLength(0)
+    expect(deps.runOllamaPrompt).not.toHaveBeenCalled()
+  })
+
+  it('returns [] when there is no data to prompt with', async () => {
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: true }),
+      runOllamaPrompt: vi.fn()
+    }
+    // No gmail messages or github items
+    const results = await extractFactsViaOllama(
+      makeCtx({ gmailMessages: [], githubItems: [] }),
+      deps
+    )
+    expect(results).toHaveLength(0)
+    expect(deps.runOllamaPrompt).not.toHaveBeenCalled()
+  })
+
+  it('parses a well-formed JSON response correctly', async () => {
+    const validResponse = JSON.stringify([
+      { kind: 'contact', name: 'Jane Doe', detail: 'Product Manager', source: 'gmail' }
+    ])
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: true }),
+      runOllamaPrompt: vi.fn().mockResolvedValue(validResponse)
+    }
+    const results = await extractFactsViaOllama(makeCtx(), deps)
+    expect(results).toHaveLength(1)
+    expect(results[0].source).toBe('ollama:gmail')
+    expect(results[0].kind).toBe('contact')
+    expect(results[0].proposedContent).toContain('Jane Doe')
+    expect(results[0].proposedContent).toContain('Product Manager')
+    expect(results[0].targetPath).toBe('profile/relationships.md')
+  })
+
+  it('parses employer facts and sets the correct targetPath', async () => {
+    const validResponse = JSON.stringify([
+      { kind: 'employer', name: 'Acme Corp', detail: 'SaaS startup', source: 'gmail' }
+    ])
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: true }),
+      runOllamaPrompt: vi.fn().mockResolvedValue(validResponse)
+    }
+    const results = await extractFactsViaOllama(makeCtx(), deps)
+    expect(results).toHaveLength(1)
+    expect(results[0].targetPath).toBe('work/employers.md')
+    expect(results[0].source).toBe('ollama:gmail')
+  })
+
+  it('discards malformed JSON entirely', async () => {
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: true }),
+      runOllamaPrompt: vi.fn().mockResolvedValue('Here are the results: { broken json ]')
+    }
+    const results = await extractFactsViaOllama(makeCtx(), deps)
+    expect(results).toHaveLength(0)
+  })
+
+  it('discards a response with no JSON array', async () => {
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: true }),
+      runOllamaPrompt: vi.fn().mockResolvedValue('I found no relevant facts in the data provided.')
+    }
+    const results = await extractFactsViaOllama(makeCtx(), deps)
+    expect(results).toHaveLength(0)
+  })
+
+  it('discards facts with an invalid kind', async () => {
+    const badResponse = JSON.stringify([{ kind: 'pet', name: 'Fluffy', source: 'gmail' }])
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: true }),
+      runOllamaPrompt: vi.fn().mockResolvedValue(badResponse)
+    }
+    const results = await extractFactsViaOllama(makeCtx(), deps)
+    expect(results).toHaveLength(0)
+  })
+
+  it('discards facts with an invalid source field', async () => {
+    const badResponse = JSON.stringify([{ kind: 'contact', name: 'Bob', source: 'linkedin' }])
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: true }),
+      runOllamaPrompt: vi.fn().mockResolvedValue(badResponse)
+    }
+    const results = await extractFactsViaOllama(makeCtx(), deps)
+    expect(results).toHaveLength(0)
+  })
+
+  it('does not propose a fact already present in existingRelationships', async () => {
+    const validResponse = JSON.stringify([
+      { kind: 'contact', name: 'Jane Doe', detail: 'Colleague', source: 'gmail' }
+    ])
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: true }),
+      runOllamaPrompt: vi.fn().mockResolvedValue(validResponse)
+    }
+    const results = await extractFactsViaOllama(
+      makeCtx({ existingRelationships: '| Jane Doe | Colleague | jane@acme.com |' }),
+      deps
+    )
+    // Already mentioned — should be filtered out
+    expect(results).toHaveLength(0)
+  })
+
+  it('does not propose an employer already present in existingEmployers', async () => {
+    const validResponse = JSON.stringify([{ kind: 'employer', name: 'Acme Corp', source: 'gmail' }])
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: true }),
+      runOllamaPrompt: vi.fn().mockResolvedValue(validResponse)
+    }
+    const results = await extractFactsViaOllama(
+      makeCtx({ existingEmployers: 'Acme Corp is my current employer' }),
+      deps
+    )
+    expect(results).toHaveLength(0)
+  })
+
+  it('returns [] when runOllamaPrompt throws', async () => {
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: true }),
+      runOllamaPrompt: vi.fn().mockRejectedValue(new Error('connection refused'))
+    }
+    const results = await extractFactsViaOllama(makeCtx(), deps)
+    expect(results).toHaveLength(0)
+  })
+
+  it('strips prose surrounding the JSON array', async () => {
+    const responseWithProse = `Sure! Here are the facts I found:\n[{"kind":"contact","name":"Alice","source":"github"}]\nHope that helps!`
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: true }),
+      runOllamaPrompt: vi.fn().mockResolvedValue(responseWithProse)
+    }
+    const results = await extractFactsViaOllama(
+      makeCtx({
+        githubItems: [
+          {
+            id: 1,
+            html_url: 'https://github.com/org/repo/issues/1',
+            type: 'issue',
+            repo: 'org/repo',
+            user: { login: 'alice' },
+            assignee: null,
+            labels: []
+          }
+        ]
+      }),
+      deps
+    )
+    expect(results).toHaveLength(1)
+    expect(results[0].proposedContent).toContain('Alice')
+    expect(results[0].source).toBe('ollama:github')
+  })
+
+  it('uses sender display names only in prompt data when from header is bare email', async () => {
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: true }),
+      runOllamaPrompt: vi.fn().mockResolvedValue('[]')
+    }
+    await extractFactsViaOllama(
+      makeCtx({
+        gmailMessages: [
+          {
+            id: 'm-email',
+            threadId: 't-email',
+            subject: 'Need follow up',
+            from: 'bare.sender@example.com'
+          }
+        ]
+      }),
+      deps
+    )
+    const prompt = deps.runOllamaPrompt.mock.calls[0]?.[1] as string
+    expect(prompt).toContain('(no display name)')
+    expect(prompt).not.toContain('bare.sender@example.com')
+  })
+
+  it('includes GitHub title + repo in prompt data', async () => {
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: true }),
+      runOllamaPrompt: vi.fn().mockResolvedValue('[]')
+    }
+    await extractFactsViaOllama(
+      makeCtx({
+        gmailMessages: [],
+        githubItems: [
+          {
+            id: 99,
+            html_url: 'https://github.com/org/repo/issues/99',
+            type: 'issue',
+            repo: 'org/repo',
+            title: 'Fix flaky knowledge extraction test',
+            user: { login: 'octocat' },
+            assignee: null,
+            labels: []
+          }
+        ]
+      }),
+      deps
+    )
+    const prompt = deps.runOllamaPrompt.mock.calls[0]?.[1] as string
+    expect(prompt).toContain('org/repo')
+    expect(prompt).toContain('Title: Fix flaky knowledge extraction test')
+    expect(prompt).not.toContain('author:')
+  })
+
+  it('sanitizes markdown-breaking characters in model output', async () => {
+    const deps = {
+      detectOllama: vi.fn().mockResolvedValue({ available: true }),
+      runOllamaPrompt: vi.fn().mockResolvedValue(
+        JSON.stringify([
+          {
+            kind: 'contact',
+            name: 'A|lice\n<script>',
+            detail: 'Lead|\nEng <b>',
+            source: 'gmail'
+          }
+        ])
+      )
+    }
+    const results = await extractFactsViaOllama(makeCtx(), deps)
+    expect(results).toHaveLength(1)
+    expect(results[0].sourceId).toBe('gmail:contact:a lice script')
+    expect(results[0].proposedContent).toContain('| A lice script | Lead Eng b |')
+    expect(results[0].proposedContent).not.toContain('<')
+    expect(results[0].proposedContent).not.toContain('|lice')
   })
 })

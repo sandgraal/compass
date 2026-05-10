@@ -22,6 +22,7 @@ import {
   knowledgeFiles,
   syncEvents
 } from '../db/schema'
+import { detectOllama } from '../knowledge/ollama'
 import { restartQuickCaptureShortcut } from '../menu-bar'
 import { DATA_DIR, KNOWLEDGE_DIR, VAULT_DIR } from '../paths'
 
@@ -251,6 +252,11 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
     } catch (err) {
       return { success: false, error: String(err) }
     }
+  })
+
+  // ---- Ollama detection ----
+  ipcMain.handle('settings:detect-ollama', async (_event, options?: { forceRefresh?: boolean }) => {
+    return detectOllama({ bypassCache: options?.forceRefresh === true })
   })
 
   // ---- Data management ----
