@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, gte, isNotNull, isNull, or } from 'drizzle-orm'
 import { BrowserWindow, type IpcMain, Notification } from 'electron'
 import { getDb } from '../db/client'
 import {
@@ -19,9 +19,11 @@ import {
 } from '../knowledge/extractor'
 import { DEFAULT_OLLAMA_MODEL, detectOllama, runOllamaPrompt } from '../knowledge/ollama'
 import {
+  type CalendarInputEvent,
   type GitHubInputItem,
   type GmailInputMessage,
   type OllamaSyncContext,
+  extractContactsFromCalendar,
   extractContactsFromGithub,
   extractContactsFromGmail,
   extractFactsViaOllama,
@@ -143,10 +145,28 @@ export async function runSuggestionExtractors(
           labels: r.labels ? (JSON.parse(r.labels) as string[]).map((n) => ({ name: n })) : []
         }))
 
+    const calendarCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    const calendarInputs: CalendarInputEvent[] = db
+      .select({
+        externalId: calendarEvents.externalId,
+        title: calendarEvents.title,
+        description: calendarEvents.description,
+        startAt: calendarEvents.startAt
+      })
+      .from(calendarEvents)
+      .where(
+        and(
+          isNotNull(calendarEvents.description),
+          or(isNull(calendarEvents.startAt), gte(calendarEvents.startAt, calendarCutoff))
+        )
+      )
+      .all()
+
     const regexCandidates = [
       ...extractContactsFromGmail(gmailInputs, relationshipsContent),
       ...extractOrgsFromGmail(gmailInputs, employersContent),
-      ...extractContactsFromGithub(githubInputs, relationshipsContent)
+      ...extractContactsFromGithub(githubInputs, relationshipsContent),
+      ...extractContactsFromCalendar(calendarInputs, relationshipsContent)
     ]
     const candidates = [...regexCandidates]
 

@@ -259,7 +259,124 @@ export function extractOrgsFromGmail(
   return candidates
 }
 
-// ── Extractor 3: Contacts from GitHub items ───────────────────────────────────
+// ── Extractor 3: Contacts from calendar events ───────────────────────────────
+
+export interface CalendarInputEvent {
+  externalId: string
+  title: string
+  description?: string | null
+  startAt?: Date | null
+}
+
+/**
+ * Simple email extractor — pull every RFC-5322-like address out of a string.
+ * Returns an array of { name, email } objects (name may be empty).
+ */
+function extractEmailsFromText(text: string): Array<{ name: string; email: string }> {
+  const results: Array<{ name: string; email: string }> = []
+
+  // Match "Display Name <email>" patterns first
+  const namedRe = /([A-Za-z][^<]*?)\s*<([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})>/g
+  let m: RegExpExecArray | null
+  const namedEmails = new Set<string>()
+  while ((m = namedRe.exec(text)) !== null) {
+    const name = m[1].trim().replace(/^"|"$/g, '')
+    const email = m[2].trim().toLowerCase()
+    results.push({ name, email })
+    namedEmails.add(email)
+  }
+
+  // Then bare email addresses that weren't captured above
+  const bareRe = /\b([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\b/g
+  while ((m = bareRe.exec(text)) !== null) {
+    const email = m[1].trim().toLowerCase()
+    if (!namedEmails.has(email)) {
+      results.push({ name: '', email })
+      namedEmails.add(email)
+    }
+  }
+
+  return results
+}
+
+/**
+ * Aggregate calendar event attendees from the description field.
+ * If a person (by email) appears in >= 2 events in the last 30 days AND
+ * they are not already in relationships.md, propose a contact row.
+ */
+export function extractContactsFromCalendar(
+  events: CalendarInputEvent[],
+  existingRelationships: string
+): KnowledgeSuggestionCandidate[] {
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000
+
+  // email → { name, distinctEventIds, firstEventId }
+  const emailCounts = new Map<
+    string,
+    { name: string; eventIds: Set<string>; firstEventId: string }
+  >()
+
+  for (const ev of events) {
+    // Filter to last 30 days when we have a date
+    if (ev.startAt) {
+      const ms = ev.startAt instanceof Date ? ev.startAt.getTime() : new Date(ev.startAt).getTime()
+      if (!Number.isNaN(ms) && ms < cutoff) continue
+    }
+
+    if (!ev.description) continue
+
+    const contacts = extractEmailsFromText(ev.description)
+    const seenInEvent = new Set<string>()
+    for (const { name, email } of contacts) {
+      // Skip noisy / machine senders
+      const atIdx = email.lastIndexOf('@')
+      if (atIdx < 0) continue
+      const domain = email.slice(atIdx + 1)
+      if (IGNORED_DOMAINS.has(domain)) continue
+      if (/noreply|no-reply|donotreply|notification|automated|mailer/i.test(email)) continue
+      if (seenInEvent.has(email)) continue
+      seenInEvent.add(email)
+
+      const existing = emailCounts.get(email)
+      if (existing) {
+        existing.eventIds.add(ev.externalId)
+        // Prefer the longer/better name
+        if (name.length > existing.name.length) existing.name = name
+      } else {
+        emailCounts.set(email, {
+          name,
+          eventIds: new Set([ev.externalId]),
+          firstEventId: ev.externalId
+        })
+      }
+    }
+  }
+
+  const candidates: KnowledgeSuggestionCandidate[] = []
+
+  for (const [email, { name, eventIds, firstEventId }] of emailCounts) {
+    const count = eventIds.size
+    if (count < 2) continue
+    if (alreadyMentioned(existingRelationships, email)) continue
+
+    const displayName = name || email.split('@')[0]
+    if (name && alreadyMentioned(existingRelationships, name)) continue
+
+    const proposedContent = `| ${displayName} | (from calendar) | ${email} |`
+    candidates.push({
+      source: 'calendar',
+      sourceId: firstEventId,
+      targetPath: 'profile/relationships.md',
+      kind: 'contact',
+      proposedContent,
+      context: `Appeared in ${count} calendar event(s) (${email})`
+    })
+  }
+
+  return candidates
+}
+
+// ── Extractor 4: Contacts from GitHub items ───────────────────────────────────
 
 /**
  * Extract GitHub user logins (assignees, authors) from issues/PRs and propose
