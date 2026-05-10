@@ -468,10 +468,44 @@ export type DetectedAccount = {
   sourceFile: string
 }
 
+/**
+ * Statement-level metadata pulled out of a PDF (or other format) alongside
+ * the transaction rows. Used to auto-populate `financeAccounts` columns so
+ * the user doesn't have to type balance/APR/credit-limit by hand.
+ *
+ * Every field is optional — extractors only report what they confidently
+ * parsed. Missing fields are NOT applied as zeros / nulls; downstream code
+ * leaves the existing column value alone.
+ */
+export type StatementMetadata = {
+  /** Current statement balance. Positive = amount owed for credit, deposit balance for checking/savings. */
+  balance?: number
+  /** Minimum payment due, for credit accounts. Always positive. */
+  minimumPayment?: number
+  /** Payment due date as ISO 'YYYY-MM-DD'. */
+  paymentDueDate?: string
+  /** Credit limit, for credit accounts. */
+  creditLimit?: number
+  /** Annual percentage rate as a decimal (e.g. 0.2299 for 22.99%). */
+  apr?: number
+  /** Statement closing date as ISO 'YYYY-MM-DD'. */
+  statementClosingDate?: string
+  /** Statement period start as ISO 'YYYY-MM-DD'. */
+  statementPeriodStart?: string
+  /** Statement period end as ISO 'YYYY-MM-DD'. */
+  statementPeriodEnd?: string
+}
+
 export type ParsedFile = {
   bank: string
   txns: RawTxn[]
   account?: DetectedAccount
+  /**
+   * Statement-level numbers (balance, APR, due date, …). Populated by PDF
+   * extractors; CSV/xlsx parsers leave it undefined since those formats
+   * don't include statement-summary rows.
+   */
+  metadata?: StatementMetadata
 }
 
 /**
