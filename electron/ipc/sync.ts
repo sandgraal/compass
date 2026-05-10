@@ -17,10 +17,14 @@ import {
   updateGitHubKnowledge,
   updateGmailKnowledge
 } from '../knowledge/extractor'
+import { DEFAULT_OLLAMA_MODEL, detectOllama, runOllamaPrompt } from '../knowledge/ollama'
 import {
   type GitHubInputItem,
+  type GmailInputMessage,
+  type OllamaSyncContext,
   extractContactsFromGithub,
   extractContactsFromGmail,
+  extractFactsViaOllama,
   extractOrgsFromGmail
 } from '../knowledge/suggestions'
 import { readKnowledgeFile } from '../knowledge/writer'
@@ -64,8 +68,14 @@ function getIntegrationId(db: ReturnType<typeof getDb>, service: string): number
  * Run all pattern-based suggestion extractors against the latest synced data and
  * persist new candidates to `knowledge_suggestions`. Idempotent: skips any
  * (targetPath + proposedContent) pair that already exists in the table.
+ *
+ * If the user has enabled Ollama suggestions AND Ollama is running locally,
+ * also runs the AI-augmented extractor — wrapped in its own try/catch so an
+ * Ollama failure can never block or fail the sync flow.
  */
-export function runSuggestionExtractors(githubInputsOverride?: GitHubInputItem[]): void {
+export async function runSuggestionExtractors(
+  githubInputsOverride?: GitHubInputItem[]
+): Promise<void> {
   try {
     const db = getDb()
 
@@ -76,7 +86,7 @@ export function runSuggestionExtractors(githubInputsOverride?: GitHubInputItem[]
     // Load recently synced data
     const gmailRows = db.select().from(gmailActions).all()
     // Build input shapes expected by extractors
-    const gmailInputs = gmailRows.map((r) => ({
+    const gmailInputs: GmailInputMessage[] = gmailRows.map((r) => ({
       id: String(r.id),
       threadId: r.threadId,
       subject: r.subject,
@@ -85,7 +95,7 @@ export function runSuggestionExtractors(githubInputsOverride?: GitHubInputItem[]
       date: r.receivedAt ? r.receivedAt.toISOString() : undefined
     }))
 
-    const githubInputs =
+    const githubInputs: GitHubInputItem[] =
       githubInputsOverride ??
       db
         .select()
@@ -106,6 +116,44 @@ export function runSuggestionExtractors(githubInputsOverride?: GitHubInputItem[]
       ...extractOrgsFromGmail(gmailInputs, employersContent),
       ...extractContactsFromGithub(githubInputs, relationshipsContent)
     ]
+
+    // ── Optional: Ollama AI augmentation ──────────────────────────────────────
+    // Only runs when the user has opted in. Failures are logged and ignored.
+    try {
+      const ollamaEnabledRow = db
+        .select()
+        .from(appSettings)
+        .where(eq(appSettings.key, 'ollamaSuggestionsEnabled'))
+        .get()
+      const ollamaEnabled = ollamaEnabledRow?.value === 'true'
+
+      if (ollamaEnabled) {
+        const ollamaModelRow = db
+          .select()
+          .from(appSettings)
+          .where(eq(appSettings.key, 'ollamaModel'))
+          .get()
+        const model = ollamaModelRow?.value ?? DEFAULT_OLLAMA_MODEL
+
+        const ollamaCtx: OllamaSyncContext = {
+          gmailMessages: gmailInputs,
+          githubItems: githubInputs,
+          existingRelationships: relationshipsContent,
+          existingEmployers: employersContent,
+          model
+        }
+
+        const ollamaCandidates = await extractFactsViaOllama(ollamaCtx, {
+          detectOllama,
+          runOllamaPrompt
+        })
+        candidates.push(...ollamaCandidates)
+      }
+    } catch (ollamaErr) {
+      // Ollama is best-effort — never propagate errors into the sync flow
+      console.warn('[ollama] extractor error:', (ollamaErr as Error).message)
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Load existing suggestions to avoid duplicates
     const existingSuggestions = db
@@ -338,7 +386,7 @@ export async function syncGoogle(
     })
     // Run pattern-based suggestion extractors after a successful Google sync
     if (runExtractors) {
-      runSuggestionExtractors()
+      await runSuggestionExtractors()
     }
 
     maybeSendNotification('google', recordsUpdated)
@@ -452,7 +500,7 @@ export async function syncGitHub(
     })
     // Run pattern-based suggestion extractors after a successful GitHub sync
     if (runExtractors) {
-      runSuggestionExtractors(githubSuggestionInputs)
+      await runSuggestionExtractors(githubSuggestionInputs)
     }
 
     maybeSendNotification('github', recordsUpdated)
@@ -498,7 +546,7 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
       syncGitHub(win, false)
     ])
     if (googleResult.success || githubResult.success) {
-      runSuggestionExtractors(githubResult.githubSuggestionInputs ?? [])
+      await runSuggestionExtractors(githubResult.githubSuggestionInputs ?? [])
     }
     return [toPublicSyncResult(googleResult), toPublicSyncResult(githubResult)]
   })
