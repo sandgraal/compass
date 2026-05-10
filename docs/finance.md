@@ -2,9 +2,9 @@
 
 Local-first personal finance, integrated as a peer of Calendar / Gmail / GitHub.
 Owns ingest, categorization, debt tracking, budget, and dashboard for the user's
-financial life. Replaces the legacy Excel pipeline at
-`~/Documents/Claude/Projects/Getting on top of finances/` (in transition through
-2026-06-10 — see [`finance/legacy-cutover.md`](finance/legacy-cutover.md)).
+financial life. Replaces the legacy Excel pipeline in a user-configured legacy
+finance project directory (in transition through 2026-06-10 — see
+[`finance/legacy-cutover.md`](finance/legacy-cutover.md)).
 
 ## Surfaces
 
@@ -13,7 +13,7 @@ financial life. Replaces the legacy Excel pipeline at
 | Schema | `electron/db/schema.ts` (finance section) | `financeAccounts` (debts modeled via `isDebt=true`), `financeTransactions`, `categorizationRules`, `budgetRules` |
 | Ingest | `electron/integrations/finance.ts` | CSV parsers (Chase, Amex, Cap One, Discover, BoA, USAA, Rocket Money, generic), categorizer, dedupe |
 | PDF | `electron/integrations/finance-pdf.ts` | Statement extractors (USAA, AMEX, generic) |
-| Watcher | `electron/integrations/finance-watcher.ts` | Chokidar watch on `~/Documents/Money/` (configurable), 3-level subfolder depth, `.csv` + `.pdf` allowlist |
+| Watcher | `electron/integrations/finance-watcher.ts` | Chokidar watch on `~/Documents/Money/` (configurable), 3-level subfolder depth, `.csv` + `.xlsx` + `.pdf` allowlist |
 | Geo | `electron/integrations/finance-geo.ts` | Tags every txn with `geo:CR \| purpose:capex`-style tokens in `notes` |
 | ATM split | `electron/integrations/finance-atm-split.ts` | 70/30 CR ATM auto-split (Property/Construction vs personal cash) |
 | Subscriptions | `electron/integrations/finance-subscriptions.ts` | Recurring detection, zombies, duplicates |
@@ -65,8 +65,9 @@ are post-processed after each ingest:
    via `finance:set-watch-folder`).
 2. `finance-watcher.ts` (chokidar) detects the file, calls
    `ingestWatchedFolderNow()`.
-3. `ingestCsvFolder()` parses → categorizes → dedupes → tags geo/purpose →
-   inserts → archives the file → runs `applyAtmSplit()` if any rows were added.
+3. `ingestFinanceFiles()` parses → categorizes → dedupes → tags geo/purpose →
+   inserts (read-in-place; source files are not moved) → runs `applyAtmSplit()`
+   if any rows were added.
 4. `finance-extractor.ts` regenerates the markdown summary in
    `knowledge-base/profile/`.
 5. UI reloads via `finance-watcher:ingest-complete` event.
@@ -78,14 +79,14 @@ are post-processed after each ingest:
 | Transactions, accounts, categorization rules, budget rules | SQLite at `.data/compass.db` | No |
 | Account credentials, raw account numbers | `.vault/financial.enc` | Yes (AES-256-GCM via `safeStorage`) |
 | Markdown summaries (no PII) | `knowledge-base/profile/finances*.md` | No |
-| Source CSVs / PDFs after ingestion | `~/Documents/Money/archive/` (auto-moved) | No |
+| Source CSVs / PDFs after ingestion | Watched-folder mode reads in place (no auto-move). Inbox/drain ingest mode archives to `~/Documents/Money/archive/`. | No |
 
 ## Legacy Excel pipeline (transition)
 
-The original implementation lives at
-`~/Documents/Claude/Projects/Getting on top of finances/` and continues to run
-in parallel through **2026-06-10** as a reconciliation backstop. After that the
-Excel project is archived and Compass is the only active finance system. See
+The original implementation lives in a user-configured legacy finance project
+directory and continues to run in parallel through **2026-06-10** as a
+reconciliation backstop. After that the Excel project is archived and Compass
+is the only active finance system. See
 [`finance/legacy-cutover.md`](finance/legacy-cutover.md) for the migration
 playbook.
 
@@ -104,8 +105,6 @@ land as one PR):
 - [`plaid-integration.md`](finance/plaid-integration.md) — kill the manual CSV ritual
 - [`geo-purpose-schema-promotion.md`](finance/geo-purpose-schema-promotion.md) — promote tags to indexed columns
 - [`db-migrate-fix.md`](finance/db-migrate-fix.md) — restore `npm run db:migrate`
-- [`dashboard-snapshot-ipc.md`](finance/dashboard-snapshot-ipc.md) — fold `dashboard_data.py` into an IPC + MCP tool
-- [`knowledge-base-alignment.md`](finance/knowledge-base-alignment.md) — Friday-review markdown lands in Compass KB
 - [`legacy-cutover.md`](finance/legacy-cutover.md) — Excel pipeline retirement
 
 The implementation plan's

@@ -8,10 +8,10 @@ is going.
 
 ## Why now
 
-The dashboard shows $19,400 in debt and a 36 % savings rate. That tells you
-nothing about whether net worth is climbing — half the saved money is going
-into a CR construction asset and half into bank reserves, but neither shows up.
-A 12-month wealth trajectory chart with both sides resolves this.
+The dashboard can show debt and savings-rate metrics, but that still says
+nothing about whether net worth is climbing. Saved money may be split between a
+CR construction asset and bank reserves, and neither appears in the current
+view. A 12-month wealth trajectory chart with both sides resolves this.
 
 ## Acceptance criteria
 

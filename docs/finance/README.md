@@ -12,8 +12,6 @@ is the canonical status tracker; this folder holds the per-feature briefs.
 | 4.4 | [`net-worth.md`](net-worth.md) | `migration-author` + `integration-implementer` + `ui-polish` | medium-large (~700–900 LOC) |
 | 4.5 | [`cash-flow-forecast.md`](cash-flow-forecast.md) | `integration-implementer` + `ui-polish` | medium (~500–700 LOC) |
 | 4.6 | [`plaid-integration.md`](plaid-integration.md) | `director` orchestrating | multi-PR (~1,500–2,000 LOC) |
-| 4.8 | [`dashboard-snapshot-ipc.md`](dashboard-snapshot-ipc.md) | `director` orchestrating | multi-PR (~600–800 LOC across 5 PRs) |
-| 4.9 | [`knowledge-base-alignment.md`](knowledge-base-alignment.md) | `integration-implementer` + `docs-keeper` | small (~150 LOC) |
 | ops | [`legacy-cutover.md`](legacy-cutover.md) | `docs-keeper` + `director` | operational, no code |
 
 ## How an agent should use these

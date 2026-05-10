@@ -9,10 +9,10 @@ Airbnb rental income is Schedule E.
 
 ## Why now
 
-The CR build is approaching $50K capex YTD with zero tax-coded distinction
-between consumption and investment. By the time it's a Q4 problem, three
-years of transactions need re-classifying. Tagging at ingest is cheap;
-retro-tagging 10K rows next April is not.
+The CR build now has substantial capex activity with no tax-coded distinction
+between consumption and investment. By the time it's a Q4 problem, years of
+transactions need re-classifying. Tagging at ingest is cheap; retro-tagging an
+entire backlog next April is not.
 
 ## Acceptance criteria
 

@@ -12,7 +12,7 @@
 | **Phase 1** — Critical bug fixes | 5 items | 0% |
 | **Phase 2** — Remaining PRD features | 7 items | partial (2.1 vault edit shipped in PR #10 follow-up) |
 | **Phase 3** — Beyond-PRD polish | 2 selected items | 0% |
-| **Phase 4** — Finance forward roadmap | 9 items | partial (Rocket Money import + geo/CR-purpose UI + subscription audit shipped in `feat/finance-rocket-money-import`) |
+| **Phase 4** — Finance forward roadmap | 7 items | partial (Rocket Money import + geo/CR-purpose UI + subscription audit shipped in `feat/finance-rocket-money-import`) |
 
 PRD-completion of the running app: **~91%** (10 PRs merged through #10).
 
@@ -185,8 +185,8 @@ Modern (Nov 2025+) Claude Code best practice splits guidance into 4 layers. This
 ## Phase 4 — Finance forward roadmap
 
 Compass owns the user's full financial life as of `feat/finance-rocket-money-import`
-(merged 2026-05). The Excel pipeline at `~/Documents/Claude/Projects/Getting on top of finances/`
-runs in parallel through 2026-06-10, then retires (see [`finance/legacy-cutover.md`](finance/legacy-cutover.md)).
+(merged 2026-05). The Excel pipeline in the user-configured legacy finance project
+directory runs in parallel through 2026-06-10, then retires (see [`finance/legacy-cutover.md`](finance/legacy-cutover.md)).
 This phase turns the retrospective dashboard into a forward-looking financial command center.
 
 Each item below has its own plan doc under [`docs/finance/`](finance/) sized to land as one PR.
@@ -222,14 +222,6 @@ Plaid Link in a child BrowserWindow, encrypted tokens in Vault, `transactions/sy
 Operational doc. Transition rules for the parallel-run window, cutover-day checklist, rollback plan. Not a PR — `docs-keeper` maintains the reconciliation log here during the window.
 *Owner: `docs-keeper` + `director` · operational, no code*
 
-### 4.8 [`dashboard-snapshot-ipc.md`](finance/dashboard-snapshot-ipc.md) — fold `dashboard_data.py` into IPC + MCP
-Move the dashboard query out of the standalone Python script and into Compass as `finance:get-dashboard-snapshot`, exposed via the existing MCP server. Cowork's `finance-dashboard` artifact + the two scheduled-task SKILLs switch to a single MCP call. Compass becomes the literal single source for the dashboard query.
-*Owner: `director` orchestrating · multi-PR (~600–800 LOC)*
-
-### 4.9 [`knowledge-base-alignment.md`](finance/knowledge-base-alignment.md) — Friday-review lands in Compass KB
-Today the Friday weekly-review SKILL writes a copy under `~/Documents/Claude/Scheduled/finance-weekly-review/reports/`, invisible to Compass's `knowledge-base/finance/weekly/`. New IPC + MCP tool (`finance.write_weekly_review`) wires the SKILL through Compass so the markdown lands in the knowledge base and shows up on the Finance page.
-*Owner: `integration-implementer` + `docs-keeper` · small (~150 LOC)*
-
 ### Recommended sequence
 
 ```
@@ -238,19 +230,14 @@ Today the Friday weekly-review SKILL writes a copy under `~/Documents/Claude/Sch
                                                                     │
                                                                     ├→ 4.5 (forecast)
                                                                     │
-                                                                    ├→ 4.6 (Plaid, multi-PR)
-                                                                    │
-                                                                    └→ 4.8 (dashboard IPC) → 4.9 (KB alignment)
+                                                                    └→ 4.6 (Plaid, multi-PR)
 
 4.7 (cutover) runs as background ops doc throughout May 2026.
 ```
 
 4.4 and 4.5 are independent of each other; can parallelize in worktrees.
 4.6 is the largest and most risk-prone — start it after 4.4 lands so the
-Net Worth view has live balances waiting. 4.8 and 4.9 are alignment work
-that gates the legacy cutover (4.7) — they should land before 2026-06-10
-so the Cowork-side scheduled tasks have a Compass-native target to point
-at before the Python script archives.
+Net Worth view has live balances waiting.
 
 ### Phase 4 verification
 
@@ -300,8 +287,6 @@ at before the Python script archives.
 | U ←→ | `feat/finance-net-worth` | Phase 4.4 | migration-author + ui-polish |
 | V ←→ | `feat/finance-forecast` | Phase 4.5 | integration-implementer + ui-polish |
 | W | `feat/finance-plaid-*` (5–6 PRs) | Phase 4.6 | director |
-| X | `feat/finance-dashboard-snapshot-ipc-*` (5 PRs) | Phase 4.8 | director |
-| Y | `feat/finance-kb-weekly-review` | Phase 4.9 | integration-implementer + docs-keeper |
 
 `←→` = independent, parallelizable across worktrees.
 
@@ -317,4 +302,4 @@ at before the Python script archives.
 
 **Phase 3**: First launch shows wizard once; habit reminder fires; tray menu opens quick-capture popup; `Cmd+Shift+T` works from any app.
 
-**Phase 4**: `npm run db:migrate -- --check` exits 0 after each schema item; `finance:get-geo-summary` and `finance:get-tax-summary` return SQL-aggregated results (not JS post-aggregation); Net Worth tab shows non-zero deltas after a snapshot capture; Forecast tab projects 90 days with at least the active subscriptions visible as outflow events; Plaid Link completes in sandbox env with a fixture institution; the Excel project at `~/Documents/Claude/Projects/Getting on top of finances/` is in `~/Documents/Claude/Archived/` after 2026-06-10; the Cowork `finance-dashboard` artifact fetches its snapshot via the Compass MCP tool (no embedded JSON); the Cowork `finance-weekly-review` SKILL writes its markdown body into Compass's `knowledge-base/finance/weekly/` via `finance.write_weekly_review`, and the Compass Finance page lists those reviews.
+**Phase 4**: `npm run db:migrate -- --check` exits 0 after each schema item; `finance:get-geo-summary` and `finance:get-tax-summary` return SQL-aggregated results (not JS post-aggregation); Net Worth tab shows non-zero deltas after a snapshot capture; Forecast tab projects 90 days with at least the active subscriptions visible as outflow events; Plaid Link completes in sandbox env with a fixture institution; the Excel project at `~/Documents/Claude/Projects/Getting on top of finances/` is in `~/Documents/Claude/Archived/` after 2026-06-10.
