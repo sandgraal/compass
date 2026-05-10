@@ -185,8 +185,8 @@ Modern (Nov 2025+) Claude Code best practice splits guidance into 4 layers. This
 ## Phase 4 — Finance forward roadmap
 
 Compass owns the user's full financial life as of `feat/finance-rocket-money-import`
-(merged 2026-05). The Excel pipeline at `~/Documents/Claude/Projects/Getting on top of finances/`
-runs in parallel through 2026-06-10, then retires (see [`finance/legacy-cutover.md`](finance/legacy-cutover.md)).
+(merged 2026-05). The Excel pipeline in the user-configured legacy finance project
+directory runs in parallel through 2026-06-10, then retires (see [`finance/legacy-cutover.md`](finance/legacy-cutover.md)).
 This phase turns the retrospective dashboard into a forward-looking financial command center.
 
 Each item below has its own plan doc under [`docs/finance/`](finance/) sized to land as one PR.

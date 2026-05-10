@@ -15,8 +15,9 @@ download, pick the right CSV format, save to `~/Documents/Money`, then come
 back to Compass. Plaid does this in 200 ms via API. The ingest pipeline
 downstream is identical.
 
-This is **also** the place where the existing `archive/integrations/plaid.ts`
-reference in `electron/integrations/finance.ts:1-7` becomes real.
+This is **also** the place where the existing
+`electron/integrations/plaid.ts` reference in
+`electron/integrations/finance.ts:1-7` becomes real.
 
 ## Acceptance criteria
 
@@ -48,17 +49,16 @@ reference in `electron/integrations/finance.ts:1-7` becomes real.
 | Development | `development` | First 100 connected accounts free; use this for the user's actual accounts during build-out |
 | Production | `production` | When the auth + sync loop is rock-solid; usage-billed |
 
-User's `~/.config/compass/plaid.env` (NOT in `.vault` — it's a public client
-ID, not a secret) holds:
+User's `~/.config/compass/plaid.env` holds non-secret config only:
 
 ```
 PLAID_CLIENT_ID=...
-PLAID_SECRET_DEV=...
 PLAID_ENV=development
 ```
 
-The secret is encrypted via `safeStorage` and stored in `.vault/plaid-config.enc`
-to keep the same security envelope as other tokens.
+Secrets (`PLAID_SECRET_DEV`/`PLAID_SECRET_PROD`) and access tokens are encrypted
+via `safeStorage` and stored in `.vault/plaid-config.enc` to keep the same
+security envelope as other tokens.
 
 ### Schema additions
 
