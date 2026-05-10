@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { DATA_DIR } from '../paths'
 import * as schema from './schema'
 
@@ -36,6 +37,7 @@ export async function initDb(): Promise<void> {
 
   // Run migrations
   try {
+    normalizeRecordedMigrationTimestamps(sqlite, MIGRATIONS_FOLDER)
     reconcileBackfilledInstitutionMigration(sqlite)
     migrate(_db as ReturnType<typeof drizzle>, {
       migrationsFolder: MIGRATIONS_FOLDER
@@ -115,10 +117,38 @@ function ensureColumn(
   column: string,
   ddl: string
 ): boolean {
-  const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  const quotedTable = quoteSqliteIdentifier(table)
+  const quotedColumn = quoteSqliteIdentifier(column)
+  const cols = sqlite.prepare(`PRAGMA table_info(${quotedTable})`).all() as Array<{ name: string }>
   if (cols.some((c) => c.name === column)) return false
-  sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`)
+  sqlite.exec(`ALTER TABLE ${quotedTable} ADD COLUMN ${quotedColumn} ${ddl}`)
   return true
+}
+
+function normalizeRecordedMigrationTimestamps(
+  sqlite: Database.Database,
+  migrationsFolder: string
+): void {
+  const migrations = readMigrationFiles({ migrationsFolder })
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS __drizzle_migrations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      hash TEXT NOT NULL,
+      created_at NUMERIC
+    );
+  `)
+
+  const updateMigrationTimestamp = sqlite.prepare(`
+    UPDATE __drizzle_migrations
+    SET created_at = ?
+    WHERE hash = ?
+      AND COALESCE(created_at, -1) <> ?
+  `)
+
+  for (const migration of migrations) {
+    updateMigrationTimestamp.run(migration.folderMillis, migration.hash, migration.folderMillis)
+  }
 }
 
 function reconcileBackfilledInstitutionMigration(sqlite: Database.Database): void {
@@ -152,8 +182,23 @@ function hasTable(sqlite: Database.Database, table: string): boolean {
 }
 
 function hasColumn(sqlite: Database.Database, table: string, column: string): boolean {
-  const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  const quotedTable = quoteSqliteIdentifier(table)
+  const columns = sqlite.prepare(`PRAGMA table_info(${quotedTable})`).all() as Array<{
+    name: string
+  }>
   return columns.some((entry) => entry.name === column)
+}
+
+/**
+ * Validates and quotes SQLite identifiers used in PRAGMA/ALTER TABLE statements.
+ * Only simple alphanumeric identifiers starting with a letter or underscore are allowed.
+ */
+function quoteSqliteIdentifier(identifier: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) {
+    throw new Error(`Invalid SQLite identifier: ${identifier}`)
+  }
+
+  return `"${identifier}"`
 }
 
 function getMigrationMetadata(tag: string): { hash: string; when: number } | null {
