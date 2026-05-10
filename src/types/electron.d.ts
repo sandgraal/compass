@@ -281,6 +281,9 @@ declare global {
             apr: number | null
             minPayment: number | null
             creditLimit: number | null
+            institution?: string
+            paymentDueDate?: string | null
+            lastStatementSyncedAt?: number | Date | null
           }>
         >
         upsertAccount(account: {
@@ -304,6 +307,17 @@ declare global {
           }>
           projection: Array<{ month: number; balance: number }>
         }>
+        getUpcomingPayments(daysAhead?: number): Promise<
+          Array<{
+            id: number
+            name: string
+            institution: string
+            paymentDueDate: string
+            minPayment: number
+            balance: number
+            daysRemaining: number
+          }>
+        >
         getBudgetStatus(month?: string): Promise<{
           lines: Array<{
             category: string

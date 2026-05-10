@@ -3,9 +3,13 @@ Credit Card Statement
 Account ending in 4321
 Statement Period: 04/15/2026 - 05/14/2026
 Closing Date: 05/14/2026
+Payment Due Date: 06/10/2026
 Minimum Payment Due: $42.00
 New Balance: $1,284.55
 Previous Balance: $1,012.30
+Credit Limit: $5,000.00
+Available Credit: $3,715.45
+Annual Percentage Rate (APR): 18.99%
 
 Account Summary
 Previous Balance              $1,012.30

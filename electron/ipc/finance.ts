@@ -260,6 +260,42 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     return { debts, projection }
   })
 
+  // ── Upcoming payments (Dashboard "Payments Due" card) ────────────────────
+  // Returns debt accounts whose payment_due_date is within the next
+  // `daysAhead` days (default 14), sorted by date ascending. Past-due dates
+  // are included too so the user sees them on the Dashboard until paid.
+  ipcMain.handle('finance:get-upcoming-payments', (_event, daysAhead = 14) => {
+    const db = getDb()
+    const debts = db.select().from(financeAccounts).where(eq(financeAccounts.isDebt, true)).all()
+    const normalizedDaysAhead = Number.isFinite(daysAhead) ? Math.floor(daysAhead) : 14
+    const clampedDaysAhead = Math.min(365, Math.max(0, normalizedDaysAhead))
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const cutoff = new Date(today)
+    cutoff.setDate(cutoff.getDate() + clampedDaysAhead)
+    const upcoming = debts
+      .filter((d): d is typeof d & { paymentDueDate: string } => Boolean(d.paymentDueDate))
+      .map((d) => {
+        const due = new Date(`${d.paymentDueDate}T00:00:00`)
+        const daysRemaining = Math.round((due.getTime() - today.getTime()) / 86_400_000)
+        return {
+          id: d.id,
+          name: d.name,
+          institution: d.institution,
+          paymentDueDate: d.paymentDueDate,
+          minPayment: d.minPayment ?? 0,
+          balance: d.balance ?? 0,
+          daysRemaining
+        }
+      })
+      .filter((p) => {
+        const due = new Date(`${p.paymentDueDate}T00:00:00`)
+        return due.getTime() <= cutoff.getTime()
+      })
+      .sort((a, b) => (a.paymentDueDate < b.paymentDueDate ? -1 : 1))
+    return upcoming
+  })
+
   // ── Budget status (actual vs planned for a month) ─────────────────────────
   ipcMain.handle('finance:get-budget-status', (_event, month?: string) => {
     const db = getDb()

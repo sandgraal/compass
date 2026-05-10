@@ -56,6 +56,7 @@ function ensureNewTables(sqlite: Database.Database): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'credit',
       is_debt INTEGER DEFAULT 0, balance REAL DEFAULT 0, apr REAL DEFAULT 0,
       min_payment REAL DEFAULT 0, credit_limit REAL, institution TEXT NOT NULL DEFAULT '',
+      payment_due_date TEXT, last_statement_synced_at INTEGER,
       updated_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS finance_transactions (
@@ -94,6 +95,8 @@ function ensureNewTables(sqlite: Database.Database): void {
     'INTEGER NOT NULL DEFAULT 15'
   )
   ensureColumn(sqlite, 'finance_accounts', 'institution', "TEXT NOT NULL DEFAULT ''")
+  ensureColumn(sqlite, 'finance_accounts', 'payment_due_date', 'TEXT')
+  ensureColumn(sqlite, 'finance_accounts', 'last_statement_synced_at', 'INTEGER')
   if (addedSyncInterval) {
     // One-time migration: seed per-integration intervals from the legacy global setting so users
     // who tuned `syncInterval` keep their preference on existing connected integrations.
@@ -337,6 +340,8 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       min_payment REAL DEFAULT 0,
       credit_limit REAL,
       institution TEXT NOT NULL DEFAULT '',
+      payment_due_date TEXT,
+      last_statement_synced_at INTEGER,
       updated_at INTEGER
     );
 

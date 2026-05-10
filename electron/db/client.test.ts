@@ -246,12 +246,15 @@ describe('initDb finance_accounts institution column', () => {
     await initDb()
 
     const recordedMigrations = readRecordedMigrations(dbPath)
-    expect(recordedMigrations).toEqual(
-      appliedMigrations.map((migration) => ({
-        hash: migration.hash,
-        created_at: migration.when
-      }))
-    )
+    // The pre-seeded applied migrations should have their timestamps
+    // normalized back to the journal's `when`. Any later migrations
+    // (added after this test was written) get applied during initDb()
+    // but are unrelated to this test's invariant.
+    for (const migration of appliedMigrations) {
+      const recorded = recordedMigrations.find((row) => row.hash === migration.hash)
+      expect(recorded).toBeDefined()
+      expect(recorded?.created_at).toBe(migration.when)
+    }
   })
 
   it('records the institution migration when the column was already backfilled', async () => {
