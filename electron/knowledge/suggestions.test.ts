@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  type CalendarInputEvent,
   type GitHubInputItem,
   type GmailInputMessage,
+  extractContactsFromCalendar,
   extractContactsFromGithub,
   extractContactsFromGmail,
   extractOrgsFromGmail
@@ -124,6 +126,103 @@ describe('extractOrgsFromGmail', () => {
       makeGmailMsg({ id: 'm3', threadId: 't3', from: 'C <c@gmail.com>' })
     ]
     expect(extractOrgsFromGmail(messages, '')).toHaveLength(0)
+  })
+})
+
+// ── extractContactsFromCalendar ───────────────────────────────────────────────
+
+describe('extractContactsFromCalendar', () => {
+  const RECENT = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) // 5 days ago
+
+  function makeEvent(
+    overrides: Partial<CalendarInputEvent> & Pick<CalendarInputEvent, 'externalId'>
+  ): CalendarInputEvent {
+    return {
+      title: 'Team Sync',
+      description: null,
+      startAt: RECENT,
+      ...overrides
+    }
+  }
+
+  it('does NOT propose a contact when they appear in only one event', () => {
+    const events = [
+      makeEvent({
+        externalId: 'ev1',
+        description: 'Organizer: Alice Smith <alice@acme.com>'
+      })
+    ]
+    expect(extractContactsFromCalendar(events, '')).toHaveLength(0)
+  })
+
+  it('proposes a contact when the same email appears in >= 2 events', () => {
+    const events = [
+      makeEvent({
+        externalId: 'ev1',
+        description: 'Alice Smith <alice@acme.com> will present'
+      }),
+      makeEvent({
+        externalId: 'ev2',
+        description: 'Attendees: Alice Smith <alice@acme.com>'
+      })
+    ]
+    const results = extractContactsFromCalendar(events, '')
+    expect(results).toHaveLength(1)
+    expect(results[0].proposedContent).toContain('Alice Smith')
+    expect(results[0].proposedContent).toContain('alice@acme.com')
+    expect(results[0].targetPath).toBe('profile/relationships.md')
+    expect(results[0].kind).toBe('contact')
+    expect(results[0].source).toBe('calendar')
+  })
+
+  it('does NOT propose when the contact is already in relationships.md', () => {
+    const events = [
+      makeEvent({
+        externalId: 'ev1',
+        description: 'Bob Jones <bob@startup.io>'
+      }),
+      makeEvent({
+        externalId: 'ev2',
+        description: 'Bob Jones <bob@startup.io> joining remotely'
+      })
+    ]
+    const existing = '| Bob Jones | Colleague | bob@startup.io |'
+    expect(extractContactsFromCalendar(events, existing)).toHaveLength(0)
+  })
+
+  it('skips events older than 30 days', () => {
+    const OLD = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000)
+    const events = [
+      makeEvent({ externalId: 'ev1', description: 'carol@work.com', startAt: OLD }),
+      makeEvent({ externalId: 'ev2', description: 'carol@work.com', startAt: OLD })
+    ]
+    expect(extractContactsFromCalendar(events, '')).toHaveLength(0)
+  })
+
+  it('skips noreply and automated email addresses', () => {
+    const events = [
+      makeEvent({ externalId: 'ev1', description: 'noreply@calendar.google.com' }),
+      makeEvent({ externalId: 'ev2', description: 'noreply@calendar.google.com' })
+    ]
+    expect(extractContactsFromCalendar(events, '')).toHaveLength(0)
+  })
+
+  it('skips events with no description', () => {
+    const events = [
+      makeEvent({ externalId: 'ev1', description: null }),
+      makeEvent({ externalId: 'ev2', description: undefined })
+    ]
+    expect(extractContactsFromCalendar(events, '')).toHaveLength(0)
+  })
+
+  it('includes context with event count', () => {
+    const events = [
+      makeEvent({ externalId: 'ev1', description: 'dave@partner.com' }),
+      makeEvent({ externalId: 'ev2', description: 'dave@partner.com' }),
+      makeEvent({ externalId: 'ev3', description: 'dave@partner.com' })
+    ]
+    const results = extractContactsFromCalendar(events, '')
+    expect(results[0].context).toContain('3 calendar event')
   })
 })
 

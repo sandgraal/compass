@@ -18,7 +18,9 @@ import {
   updateGmailKnowledge
 } from '../knowledge/extractor'
 import {
+  type CalendarInputEvent,
   type GitHubInputItem,
+  extractContactsFromCalendar,
   extractContactsFromGithub,
   extractContactsFromGmail,
   extractOrgsFromGmail
@@ -101,10 +103,22 @@ export function runSuggestionExtractors(githubInputsOverride?: GitHubInputItem[]
           labels: r.labels ? (JSON.parse(r.labels) as string[]).map((n) => ({ name: n })) : []
         }))
 
+    const calendarInputs: CalendarInputEvent[] = db
+      .select()
+      .from(calendarEvents)
+      .all()
+      .map((r) => ({
+        externalId: r.externalId,
+        title: r.title,
+        description: r.description,
+        startAt: r.startAt
+      }))
+
     const candidates = [
       ...extractContactsFromGmail(gmailInputs, relationshipsContent),
       ...extractOrgsFromGmail(gmailInputs, employersContent),
-      ...extractContactsFromGithub(githubInputs, relationshipsContent)
+      ...extractContactsFromGithub(githubInputs, relationshipsContent),
+      ...extractContactsFromCalendar(calendarInputs, relationshipsContent)
     ]
 
     // Load existing suggestions to avoid duplicates
