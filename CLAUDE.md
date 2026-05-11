@@ -31,6 +31,16 @@ All user data stays on disk; only OAuth tokens leave the machine (and only to Go
 - One Changeset per PR (`.changeset/*.md` describing user-visible change + bump type)
 - Co-author Claude on every commit Claude touched
 
+## Release flow (shipping a new version to the installed app)
+```bash
+npm version patch          # or minor / major — bumps package.json + creates git tag
+git push --follow-tags     # GitHub Actions builds, packages, publishes to GitHub Releases
+```
+That's it. `GITHUB_TOKEN` is auto-injected by Actions — no PAT, no manual packaging.
+The running app detects the new release within 3 s of next launch (or 4 h periodic check)
+and shows the UpdateBanner. See `.github/workflows/release.yml` for the full pipeline.
+**Never run `npm run release` locally** — let CI do it so builds are reproducible.
+
 ## Sub-agents you can delegate to (see `.claude/agents/`)
 `bug-triager` · `migration-author` · `security-auditor` · `integration-implementer` · `ui-polish` · `docs-keeper` · `director`
 

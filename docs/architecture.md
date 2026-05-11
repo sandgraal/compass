@@ -38,7 +38,8 @@ CSP enforced in production builds (no eval, no remote scripts, allowlist for OAu
 | OAuth flows + token storage | `electron/ipc/auth.ts` |
 | Sync logic per service | `electron/ipc/sync.ts` |
 | Knowledge file write/read | `electron/knowledge/writer.ts` |
-| Auto-update pipeline | `electron/knowledge/extractor.ts` |
+| Knowledge auto-update pipeline | `electron/knowledge/extractor.ts` |
+| **App auto-updater** (electron-updater) | `electron/ipc/updater.ts` |
 | Finance ingestion + budget | `electron/ipc/finance.ts`, `electron/integrations/finance.ts` |
 
 ## Database (Drizzle / SQLite via `better-sqlite3`)
@@ -90,6 +91,7 @@ Registered in `electron/main.ts`:
 - `registerSettingsHandlers` — get/set/getAll, data export, wipe
 - `registerFinanceHandlers` — txns, accounts, debt summary, budget, rules
 - `registerHabitsHandlers` — habit CRUD + toggle entries
+- `registerUpdaterHandlers` — `updater:check`, `updater:install-and-restart`; pushes `updater:status` events to renderer
 
 Pattern: every IPC handler lives in `electron/ipc/<domain>.ts`, is exposed through `electron/preload.ts`, and has a TypeScript signature in `src/types/electron.d.ts`. Drift between these three is the leading source of bugs — see `electron-trpc` migration plan in `docs/implementation_plan.md` Phase 0.7.
 
@@ -123,3 +125,22 @@ Global ⌘K palette: `src/components/CommandPalette.tsx` (mounted in `App.tsx`).
 - `chokidar` watcher on `knowledge-base/` for external edits
 - `node-cron` scheduler in `electron/cron.ts`
 - Native theme listener (re-emits to renderer on macOS dark/light flip)
+- `electron-updater` — checks GitHub Releases 3 s after launch, then every 4 h; downloads silently; notifies renderer via `updater:status` push events
+
+## Release pipeline
+
+Shipping a new version to all running Compass instances:
+
+```bash
+npm version patch          # bumps package.json + creates git tag (e.g. v0.1.1)
+git push --follow-tags     # triggers .github/workflows/release.yml
+```
+
+GitHub Actions (`release.yml`) runs on `macos-latest`, installs deps, builds via `npm run release`
+(`electron-builder --publish always`), and uploads `.dmg` + `latest-mac.yml` to GitHub Releases
+using the auto-injected `GITHUB_TOKEN` — no manual secrets or PAT required.
+
+The running app discovers the new `latest-mac.yml` on next check, downloads the `.dmg` in the
+background, then shows the `UpdateBanner` with a "Restart to Install" CTA.
+
+**Do not run `npm run release` locally** — CI builds are reproducible; local builds may differ.
