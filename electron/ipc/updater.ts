@@ -1,4 +1,4 @@
-import type { BrowserWindow, IpcMain } from 'electron'
+import { BrowserWindow, type IpcMain, app } from 'electron'
 import { autoUpdater } from 'electron-updater'
 
 export type UpdaterStatusPayload =
@@ -9,40 +9,33 @@ export type UpdaterStatusPayload =
   | { phase: 'downloaded'; version: string }
   | { phase: 'error'; message: string }
 
-let getTargetWindow: (() => BrowserWindow | null) | null = null
-let updaterInitialized = false
-let scheduledCheckTimeout: ReturnType<typeof setTimeout> | null = null
-let scheduledCheckInterval: ReturnType<typeof setInterval> | null = null
-
-function currentWindow(): BrowserWindow | null {
-  const win = getTargetWindow?.() ?? null
-  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return null
-  return win
-}
-
+/** Send a status event to the current main window, guarding against destroyed windows. */
 function push(payload: UpdaterStatusPayload): void {
-  currentWindow()?.webContents.send('updater:status', payload)
+  const win = BrowserWindow.getAllWindows()[0]
+  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
+  win.webContents.send('updater:status', payload)
 }
 
 function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-async function checkForUpdates(): Promise<void> {
-  try {
-    await autoUpdater.checkForUpdates()
-  } catch (err) {
-    push({ phase: 'error', message: getErrorMessage(err) })
-  }
-}
+// Module-level flag — prevents duplicate listener registration if initAutoUpdater is called
+// more than once (e.g. on macOS window re-creation).
+let listenersRegistered = false
 
-export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
-  getTargetWindow = getWindow
-  autoUpdater.logger = null
-  autoUpdater.autoDownload = true
-  autoUpdater.autoInstallOnAppQuit = false
-  if (updaterInitialized) return
-  updaterInitialized = true
+/**
+ * Configure autoUpdater and wire all events to the renderer.
+ * Safe to call multiple times — listeners are only registered once.
+ * Call in production only (!is.dev).
+ */
+export function initAutoUpdater(): void {
+  autoUpdater.logger = null // suppress file-based log noise
+  autoUpdater.autoDownload = true // silent background download once an update is found
+  autoUpdater.autoInstallOnAppQuit = false // user must click "Restart to Install"
+
+  if (listenersRegistered) return
+  listenersRegistered = true
 
   autoUpdater.on('checking-for-update', () => push({ phase: 'checking' }))
 
@@ -72,24 +65,32 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
   autoUpdater.on('error', (err) => push({ phase: 'error', message: getErrorMessage(err) }))
 }
 
+/**
+ * Schedule automatic background update checks.
+ * Call AFTER initAutoUpdater(), in production only.
+ */
 export function scheduleUpdateChecks(): void {
-  if (scheduledCheckTimeout || scheduledCheckInterval) return
-
   // Initial check 3 s after launch — avoids blocking startup
-  scheduledCheckTimeout = setTimeout(() => {
-    void checkForUpdates()
+  setTimeout(() => {
+    void autoUpdater.checkForUpdates().catch((err) => {
+      push({ phase: 'error', message: getErrorMessage(err) })
+    })
   }, 3_000)
 
-  // Periodic check every 4 hours
-  scheduledCheckInterval = setInterval(
+  // Re-check every 4 hours
+  setInterval(
     () => {
-      void checkForUpdates()
+      void autoUpdater.checkForUpdates().catch((err) => {
+        push({ phase: 'error', message: getErrorMessage(err) })
+      })
     },
     4 * 60 * 60 * 1_000
   )
 }
 
 export function registerUpdaterHandlers(ipcMain: IpcMain): void {
+  ipcMain.handle('updater:get-version', () => app.getVersion())
+
   ipcMain.handle('updater:check', async () => {
     try {
       await autoUpdater.checkForUpdates()
@@ -99,7 +100,8 @@ export function registerUpdaterHandlers(ipcMain: IpcMain): void {
     }
   })
 
-  ipcMain.handle('updater:install-and-restart', () => {
+  // Fire-and-forget: quitAndInstall never returns, so use send not invoke.
+  ipcMain.on('updater:install-and-restart', () => {
     autoUpdater.quitAndInstall(false, true)
   })
 }

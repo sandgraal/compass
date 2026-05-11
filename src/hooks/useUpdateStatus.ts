@@ -40,6 +40,8 @@ export function useUpdateStatus(): UpdaterState {
           setState(INITIAL)
           break
         case 'downloading':
+          // Use functional update to preserve `version`/`releaseDate` set by the
+          // preceding `available` event — don't wipe them by replacing the whole object.
           setState((prev) => ({
             ...prev,
             phase: 'downloading',

@@ -229,10 +229,10 @@ const api = {
 
   // --- Auto-updater ---
   updater: {
+    getVersion: () => ipcRenderer.invoke('updater:get-version'),
     check: () => ipcRenderer.invoke('updater:check'),
-    installAndRestart: async (): Promise<void> => {
-      await ipcRenderer.invoke('updater:install-and-restart')
-    },
+    // send (not invoke) — quitAndInstall never returns, so there's no reply to await
+    installAndRestart: () => ipcRenderer.send('updater:install-and-restart'),
     onStatus: (cb: (data: UpdaterStatusPayload) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, data: unknown) => {
         if (isUpdaterStatusPayload(data)) cb(data)
