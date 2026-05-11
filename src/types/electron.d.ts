@@ -1,6 +1,8 @@
 // Typed window.api interface — mirrors electron/preload.ts
 
 declare global {
+  type AppSettings = Record<string, string> & { appVersion: string }
+
   type UpdaterStatusPayload =
     | { phase: 'checking' }
     | { phase: 'available'; version: string; releaseDate: string }
@@ -226,7 +228,7 @@ declare global {
       settings: {
         get(key: string): Promise<string | null>
         set(key: string, value: unknown): Promise<{ success: boolean }>
-        getAll(): Promise<Record<string, string>>
+        getAll(): Promise<AppSettings>
         openDataDir(): Promise<{ success: boolean }>
         wipeKnowledge(): Promise<{ success: boolean; error?: string }>
         wipeVault(): Promise<{ success: boolean; error?: string }>
@@ -241,7 +243,7 @@ declare global {
       }
       updater: {
         check(): Promise<{ success: boolean; error?: string }>
-        installAndRestart(): void
+        installAndRestart(): Promise<void>
         onStatus(cb: (data: UpdaterStatusPayload) => void): () => void
       }
       theme: {

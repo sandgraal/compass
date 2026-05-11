@@ -1,5 +1,31 @@
 import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer } from 'electron'
+import type { UpdaterStatusPayload } from './ipc/updater'
+
+function isUpdaterStatusPayload(data: unknown): data is UpdaterStatusPayload {
+  if (!data || typeof data !== 'object' || !('phase' in data)) return false
+  const payload = data as Record<string, unknown>
+
+  switch (payload.phase) {
+    case 'checking':
+    case 'not-available':
+      return true
+    case 'available':
+      return typeof payload.version === 'string' && typeof payload.releaseDate === 'string'
+    case 'downloading':
+      return (
+        typeof payload.percent === 'number' &&
+        typeof payload.bytesPerSecond === 'number' &&
+        typeof payload.total === 'number'
+      )
+    case 'downloaded':
+      return typeof payload.version === 'string'
+    case 'error':
+      return typeof payload.message === 'string'
+    default:
+      return false
+  }
+}
 
 // Typed API exposed to the renderer via contextBridge
 // The renderer has ZERO direct access to Node.js or Electron internals
@@ -204,9 +230,13 @@ const api = {
   // --- Auto-updater ---
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),
-    installAndRestart: () => ipcRenderer.invoke('updater:install-and-restart'),
-    onStatus: (cb: (data: unknown) => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, data: unknown) => cb(data)
+    installAndRestart: async (): Promise<void> => {
+      await ipcRenderer.invoke('updater:install-and-restart')
+    },
+    onStatus: (cb: (data: UpdaterStatusPayload) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: unknown) => {
+        if (isUpdaterStatusPayload(data)) cb(data)
+      }
       ipcRenderer.on('updater:status', listener)
       return () => ipcRenderer.removeListener('updater:status', listener)
     }

@@ -9,29 +9,55 @@ export type UpdaterStatusPayload =
   | { phase: 'downloaded'; version: string }
   | { phase: 'error'; message: string }
 
-function push(win: BrowserWindow, payload: UpdaterStatusPayload): void {
-  win.webContents.send('updater:status', payload)
+let getTargetWindow: (() => BrowserWindow | null) | null = null
+let updaterInitialized = false
+let scheduledCheckTimeout: ReturnType<typeof setTimeout> | null = null
+let scheduledCheckInterval: ReturnType<typeof setInterval> | null = null
+
+function currentWindow(): BrowserWindow | null {
+  const win = getTargetWindow?.() ?? null
+  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return null
+  return win
 }
 
-export function initAutoUpdater(win: BrowserWindow): void {
+function push(payload: UpdaterStatusPayload): void {
+  currentWindow()?.webContents.send('updater:status', payload)
+}
+
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+async function checkForUpdates(): Promise<void> {
+  try {
+    await autoUpdater.checkForUpdates()
+  } catch (err) {
+    push({ phase: 'error', message: getErrorMessage(err) })
+  }
+}
+
+export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
+  getTargetWindow = getWindow
   autoUpdater.logger = null
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = false
+  if (updaterInitialized) return
+  updaterInitialized = true
 
-  autoUpdater.on('checking-for-update', () => push(win, { phase: 'checking' }))
+  autoUpdater.on('checking-for-update', () => push({ phase: 'checking' }))
 
   autoUpdater.on('update-available', (info) =>
-    push(win, {
+    push({
       phase: 'available',
       version: info.version,
       releaseDate: info.releaseDate ? String(info.releaseDate) : ''
     })
   )
 
-  autoUpdater.on('update-not-available', () => push(win, { phase: 'not-available' }))
+  autoUpdater.on('update-not-available', () => push({ phase: 'not-available' }))
 
   autoUpdater.on('download-progress', (progress) =>
-    push(win, {
+    push({
       phase: 'downloading',
       percent: progress.percent,
       bytesPerSecond: progress.bytesPerSecond,
@@ -40,26 +66,24 @@ export function initAutoUpdater(win: BrowserWindow): void {
   )
 
   autoUpdater.on('update-downloaded', (info) =>
-    push(win, { phase: 'downloaded', version: info.version })
+    push({ phase: 'downloaded', version: info.version })
   )
 
-  autoUpdater.on('error', (err) => push(win, { phase: 'error', message: err.message }))
+  autoUpdater.on('error', (err) => push({ phase: 'error', message: getErrorMessage(err) }))
 }
 
-export function scheduleUpdateChecks(win: BrowserWindow): void {
+export function scheduleUpdateChecks(): void {
+  if (scheduledCheckTimeout || scheduledCheckInterval) return
+
   // Initial check 3 s after launch — avoids blocking startup
-  setTimeout(() => {
-    void autoUpdater.checkForUpdates().catch((err) => {
-      push(win, { phase: 'error', message: String(err) })
-    })
+  scheduledCheckTimeout = setTimeout(() => {
+    void checkForUpdates()
   }, 3_000)
 
   // Periodic check every 4 hours
-  setInterval(
+  scheduledCheckInterval = setInterval(
     () => {
-      void autoUpdater.checkForUpdates().catch((err) => {
-        push(win, { phase: 'error', message: String(err) })
-      })
+      void checkForUpdates()
     },
     4 * 60 * 60 * 1_000
   )

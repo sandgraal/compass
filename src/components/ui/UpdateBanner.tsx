@@ -15,6 +15,8 @@ export function UpdateBanner(): JSX.Element | null {
 
   return (
     <div
+      aria-live={status.phase === 'error' ? 'assertive' : 'polite'}
+      aria-atomic="true"
       className={cn(
         'flex items-center gap-2.5 shrink-0 h-9 px-4 text-xs border-b',
         status.phase === 'downloaded'
@@ -67,7 +69,7 @@ export function UpdateBanner(): JSX.Element | null {
           </span>
           <button
             type="button"
-            onClick={() => window.api.updater.installAndRestart()}
+            onClick={() => void window.api.updater.installAndRestart()}
             className="ml-auto shrink-0 px-3 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-200 font-medium transition-colors"
           >
             Restart to Install

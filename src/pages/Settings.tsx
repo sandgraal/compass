@@ -22,6 +22,7 @@ export default function Settings(): JSX.Element {
   const [syncInterval, setSyncInterval] = useState('15')
   const [notifications, setNotifications] = useState(true)
   const [contextDrawer, setContextDrawer] = useState(true)
+  const [updateCheckInFlight, setUpdateCheckInFlight] = useState(false)
   const { setContextDrawerOpen } = useAppStore()
   const { toast } = useToast()
   const confirm = useConfirm()
@@ -44,7 +45,7 @@ export default function Settings(): JSX.Element {
         setNotifications(s.notificationsEnabled !== 'false')
         setContextDrawer(s.showContextDrawer !== 'false')
         setOllamaEnabled(s.ollamaSuggestionsEnabled === 'true')
-        if (s.appVersion) setAppVersion(s.appVersion)
+        setAppVersion(s.appVersion)
         setOllamaModel(savedModel)
         loadedOllamaModelRef.current = savedModel
         checkOllama({ currentModel: savedModel })
@@ -323,12 +324,26 @@ export default function Settings(): JSX.Element {
         <SettingsRow label="Check for updates" description={`Current version: ${appVersion}`}>
           <button
             type="button"
-            onClick={() => void window.api.updater.check()}
+            onClick={async () => {
+              setUpdateCheckInFlight(true)
+              try {
+                const result = await window.api.updater.check()
+                if (!result.success) {
+                  toast(
+                    result.error ? `Update check failed: ${result.error}` : 'Update check failed.',
+                    'error'
+                  )
+                }
+              } finally {
+                setUpdateCheckInFlight(false)
+              }
+            }}
+            disabled={updateCheckInFlight}
             aria-label="Check for updates now"
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <RefreshCw size={12} />
-            Check now
+            <RefreshCw size={12} className={cn(updateCheckInFlight && 'animate-spin')} />
+            {updateCheckInFlight ? 'Checking…' : 'Check now'}
           </button>
         </SettingsRow>
       </SettingsSection>

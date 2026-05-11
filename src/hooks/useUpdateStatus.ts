@@ -40,12 +40,13 @@ export function useUpdateStatus(): UpdaterState {
           setState(INITIAL)
           break
         case 'downloading':
-          setState({
+          setState((prev) => ({
+            ...prev,
             phase: 'downloading',
             percent: payload.percent,
             bytesPerSecond: payload.bytesPerSecond,
             total: payload.total
-          })
+          }))
           break
         case 'downloaded':
           setState({ phase: 'downloaded', version: payload.version })
