@@ -12,6 +12,7 @@
 | **Phase 1** — Critical bug fixes | 5 items | 0% |
 | **Phase 2** — Remaining PRD features | 7 items | partial (2.1 vault edit shipped in PR #10 follow-up) |
 | **Phase 3** — Beyond-PRD polish | 2 selected items | 0% |
+| **Phase 4** — Finance forward roadmap | 7 items | partial (Rocket Money import + geo/CR-purpose UI + subscription audit shipped in `feat/finance-rocket-money-import`) |
 
 PRD-completion of the running app: **~91%** (10 PRs merged through #10).
 
@@ -181,6 +182,73 @@ Modern (Nov 2025+) Claude Code best practice splits guidance into 4 layers. This
 
 ---
 
+## Phase 4 — Finance forward roadmap
+
+Compass owns the user's full financial life as of `feat/finance-rocket-money-import`
+(merged 2026-05). The Excel pipeline in the user-configured legacy finance project
+directory runs in parallel through 2026-06-10, then retires (see [`finance/legacy-cutover.md`](finance/legacy-cutover.md)).
+This phase turns the retrospective dashboard into a forward-looking financial command center.
+
+Each item below has its own plan doc under [`docs/finance/`](finance/) sized to land as one PR.
+
+### 4.0 ✅ Rocket Money import + geo/CR-purpose tagging + subscription audit
+Shipped in `feat/finance-rocket-money-import`. Adds Rocket Money parser, `categorize()` smart fallbacks (CR ATM regex + RM category map), `finance-geo.ts` (geo + purpose tagger via `notes` tokens), `finance-atm-split.ts` (idempotent 70/30 CR ATM split), `finance-subscriptions.ts`, `scripts/import-from-excel.ts`, plus the **CR & Subs** Finance tab and the *Hide Property* budget toggle.
+
+### 4.1 [`db-migrate-fix.md`](finance/db-migrate-fix.md) — restore `npm run db:migrate`
+Tiny prerequisite. Today the npm script points at a missing file. Land before the schema-changing items below so each one's migration is verifiable in isolation.
+*Owner: `migration-author` · ~150 LOC*
+
+### 4.2 [`geo-purpose-schema-promotion.md`](finance/geo-purpose-schema-promotion.md) — promote tags to indexed columns
+Move `geo` and `purpose` from `notes` tokens to first-class indexed columns. Replaces JS-side aggregation with SQL aggregation. Makes the geo summary fast and unlocks Transaction-tab geo filtering.
+*Owner: `migration-author` + `integration-implementer` · ~250 LOC + migration*
+
+### 4.3 [`tax-tagging.md`](finance/tax-tagging.md) — Schedule C / E / capex tags
+New `taxTag` column + tagger. Enndustrious deposits → Schedule C income; CR Property → capex-airbnb; etc. Backfill script for the existing 3,100 rows. Year-end report becomes a SQL query.
+*Owner: `integration-implementer` · ~500 LOC*
+
+### 4.4 [`net-worth.md`](finance/net-worth.md) — asset-side tracking + trajectory
+Snapshot table, asset-class column on accounts, nightly inference cron, Net Worth tab with delta tiles + trajectory chart. Depends on 4.2 (indexes make trajectory queries cheap).
+*Owner: `migration-author` + `integration-implementer` + `ui-polish` · ~700–900 LOC*
+
+### 4.5 [`cash-flow-forecast.md`](finance/cash-flow-forecast.md) — 90-day projection
+Forecast engine combining subscription cadence + recurring income + scheduled debt + calendar bills. New Forecast tab with trajectory chart, override popovers, low-cash warnings.
+*Owner: `integration-implementer` + `ui-polish` · ~500–700 LOC*
+
+### 4.6 [`plaid-integration.md`](finance/plaid-integration.md) — kill the Sunday CSV ritual
+Plaid Link in a child BrowserWindow, encrypted tokens in Vault, `transactions/sync` cursor loop, daily 06:00 cron. CSV watcher stays as fallback for institutions Plaid can't reach (CR Banco Popular). Multi-PR effort — orchestrate via `director`.
+*Owner: `director` orchestrating `migration-author` + `integration-implementer` + `security-auditor` + `ui-polish` · ~1,500–2,000 LOC across 5–6 PRs*
+
+### 4.7 [`legacy-cutover.md`](finance/legacy-cutover.md) — retire the Excel pipeline (2026-06-10)
+Operational doc. Transition rules for the parallel-run window, cutover-day checklist, rollback plan. Not a PR — `docs-keeper` maintains the reconciliation log here during the window.
+*Owner: `docs-keeper` + `director` · operational, no code*
+
+### Recommended sequence
+
+```
+4.1 (db:migrate fix) → 4.2 (schema promotion) → 4.3 (tax tagging) ─┐
+                                                                    ├→ 4.4 (net worth)
+                                                                    │
+                                                                    ├→ 4.5 (forecast)
+                                                                    │
+                                                                    └→ 4.6 (Plaid, multi-PR)
+
+4.7 (cutover) runs as background ops doc throughout May 2026.
+```
+
+4.4 and 4.5 are independent of each other; can parallelize in worktrees.
+4.6 is the largest and most risk-prone — start it after 4.4 lands so the
+Net Worth view has live balances waiting.
+
+### Phase 4 verification
+
+- `npm run db:migrate -- --check` passes after each schema item.
+- New IPC handlers all have type defs in `src/types/electron.d.ts`.
+- Each new tab lands behind the existing tab navigation pattern in `Finance.tsx`.
+- Markdown summaries written to `knowledge-base/profile/finances*.md` stay PII-free.
+- During the Plaid rollout, `security-auditor` review is a merge gate (token storage + CSP additions).
+
+---
+
 ## Backlog (deferred, considered but out of scope this round)
 
 - Encrypted backup/restore (high value — Phase 4)
@@ -212,6 +280,13 @@ Modern (Nov 2025+) Claude Code best practice splits guidance into 4 layers. This
 | N | `feat/knowledge-suggestions-ollama` | Phase 2.7 Ollama | integration-implementer |
 | O | `feat/onboarding-wizard` | Phase 3.1 | feature agent |
 | P | `feat/notifications-and-tray` | Phase 3.2 | feature agent |
+| Q ✅ | `feat/finance-rocket-money-import` | Phase 4.0 | merged |
+| R | `fix/db-migrate-script` | Phase 4.1 | migration-author |
+| S | `feat/finance-geo-purpose-columns` | Phase 4.2 | migration-author + integration-implementer |
+| T | `feat/finance-tax-tagging` | Phase 4.3 | integration-implementer |
+| U ←→ | `feat/finance-net-worth` | Phase 4.4 | migration-author + ui-polish |
+| V ←→ | `feat/finance-forecast` | Phase 4.5 | integration-implementer + ui-polish |
+| W | `feat/finance-plaid-*` (5–6 PRs) | Phase 4.6 | director |
 
 `←→` = independent, parallelizable across worktrees.
 
@@ -226,3 +301,5 @@ Modern (Nov 2025+) Claude Code best practice splits guidance into 4 layers. This
 **Phase 2**: Vault password edit saves + history retains old; finance account add/edit/delete persists; Google→5m, GitHub→1h fire on own schedules; Weekly "events attended" matches; Gmail from new sender → 📝 suggestion appears, then 🤖 if Ollama enabled.
 
 **Phase 3**: First launch shows wizard once; habit reminder fires; tray menu opens quick-capture popup; `Cmd+Shift+T` works from any app.
+
+**Phase 4**: `npm run db:migrate -- --check` exits 0 after each schema item; `finance:get-geo-summary` and `finance:get-tax-summary` return SQL-aggregated results (not JS post-aggregation); Net Worth tab shows non-zero deltas after a snapshot capture; Forecast tab projects 90 days with at least the active subscriptions visible as outflow events; Plaid Link completes in sandbox env with a fixture institution; the Excel project at `~/Documents/Claude/Projects/Getting on top of finances/` is in `~/Documents/Claude/Archived/` after 2026-06-10.
