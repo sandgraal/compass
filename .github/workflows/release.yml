@@ -17,14 +17,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install dependencies
-        run: npx -y npm@11 ci
-
       - name: Require macOS signing secrets
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
@@ -34,6 +26,14 @@ jobs:
             echo "::error title=Missing macOS signing secrets::Set CSC_LINK and CSC_KEY_PASSWORD before publishing updater-enabled macOS releases."
             exit 1
           fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npx -y npm@11 ci
 
       - name: Build and publish
         run: npm run release
