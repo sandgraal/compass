@@ -9,9 +9,13 @@ export type UpdaterStatusPayload =
   | { phase: 'downloaded'; version: string }
   | { phase: 'error'; message: string }
 
-/** Send a status event to the current main window, guarding against destroyed windows. */
+/**
+ * Send a status event to the main window, guarding against destroyed windows.
+ * Excludes always-on-top windows (e.g. the quick-capture popover, OAuth flows)
+ * so the event always reaches the correct renderer.
+ */
 function push(payload: UpdaterStatusPayload): void {
-  const win = BrowserWindow.getAllWindows()[0]
+  const win = BrowserWindow.getAllWindows().find((w) => !w.isAlwaysOnTop())
   if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
   win.webContents.send('updater:status', payload)
 }
