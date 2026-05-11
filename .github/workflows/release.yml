@@ -38,7 +38,8 @@ jobs:
       - name: Build and publish
         run: npm run release
         env:
-          # Automatically provided by GitHub Actions — no PAT or secrets needed
+          # GH_TOKEN is automatically provided by GitHub Actions; this step still requires
+          # the macOS signing secrets below and does not need a separate PAT.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
