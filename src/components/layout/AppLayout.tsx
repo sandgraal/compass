@@ -5,6 +5,7 @@ import { useAppStore } from '../../store/appStore'
 import { OnboardingWizard } from '../onboarding/OnboardingWizard'
 import { ConfirmDialogProvider } from '../ui/ConfirmDialog'
 import { ToastProvider } from '../ui/Toast'
+import { UpdateBanner } from '../ui/UpdateBanner'
 import { ContextDrawer } from './ContextDrawer'
 import { Sidebar } from './Sidebar'
 
@@ -56,6 +57,7 @@ export function AppLayout(): JSX.Element {
               contextDrawerOpen ? 'mr-80' : 'mr-0'
             )}
           >
+            <UpdateBanner />
             <div className="flex-1 overflow-y-auto">
               <Outlet />
             </div>

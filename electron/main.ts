@@ -11,6 +11,7 @@ import { registerHabitsHandlers } from './ipc/habits'
 import { registerKnowledgeHandlers } from './ipc/knowledge'
 import { registerSettingsHandlers } from './ipc/settings'
 import { registerSyncHandlers } from './ipc/sync'
+import { initAutoUpdater, registerUpdaterHandlers, scheduleUpdateChecks } from './ipc/updater'
 import { registerVaultHandlers } from './ipc/vault'
 import { initMenuBar } from './menu-bar'
 import { APP_DATA_DIR, DATA_DIR, KNOWLEDGE_DIR, VAULT_DIR } from './paths'
@@ -78,7 +79,7 @@ function createWindow(): void {
         responseHeaders: {
           ...details.responseHeaders,
           'Content-Security-Policy': [
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://gmail.googleapis.com https://api.github.com https://oauth2.googleapis.com https://github.com https://accounts.google.com; frame-src 'none'; object-src 'none'"
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://gmail.googleapis.com https://api.github.com https://oauth2.googleapis.com https://github.com https://accounts.google.com https://objects.githubusercontent.com https://github-releases.githubusercontent.com; frame-src 'none'; object-src 'none'"
           ]
         }
       })
@@ -118,6 +119,7 @@ app.whenReady().then(async () => {
   registerSettingsHandlers(ipcMain)
   registerFinanceHandlers(ipcMain)
   registerHabitsHandlers(ipcMain)
+  registerUpdaterHandlers(ipcMain)
 
   // Toggle content protection when navigating to/from vault
   ipcMain.on('vault:set-content-protection', (_event, enabled: boolean) => {
@@ -148,6 +150,11 @@ app.whenReady().then(async () => {
   startCronJobs()
   await startOrRefreshFinanceWatcher()
   initMenuBar(__dirname)
+
+  if (!is.dev && mainWindow) {
+    initAutoUpdater(mainWindow)
+    scheduleUpdateChecks(mainWindow)
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

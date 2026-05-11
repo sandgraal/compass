@@ -201,6 +201,17 @@ const api = {
     }
   },
 
+  // --- Auto-updater ---
+  updater: {
+    check: () => ipcRenderer.invoke('updater:check'),
+    installAndRestart: () => ipcRenderer.invoke('updater:install-and-restart'),
+    onStatus: (cb: (data: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: unknown) => cb(data)
+      ipcRenderer.on('updater:status', listener)
+      return () => ipcRenderer.removeListener('updater:status', listener)
+    }
+  },
+
   // --- Theme ---
   theme: {
     getNativeTheme: () => ipcRenderer.invoke('get-native-theme'),

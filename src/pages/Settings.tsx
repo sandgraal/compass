@@ -6,6 +6,7 @@ import {
   Keyboard,
   Monitor,
   Moon,
+  RefreshCw,
   Shield,
   Sun,
   Trash2
@@ -25,6 +26,8 @@ export default function Settings(): JSX.Element {
   const { toast } = useToast()
   const confirm = useConfirm()
 
+  const [appVersion, setAppVersion] = useState('0.1.0')
+
   // AI assist (Ollama)
   const [ollamaEnabled, setOllamaEnabled] = useState(false)
   const [ollamaModel, setOllamaModel] = useState('')
@@ -41,6 +44,7 @@ export default function Settings(): JSX.Element {
         setNotifications(s.notificationsEnabled !== 'false')
         setContextDrawer(s.showContextDrawer !== 'false')
         setOllamaEnabled(s.ollamaSuggestionsEnabled === 'true')
+        if (s.appVersion) setAppVersion(s.appVersion)
         setOllamaModel(savedModel)
         loadedOllamaModelRef.current = savedModel
         checkOllama({ currentModel: savedModel })
@@ -313,6 +317,20 @@ export default function Settings(): JSX.Element {
             </select>
           </SettingsRow>
         )}
+      </SettingsSection>
+
+      <SettingsSection icon={<RefreshCw size={16} />} title="Updates">
+        <SettingsRow label="Check for updates" description={`Current version: ${appVersion}`}>
+          <button
+            type="button"
+            onClick={() => void window.api.updater.check()}
+            aria-label="Check for updates now"
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors"
+          >
+            <RefreshCw size={12} />
+            Check now
+          </button>
+        </SettingsRow>
       </SettingsSection>
 
       {/* Danger zone */}
