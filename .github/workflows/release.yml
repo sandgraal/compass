@@ -25,14 +25,24 @@ jobs:
       - name: Install dependencies
         run: npx -y npm@11 ci
 
+      - name: Require macOS signing secrets
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          if [ -z "$CSC_LINK" ] || [ -z "$CSC_KEY_PASSWORD" ]; then
+            echo "::error title=Missing macOS signing secrets::Set CSC_LINK and CSC_KEY_PASSWORD before publishing updater-enabled macOS releases."
+            exit 1
+          fi
+
       - name: Build and publish
         run: npm run release
         env:
           # Automatically provided by GitHub Actions — no PAT or secrets needed
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Uncomment when you add an Apple Developer certificate to repo secrets:
-          # CSC_LINK: ${{ secrets.CSC_LINK }}
-          # CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # Optional notarization secrets:
           # APPLE_ID: ${{ secrets.APPLE_ID }}
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}

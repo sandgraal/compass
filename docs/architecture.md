@@ -138,7 +138,9 @@ git push --follow-tags     # triggers .github/workflows/release.yml
 
 GitHub Actions (`release.yml`) runs on `macos-latest`, installs deps, builds via `npm run release`
 (`electron-builder --publish always`), and uploads `.dmg` + `latest-mac.yml` to GitHub Releases
-using the auto-injected `GITHUB_TOKEN` — no manual secrets or PAT required.
+using the auto-injected `GITHUB_TOKEN`. Because auto-updated macOS builds must be signed, the
+workflow also requires repo secrets `CSC_LINK` and `CSC_KEY_PASSWORD` and fails fast if either
+is missing.
 
 The running app discovers the new `latest-mac.yml` on next check, downloads the `.dmg` in the
 background, then shows the `UpdateBanner` with a "Restart to Install" CTA.
