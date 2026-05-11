@@ -12,6 +12,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "package": "npm run build && electron-builder",
+    "release": "npm run build && electron-builder --publish always",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx electron/db/migrate.ts",
     "typecheck": "tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.node.json --noEmit",
@@ -60,6 +61,7 @@
     "date-fns": "^4.1.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
+    "electron-updater": "^6.8.3",
     "exceljs": "^4.4.0",
     "googleapis": "^144.0.0",
     "lucide-react": "^0.462.0",
@@ -115,6 +117,12 @@
   "build": {
     "appId": "com.compass.app",
     "productName": "Compass",
+    "publish": {
+      "provider": "github",
+      "owner": "sandgraal",
+      "repo": "compass",
+      "releaseType": "release"
+    },
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "resources/icon.icns"

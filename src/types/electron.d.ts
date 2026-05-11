@@ -1,6 +1,16 @@
 // Typed window.api interface — mirrors electron/preload.ts
 
 declare global {
+  type AppSettings = Record<string, string> & { appVersion: string }
+
+  type UpdaterStatusPayload =
+    | { phase: 'checking' }
+    | { phase: 'available'; version: string; releaseDate: string }
+    | { phase: 'not-available' }
+    | { phase: 'downloading'; percent: number; bytesPerSecond: number; total: number }
+    | { phase: 'downloaded'; version: string }
+    | { phase: 'error'; message: string }
+
   interface VaultEntry {
     id: string
     createdAt: number
@@ -218,7 +228,7 @@ declare global {
       settings: {
         get(key: string): Promise<string | null>
         set(key: string, value: unknown): Promise<{ success: boolean }>
-        getAll(): Promise<Record<string, string>>
+        getAll(): Promise<AppSettings>
         openDataDir(): Promise<{ success: boolean }>
         wipeKnowledge(): Promise<{ success: boolean; error?: string }>
         wipeVault(): Promise<{ success: boolean; error?: string }>
@@ -230,6 +240,11 @@ declare global {
         }>
         setQuickCaptureShortcut(accelerator: string): Promise<{ success: boolean; error?: string }>
         detectOllama(options?: { forceRefresh?: boolean }): Promise<OllamaStatus>
+      }
+      updater: {
+        check(): Promise<{ success: boolean; error?: string }>
+        installAndRestart(): Promise<void>
+        onStatus(cb: (data: UpdaterStatusPayload) => void): () => void
       }
       theme: {
         getNativeTheme(): Promise<'dark' | 'light'>

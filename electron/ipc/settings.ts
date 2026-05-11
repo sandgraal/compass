@@ -76,7 +76,7 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('settings:get-all', () => {
     const db = getDb()
     const rows = db.select().from(appSettings).all()
-    const result = { ...DEFAULTS }
+    const result = { ...DEFAULTS, appVersion: app.getVersion() }
     for (const row of rows) result[row.key] = row.value
     return result
   })

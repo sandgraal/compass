@@ -87,7 +87,7 @@ Modern (Nov 2025+) Claude Code best practice splits guidance into 4 layers. This
 **Tests**: [x] Vitest [x] Playwright (E2E) [ ] coverage 70% on `electron/ipc/` + `electron/knowledge/`
 **Type safety**: [x] `npm run typecheck` script [ ] electron-trpc (incremental adoption)
 **Dependency hygiene**: [x] Renovate [ ] syncpack [x] remove `react-beautiful-dnd`
-**Release**: [x] Changesets
+**Release**: [x] Changesets [x] electron-updater auto-update (GitHub Actions CI pipeline — `npm version patch && git push --follow-tags`)
 
 ---
 

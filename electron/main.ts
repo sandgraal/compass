@@ -11,6 +11,7 @@ import { registerHabitsHandlers } from './ipc/habits'
 import { registerKnowledgeHandlers } from './ipc/knowledge'
 import { registerSettingsHandlers } from './ipc/settings'
 import { registerSyncHandlers } from './ipc/sync'
+import { initAutoUpdater, registerUpdaterHandlers, scheduleUpdateChecks } from './ipc/updater'
 import { registerVaultHandlers } from './ipc/vault'
 import { initMenuBar } from './menu-bar'
 import { APP_DATA_DIR, DATA_DIR, KNOWLEDGE_DIR, VAULT_DIR } from './paths'
@@ -118,6 +119,7 @@ app.whenReady().then(async () => {
   registerSettingsHandlers(ipcMain)
   registerFinanceHandlers(ipcMain)
   registerHabitsHandlers(ipcMain)
+  registerUpdaterHandlers(ipcMain)
 
   // Toggle content protection when navigating to/from vault
   ipcMain.on('vault:set-content-protection', (_event, enabled: boolean) => {
@@ -149,9 +151,15 @@ app.whenReady().then(async () => {
   await startOrRefreshFinanceWatcher()
   initMenuBar(__dirname)
 
+  if (!is.dev && mainWindow) {
+    initAutoUpdater(() => mainWindow)
+    scheduleUpdateChecks()
+  }
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow()
+      if (!is.dev) initAutoUpdater(() => mainWindow)
       void startOrRefreshFinanceWatcher()
     }
   })
