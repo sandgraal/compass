@@ -15,6 +15,7 @@ import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
+import { backfillTaxTags } from '../integrations/finance-tax'
 import { DATA_DIR } from '../paths'
 import { reconcileMigrationState } from './reconcile'
 import * as schema from './schema'
@@ -56,6 +57,16 @@ export function runMigrations(dbPath: string = DB_PATH): { applied: number } {
   // patched up by ensureNewTables() in earlier app versions can still migrate.
   reconcileMigrationState(sqlite, MIGRATIONS_FOLDER)
   migrate(db, { migrationsFolder: MIGRATIONS_FOLDER })
+
+  // Phase 4.3 — re-classify any rows still at the migration default
+  // tax:none. Cheap on a fresh DB (no rows) and on an up-to-date DB (no
+  // auto-source rows changed). User overrides are skipped.
+  try {
+    backfillTaxTags(sqlite)
+  } catch {
+    /* ignore — purely additive */
+  }
+
   sqlite.close()
 
   return { applied: before }

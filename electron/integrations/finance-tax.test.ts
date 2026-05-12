@@ -1,6 +1,13 @@
+import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 import type { RawTxn } from './finance'
-import { classifyTax, shouldOverwrite, tagTax, taxYearFromDate } from './finance-tax'
+import {
+  backfillTaxTags,
+  classifyTax,
+  shouldOverwrite,
+  tagTax,
+  taxYearFromDate
+} from './finance-tax'
 
 describe('classifyTax', () => {
   it('tags Enndustrious deposits as schedule-c-income', () => {
@@ -223,5 +230,97 @@ describe('tagTax', () => {
     expect(out[0].geo).toBe('US')
     expect(out[0].notes).toBe('rm:something')
     expect(out[0].taxTag).toBe('tax:none')
+  })
+})
+
+describe('backfillTaxTags', () => {
+  function makeFixture(): Database.Database {
+    const sqlite = new Database(':memory:')
+    sqlite.exec(`
+      CREATE TABLE finance_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL
+      );
+      CREATE TABLE finance_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        amount REAL NOT NULL,
+        category TEXT,
+        subcategory TEXT,
+        notes TEXT,
+        account_id INTEGER REFERENCES finance_accounts(id),
+        geo TEXT NOT NULL DEFAULT 'US',
+        purpose TEXT,
+        tax_tag TEXT NOT NULL DEFAULT 'tax:none',
+        tax_tag_source TEXT NOT NULL DEFAULT 'auto',
+        tax_year INTEGER
+      );
+    `)
+    sqlite
+      .prepare("INSERT INTO finance_accounts (id, name) VALUES (1, 'Enndustrious Checking')")
+      .run()
+    sqlite.prepare("INSERT INTO finance_accounts (id, name) VALUES (2, 'Chase Sapphire')").run()
+    return sqlite
+  }
+
+  it('reclassifies historical Enndustrious + Charity + CR-capex rows', () => {
+    const sqlite = makeFixture()
+    sqlite
+      .prepare(
+        `INSERT INTO finance_transactions (amount, category, subcategory, account_id, geo, purpose)
+         VALUES
+           (5000, 'Income', 'Consulting', 1, 'US', NULL),
+           (-50, 'Charity', 'UNICEF', 2, 'US', NULL),
+           (-300, 'Property', 'Construction — materials', 2, 'CR', 'capex'),
+           (-25, 'Food & Drink', 'Restaurants', 2, 'US', NULL)`
+      )
+      .run()
+
+    const result = backfillTaxTags(sqlite)
+    expect(result.scanned).toBe(4)
+    expect(result.updated).toBe(3) // food row stays at tax:none, no UPDATE
+
+    const tags = sqlite.prepare('SELECT tax_tag FROM finance_transactions ORDER BY id').all() as {
+      tax_tag: string
+    }[]
+    expect(tags.map((t) => t.tax_tag)).toEqual([
+      'tax:schedule-c-income',
+      'tax:charitable',
+      'tax:capex-airbnb',
+      'tax:none'
+    ])
+  })
+
+  it('never overwrites user-tagged rows', () => {
+    const sqlite = makeFixture()
+    sqlite
+      .prepare(
+        `INSERT INTO finance_transactions
+           (amount, category, account_id, geo, tax_tag, tax_tag_source)
+         VALUES (-50, 'Charity', 2, 'US', 'tax:personal', 'user')`
+      )
+      .run()
+
+    const result = backfillTaxTags(sqlite)
+    expect(result.scanned).toBe(0) // user row excluded from scan
+    const row = sqlite.prepare('SELECT tax_tag FROM finance_transactions').get() as {
+      tax_tag: string
+    }
+    expect(row.tax_tag).toBe('tax:personal')
+  })
+
+  it('is idempotent — running twice updates nothing the second time', () => {
+    const sqlite = makeFixture()
+    sqlite
+      .prepare(
+        `INSERT INTO finance_transactions (amount, category, account_id, geo)
+         VALUES (-50, 'Charity', 2, 'US')`
+      )
+      .run()
+
+    const first = backfillTaxTags(sqlite)
+    expect(first.updated).toBe(1)
+
+    const second = backfillTaxTags(sqlite)
+    expect(second.updated).toBe(0)
   })
 })

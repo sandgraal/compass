@@ -125,3 +125,63 @@ export function tagTax(txns: RawTxn[]): RawTxn[] {
     taxYear: taxYearFromDate(t.date)
   }))
 }
+
+/**
+ * Re-classify every existing row whose `tax_tag_source = 'auto'`. Used by
+ * `ensureNewTables()` after the columns are first added so the migration
+ * doesn't leave the entire historical ledger as `tax:none`. User overrides
+ * (`tax_tag_source = 'user'`) are NEVER touched.
+ *
+ * Pure SQLite — no Drizzle dependency — so it can run during DB init before
+ * the Drizzle wrapper is fully ready.
+ */
+export type SqliteForBackfill = {
+  prepare(sql: string): {
+    all(...params: unknown[]): unknown[]
+    run(...params: unknown[]): unknown
+  }
+}
+
+export function backfillTaxTags(sqlite: SqliteForBackfill): { updated: number; scanned: number } {
+  let scanned = 0
+  let updated = 0
+
+  const rows = sqlite
+    .prepare(
+      `SELECT t.id, t.amount, t.category, t.subcategory, t.geo, t.purpose, t.tax_tag,
+              a.name AS account_name
+         FROM finance_transactions t
+         LEFT JOIN finance_accounts a ON a.id = t.account_id
+        WHERE t.tax_tag_source = 'auto'`
+    )
+    .all() as Array<{
+    id: number
+    amount: number
+    category: string | null
+    subcategory: string | null
+    geo: string | null
+    purpose: string | null
+    tax_tag: string
+    account_name: string | null
+  }>
+
+  const update = sqlite.prepare('UPDATE finance_transactions SET tax_tag = ? WHERE id = ?')
+
+  for (const row of rows) {
+    scanned++
+    const fresh = classifyTax({
+      amount: row.amount,
+      account: row.account_name,
+      category: row.category,
+      subcategory: row.subcategory,
+      geo: (row.geo ?? 'US') as Geo,
+      purpose: (row.purpose ?? null) as Purpose | null
+    })
+    if (fresh !== row.tax_tag) {
+      update.run(fresh, row.id)
+      updated++
+    }
+  }
+
+  return { updated, scanned }
+}

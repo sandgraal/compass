@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { backfillTaxTags } from '../integrations/finance-tax'
 import { DATA_DIR } from '../paths'
 import { reconcileMigrationState } from './reconcile'
 import * as schema from './schema'
@@ -114,10 +115,15 @@ function ensureNewTables(sqlite: Database.Database): void {
     }
   }
   // Phase 4.3 — tax disposition columns. taxYear is derived from `date.year`
-  // for any row without it; the actual taxTag classification is left to the
-  // backfill script (see scripts/backfill-tax-tags.ts) so the rules live in
-  // one place rather than being duplicated in SQL.
-  ensureColumn(sqlite, 'finance_transactions', 'tax_tag', "TEXT NOT NULL DEFAULT 'tax:none'")
+  // in SQL (cheap), but the taxTag classification is run through the JS
+  // classifier so the rule logic lives in one place (electron/integrations/
+  // finance-tax.ts) rather than being duplicated in SQL.
+  const addedTaxTag = ensureColumn(
+    sqlite,
+    'finance_transactions',
+    'tax_tag',
+    "TEXT NOT NULL DEFAULT 'tax:none'"
+  )
   ensureColumn(sqlite, 'finance_transactions', 'tax_tag_source', "TEXT NOT NULL DEFAULT 'auto'")
   const addedTaxYear = ensureColumn(sqlite, 'finance_transactions', 'tax_year', 'INTEGER')
   if (addedTaxYear) {
@@ -129,6 +135,16 @@ function ensureNewTables(sqlite: Database.Database): void {
         .run()
     } catch {
       /* ignore */
+    }
+  }
+  if (addedTaxTag) {
+    // Re-classify every existing row so historical Charity / Health /
+    // Enndustrious / CR-capex rows aren't silently reported as tax:none.
+    // User overrides (tax_tag_source='user') are not touched.
+    try {
+      backfillTaxTags(sqlite)
+    } catch {
+      /* ignore — leaves rows at tax:none default; user can re-ingest to retry */
     }
   }
   if (addedSyncInterval) {

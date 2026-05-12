@@ -201,6 +201,10 @@ const api = {
     getSubscriptions: () => ipcRenderer.invoke('finance:get-subscriptions'),
     getGeoSummary: (opts?: { since?: string }) =>
       ipcRenderer.invoke('finance:get-geo-summary', opts),
+    getTaxSummary: (opts?: { year?: number }) =>
+      ipcRenderer.invoke('finance:get-tax-summary', opts),
+    setTransactionTaxTag: (id: number, taxTag: string) =>
+      ipcRenderer.invoke('finance:set-transaction-tax-tag', id, taxTag),
     getInboxPath: () => ipcRenderer.invoke('finance:get-inbox-path'),
 
     // Watched folder (source-of-truth, e.g. ~/Documents/Money)

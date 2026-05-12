@@ -179,7 +179,7 @@ Shipped in `feat/finance-rocket-money-import`. Adds Rocket Money parser, `catego
 - [x] **Shipped** — `geo` / `purpose` columns on `financeTransactions` with 3 indexes; backfill migration `0004_grey_shiver_man.sql`; `tagGeoAndPurpose` writes to columns directly; `finance:get-geo-summary` uses SQL aggregation
 
 ### 4.3 [`tax-tagging.md`](finance/tax-tagging.md) — Schedule C / E / capex tags
-- [x] **Backend shipped** — `taxTag` / `taxTagSource` / `taxYear` columns on `financeTransactions` (indexed on `(taxYear, taxTag)`); `electron/integrations/finance-tax.ts` classifier wired into both ingest paths + Excel import; `finance:get-tax-summary` and `finance:set-transaction-tax-tag` IPC handlers; user overrides sticky via `taxTagSource='user'`; 18 classifier tests
+- [x] **Backend shipped** — `taxTag` / `taxTagSource` / `taxYear` columns on `financeTransactions` (indexed on `(taxYear, taxTag)`); `electron/integrations/finance-tax.ts` classifier wired into both ingest paths + Excel import; historical-row backfill via `backfillTaxTags()` runs from both `initDb()` and the standalone `db:migrate` runner; `finance:get-tax-summary` and `finance:set-transaction-tax-tag` IPC handlers exposed through preload + types; user overrides sticky via `taxTagSource='user'`; 21 classifier + backfill tests
 - [ ] **UI follow-up** — tax badge in Transactions tab + override dropdown + year-end summary card (separate `ui-polish` PR)
 
 ### 4.4 [`net-worth.md`](finance/net-worth.md) — asset-side tracking + trajectory
