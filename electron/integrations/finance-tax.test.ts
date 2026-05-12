@@ -49,7 +49,7 @@ describe('classifyTax', () => {
   it('tags CR + capex as capex-airbnb', () => {
     const tag = classifyTax({
       amount: -300,
-      account: 'Amex Platinum',
+      account: 'Enndustrious Checking',
       category: 'Property',
       subcategory: 'Construction — materials',
       geo: 'CR',

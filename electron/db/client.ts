@@ -156,6 +156,13 @@ function ensureNewTables(sqlite: Database.Database): void {
       /* ignore — leaves rows at tax:none default; user can re-ingest to retry */
     }
   }
+  try {
+    sqlite.exec(
+      'CREATE INDEX IF NOT EXISTS idx_finance_transactions_tax_year_tag ON finance_transactions (tax_year, tax_tag)'
+    )
+  } catch {
+    /* ignore */
+  }
   if (addedSyncInterval) {
     // One-time migration: seed per-integration intervals from the legacy global setting so users
     // who tuned `syncInterval` keep their preference on existing connected integrations.
