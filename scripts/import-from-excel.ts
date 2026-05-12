@@ -206,6 +206,8 @@ async function main(): Promise<void> {
         category: t.category ?? 'Uncategorized',
         subcategory: t.subcategory,
         notes: t.notes,
+        geo: t.geo ?? 'US',
+        purpose: t.purpose ?? null,
         sourceFile: t.sourceFile,
         ingestedAt: new Date()
       })

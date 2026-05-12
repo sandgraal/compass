@@ -60,6 +60,37 @@ describe('runMigrations', () => {
     const { applied } = runMigrations(tmpDb)
     expect(applied).toBeGreaterThan(0)
   })
+
+  it('reconciles a legacy DB whose institution column was backfilled by ensureNewTables', () => {
+    // Simulate a legacy DB: all tables/columns exist (because ensureNewTables
+    // added them in an earlier app version), but the 0002 migration hash was
+    // never recorded in __drizzle_migrations. Without the reconciler,
+    // `migrate()` would try to ALTER the institution column again and crash.
+    runMigrations(tmpDb)
+    const sqlite = new Database(tmpDb)
+    try {
+      const fs = require('node:fs') as typeof import('node:fs')
+      const crypto = require('node:crypto') as typeof import('node:crypto')
+      const sql0002 = fs.readFileSync(
+        join(__dirname, 'migrations', '0002_zippy_sauron.sql'),
+        'utf8'
+      )
+      const hash0002 = crypto.createHash('sha256').update(sql0002).digest('hex')
+      const result = sqlite.prepare('DELETE FROM __drizzle_migrations WHERE hash = ?').run(hash0002)
+      expect(result.changes).toBe(1)
+    } finally {
+      sqlite.close()
+    }
+
+    // Sanity: countPendingMigrations sees 0002 as pending.
+    expect(countPendingMigrations(tmpDb)).toBe(1)
+
+    // The standalone runner must reconcile the missing record before calling
+    // migrate() — otherwise migrate() would try to re-add the institution
+    // column and throw.
+    expect(() => runMigrations(tmpDb)).not.toThrow()
+    expect(countPendingMigrations(tmpDb)).toBe(0)
+  })
 })
 
 describe('countPendingMigrations', () => {

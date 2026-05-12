@@ -1,24 +1,13 @@
-import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
-import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { DATA_DIR } from '../paths'
+import { reconcileMigrationState } from './reconcile'
 import * as schema from './schema'
 
 let _db: ReturnType<typeof drizzle> | null = null
 const MIGRATIONS_FOLDER = join(__dirname, 'migrations')
-const PREVIOUS_MIGRATION_TAG = '0001_small_blob'
-const INSTITUTION_MIGRATION_TAG = '0002_zippy_sauron'
-
-type MigrationJournal = {
-  entries: Array<{
-    tag: string
-    when: number
-  }>
-}
 
 export function getDb(): ReturnType<typeof drizzle<typeof schema>> {
   if (!_db) throw new Error('DB not initialized. Call initDb() first.')
@@ -37,8 +26,7 @@ export async function initDb(): Promise<void> {
 
   // Run migrations
   try {
-    normalizeRecordedMigrationTimestamps(sqlite, MIGRATIONS_FOLDER)
-    reconcileBackfilledInstitutionMigration(sqlite)
+    reconcileMigrationState(sqlite, MIGRATIONS_FOLDER)
     migrate(_db as ReturnType<typeof drizzle>, {
       migrationsFolder: MIGRATIONS_FOLDER
     })
@@ -154,70 +142,6 @@ function ensureColumn(
   return true
 }
 
-function normalizeRecordedMigrationTimestamps(
-  sqlite: Database.Database,
-  migrationsFolder: string
-): void {
-  const migrations = readMigrationFiles({ migrationsFolder })
-
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS __drizzle_migrations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      hash TEXT NOT NULL,
-      created_at NUMERIC
-    );
-  `)
-
-  const updateMigrationTimestamp = sqlite.prepare(`
-    UPDATE __drizzle_migrations
-    SET created_at = ?
-    WHERE hash = ?
-      AND COALESCE(created_at, -1) <> ?
-  `)
-
-  for (const migration of migrations) {
-    updateMigrationTimestamp.run(migration.folderMillis, migration.hash, migration.folderMillis)
-  }
-}
-
-function reconcileBackfilledInstitutionMigration(sqlite: Database.Database): void {
-  if (!hasTable(sqlite, '__drizzle_migrations')) return
-  if (!hasColumn(sqlite, 'finance_accounts', 'institution')) return
-
-  const previousMigration = getMigrationMetadata(PREVIOUS_MIGRATION_TAG)
-  const institutionMigration = getMigrationMetadata(INSTITUTION_MIGRATION_TAG)
-  if (!previousMigration || !institutionMigration) return
-
-  const hasPreviousMigration = sqlite
-    .prepare('SELECT 1 FROM __drizzle_migrations WHERE hash = ? LIMIT 1')
-    .get(previousMigration.hash)
-  if (!hasPreviousMigration) return
-
-  const hasInstitutionMigration = sqlite
-    .prepare('SELECT 1 FROM __drizzle_migrations WHERE hash = ? LIMIT 1')
-    .get(institutionMigration.hash)
-  if (hasInstitutionMigration) return
-
-  sqlite
-    .prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)')
-    .run(institutionMigration.hash, institutionMigration.when)
-}
-
-function hasTable(sqlite: Database.Database, table: string): boolean {
-  const row = sqlite
-    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1")
-    .get(table)
-  return Boolean(row)
-}
-
-function hasColumn(sqlite: Database.Database, table: string, column: string): boolean {
-  const quotedTable = quoteSqliteIdentifier(table)
-  const columns = sqlite.prepare(`PRAGMA table_info(${quotedTable})`).all() as Array<{
-    name: string
-  }>
-  return columns.some((entry) => entry.name === column)
-}
-
 /**
  * Validates and quotes SQLite identifiers used in PRAGMA/ALTER TABLE statements.
  * Only simple alphanumeric identifiers starting with a letter or underscore are allowed.
@@ -228,20 +152,6 @@ function quoteSqliteIdentifier(identifier: string): string {
   }
 
   return `"${identifier}"`
-}
-
-function getMigrationMetadata(tag: string): { hash: string; when: number } | null {
-  const journal = JSON.parse(
-    readFileSync(join(MIGRATIONS_FOLDER, 'meta', '_journal.json'), 'utf8')
-  ) as MigrationJournal
-  const entry = journal.entries.find((migration) => migration.tag === tag)
-  if (!entry) return null
-
-  const sql = readFileSync(join(MIGRATIONS_FOLDER, `${tag}.sql`), 'utf8')
-  return {
-    hash: createHash('sha256').update(sql).digest('hex'),
-    when: entry.when
-  }
 }
 
 function createTablesIfNeeded(sqlite: Database.Database): void {

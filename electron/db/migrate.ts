@@ -16,6 +16,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { DATA_DIR } from '../paths'
+import { reconcileMigrationState } from './reconcile'
 import * as schema from './schema'
 
 const MIGRATIONS_FOLDER = join(__dirname, 'migrations')
@@ -50,6 +51,10 @@ export function runMigrations(dbPath: string = DB_PATH): { applied: number } {
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
+
+  // Match the reconcile-then-migrate sequence used by initDb() so legacy DBs
+  // patched up by ensureNewTables() in earlier app versions can still migrate.
+  reconcileMigrationState(sqlite, MIGRATIONS_FOLDER)
   migrate(db, { migrationsFolder: MIGRATIONS_FOLDER })
   sqlite.close()
 
