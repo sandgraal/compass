@@ -17,13 +17,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Warn if macOS signing secrets are absent
-        env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      - name: Configure code signing
         run: |
-          if [ -z "$CSC_LINK" ] || [ -z "$CSC_KEY_PASSWORD" ]; then
-            echo "::warning title=No signing secrets::CSC_LINK / CSC_KEY_PASSWORD not set — publishing unsigned. Add Apple Developer certs to sign future releases."
+          if [ -n "${{ secrets.CSC_LINK }}" ] && [ -n "${{ secrets.CSC_KEY_PASSWORD }}" ]; then
+            echo "CSC_LINK=${{ secrets.CSC_LINK }}" >> $GITHUB_ENV
+            echo "CSC_KEY_PASSWORD=${{ secrets.CSC_KEY_PASSWORD }}" >> $GITHUB_ENV
+            echo "Signed release — Apple Developer certificate present."
+          else
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> $GITHUB_ENV
+            echo "::warning title=Unsigned release::CSC_LINK / CSC_KEY_PASSWORD not set — publishing unsigned. Add Apple Developer certs to GitHub Secrets to sign future releases."
           fi
 
       - uses: actions/setup-node@v4
@@ -37,12 +39,9 @@ jobs:
       - name: Build and publish
         run: npm run release
         env:
-          # GH_TOKEN is automatically provided by GitHub Actions; this step still requires
-          # the macOS signing secrets below and does not need a separate PAT.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          # Optional notarization secrets:
+          # CSC_LINK / CSC_KEY_PASSWORD injected above only when present.
+          # Optional notarization (add these secrets when you have an Apple Developer account):
           # APPLE_ID: ${{ secrets.APPLE_ID }}
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
