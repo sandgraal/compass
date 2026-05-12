@@ -31,7 +31,7 @@ CSP enforced in production builds (no eval, no remote scripts, allowlist for OAu
 | Context bridge (ALL IPC exposure) | `electron/preload.ts` |
 | Renderer types for `window.api` | `src/types/electron.d.ts` |
 | Cron jobs (sync scheduler) | `electron/cron.ts` |
-| Drizzle schema | `electron/db/schema.ts`, `electron/db/schema.finance.ts` |
+| Drizzle schema | `electron/db/schema.ts` |
 | DB singleton | `electron/db/client.ts` |
 | Local data paths | `electron/paths.ts` |
 | Vault encryption | `electron/ipc/vault.ts` |
@@ -41,14 +41,22 @@ CSP enforced in production builds (no eval, no remote scripts, allowlist for OAu
 | Knowledge auto-update pipeline | `electron/knowledge/extractor.ts` |
 | **App auto-updater** (electron-updater) | `electron/ipc/updater.ts` |
 | Finance ingestion + budget | `electron/ipc/finance.ts`, `electron/integrations/finance.ts` |
+| Finance — geo + CR purpose tagger | `electron/integrations/finance-geo.ts` |
+| Finance — Schedule C / capex tax tagger | `electron/integrations/finance-tax.ts` |
+| Finance — net-worth snapshots + inference | `electron/integrations/finance-snapshot.ts` |
+| Finance — 90-day cash-flow forecast | `electron/integrations/finance-forecast.ts` |
+| Finance — subscription audit (active/zombie/expired) | `electron/integrations/finance-subscriptions.ts` |
+| DB migration runner (CLI: `npm run db:migrate`) | `electron/db/migrate.ts`, `electron/db/reconcile.ts` |
+| Knowledge — regex / Ollama suggestion pipeline | `electron/knowledge/suggestions.ts`, `electron/knowledge/ollama.ts` |
+| Tray + global shortcut + quick-capture window | `electron/menu-bar.ts`, `src/quickCapture/` |
 
 ## Database (Drizzle / SQLite via `better-sqlite3`)
 
-17 tables. Lives at `~/Library/Application Support/Compass/.data/compass.db`.
+19 tables. Lives at `~/Library/Application Support/Compass/.data/compass.db`.
 
 | Table | Purpose |
 |---|---|
-| `integrations` | One row per service (google, github). Status, scopes, last sync. |
+| `integrations` | One row per service (google, github). Status, scopes, last sync, **per-integration `syncIntervalMinutes`**. |
 | `sync_events` | Append-only log of every sync attempt (records updated, errors). |
 | `checklist_items` | Daily/weekly/monthly tasks. Source = manual / github / calendar / gmail. |
 | `checklist_templates` | User-edited markdown templates per list type. |
@@ -57,9 +65,12 @@ CSP enforced in production builds (no eval, no remote scripts, allowlist for OAu
 | `gmail_actions` | Action items extracted from Gmail. |
 | `drive_files` | Google Drive file index. |
 | `knowledge_files` | Index of `knowledge-base/*.md` files (path, title, word count). |
-| `app_settings` | Key/value (`syncInterval`, `theme`, weekly goals JSON, etc.). |
-| `finance_accounts` | Bank, credit, investment, debt accounts. |
-| `finance_transactions` | Hashed for dedup; category/subcategory editable. |
+| `knowledge_suggestions` | Pending edits proposed by the regex / Ollama suggestion pipeline (Phase 2.7). |
+| `app_settings` | Key/value (`syncInterval`, `theme`, weekly goals JSON, `quickCaptureShortcut`, etc.). |
+| `finance_accounts` | Bank, credit, investment, debt accounts. Indexed columns added in Phase 4: `assetClass` (Phase 4.4 net-worth bucket), `paymentDayOfMonth` (Phase 4.5 forecast), `institution`, `paymentDueDate`. |
+| `finance_transactions` | Hashed for dedup. Phase 4.2 promoted `geo` + `purpose` from `notes` tokens to indexed columns; Phase 4.3 added indexed `(taxYear, taxTag)` for year-end aggregation. |
+| `finance_balance_snapshots` | Per-(account, day) balance for net-worth trajectory + delta queries. Source = `manual` / `inferred` / `plaid`. (Phase 4.4) |
+| `forecast_overrides` | User skip / shift / override edits to the auto-projected cash-flow stream. UNIQUE on `(account_id, date, label)`. (Phase 4.5) |
 | `budget_rules` | Per-category monthly budget targets. |
 | `categorization_rules` | Pattern → category rules for auto-categorization. |
 | `habits` | User-defined habits with icon + color. |
@@ -81,15 +92,15 @@ Plain markdown files at `~/Library/Application Support/Compass/knowledge-base/<c
 - Watched by `chokidar` — external edits re-index `knowledge_files` table + push `knowledge:file-changed` event
 - Auto-updated files (e.g. `calendar/upcoming.md`, `inbox/action-items.md`) get a `.prev` snapshot saved before each overwrite (PR #10), enabling the diff view
 
-## IPC handler map (~65 handlers)
+## IPC handler map (~80 handlers)
 
 Registered in `electron/main.ts`:
 - `registerAuthHandlers` — OAuth flows
 - `registerSyncHandlers` — sync trigger, status, event log
-- `registerKnowledgeHandlers` — file CRUD, search, prev snapshot
-- `registerVaultHandlers` — entry CRUD, 1Password CSV import
-- `registerSettingsHandlers` — get/set/getAll, data export, wipe
-- `registerFinanceHandlers` — txns, accounts, debt summary, budget, rules
+- `registerKnowledgeHandlers` — file CRUD, search, prev snapshot, suggestions accept/dismiss
+- `registerVaultHandlers` — entry CRUD, 1Password CSV import, history
+- `registerSettingsHandlers` — get/set/getAll, data export, wipe, **per-integration sync interval**, Ollama detect, quick-capture shortcut
+- `registerFinanceHandlers` — txns, accounts, debt summary, budget, rules, **geo summary, tax summary + override (Phase 4.3), net-worth snapshot/trajectory + capture + manual balance (Phase 4.4), forecast + override CRUD (Phase 4.5)**
 - `registerHabitsHandlers` — habit CRUD + toggle entries
 - `registerUpdaterHandlers` — `updater:check`, `updater:install-and-restart`; pushes `updater:status` events to renderer
 
@@ -123,7 +134,9 @@ Global ⌘K palette: `src/components/CommandPalette.tsx` (mounted in `App.tsx`).
 ## Background processes
 
 - `chokidar` watcher on `knowledge-base/` for external edits
-- `node-cron` scheduler in `electron/cron.ts`
+- `node-cron` scheduler in `electron/cron.ts`:
+  - Per-integration sync (interval from `integrations.syncIntervalMinutes`, default 15m)
+  - Nightly net-worth balance snapshot at 00:05 local time (Phase 4.4)
 - Native theme listener (re-emits to renderer on macOS dark/light flip)
 - `electron-updater` — checks GitHub Releases 3 s after launch, then every 4 h; downloads silently; notifies renderer via `updater:status` push events
 
