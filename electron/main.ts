@@ -151,15 +151,15 @@ app.whenReady().then(async () => {
   await startOrRefreshFinanceWatcher()
   initMenuBar(__dirname)
 
-  if (!is.dev && mainWindow) {
-    initAutoUpdater(() => mainWindow)
+  if (!is.dev) {
+    initAutoUpdater()
     scheduleUpdateChecks()
   }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow()
-      if (!is.dev) initAutoUpdater(() => mainWindow)
+      if (!is.dev) initAutoUpdater()
       void startOrRefreshFinanceWatcher()
     }
   })

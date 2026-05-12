@@ -22,12 +22,12 @@ export default function Settings(): JSX.Element {
   const [syncInterval, setSyncInterval] = useState('15')
   const [notifications, setNotifications] = useState(true)
   const [contextDrawer, setContextDrawer] = useState(true)
-  const [updateCheckInFlight, setUpdateCheckInFlight] = useState(false)
   const { setContextDrawerOpen } = useAppStore()
   const { toast } = useToast()
   const confirm = useConfirm()
 
-  const [appVersion, setAppVersion] = useState('0.1.0')
+  const [appVersion, setAppVersion] = useState('')
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
 
   // AI assist (Ollama)
   const [ollamaEnabled, setOllamaEnabled] = useState(false)
@@ -45,11 +45,19 @@ export default function Settings(): JSX.Element {
         setNotifications(s.notificationsEnabled !== 'false')
         setContextDrawer(s.showContextDrawer !== 'false')
         setOllamaEnabled(s.ollamaSuggestionsEnabled === 'true')
-        setAppVersion(s.appVersion)
         setOllamaModel(savedModel)
         loadedOllamaModelRef.current = savedModel
         checkOllama({ currentModel: savedModel })
       })
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.api?.updater) {
+      window.api.updater
+        .getVersion()
+        .then(setAppVersion)
+        .catch(() => {})
     }
   }, [])
 
@@ -321,29 +329,29 @@ export default function Settings(): JSX.Element {
       </SettingsSection>
 
       <SettingsSection icon={<RefreshCw size={16} />} title="Updates">
-        <SettingsRow label="Check for updates" description={`Current version: ${appVersion}`}>
+        <SettingsRow
+          label="Check for updates"
+          description={appVersion ? `Current version: ${appVersion}` : 'Checking version…'}
+        >
           <button
             type="button"
+            disabled={checkingUpdate}
+            aria-label="Check for updates now"
             onClick={async () => {
-              setUpdateCheckInFlight(true)
+              setCheckingUpdate(true)
               try {
                 const result = await window.api.updater.check()
                 if (!result.success) {
-                  toast(
-                    result.error ? `Update check failed: ${result.error}` : 'Update check failed.',
-                    'error'
-                  )
+                  toast(result.error ?? 'Update check failed', 'error')
                 }
               } finally {
-                setUpdateCheckInFlight(false)
+                setCheckingUpdate(false)
               }
             }}
-            disabled={updateCheckInFlight}
-            aria-label="Check for updates now"
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors disabled:opacity-50"
           >
-            <RefreshCw size={12} className={cn(updateCheckInFlight && 'animate-spin')} />
-            {updateCheckInFlight ? 'Checking…' : 'Check now'}
+            <RefreshCw size={12} className={checkingUpdate ? 'animate-spin' : ''} />
+            {checkingUpdate ? 'Checking…' : 'Check now'}
           </button>
         </SettingsRow>
       </SettingsSection>

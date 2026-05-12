@@ -242,8 +242,9 @@ declare global {
         detectOllama(options?: { forceRefresh?: boolean }): Promise<OllamaStatus>
       }
       updater: {
+        getVersion(): Promise<string>
         check(): Promise<{ success: boolean; error?: string }>
-        installAndRestart(): Promise<void>
+        installAndRestart(): void // fire-and-forget (send, not invoke)
         onStatus(cb: (data: UpdaterStatusPayload) => void): () => void
       }
       theme: {
