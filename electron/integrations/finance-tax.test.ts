@@ -46,10 +46,10 @@ describe('classifyTax', () => {
     expect(tag).toBe('tax:none')
   })
 
-  it('tags CR + capex as capex-airbnb', () => {
+  it('tags CR + capex as capex-airbnb for non-Enndustrious accounts too', () => {
     const tag = classifyTax({
       amount: -300,
-      account: 'Enndustrious Checking',
+      account: 'Amex Platinum',
       category: 'Property',
       subcategory: 'Construction — materials',
       geo: 'CR',
