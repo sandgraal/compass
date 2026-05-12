@@ -70,6 +70,18 @@ describe('classifyTax', () => {
     expect(tag).toBe('tax:capex-airbnb')
   })
 
+  it('prioritizes CR + capex over Schedule C expense tagging', () => {
+    const tag = classifyTax({
+      amount: -45,
+      account: 'enndustrious - chk',
+      category: 'Software',
+      subcategory: 'Subscriptions',
+      geo: 'CR',
+      purpose: 'capex'
+    })
+    expect(tag).toBe('tax:capex-airbnb')
+  })
+
   it('tags Charity → charitable', () => {
     const tag = classifyTax({
       amount: -50,
