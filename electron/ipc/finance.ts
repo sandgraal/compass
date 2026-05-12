@@ -9,9 +9,11 @@ import {
   budgetRules,
   categorizationRules,
   financeAccounts,
-  financeTransactions
+  financeTransactions,
+  forecastOverrides
 } from '../db/schema'
 import { categorize, ingestCsvFolder } from '../integrations/finance'
+import { type ForecastResult, buildForecast } from '../integrations/finance-forecast'
 import {
   captureSnapshots,
   getNetWorthSnapshot,
@@ -492,6 +494,128 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       return { success: false, error: `Failed to set balance: ${message}` }
+    }
+  })
+
+  // ── 90-day cash-flow forecast (Phase 4.5) ─────────────────────────────────
+  // Combines subscriptions + recurring income + debt minimums + calendar
+  // bills + user overrides into a per-account daily trajectory. Starting
+  // balances come from the latest balance snapshot per account (Phase 4.4).
+  ipcMain.handle(
+    'finance:get-forecast',
+    (_event, opts?: { windowDays?: number; lowCashThreshold?: number }): ForecastResult => {
+      const sqlite = getRawSqlite()
+      const db = getDb()
+      const days = Number.isFinite(opts?.windowDays) ? Math.floor(opts!.windowDays as number) : 90
+      const windowDays = Math.min(365, Math.max(7, days))
+      const threshold = Number.isFinite(opts?.lowCashThreshold)
+        ? (opts!.lowCashThreshold as number)
+        : 500
+
+      // Pull latest snapshot per account as the starting point. Falls back
+      // to 0 for accounts with no snapshot yet.
+      const latest = sqlite
+        .prepare(
+          `SELECT s.account_id, s.balance
+             FROM finance_balance_snapshots s
+             JOIN (
+               SELECT account_id, MAX(captured_at) AS m
+                 FROM finance_balance_snapshots GROUP BY account_id
+             ) latest ON latest.account_id = s.account_id AND latest.m = s.captured_at`
+        )
+        .all() as Array<{ account_id: number; balance: number }>
+      const startingBalances: Record<number, number> = {}
+      for (const r of latest) startingBalances[r.account_id] = r.balance
+
+      return buildForecast(db, sqlite, startingBalances, {
+        windowDays,
+        lowCashThreshold: threshold
+      })
+    }
+  )
+
+  // ── Upsert a forecast override ───────────────────────────────────────────
+  ipcMain.handle(
+    'finance:set-forecast-override',
+    (
+      _event,
+      override: {
+        accountId: number
+        date: string
+        kind: 'skip' | 'shift' | 'override'
+        amount?: number | null
+        label?: string | null
+        shiftToDate?: string | null
+      }
+    ) => {
+      if (!Number.isInteger(override.accountId) || override.accountId <= 0) {
+        return { success: false, error: `Invalid account id: ${override.accountId}` }
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(override.date)) {
+        return { success: false, error: `Invalid date: ${override.date}` }
+      }
+      if (override.kind !== 'skip' && override.kind !== 'shift' && override.kind !== 'override') {
+        return { success: false, error: `Invalid kind: ${override.kind}` }
+      }
+      if (override.kind === 'shift') {
+        if (!override.shiftToDate || !/^\d{4}-\d{2}-\d{2}$/.test(override.shiftToDate)) {
+          return { success: false, error: `Invalid shiftToDate: ${override.shiftToDate}` }
+        }
+      }
+      if (override.kind === 'override') {
+        if (override.amount == null || !Number.isFinite(override.amount)) {
+          return { success: false, error: 'Override amount required and must be finite' }
+        }
+      }
+      try {
+        const db = getDb()
+        // Replace any existing override for the same (account, date) — there's
+        // never more than one logical override per auto-event.
+        db.delete(forecastOverrides)
+          .where(
+            and(
+              eq(forecastOverrides.accountId, override.accountId),
+              eq(forecastOverrides.date, override.date)
+            )
+          )
+          .run()
+        db.insert(forecastOverrides)
+          .values({
+            accountId: override.accountId,
+            date: override.date,
+            kind: override.kind,
+            amount: override.amount ?? null,
+            label: override.label ?? null,
+            shiftToDate: override.shiftToDate ?? null,
+            createdAt: new Date()
+          })
+          .run()
+        return { success: true }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        return { success: false, error: `Failed to save override: ${message}` }
+      }
+    }
+  )
+
+  // ── Delete a forecast override (revert to auto-projected) ─────────────────
+  ipcMain.handle('finance:delete-forecast-override', (_event, accountId: number, date: string) => {
+    if (!Number.isInteger(accountId) || accountId <= 0) {
+      return { success: false, error: `Invalid account id: ${accountId}` }
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return { success: false, error: `Invalid date: ${date}` }
+    }
+    try {
+      const db = getDb()
+      const result = db
+        .delete(forecastOverrides)
+        .where(and(eq(forecastOverrides.accountId, accountId), eq(forecastOverrides.date, date)))
+        .run()
+      return { success: true, removed: result.changes }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { success: false, error: `Failed to delete override: ${message}` }
     }
   })
 

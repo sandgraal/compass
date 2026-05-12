@@ -214,6 +214,20 @@ const api = {
     setAccountBalance: (accountId: number, balance: number) =>
       ipcRenderer.invoke('finance:set-account-balance', accountId, balance),
 
+    // Cash-flow forecast (Phase 4.5)
+    getForecast: (opts?: { windowDays?: number; lowCashThreshold?: number }) =>
+      ipcRenderer.invoke('finance:get-forecast', opts),
+    setForecastOverride: (override: {
+      accountId: number
+      date: string
+      kind: 'skip' | 'shift' | 'override'
+      amount?: number | null
+      label?: string | null
+      shiftToDate?: string | null
+    }) => ipcRenderer.invoke('finance:set-forecast-override', override),
+    deleteForecastOverride: (accountId: number, date: string) =>
+      ipcRenderer.invoke('finance:delete-forecast-override', accountId, date),
+
     getInboxPath: () => ipcRenderer.invoke('finance:get-inbox-path'),
 
     // Watched folder (source-of-truth, e.g. ~/Documents/Money)

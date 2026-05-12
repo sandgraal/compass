@@ -12,9 +12,9 @@
 | **Phase 1** — Critical bug fixes | 5 items | 100% (all shipped prior to this branch) |
 | **Phase 2** — Remaining PRD features | 7 items | 100% (2.1–2.7 all shipped prior to this branch) |
 | **Phase 3** — Beyond-PRD polish | 2 selected items | 100% (onboarding wizard + tray/notifications shipped) |
-| **Phase 4** — Finance forward roadmap | 7 items | partial (4.0–4.4 shipped; 4.5–4.6 outstanding) |
+| **Phase 4** — Finance forward roadmap | 7 items | partial (4.0–4.5 shipped; 4.6 outstanding) |
 
-PRD-completion of the running app: **~98%** (all Phases 1–3 + Phase 4.0–4.4 merged).
+PRD-completion of the running app: **~99%** (all Phases 1–3 + Phase 4.0–4.5 merged).
 
 ---
 
@@ -187,8 +187,8 @@ Shipped in `feat/finance-rocket-money-import`. Adds Rocket Money parser, `catego
 - [ ] **UI follow-up** — Net Worth tab with delta tiles + trajectory chart + per-account inline edit (separate `ui-polish` PR; needs a chart lib like Recharts)
 
 ### 4.5 [`cash-flow-forecast.md`](finance/cash-flow-forecast.md) — 90-day projection
-Forecast engine combining subscription cadence + recurring income + scheduled debt + calendar bills. New Forecast tab with trajectory chart, override popovers, low-cash warnings.
-*Owner: `integration-implementer` + `ui-polish` · ~500–700 LOC*
+- [x] **Backend shipped** — `forecast_overrides` table + `paymentDayOfMonth` column on `financeAccounts`; `electron/integrations/finance-forecast.ts` engine with pure functions for `projectSubscriptionEvents` (uses Phase 4.0 audit), `projectIncomeEvents` (built on `detectRecurringIncome`, biweekly/weekly/monthly payroll detection), `projectDebtEvents` (monthly minimums on `paymentDayOfMonth`), `projectCalendarEvents` (keyword-matched bills), `applyOverrides` (skip / shift / override), `projectCashflow` (day-by-day walk with low-cash detection); 3 IPC handlers (`get-forecast`, `set-forecast-override`, `delete-forecast-override`) wired through preload + types; 26 forecast tests
+- [ ] **UI follow-up** — Forecast tab with Recharts trajectory + per-event popover + low-cash banner (separate `ui-polish` PR; needs Recharts)
 
 ### 4.6 [`plaid-integration.md`](finance/plaid-integration.md) — kill the Sunday CSV ritual
 Plaid Link in a child BrowserWindow, encrypted tokens in Vault, `transactions/sync` cursor loop, daily 06:00 cron. CSV watcher stays as fallback for institutions Plaid can't reach (CR Banco Popular). Multi-PR effort — orchestrate via `director`.

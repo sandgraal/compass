@@ -50,6 +50,13 @@
       "when": 1778558630231,
       "tag": "0006_breezy_cloak",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1778559731340,
+      "tag": "0007_even_captain_flint",
+      "breakpoints": true
     }
   ]
 }
