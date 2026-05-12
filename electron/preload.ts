@@ -205,6 +205,15 @@ const api = {
       ipcRenderer.invoke('finance:get-tax-summary', opts),
     setTransactionTaxTag: (id: number, taxTag: string) =>
       ipcRenderer.invoke('finance:set-transaction-tax-tag', id, taxTag),
+
+    // Net worth (Phase 4.4)
+    getNetWorthSnapshot: () => ipcRenderer.invoke('finance:get-net-worth-snapshot'),
+    getNetWorthTrajectory: (opts?: { sinceDays?: number; untilMs?: number }) =>
+      ipcRenderer.invoke('finance:get-net-worth-trajectory', opts),
+    captureSnapshot: () => ipcRenderer.invoke('finance:capture-snapshot'),
+    setAccountBalance: (accountId: number, balance: number) =>
+      ipcRenderer.invoke('finance:set-account-balance', accountId, balance),
+
     getInboxPath: () => ipcRenderer.invoke('finance:get-inbox-path'),
 
     // Watched folder (source-of-truth, e.g. ~/Documents/Money)

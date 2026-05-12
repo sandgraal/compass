@@ -43,6 +43,13 @@
       "when": 1778556478166,
       "tag": "0005_premium_patch",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1778558630231,
+      "tag": "0006_breezy_cloak",
+      "breakpoints": true
     }
   ]
 }

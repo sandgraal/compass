@@ -134,6 +134,12 @@ export const financeAccounts = sqliteTable('finance_accounts', {
   minPayment: real('min_payment').default(0),
   creditLimit: real('credit_limit'),
   institution: text('institution').notNull().default(''),
+  // Net-worth bucket (Phase 4.4). 'spending' | 'savings' | 'retirement' |
+  // 'real_estate' | 'manual_asset' | 'liability'. Drives which accounts
+  // contribute to the assets side of the net-worth snapshot. `manual_asset`
+  // accounts have no transaction stream — balance is only updated by the
+  // user via finance:set-account-balance.
+  assetClass: text('asset_class').notNull().default('spending'),
   // ISO 'YYYY-MM-DD'. Surfaced as a "Payments Due" reminder on the Dashboard
   // when within the next 14 days. Populated from PDF statement metadata.
   paymentDueDate: text('payment_due_date'),
@@ -143,6 +149,19 @@ export const financeAccounts = sqliteTable('finance_accounts', {
   // based.
   lastStatementSyncedAt: integer('last_statement_synced_at', { mode: 'timestamp_ms' }),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
+// ---- Net worth balance snapshots (Phase 4.4) ----
+// One row per (account, day) recording the inferred or manually-entered
+// balance. Used by the net-worth dashboard for trajectory + delta queries.
+export const financeBalanceSnapshots = sqliteTable('finance_balance_snapshots', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  accountId: integer('account_id')
+    .notNull()
+    .references(() => financeAccounts.id),
+  capturedAt: integer('captured_at', { mode: 'timestamp_ms' }).notNull(),
+  balance: real('balance').notNull(),
+  source: text('source').notNull() // 'manual' | 'inferred' | 'plaid'
 })
 
 export const financeTransactions = sqliteTable('finance_transactions', {

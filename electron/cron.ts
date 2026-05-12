@@ -1,12 +1,34 @@
 import { eq } from 'drizzle-orm'
 import { BrowserWindow } from 'electron'
 import cron from 'node-cron'
-import { getDb } from './db/client'
+import { getDb, getRawSqlite } from './db/client'
 import { appSettings, integrations } from './db/schema'
+import { captureSnapshots } from './integrations/finance-snapshot'
 import { syncGitHub, syncGoogle } from './ipc/sync'
 
 // Map of service name -> active scheduled task (so we can stop/restart per integration).
 const scheduledTasks = new Map<string, cron.ScheduledTask>()
+let snapshotTask: cron.ScheduledTask | null = null
+
+// Daily at 00:05 local time. Runs the net-worth balance snapshot pass for
+// every account. Idempotent — captureSnapshots() skips accounts that
+// already have a snapshot for today.
+const SNAPSHOT_CRON = '5 0 * * *'
+
+function runFinanceSnapshot(): void {
+  try {
+    const sqlite = getRawSqlite()
+    captureSnapshots(sqlite)
+  } catch (err) {
+    console.error('[cron] finance snapshot failed:', err)
+  }
+}
+
+function scheduleFinanceSnapshot(): void {
+  snapshotTask?.stop()
+  snapshotTask = cron.schedule(SNAPSHOT_CRON, runFinanceSnapshot)
+  snapshotTask.start()
+}
 
 function getMainWindow(): BrowserWindow | undefined {
   return BrowserWindow.getAllWindows()[0]
@@ -42,6 +64,8 @@ function stopAllJobs(): void {
     task.stop()
   }
   scheduledTasks.clear()
+  snapshotTask?.stop()
+  snapshotTask = null
 }
 
 function cronExpressionForIntervalMinutes(intervalMinutes: number): string | null {
@@ -99,6 +123,7 @@ export function startCronJobs(): void {
   } catch {
     // DB not ready yet — caller will likely call restartCronJobs() once init completes.
   }
+  scheduleFinanceSnapshot()
 }
 
 export function restartCronJobs(): void {

@@ -12,9 +12,9 @@
 | **Phase 1** — Critical bug fixes | 5 items | 100% (all shipped prior to this branch) |
 | **Phase 2** — Remaining PRD features | 7 items | 100% (2.1–2.7 all shipped prior to this branch) |
 | **Phase 3** — Beyond-PRD polish | 2 selected items | 100% (onboarding wizard + tray/notifications shipped) |
-| **Phase 4** — Finance forward roadmap | 7 items | partial (4.0–4.3 shipped; 4.4–4.6 outstanding) |
+| **Phase 4** — Finance forward roadmap | 7 items | partial (4.0–4.4 shipped; 4.5–4.6 outstanding) |
 
-PRD-completion of the running app: **~98%** (all Phases 1–3 + Phase 4.0–4.3 merged).
+PRD-completion of the running app: **~98%** (all Phases 1–3 + Phase 4.0–4.4 merged).
 
 ---
 
@@ -183,8 +183,8 @@ Shipped in `feat/finance-rocket-money-import`. Adds Rocket Money parser, `catego
 - [ ] **UI follow-up** — tax badge in Transactions tab + override dropdown + year-end summary card (separate `ui-polish` PR)
 
 ### 4.4 [`net-worth.md`](finance/net-worth.md) — asset-side tracking + trajectory
-Snapshot table, asset-class column on accounts, nightly inference cron, Net Worth tab with delta tiles + trajectory chart. Depends on 4.2 (indexes make trajectory queries cheap).
-*Owner: `migration-author` + `integration-implementer` + `ui-polish` · ~700–900 LOC*
+- [x] **Backend shipped** — `assetClass` column on `financeAccounts` + new `finance_balance_snapshots` table (indexed on `(accountId, capturedAt)`); `electron/integrations/finance-snapshot.ts` with `captureSnapshots()` (idempotent within a day), `inferBalance()` (snapshot baseline + Σ newer txns), `setAccountBalance()` (manual writes for `manual_asset` accounts), `getNetWorthSnapshot()` (assets / liabilities / net + 30/90/365-day deltas), `getNetWorthTrajectory()`; nightly cron at 00:05 local time in `cron.ts`; 4 IPC handlers exposed through preload + types; 17 snapshot tests
+- [ ] **UI follow-up** — Net Worth tab with delta tiles + trajectory chart + per-account inline edit (separate `ui-polish` PR; needs a chart lib like Recharts)
 
 ### 4.5 [`cash-flow-forecast.md`](finance/cash-flow-forecast.md) — 90-day projection
 Forecast engine combining subscription cadence + recurring income + scheduled debt + calendar bills. New Forecast tab with trajectory chart, override popovers, low-cash warnings.
