@@ -93,6 +93,16 @@ function ensureNewTables(sqlite: Database.Database): void {
       balance REAL NOT NULL,
       source TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS forecast_overrides (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL REFERENCES finance_accounts(id),
+      date TEXT NOT NULL,
+      amount REAL,
+      label TEXT,
+      kind TEXT NOT NULL,
+      shift_to_date TEXT,
+      created_at INTEGER
+    );
   `)
 
   // Backfill new columns on pre-existing tables (safe no-op when columns already exist).
@@ -206,6 +216,21 @@ function ensureNewTables(sqlite: Database.Database): void {
   try {
     sqlite.exec(
       'CREATE INDEX IF NOT EXISTS idx_finance_balance_snapshots_account_captured ON finance_balance_snapshots(account_id, captured_at)'
+    )
+  } catch {
+    /* ignore */
+  }
+  // Phase 4.5 — forecast columns + UNIQUE index. payment_day_of_month is
+  // nullable (defaults to 1 in the engine when not set). The unique index
+  // on (account_id, date, label) lets the IPC use atomic upsert semantics
+  // and enforces "at most one override per (account, date, event-label)"
+  // at the DB level.
+  ensureColumn(sqlite, 'finance_accounts', 'payment_day_of_month', 'INTEGER')
+  try {
+    // Drop the legacy non-unique index if it exists from a pre-0008 install.
+    sqlite.exec('DROP INDEX IF EXISTS idx_forecast_overrides_account_date')
+    sqlite.exec(
+      'CREATE UNIQUE INDEX IF NOT EXISTS uq_forecast_overrides_account_date_label ON forecast_overrides(account_id, date, label)'
     )
   } catch {
     /* ignore */
@@ -376,6 +401,7 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       credit_limit REAL,
       institution TEXT NOT NULL DEFAULT '',
       asset_class TEXT NOT NULL DEFAULT 'spending',
+      payment_day_of_month INTEGER,
       payment_due_date TEXT,
       last_statement_synced_at INTEGER,
       updated_at INTEGER
@@ -387,6 +413,17 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       captured_at INTEGER NOT NULL,
       balance REAL NOT NULL,
       source TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS forecast_overrides (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL REFERENCES finance_accounts(id),
+      date TEXT NOT NULL,
+      amount REAL,
+      label TEXT,
+      kind TEXT NOT NULL,
+      shift_to_date TEXT,
+      created_at INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS finance_transactions (

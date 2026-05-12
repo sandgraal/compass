@@ -442,6 +442,33 @@ declare global {
           balance: number
         ): Promise<{ success: boolean; error?: string }>
 
+        // Cash-flow forecast (Phase 4.5)
+        getForecast(opts?: { windowDays?: number; lowCashThreshold?: number }): Promise<{
+          events: Array<{
+            date: string
+            accountId: number | null
+            amount: number
+            label: string
+            source: 'subscription' | 'income' | 'debt' | 'calendar' | 'override'
+            confidence: 'high' | 'medium' | 'low'
+          }>
+          trajectory: Array<{ date: string; accountId: number; balance: number }>
+          lowDates: Array<{ accountId: number; date: string; balance: number }>
+        }>
+        setForecastOverride(override: {
+          accountId: number
+          date: string
+          label: string
+          kind: 'skip' | 'shift' | 'override'
+          amount?: number | null
+          shiftToDate?: string | null
+        }): Promise<{ success: boolean; error?: string }>
+        deleteForecastOverride(
+          accountId: number,
+          date: string,
+          label: string
+        ): Promise<{ success: boolean; error?: string; removed?: number }>
+
         getInboxPath(): Promise<string>
 
         // Watched folder

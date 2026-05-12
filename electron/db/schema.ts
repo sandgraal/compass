@@ -140,6 +140,10 @@ export const financeAccounts = sqliteTable('finance_accounts', {
   // accounts have no transaction stream — balance is only updated by the
   // user via finance:set-account-balance.
   assetClass: text('asset_class').notNull().default('spending'),
+  // Day of month the user pays this account's debt minimum (1-28). Used by
+  // the cash-flow forecast (Phase 4.5) to schedule debt outflows. Default
+  // null = "no fixed pay day, fall back to paymentDueDate".
+  paymentDayOfMonth: integer('payment_day_of_month'),
   // ISO 'YYYY-MM-DD'. Surfaced as a "Payments Due" reminder on the Dashboard
   // when within the next 14 days. Populated from PDF statement metadata.
   paymentDueDate: text('payment_due_date'),
@@ -162,6 +166,24 @@ export const financeBalanceSnapshots = sqliteTable('finance_balance_snapshots', 
   capturedAt: integer('captured_at', { mode: 'timestamp_ms' }).notNull(),
   balance: real('balance').notNull(),
   source: text('source').notNull() // 'manual' | 'inferred' | 'plaid'
+})
+
+// ---- Forecast overrides (Phase 4.5) ----
+// User edits to the projected cash-flow stream. The forecast engine reads
+// these to skip / shift / replace the auto-generated event for a given
+// account+date. `kind='shift'` populates `shiftToDate`; `kind='override'`
+// populates `amount`; `kind='skip'` needs neither.
+export const forecastOverrides = sqliteTable('forecast_overrides', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  accountId: integer('account_id')
+    .notNull()
+    .references(() => financeAccounts.id),
+  date: text('date').notNull(), // ISO 'YYYY-MM-DD' — date of the auto event being overridden
+  amount: real('amount'), // null unless kind='override'
+  label: text('label'),
+  kind: text('kind').notNull(), // 'skip' | 'shift' | 'override'
+  shiftToDate: text('shift_to_date'), // populated when kind='shift'
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
 export const financeTransactions = sqliteTable('finance_transactions', {
