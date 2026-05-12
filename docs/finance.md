@@ -131,9 +131,11 @@ are post-processed after each ingest:
    via `finance:set-watch-folder`).
 2. `finance-watcher.ts` (chokidar) detects the file, calls
    `ingestWatchedFolderNow()`.
-3. `ingestCsvFolder()` parses → categorizes → dedupes → `tagGeoAndPurpose()`
+3. `ingestFinanceFiles()` parses → categorizes → dedupes → `tagGeoAndPurpose()`
    → `tagTax()` → inserts (read-in-place; source files are not moved) → runs
-   `applyAtmSplit()` if any rows were added.
+   `applyAtmSplit()` if any rows were added. Handles `.csv` + `.xlsx` + `.pdf`.
+   (The sibling `ingestCsvFolder()` is the older inbox/drain path: top-level
+   `.csv` only, with archive-on-success — not what the watcher uses.)
 4. `finance-extractor.ts` regenerates the markdown summary in
    `knowledge-base/profile/`.
 5. UI reloads via `finance-watcher:ingest-complete` event.
