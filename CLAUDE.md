@@ -36,7 +36,8 @@ All user data stays on disk; only OAuth tokens leave the machine (and only to Go
 npm version patch          # or minor / major — bumps package.json + creates git tag
 git push --follow-tags     # GitHub Actions builds, packages, publishes to GitHub Releases
 ```
-That's it. `GITHUB_TOKEN` is auto-injected by Actions — no PAT, no manual packaging.
+That release workflow uses the auto-injected `GITHUB_TOKEN` plus repo secrets `CSC_LINK` and
+`CSC_KEY_PASSWORD`; tag pushes fail fast if macOS signing is not configured.
 The running app detects the new release within 3 s of next launch (or 4 h periodic check)
 and shows the UpdateBanner. See `.github/workflows/release.yml` for the full pipeline.
 **Never run `npm run release` locally** — let CI do it so builds are reproducible.
