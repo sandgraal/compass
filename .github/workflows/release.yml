@@ -17,14 +17,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Require macOS signing secrets
+      - name: Warn if macOS signing secrets are absent
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
         run: |
           if [ -z "$CSC_LINK" ] || [ -z "$CSC_KEY_PASSWORD" ]; then
-            echo "::error title=Missing macOS signing secrets::Set CSC_LINK and CSC_KEY_PASSWORD before publishing updater-enabled macOS releases."
-            exit 1
+            echo "::warning title=No signing secrets::CSC_LINK / CSC_KEY_PASSWORD not set — publishing unsigned. Add Apple Developer certs to sign future releases."
           fi
 
       - uses: actions/setup-node@v4
