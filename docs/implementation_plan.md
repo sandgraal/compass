@@ -12,9 +12,9 @@
 | **Phase 1** — Critical bug fixes | 5 items | 100% (all shipped prior to this branch) |
 | **Phase 2** — Remaining PRD features | 7 items | 100% (2.1–2.7 all shipped prior to this branch) |
 | **Phase 3** — Beyond-PRD polish | 2 selected items | 100% (onboarding wizard + tray/notifications shipped) |
-| **Phase 4** — Finance forward roadmap | 7 items | partial (4.0 Rocket Money + 4.1 db:migrate + 4.2 geo/purpose columns shipped) |
+| **Phase 4** — Finance forward roadmap | 7 items | partial (4.0–4.3 shipped; 4.4–4.6 outstanding) |
 
-PRD-completion of the running app: **~97%** (all Phases 1–3 + Phase 4.0–4.2 merged).
+PRD-completion of the running app: **~98%** (all Phases 1–3 + Phase 4.0–4.3 merged).
 
 ---
 
@@ -179,8 +179,8 @@ Shipped in `feat/finance-rocket-money-import`. Adds Rocket Money parser, `catego
 - [x] **Shipped** — `geo` / `purpose` columns on `financeTransactions` with 3 indexes; backfill migration `0004_grey_shiver_man.sql`; `tagGeoAndPurpose` writes to columns directly; `finance:get-geo-summary` uses SQL aggregation
 
 ### 4.3 [`tax-tagging.md`](finance/tax-tagging.md) — Schedule C / E / capex tags
-New `taxTag` column + tagger. Enndustrious deposits → Schedule C income; CR Property → capex-airbnb; etc. Backfill script for the existing 3,100 rows. Year-end report becomes a SQL query.
-*Owner: `integration-implementer` · ~500 LOC*
+- [x] **Backend shipped** — `taxTag` / `taxTagSource` / `taxYear` columns on `financeTransactions` (indexed on `(taxYear, taxTag)`); `electron/integrations/finance-tax.ts` classifier wired into both ingest paths + Excel import; `finance:get-tax-summary` and `finance:set-transaction-tax-tag` IPC handlers; user overrides sticky via `taxTagSource='user'`; 18 classifier tests
+- [ ] **UI follow-up** — tax badge in Transactions tab + override dropdown + year-end summary card (separate `ui-polish` PR)
 
 ### 4.4 [`net-worth.md`](finance/net-worth.md) — asset-side tracking + trajectory
 Snapshot table, asset-class column on accounts, nightly inference cron, Net Worth tab with delta tiles + trajectory chart. Depends on 4.2 (indexes make trajectory queries cheap).

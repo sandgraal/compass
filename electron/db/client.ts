@@ -113,6 +113,24 @@ function ensureNewTables(sqlite: Database.Database): void {
       }
     }
   }
+  // Phase 4.3 — tax disposition columns. taxYear is derived from `date.year`
+  // for any row without it; the actual taxTag classification is left to the
+  // backfill script (see scripts/backfill-tax-tags.ts) so the rules live in
+  // one place rather than being duplicated in SQL.
+  ensureColumn(sqlite, 'finance_transactions', 'tax_tag', "TEXT NOT NULL DEFAULT 'tax:none'")
+  ensureColumn(sqlite, 'finance_transactions', 'tax_tag_source', "TEXT NOT NULL DEFAULT 'auto'")
+  const addedTaxYear = ensureColumn(sqlite, 'finance_transactions', 'tax_year', 'INTEGER')
+  if (addedTaxYear) {
+    try {
+      sqlite
+        .prepare(
+          'UPDATE finance_transactions SET tax_year = CAST(SUBSTR(date, 1, 4) AS INTEGER) WHERE tax_year IS NULL'
+        )
+        .run()
+    } catch {
+      /* ignore */
+    }
+  }
   if (addedSyncInterval) {
     // One-time migration: seed per-integration intervals from the legacy global setting so users
     // who tuned `syncInterval` keep their preference on existing connected integrations.

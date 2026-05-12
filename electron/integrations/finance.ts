@@ -15,6 +15,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
 import { applyAtmSplit } from './finance-atm-split'
 import { tagGeoAndPurpose } from './finance-geo'
+import { tagTax } from './finance-tax'
 
 // ---------- Types ----------
 export type RawTxn = {
@@ -27,6 +28,8 @@ export type RawTxn = {
   notes?: string
   geo?: string // set by tagGeoAndPurpose
   purpose?: string // set by tagGeoAndPurpose (CR transactions only)
+  taxTag?: string // set by tagTax (Phase 4.3)
+  taxYear?: number | null // derived from date.year by tagTax
   sourceFile: string
   hash: string
 }
@@ -503,7 +506,9 @@ export async function ingestCsvFolder(
     const categorized = rules.length ? categorize(parsed, rules) : parsed
     // Tag every categorized txn with geo (CR/US/etc.) + purpose (capex/household/…
     // for CR rows). Written to indexed `geo` / `purpose` columns. Idempotent on re-ingest.
-    const txns = tagGeoAndPurpose(categorized)
+    // Tax disposition (Phase 4.3) is added after geo/purpose so the classifier
+    // sees the final tags. Auto-source — never overwrites user picks.
+    const txns = tagTax(tagGeoAndPurpose(categorized))
     const fresh = txns.filter((t) => !existingHashes.has(t.hash))
 
     for (const t of fresh) {
@@ -519,6 +524,9 @@ export async function ingestCsvFolder(
           notes: t.notes,
           geo: t.geo ?? 'US',
           purpose: t.purpose ?? null,
+          taxTag: t.taxTag ?? 'tax:none',
+          taxTagSource: 'auto',
+          taxYear: t.taxYear ?? null,
           sourceFile: t.sourceFile,
           ingestedAt: new Date()
         })
@@ -1232,7 +1240,7 @@ export async function ingestFinanceFiles(
     }
 
     const categorized = rules.length ? categorize(txns, rules) : txns
-    const tagged = tagGeoAndPurpose(categorized)
+    const tagged = tagTax(tagGeoAndPurpose(categorized))
 
     // Scope hash lookup to only this batch's candidates — avoids full-table scan
     const candidateHashes = tagged.map((t) => t.hash)
@@ -1262,6 +1270,9 @@ export async function ingestFinanceFiles(
           notes: t.notes,
           geo: t.geo ?? 'US',
           purpose: t.purpose ?? null,
+          taxTag: t.taxTag ?? 'tax:none',
+          taxTagSource: 'auto',
+          taxYear: t.taxYear ?? null,
           sourceFile: t.sourceFile,
           ingestedAt: new Date()
         })
