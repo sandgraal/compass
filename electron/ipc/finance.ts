@@ -434,10 +434,24 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(
     'finance:get-net-worth-trajectory',
     (_event, opts?: { sinceDays?: number; untilMs?: number }) => {
+      const now = Date.now()
       const days = Number.isFinite(opts?.sinceDays) ? Math.floor(opts!.sinceDays as number) : 365
       const clamped = Math.min(3650, Math.max(1, days))
-      const sinceMs = Date.now() - clamped * 24 * 60 * 60 * 1000
-      return getNetWorthTrajectory(getRawSqlite(), { sinceMs, untilMs: opts?.untilMs })
+      const sinceMs = now - clamped * 24 * 60 * 60 * 1000
+
+      // Validate untilMs: must be a finite positive number within a sane
+      // window and >= sinceMs. Anything else falls back to "now".
+      let untilMs = now
+      if (
+        Number.isFinite(opts?.untilMs) &&
+        (opts!.untilMs as number) > 0 &&
+        (opts!.untilMs as number) >= sinceMs &&
+        (opts!.untilMs as number) <= now + 365 * 24 * 60 * 60 * 1000
+      ) {
+        untilMs = opts!.untilMs as number
+      }
+
+      return getNetWorthTrajectory(getRawSqlite(), { sinceMs, untilMs })
     }
   )
 
@@ -459,15 +473,26 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     if (!Number.isFinite(balance)) {
       return { success: false, error: `Invalid balance: ${balance}` }
     }
-    const sqlite = getRawSqlite()
-    const exists = sqlite
-      .prepare('SELECT 1 FROM finance_accounts WHERE id = ? LIMIT 1')
-      .get(accountId)
-    if (!exists) {
-      return { success: false, error: `Account not found: ${accountId}` }
+    // Sanity bound: ±$1B covers any realistic personal asset (CR property,
+    // brokerage, retirement) and rejects garbage like Number.MAX_VALUE.
+    const MAX_BALANCE = 1_000_000_000
+    if (Math.abs(balance) > MAX_BALANCE) {
+      return { success: false, error: `Balance out of range: ${balance}` }
     }
-    setAccountBalance(sqlite, accountId, balance)
-    return { success: true }
+    try {
+      const sqlite = getRawSqlite()
+      const exists = sqlite
+        .prepare('SELECT 1 FROM finance_accounts WHERE id = ? LIMIT 1')
+        .get(accountId)
+      if (!exists) {
+        return { success: false, error: `Account not found: ${accountId}` }
+      }
+      setAccountBalance(sqlite, accountId, balance)
+      return { success: true }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { success: false, error: `Failed to set balance: ${message}` }
+    }
   })
 
   // ── Upcoming payments (Dashboard "Payments Due" card) ────────────────────

@@ -5,6 +5,7 @@ import {
   getNetWorthSnapshot,
   getNetWorthTrajectory,
   inferBalance,
+  localDateString,
   setAccountBalance,
   startOfDayMs
 } from './finance-snapshot'
@@ -56,6 +57,33 @@ describe('startOfDayMs', () => {
     expect(d.getMinutes()).toBe(0)
     expect(d.getSeconds()).toBe(0)
     expect(d.getMilliseconds()).toBe(0)
+  })
+})
+
+describe('localDateString', () => {
+  it('formats a timestamp as YYYY-MM-DD using local-time fields', () => {
+    // 2026-05-11 at 15:42:33 local time, regardless of TZ offset.
+    const ts = new Date(2026, 4, 11, 15, 42, 33).getTime()
+    expect(localDateString(ts)).toBe('2026-05-11')
+  })
+
+  it('keeps the date stable for late-night local timestamps', () => {
+    // 2026-05-11 at 23:30 local time. A UTC formatter could shift this to
+    // 2026-05-12 in negative-offset zones; we want the local-day bucket.
+    const ts = new Date(2026, 4, 11, 23, 30, 0).getTime()
+    expect(localDateString(ts)).toBe('2026-05-11')
+  })
+
+  it('keeps the date stable for early-morning local timestamps', () => {
+    // 2026-05-11 at 00:30 local time. UTC could shift to 2026-05-10 in
+    // positive-offset zones; we want the local-day bucket.
+    const ts = new Date(2026, 4, 11, 0, 30, 0).getTime()
+    expect(localDateString(ts)).toBe('2026-05-11')
+  })
+
+  it('zero-pads month and day', () => {
+    const ts = new Date(2026, 0, 5, 12, 0, 0).getTime() // 2026-01-05
+    expect(localDateString(ts)).toBe('2026-01-05')
   })
 })
 

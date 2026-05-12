@@ -47,6 +47,26 @@ export function startOfDayMs(ts: number): number {
 }
 
 /**
+ * Format a timestamp as a local-time `YYYY-MM-DD` string.
+ *
+ * Snapshots are bucketed per LOCAL calendar day (cron at 00:05 local time,
+ * idempotency check via `startOfDayMs`), and `finance_transactions.date` is
+ * stored as a date-only ISO string with no timezone — so it represents the
+ * local day the txn occurred. Comparing transaction dates against a
+ * UTC-derived slug (`toISOString().slice(0, 10)`) shifts the boundary by ±1
+ * day for users outside UTC, which can include or exclude txns around
+ * midnight. This formatter keeps the comparison aligned with capture
+ * semantics.
+ */
+export function localDateString(ts: number): string {
+  const d = new Date(ts)
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+/**
  * Capture today's snapshot for every account. Returns count of rows written.
  * Skips accounts that already have a snapshot for today (idempotent).
  *
@@ -126,9 +146,10 @@ export function inferBalance(sqlite: SqliteForSnapshot, accountId: number, asOfM
     .get(accountId, asOfMs) as SnapshotRow | undefined
 
   // Sum txns strictly after the snapshot's date, up to and including today.
-  // Transactions are date-only ('YYYY-MM-DD'), so we compare as ISO strings.
-  const sinceDate = last ? new Date(last.captured_at).toISOString().slice(0, 10) : null
-  const upToDate = new Date(asOfMs).toISOString().slice(0, 10)
+  // Transactions are date-only ('YYYY-MM-DD') in local time, so we use the
+  // local-day formatter to keep date math aligned with snapshot semantics.
+  const sinceDate = last ? localDateString(last.captured_at) : null
+  const upToDate = localDateString(asOfMs)
 
   const sumRow = sinceDate
     ? sqlite
@@ -316,7 +337,8 @@ export function getNetWorthTrajectory(
     accountId: r.account_id,
     accountName: r.name,
     assetClass: r.asset_class,
-    date: new Date(r.captured_at).toISOString().slice(0, 10),
+    // Local-day formatter — matches the snapshot's local-day bucket.
+    date: localDateString(r.captured_at),
     balance: r.balance
   }))
 }
