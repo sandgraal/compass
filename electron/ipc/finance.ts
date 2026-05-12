@@ -384,7 +384,9 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   // ── Override a transaction's tax tag (Phase 4.3) ──────────────────────────
   // Marks taxTagSource='user' so future re-tag passes won't overwrite it.
   ipcMain.handle('finance:set-transaction-tax-tag', (_event, id: number, taxTag: string) => {
-    const db = getDb()
+    if (!Number.isInteger(id) || id <= 0) {
+      return { success: false, error: `Invalid transaction id: ${id}` }
+    }
     // Whitelist accepted values to keep schema clean.
     const allowed = new Set([
       'tax:capex-airbnb',
@@ -402,10 +404,15 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     if (!allowed.has(taxTag)) {
       return { success: false, error: `Unknown tax tag: ${taxTag}` }
     }
-    db.update(financeTransactions)
+    const db = getDb()
+    const result = db
+      .update(financeTransactions)
       .set({ taxTag, taxTagSource: 'user' })
       .where(eq(financeTransactions.id, id))
       .run()
+    if (result.changes === 0) {
+      return { success: false, error: `No transaction found with id ${id}` }
+    }
     return { success: true }
   })
 

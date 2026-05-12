@@ -46,10 +46,22 @@ describe('classifyTax', () => {
     expect(tag).toBe('tax:none')
   })
 
-  it('tags CR + capex as capex-airbnb regardless of Enndustrious', () => {
+  it('tags CR + capex as capex-airbnb', () => {
     const tag = classifyTax({
       amount: -300,
       account: 'Amex Platinum',
+      category: 'Property',
+      subcategory: 'Construction — materials',
+      geo: 'CR',
+      purpose: 'capex'
+    })
+    expect(tag).toBe('tax:capex-airbnb')
+  })
+
+  it('CR + capex wins over Enndustrious — hardware purchased on the business card for the CR build is still real-estate capex', () => {
+    const tag = classifyTax({
+      amount: -300,
+      account: 'Enndustrious Checking',
       category: 'Property',
       subcategory: 'Construction — materials',
       geo: 'CR',

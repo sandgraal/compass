@@ -115,9 +115,8 @@ function ensureNewTables(sqlite: Database.Database): void {
     }
   }
   // Phase 4.3 — tax disposition columns. taxYear is derived from `date.year`
-  // in SQL (cheap), but the taxTag classification is run through the JS
-  // classifier so the rule logic lives in one place (electron/integrations/
-  // finance-tax.ts) rather than being duplicated in SQL.
+  // in SQL (cheap); the taxTag classification runs through the JS classifier
+  // (backfillTaxTags below) so the rule logic lives in one place.
   const addedTaxTag = ensureColumn(
     sqlite,
     'finance_transactions',
@@ -136,6 +135,16 @@ function ensureNewTables(sqlite: Database.Database): void {
     } catch {
       /* ignore */
     }
+  }
+  // Mirror the (tax_year, tax_tag) compound index from migration 0005 so the
+  // finance:get-tax-summary query stays fast on legacy DBs that bypass the
+  // migration runner.
+  try {
+    sqlite.exec(
+      'CREATE INDEX IF NOT EXISTS idx_finance_transactions_tax_year_tag ON finance_transactions(tax_year, tax_tag)'
+    )
+  } catch {
+    /* ignore */
   }
   if (addedTaxTag) {
     // Re-classify every existing row so historical Charity / Health /

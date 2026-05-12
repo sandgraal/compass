@@ -179,8 +179,12 @@ async function main(): Promise<void> {
       .all()
       .map((r) => r.h)
   )
-  // Re-tag geo+purpose AND tax disposition at import time so existing rows are
-  // consistent with what new ingests will produce going forward (idempotent).
+  // Tag geo+purpose AND tax disposition before insert so freshly-imported rows
+  // arrive with the same shape as ones produced by the live CSV ingest path.
+  // Note: rows whose hash already exists in the DB are skipped below — this
+  // script only tags rows on first import. Re-tagging existing rows is the job
+  // of the in-app classifier path (initDb → backfillTaxTags) and a future
+  // explicit re-tag IPC.
   const tagged = tagTax(
     tagGeoAndPurpose(
       ledger.map((r) => ({

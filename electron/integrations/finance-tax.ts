@@ -67,15 +67,18 @@ export function classifyTax(txn: ClassifyTaxInput): TaxTag {
   const category = txn.category ?? ''
   const subcategory = txn.subcategory ?? ''
 
-  // 1. Schedule C — Enndustrious account activity.
+  // 1. CR + capex → depreciable Airbnb investment. Wins over Schedule C
+  //    because a hardware-store purchase made on the Enndustrious card
+  //    that's actually for the CR build is still a real-estate capex item,
+  //    not a deductible business expense.
+  if (txn.geo === 'CR' && txn.purpose === 'capex') {
+    return 'tax:capex-airbnb'
+  }
+
+  // 2. Schedule C — Enndustrious account activity.
   //    Deposits = income, withdrawals = expense. Internal transfers stay neutral.
   if (isScheduleCAccount && category !== 'Transfers') {
     return txn.amount > 0 ? 'tax:schedule-c-income' : 'tax:schedule-c-expense'
-  }
-
-  // 2. CR + capex → depreciable Airbnb investment.
-  if (txn.geo === 'CR' && txn.purpose === 'capex') {
-    return 'tax:capex-airbnb'
   }
 
   // 3. Category-based.
