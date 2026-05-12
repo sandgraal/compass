@@ -10,16 +10,19 @@ finance project directory (in transition through 2026-06-10 — see
 
 | Layer | File | Purpose |
 |---|---|---|
-| Schema | `electron/db/schema.ts` (finance section) | `financeAccounts` (debts modeled via `isDebt=true`), `financeTransactions`, `categorizationRules`, `budgetRules` |
+| Schema | `electron/db/schema.ts` (finance section) | `financeAccounts` (debts via `isDebt=true`, net-worth bucket via `assetClass`, debt pay day via `paymentDayOfMonth`), `financeTransactions` (with indexed `geo`, `purpose`, `taxTag`, `taxYear`), `categorizationRules`, `budgetRules`, `financeBalanceSnapshots`, `forecastOverrides` |
 | Ingest | `electron/integrations/finance.ts` | CSV parsers (Chase, Amex, Cap One, Discover, BoA, USAA, Rocket Money, generic), categorizer, dedupe |
 | PDF | `electron/integrations/finance-pdf.ts` | Statement extractors (USAA, AMEX, generic) |
 | Watcher | `electron/integrations/finance-watcher.ts` | Chokidar watch on `~/Documents/Money/` (configurable), 3-level subfolder depth, `.csv` + `.xlsx` + `.pdf` allowlist |
-| Geo | `electron/integrations/finance-geo.ts` | Tags every txn with `geo:CR \| purpose:capex`-style tokens in `notes` |
+| Geo / purpose | `electron/integrations/finance-geo.ts` | Classifies CR / US / SPAIN / etc. + capex/operating/etc. for CR rows. Sets indexed columns at ingest. |
+| Tax tagging | `electron/integrations/finance-tax.ts` | Schedule C / E / capex-airbnb / charitable / medical / investment / none. Auto-runs after geo; user overrides sticky via `taxTagSource='user'`. |
+| Net-worth snapshots | `electron/integrations/finance-snapshot.ts` | Nightly per-account balance capture. Inferred from snapshot baseline + Σ(txns since); manual_asset accounts edited via `setAccountBalance`. |
+| Cash-flow forecast | `electron/integrations/finance-forecast.ts` | 90-day projection: subscriptions + recurring income + debt minimums + calendar bills + user overrides. Day-aggregated to avoid within-day order artifacts; debt minimums route to a cash account. |
 | ATM split | `electron/integrations/finance-atm-split.ts` | 70/30 CR ATM auto-split (Property/Construction vs personal cash) |
 | Subscriptions | `electron/integrations/finance-subscriptions.ts` | Recurring detection, zombies, duplicates |
 | Knowledge | `electron/knowledge/finance-extractor.ts` | Writes `profile/finances.md`, `profile/finances-debt.md`, `profile/finances-monthly.md` |
-| IPC | `electron/ipc/finance.ts` | 24+ handlers — see `electron/preload.ts` for the full surface |
-| UI | `src/pages/Finance.tsx` | Overview / Transactions / Accounts / Rules / CR & Subs tabs |
+| IPC | `electron/ipc/finance.ts` | 35+ handlers — see `electron/preload.ts` for the full surface |
+| UI | `src/pages/Finance.tsx` | Overview / Transactions / Accounts / Rules / CR & Subs tabs (Net Worth + Forecast + Tax-summary tabs are pending UI follow-up PRs) |
 
 ## Sign convention
 
@@ -36,17 +39,80 @@ finance project directory (in transition through 2026-06-10 — see
 
 ## Geo / purpose tagging
 
-Stored in the existing `notes` column as pipe-delimited tokens:
-`rm:Groceries | geo:CR | purpose:household`.
+First-class indexed columns on `financeTransactions` (promoted from `notes`
+tokens in Phase 4.2):
 
-- `geo` ∈ `CR | US | SPAIN | COLOMBIA | PANAMA` (US is default for unknown).
-- `purpose` ∈ `capex | operating | household | travel | other` — only set on CR transactions.
-- Tag-aware queries use `parseNotesTags()` from `finance-geo.ts`.
-- Idempotent: re-running `tagGeoAndPurpose()` replaces existing tags rather than duplicating.
+- `geo` ∈ `CR | US | SPAIN | COLOMBIA | PANAMA | OTHER` — `US` default. Indexed.
+- `purpose` ∈ `capex | operating | household | travel | other` — only set on
+  CR transactions; nullable. Indexed via the `(geo, purpose)` compound index.
 
-The `notes`-column approach was chosen to ship the Rocket Money import without a
-schema migration. Promotion to indexed columns is planned —
-see [`finance/geo-purpose-schema-promotion.md`](finance/geo-purpose-schema-promotion.md).
+`tagGeoAndPurpose()` in `finance-geo.ts` writes both fields directly at ingest;
+re-running on the same batch is idempotent. The `notes` column still carries
+the upstream `rm:CATEGORY` token from Rocket Money imports — that's input data
+for the categorizer, not output for queries.
+
+## Tax tagging (Phase 4.3)
+
+`taxTag` column on `financeTransactions` with `(taxYear, taxTag)` index.
+Classified at ingest by `finance-tax.ts`; override IPC marks
+`taxTagSource='user'` so re-tag passes never overwrite manual picks.
+
+Rule order (first match wins):
+1. **CR + capex** → `tax:capex-airbnb` (depreciable Airbnb investment).
+   Wins over Schedule C because hardware purchased on the business card for
+   the CR build is real-estate capex, not a deductible expense.
+2. **Enndustrious account activity** → `tax:schedule-c-income` (deposit) or
+   `tax:schedule-c-expense` (withdrawal). Internal transfers stay neutral.
+3. **Category mapping** — Charity/Gifts → `tax:charitable`; Investment →
+   `tax:investment`; Health (negative + non-reimbursement subcategory) →
+   `tax:medical`.
+4. **Default**: `tax:none`.
+
+Add new business accounts to `SCHEDULE_C_ACCOUNT_HINTS` in `finance-tax.ts`.
+
+## Net-worth snapshots (Phase 4.4)
+
+Per-(account, day) balance row in `finance_balance_snapshots`. Cron at 00:05
+local time captures one snapshot per non-`manual_asset` account, **idempotent
+within a calendar day**. `manual_asset` accounts (CR property, collectibles)
+only capture when the user sets a non-zero balance via
+`finance:set-account-balance`.
+
+Inference math: `previous_snapshot.balance + Σ(txns since previous_snapshot
+date, up to today)`. **Sign convention for debts**: txn `amount` follows the
+codebase rule (negative = charge / expense), but stored debt balances are
+positive amounts owed — so `inferBalance` flips the txn-sum sign for
+`isDebt=true` accounts. A $50 charge raises owed by 50; a $200 payment
+reduces it by 200.
+
+`getNetWorthSnapshot()` returns assets / liabilities / net + 30/90/365-day
+deltas; `getNetWorthTrajectory({ sinceMs, untilMs })` returns every snapshot
+in window for chart rendering.
+
+## Cash-flow forecast (Phase 4.5)
+
+`buildForecast()` produces a 90-day per-account daily trajectory from four
+event streams:
+
+| Stream | Source | Confidence |
+|---|---|---|
+| Subscriptions | `auditSubscriptions(db).active` (Phase 4.0) | high if ≥6 charges, medium if 3-5, low if <3 |
+| Recurring income | `detectRecurringIncome(sqlite)` — biweekly / weekly / monthly payroll detection. Excludes debt accounts (positives there are payments, not income). | same scale |
+| Debt minimums | `financeAccounts.minPayment` on `paymentDayOfMonth` | high |
+| Calendar bills | `calendar_events` matching `rent / mortgage / utilities / tax / hoa / lease / insurance / payment due` | low (amount unknown) |
+
+**Debt minimums route to the default cash account, NOT the debt account** —
+the forecast's job is "will my cash be short?", and the corresponding
+liability decrease is tracked by the Net Worth view.
+
+Same-day events for the same account are aggregated before walking, so a
+$100 outflow + $200 inflow on the same day produces one trajectory point at
+day-end (+$100), not two intermediate points whose order could spuriously
+trigger or mask the low-cash threshold.
+
+Override match key is `(accountId, date, label)` — UNIQUE in the DB so
+`set-forecast-override` is an atomic upsert via `onConflictDoUpdate`. Two
+events on the same account+day can be edited independently.
 
 ## CR ATM split
 
@@ -65,9 +131,11 @@ are post-processed after each ingest:
    via `finance:set-watch-folder`).
 2. `finance-watcher.ts` (chokidar) detects the file, calls
    `ingestWatchedFolderNow()`.
-3. `ingestFinanceFiles()` parses → categorizes → dedupes → tags geo/purpose →
-   inserts (read-in-place; source files are not moved) → runs `applyAtmSplit()`
-   if any rows were added.
+3. `ingestFinanceFiles()` parses → categorizes → dedupes → `tagGeoAndPurpose()`
+   → `tagTax()` → inserts (read-in-place; source files are not moved) → runs
+   `applyAtmSplit()` if any rows were added. Handles `.csv` + `.xlsx` + `.pdf`.
+   (The sibling `ingestCsvFolder()` is the older inbox/drain path: top-level
+   `.csv` only, with archive-on-success — not what the watcher uses.)
 4. `finance-extractor.ts` regenerates the markdown summary in
    `knowledge-base/profile/`.
 5. UI reloads via `finance-watcher:ingest-complete` event.
@@ -96,16 +164,16 @@ legacy project produces (`master_ledger.compass.json`,
 
 ## Forward roadmap
 
-See [`docs/finance/`](finance/) for individual feature plans (each one sized to
-land as one PR):
+See [`docs/finance/`](finance/) for individual feature plans. Status as of
+the latest merge:
 
-- [`cash-flow-forecast.md`](finance/cash-flow-forecast.md) — 90-day projection page
-- [`net-worth.md`](finance/net-worth.md) — asset-side tracking, true net-worth view
-- [`tax-tagging.md`](finance/tax-tagging.md) — Schedule C / E / capex tags
-- [`plaid-integration.md`](finance/plaid-integration.md) — kill the manual CSV ritual
-- [`geo-purpose-schema-promotion.md`](finance/geo-purpose-schema-promotion.md) — promote tags to indexed columns
-- [`db-migrate-fix.md`](finance/db-migrate-fix.md) — restore `npm run db:migrate`
-- [`legacy-cutover.md`](finance/legacy-cutover.md) — Excel pipeline retirement
+- ✅ [`db-migrate-fix.md`](finance/db-migrate-fix.md) — `npm run db:migrate` works
+- ✅ [`geo-purpose-schema-promotion.md`](finance/geo-purpose-schema-promotion.md) — geo/purpose are indexed columns
+- ✅ [`tax-tagging.md`](finance/tax-tagging.md) — Schedule C / capex backend (UI follow-up pending)
+- ✅ [`net-worth.md`](finance/net-worth.md) — snapshot backend (UI follow-up pending)
+- ✅ [`cash-flow-forecast.md`](finance/cash-flow-forecast.md) — forecast backend (UI follow-up pending)
+- ⏳ [`plaid-integration.md`](finance/plaid-integration.md) — kill the manual CSV ritual (multi-PR, not started)
+- ⏳ [`legacy-cutover.md`](finance/legacy-cutover.md) — Excel pipeline retirement (operational, runs through 2026-06-10)
 
 The implementation plan's
 [Phase 4 — Finance forward](./implementation_plan.md#phase-4--finance-forward-roadmap)
