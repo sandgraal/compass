@@ -86,7 +86,7 @@ function ensureNewTables(sqlite: Database.Database): void {
   ensureColumn(sqlite, 'finance_accounts', 'payment_due_date', 'TEXT')
   ensureColumn(sqlite, 'finance_accounts', 'last_statement_synced_at', 'INTEGER')
   const addedGeo = ensureColumn(sqlite, 'finance_transactions', 'geo', "TEXT NOT NULL DEFAULT 'US'")
-  ensureColumn(sqlite, 'finance_transactions', 'purpose', 'TEXT')
+  const addedPurpose = ensureColumn(sqlite, 'finance_transactions', 'purpose', 'TEXT')
   if (addedGeo) {
     // Backfill geo from notes tokens for existing rows.
     for (const val of ['CR', 'SPAIN', 'COLOMBIA', 'PANAMA', 'OTHER'] as const) {
@@ -98,6 +98,8 @@ function ensureNewTables(sqlite: Database.Database): void {
         /* ignore */
       }
     }
+  }
+  if (addedGeo || addedPurpose) {
     // Backfill purpose from notes tokens for existing rows.
     for (const val of ['capex', 'household', 'operating', 'travel', 'other'] as const) {
       try {

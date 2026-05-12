@@ -118,7 +118,7 @@ describe('countPendingMigrations', () => {
     expect(countPendingMigrations(tmpDb)).toBeGreaterThan(0)
   })
 
-  it('creates __drizzle_migrations dir entry when table is absent', () => {
+  it('returns total migration count when __drizzle_migrations is absent', () => {
     mkdirSync(tmpDb.replace('/compass.db', ''), { recursive: true })
     const sqlite = new Database(tmpDb)
     sqlite.exec('CREATE TABLE placeholder (id INTEGER PRIMARY KEY)')

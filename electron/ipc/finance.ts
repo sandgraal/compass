@@ -287,9 +287,9 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   })
 
   // ── Geo / CR purpose summary across the whole ledger ──────────────────────
-  // Reads geo:X | purpose:Y tokens from the notes column (set by finance-geo
-  // tagger during ingest). Returns aggregates the Finance page renders as the
-  // "Geography" + "Costa Rica purpose" cards.
+  // Aggregates first-class `geo` / `purpose` columns set during ingest and
+  // returns data the Finance page renders as the "Geography" + "Costa Rica
+  // purpose" cards.
   ipcMain.handle('finance:get-geo-summary', (_event, opts?: { since?: string }) => {
     const db = getDb()
     const cutoff = opts?.since ? validateGeoSince(opts.since) : null
