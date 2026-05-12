@@ -155,6 +155,11 @@ export const financeTransactions = sqliteTable('finance_transactions', {
   category: text('category').default('Uncategorized'),
   subcategory: text('subcategory'),
   notes: text('notes'),
+  // Geo + purpose are first-class indexed columns (promoted from notes tokens in 4.2).
+  // 'CR' | 'US' | 'SPAIN' | 'COLOMBIA' | 'PANAMA' | 'OTHER'. Default 'US'.
+  geo: text('geo').notNull().default('US'),
+  // Only set for CR transactions: 'capex' | 'household' | 'operating' | 'travel' | 'other'.
+  purpose: text('purpose'),
   sourceFile: text('source_file'),
   ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })

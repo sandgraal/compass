@@ -198,12 +198,13 @@ export function upsertNotesTags(
 
 /**
  * Tag a batch of (already-categorized) transactions with geo + purpose.
- * Mutates `notes` in-place via upsertNotesTags. Idempotent.
+ * Sets `geo` and `purpose` directly on the returned RawTxn objects.
+ * Idempotent — safe to call multiple times on the same batch.
  */
 export function tagGeoAndPurpose(txns: RawTxn[]): RawTxn[] {
   return txns.map((t) => {
     const geo = classifyGeo(t.description)
     const purpose = classifyPurpose(geo, t.category, t.subcategory, t.description)
-    return { ...t, notes: upsertNotesTags(t.notes, geo, purpose) }
+    return { ...t, geo, purpose: purpose || undefined }
   })
 }
