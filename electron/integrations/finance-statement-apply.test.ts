@@ -25,6 +25,7 @@ function makeDb(): ReturnType<typeof drizzle<typeof schema>> {
       min_payment REAL DEFAULT 0,
       credit_limit REAL,
       institution TEXT NOT NULL DEFAULT '',
+      asset_class TEXT NOT NULL DEFAULT 'spending',
       payment_due_date TEXT,
       last_statement_synced_at INTEGER,
       updated_at INTEGER

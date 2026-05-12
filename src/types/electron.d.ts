@@ -411,6 +411,37 @@ declare global {
           id: number,
           taxTag: string
         ): Promise<{ success: boolean; error?: string }>
+
+        // Net worth (Phase 4.4)
+        getNetWorthSnapshot(): Promise<{
+          assets: number
+          liabilities: number
+          net: number
+          byAccount: Array<{
+            accountId: number
+            name: string
+            assetClass: string
+            isDebt: boolean
+            balance: number
+            capturedAt: number | null
+          }>
+          deltas: { d30: number | null; d90: number | null; d365: number | null }
+        }>
+        getNetWorthTrajectory(opts?: { sinceDays?: number; untilMs?: number }): Promise<
+          Array<{
+            accountId: number
+            accountName: string
+            assetClass: string
+            date: string
+            balance: number
+          }>
+        >
+        captureSnapshot(): Promise<{ written: number; skipped: number }>
+        setAccountBalance(
+          accountId: number,
+          balance: number
+        ): Promise<{ success: boolean; error?: string }>
+
         getInboxPath(): Promise<string>
 
         // Watched folder

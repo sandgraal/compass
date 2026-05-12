@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { and, desc, eq, gt, gte, isNull, lt, ne, or, sql } from 'drizzle-orm'
 import { BrowserWindow, type IpcMain, dialog } from 'electron'
-import { getDb } from '../db/client'
+import { getDb, getRawSqlite } from '../db/client'
 import {
   appSettings,
   budgetRules,
@@ -12,6 +12,12 @@ import {
   financeTransactions
 } from '../db/schema'
 import { categorize, ingestCsvFolder } from '../integrations/finance'
+import {
+  captureSnapshots,
+  getNetWorthSnapshot,
+  getNetWorthTrajectory,
+  setAccountBalance
+} from '../integrations/finance-snapshot'
 import { auditSubscriptions } from '../integrations/finance-subscriptions'
 import {
   getWatchedFolder,
@@ -413,6 +419,54 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     if (result.changes === 0) {
       return { success: false, error: `Transaction not found: ${id}` }
     }
+    return { success: true }
+  })
+
+  // ── Net-worth snapshot (Phase 4.4) ────────────────────────────────────────
+  // Returns latest balance per account + assets/liabilities/net totals + 30/90/365-day deltas.
+  ipcMain.handle('finance:get-net-worth-snapshot', () => {
+    return getNetWorthSnapshot(getRawSqlite())
+  })
+
+  // ── Net-worth trajectory ─────────────────────────────────────────────────
+  // Returns every snapshot in the requested window. Caller (UI) groups by
+  // account/date for the trajectory chart.
+  ipcMain.handle(
+    'finance:get-net-worth-trajectory',
+    (_event, opts?: { sinceDays?: number; untilMs?: number }) => {
+      const days = Number.isFinite(opts?.sinceDays) ? Math.floor(opts!.sinceDays as number) : 365
+      const clamped = Math.min(3650, Math.max(1, days))
+      const sinceMs = Date.now() - clamped * 24 * 60 * 60 * 1000
+      return getNetWorthTrajectory(getRawSqlite(), { sinceMs, untilMs: opts?.untilMs })
+    }
+  )
+
+  // ── Capture today's snapshot for every account ───────────────────────────
+  // Idempotent within a calendar day. Used by the "Capture snapshot" button
+  // and by the nightly cron in cron.ts.
+  ipcMain.handle('finance:capture-snapshot', () => {
+    return captureSnapshots(getRawSqlite())
+  })
+
+  // ── Manually set an account's balance (writes a 'manual' snapshot) ───────
+  // Used by the Accounts-tab "Set balance" UI for manual_asset accounts
+  // (CR property, collectibles) and as an override for transaction-backed
+  // accounts when the inferred value drifts from reality.
+  ipcMain.handle('finance:set-account-balance', (_event, accountId: number, balance: number) => {
+    if (!Number.isInteger(accountId) || accountId <= 0) {
+      return { success: false, error: `Invalid account id: ${accountId}` }
+    }
+    if (!Number.isFinite(balance)) {
+      return { success: false, error: `Invalid balance: ${balance}` }
+    }
+    const sqlite = getRawSqlite()
+    const exists = sqlite
+      .prepare('SELECT 1 FROM finance_accounts WHERE id = ? LIMIT 1')
+      .get(accountId)
+    if (!exists) {
+      return { success: false, error: `Account not found: ${accountId}` }
+    }
+    setAccountBalance(sqlite, accountId, balance)
     return { success: true }
   })
 

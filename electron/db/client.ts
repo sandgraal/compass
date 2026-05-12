@@ -8,11 +8,22 @@ import { reconcileMigrationState } from './reconcile'
 import * as schema from './schema'
 
 let _db: ReturnType<typeof drizzle> | null = null
+let _sqlite: Database.Database | null = null
 const MIGRATIONS_FOLDER = join(__dirname, 'migrations')
 
 export function getDb(): ReturnType<typeof drizzle<typeof schema>> {
   if (!_db) throw new Error('DB not initialized. Call initDb() first.')
   return _db as ReturnType<typeof drizzle<typeof schema>>
+}
+
+/**
+ * Raw `better-sqlite3` connection. Used by helpers that compose multiple
+ * statements via prepared queries (e.g. finance-snapshot.ts) where the
+ * Drizzle wrapper would add overhead with no schema-typing benefit.
+ */
+export function getRawSqlite(): Database.Database {
+  if (!_sqlite) throw new Error('DB not initialized. Call initDb() first.')
+  return _sqlite
 }
 
 export async function initDb(): Promise<void> {
@@ -24,6 +35,7 @@ export async function initDb(): Promise<void> {
   sqlite.pragma('foreign_keys = ON')
 
   _db = drizzle(sqlite, { schema })
+  _sqlite = sqlite
 
   // Run migrations
   try {
@@ -73,6 +85,13 @@ function ensureNewTables(sqlite: Database.Database): void {
       context TEXT,
       status TEXT NOT NULL DEFAULT 'pending',
       reviewed_at INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS finance_balance_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL REFERENCES finance_accounts(id),
+      captured_at INTEGER NOT NULL,
+      balance REAL NOT NULL,
+      source TEXT NOT NULL
     );
   `)
 
@@ -155,6 +174,41 @@ function ensureNewTables(sqlite: Database.Database): void {
     } catch {
       /* ignore — leaves rows at tax:none default; user can re-ingest to retry */
     }
+  }
+  // Phase 4.4 — net-worth columns. Mirror migration 0006: add asset_class
+  // with sensible defaults (debt → liability; savings/investment types →
+  // their natural buckets) and create the snapshot index.
+  const addedAssetClass = ensureColumn(
+    sqlite,
+    'finance_accounts',
+    'asset_class',
+    "TEXT NOT NULL DEFAULT 'spending'"
+  )
+  if (addedAssetClass) {
+    try {
+      sqlite
+        .prepare("UPDATE finance_accounts SET asset_class = 'liability' WHERE is_debt = 1")
+        .run()
+      sqlite
+        .prepare(
+          "UPDATE finance_accounts SET asset_class = 'savings' WHERE is_debt = 0 AND type = 'savings'"
+        )
+        .run()
+      sqlite
+        .prepare(
+          "UPDATE finance_accounts SET asset_class = 'retirement' WHERE is_debt = 0 AND type = 'investment'"
+        )
+        .run()
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    sqlite.exec(
+      'CREATE INDEX IF NOT EXISTS idx_finance_balance_snapshots_account_captured ON finance_balance_snapshots(account_id, captured_at)'
+    )
+  } catch {
+    /* ignore */
   }
   if (addedSyncInterval) {
     // One-time migration: seed per-integration intervals from the legacy global setting so users
@@ -321,9 +375,18 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       min_payment REAL DEFAULT 0,
       credit_limit REAL,
       institution TEXT NOT NULL DEFAULT '',
+      asset_class TEXT NOT NULL DEFAULT 'spending',
       payment_due_date TEXT,
       last_statement_synced_at INTEGER,
       updated_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS finance_balance_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL REFERENCES finance_accounts(id),
+      captured_at INTEGER NOT NULL,
+      balance REAL NOT NULL,
+      source TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS finance_transactions (
