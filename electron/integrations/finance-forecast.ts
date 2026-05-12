@@ -214,12 +214,21 @@ export function detectRecurringIncome(
   const lookback = options.lookbackDays ?? 365
   const cutoff = localDateString(addDays(today, -lookback))
 
+  // Exclude debt accounts — for those, positive amounts are PAYMENTS that
+  // reduce what's owed, not income. Without this filter, monthly credit-
+  // card payments get mis-detected as recurring income and the forecast
+  // projects them forward as inflows on the debt account, inflating both
+  // the debt balance AND total assets.
   const rows = sqlite
     .prepare(
-      `SELECT account_id, description, date, amount
-         FROM finance_transactions
-        WHERE amount > 0 AND account_id IS NOT NULL AND date >= ?
-        ORDER BY date ASC`
+      `SELECT t.account_id, t.description, t.date, t.amount
+         FROM finance_transactions t
+         JOIN finance_accounts a ON a.id = t.account_id
+        WHERE t.amount > 0
+          AND t.account_id IS NOT NULL
+          AND t.date >= ?
+          AND COALESCE(a.is_debt, 0) = 0
+        ORDER BY t.date ASC`
     )
     .all(cutoff) as Array<{
     account_id: number
@@ -296,6 +305,13 @@ function detectCadenceFromDates(dates: Date[]): Cadence | null {
  * Project debt minimum-payment events for every debt account that has a
  * non-zero minPayment. Schedules them on `paymentDayOfMonth` (or the 1st if
  * unset). Each month within the window emits one event per debt account.
+ *
+ * IMPORTANT: the outflow is routed to `defaultCashAccountId` rather than the
+ * debt account itself. The forecast's job is to answer "will my cash be
+ * short?" — paying a credit-card minimum withdraws money from a checking
+ * account. Tracking the corresponding debt-balance reduction belongs to the
+ * Net Worth view (Phase 4.4), not the cash forecast. If no cash account is
+ * supplied, debt events are skipped (better silent than misleading).
  */
 export function projectDebtEvents(
   debts: Array<{
@@ -305,9 +321,11 @@ export function projectDebtEvents(
     paymentDueDate: string | null
     name: string
   }>,
+  defaultCashAccountId: number | null,
   today: Date,
   windowDays: number
 ): ForecastEvent[] {
+  if (defaultCashAccountId === null) return []
   const out: ForecastEvent[] = []
   const horizon = addDays(today, windowDays)
 
@@ -323,7 +341,7 @@ export function projectDebtEvents(
     while (cursor <= horizon) {
       out.push({
         date: localDateString(cursor),
-        accountId: d.id,
+        accountId: defaultCashAccountId,
         amount: -min,
         label: `${d.name} minimum payment`,
         source: 'debt',
@@ -389,16 +407,29 @@ export function projectCalendarEvents(
 /**
  * Apply user overrides to an auto-generated event stream. Returns a NEW
  * array with skip/shift/override semantics applied; original input is not
- * mutated. Override-by-key is `accountId:date`.
+ * mutated.
+ *
+ * Match key is `accountId:date:label` — including label so two events on
+ * the same account+day (e.g. payroll and rent, or two subscriptions) can
+ * be edited independently. An override row stored without a label
+ * (`label: null`) falls back to date-only matching for backward compat,
+ * but the IPC `set-forecast-override` handler should always pass one.
  */
 export function applyOverrides(
   events: ForecastEvent[],
   overrides: ForecastOverride[]
 ): ForecastEvent[] {
-  const byKey = new Map<string, ForecastOverride>()
+  // Two lookup tables: precise (accountId+date+label) and a fallback
+  // (accountId+date) for legacy rows that didn't supply a label.
+  const byPreciseKey = new Map<string, ForecastOverride>()
+  const byFallbackKey = new Map<string, ForecastOverride>()
   for (const o of overrides) {
     if (o.accountId === null || !o.date) continue
-    byKey.set(`${o.accountId}:${o.date}`, o)
+    if (o.label) {
+      byPreciseKey.set(`${o.accountId}:${o.date}:${o.label}`, o)
+    } else {
+      byFallbackKey.set(`${o.accountId}:${o.date}`, o)
+    }
   }
 
   const out: ForecastEvent[] = []
@@ -407,7 +438,9 @@ export function applyOverrides(
       out.push(ev)
       continue
     }
-    const o = byKey.get(`${ev.accountId}:${ev.date}`)
+    const o =
+      byPreciseKey.get(`${ev.accountId}:${ev.date}:${ev.label}`) ??
+      byFallbackKey.get(`${ev.accountId}:${ev.date}`)
     if (!o) {
       out.push(ev)
       continue
@@ -418,10 +451,10 @@ export function applyOverrides(
       continue
     }
     if (o.kind === 'override') {
+      // Label is the match key — it stays. Only amount is replaced.
       out.push({
         ...ev,
         amount: o.amount ?? ev.amount,
-        label: o.label ?? ev.label,
         source: 'override',
         confidence: 'high'
       })
@@ -525,7 +558,10 @@ export function buildForecast(
   const incomeStreams = detectRecurringIncome(sqlite, { today })
   const incomeEvents = projectIncomeEvents(incomeStreams, today, windowDays)
 
-  // 3. Debt minimums.
+  // 3. Debt minimums — routed to a cash account so the forecast captures
+  // the cash impact (the whole point of "will I be short?"). Net Worth
+  // tracks the corresponding liability decrease.
+  const defaultCashAccountId = accounts.find((a) => a.is_debt !== 1)?.id ?? null
   const debts = accounts
     .filter((a) => a.is_debt === 1)
     .map((a) => ({
@@ -535,17 +571,15 @@ export function buildForecast(
       paymentDayOfMonth: a.payment_day_of_month,
       paymentDueDate: a.payment_due_date
     }))
-  const debtEvents = projectDebtEvents(debts, today, windowDays)
+  const debtEvents = projectDebtEvents(debts, defaultCashAccountId, today, windowDays)
 
-  // 4. Calendar bills — picks the first non-debt account as the default
-  // sink; UI lets the user re-route if needed.
+  // 4. Calendar bills — same default cash account as debt payments.
   const calRows = sqlite
     .prepare('SELECT title, start_at FROM calendar_events WHERE start_at IS NOT NULL')
     .all() as Array<{ title: string; start_at: number }>
-  const defaultAcct = accounts.find((a) => a.is_debt !== 1)?.id ?? null
   const calEvents = projectCalendarEvents(
     calRows.map((r) => ({ title: r.title, startAt: r.start_at })),
-    defaultAcct,
+    defaultCashAccountId,
     today,
     windowDays
   )

@@ -122,6 +122,7 @@ describe('projectIncomeEvents', () => {
 
 describe('projectDebtEvents', () => {
   const today = new Date(2026, 4, 5)
+  const CASH = 99 // any non-debt account id
 
   it('emits one minimum payment per month within the window', () => {
     const debts = [
@@ -133,12 +134,30 @@ describe('projectDebtEvents', () => {
         paymentDueDate: null
       }
     ]
-    const events = projectDebtEvents(debts, today, 90)
+    const events = projectDebtEvents(debts, CASH, today, 90)
     // From 5/5, the 15th lands at 5/15, 6/15, 7/15 — three events in 90d
     expect(events).toHaveLength(3)
     expect(events.every((e) => e.amount === -35)).toBe(true)
     expect(events.every((e) => e.source === 'debt')).toBe(true)
     expect(events[0].date).toBe('2026-05-15')
+  })
+
+  it('routes the outflow to the cash account, not the debt account', () => {
+    const debts = [
+      { id: 7, name: 'Amex', minPayment: 35, paymentDayOfMonth: 15, paymentDueDate: null }
+    ]
+    const events = projectDebtEvents(debts, CASH, today, 60)
+    // accountId is the CASH account, not the debt account (id=7).
+    expect(events.every((e) => e.accountId === CASH)).toBe(true)
+    // The debt account name is preserved in the label so the UI can show it.
+    expect(events[0].label).toContain('Amex')
+  })
+
+  it('returns [] when no cash account is supplied', () => {
+    const debts = [
+      { id: 1, name: 'Amex', minPayment: 35, paymentDayOfMonth: 15, paymentDueDate: null }
+    ]
+    expect(projectDebtEvents(debts, null, today, 90)).toHaveLength(0)
   })
 
   it('falls back to paymentDueDate day when paymentDayOfMonth is unset', () => {
@@ -151,7 +170,7 @@ describe('projectDebtEvents', () => {
         paymentDueDate: '2026-05-22'
       }
     ]
-    const events = projectDebtEvents(debts, today, 35)
+    const events = projectDebtEvents(debts, CASH, today, 35)
     expect(events[0].date).toBe('2026-05-22')
   })
 
@@ -159,14 +178,14 @@ describe('projectDebtEvents', () => {
     const debts = [
       { id: 1, name: 'Paid Off', minPayment: 0, paymentDayOfMonth: 15, paymentDueDate: null }
     ]
-    expect(projectDebtEvents(debts, today, 90)).toHaveLength(0)
+    expect(projectDebtEvents(debts, CASH, today, 90)).toHaveLength(0)
   })
 
   it('clamps day-of-month to 1-28 for safety on short months', () => {
     const debts = [
       { id: 1, name: 'Amex', minPayment: 50, paymentDayOfMonth: 31, paymentDueDate: null }
     ]
-    const events = projectDebtEvents(debts, today, 35)
+    const events = projectDebtEvents(debts, CASH, today, 35)
     expect(events[0].date).toBe('2026-05-28')
   })
 })
@@ -242,20 +261,20 @@ describe('applyOverrides', () => {
     expect(out[0].source).toBe('override')
   })
 
-  it('override replaces the amount', () => {
+  it('override replaces the amount, keeps the label as the match key', () => {
     const overrides: ForecastOverride[] = [
       {
         accountId: 1,
         date: '2026-05-15',
         amount: -25,
-        label: 'Netflix premium',
+        label: 'netflix', // matches the event's label
         kind: 'override',
         shiftToDate: null
       }
     ]
     const out = applyOverrides([baseEvent], overrides)
     expect(out[0].amount).toBe(-25)
-    expect(out[0].label).toBe('Netflix premium')
+    expect(out[0].label).toBe('netflix') // label preserved
     expect(out[0].source).toBe('override')
   })
 
@@ -371,6 +390,11 @@ describe('detectRecurringIncome', () => {
   function makeDb(): Database.Database {
     const sqlite = new Database(':memory:')
     sqlite.exec(`
+      CREATE TABLE finance_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        is_debt INTEGER DEFAULT 0
+      );
       CREATE TABLE finance_transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         account_id INTEGER,
@@ -378,6 +402,7 @@ describe('detectRecurringIncome', () => {
         amount REAL NOT NULL,
         description TEXT NOT NULL DEFAULT ''
       );
+      INSERT INTO finance_accounts (id, name, is_debt) VALUES (1, 'Chase', 0);
     `)
     return sqlite
   }
@@ -422,4 +447,133 @@ describe('detectRecurringIncome', () => {
       .run('2026-02-15', 3000, 'Some Deposit')
     expect(detectRecurringIncome(sqlite, { today: new Date(2026, 2, 1) })).toHaveLength(0)
   })
+
+  it('does NOT detect monthly credit-card payments on a debt account as income', () => {
+    const sqlite = makeDb()
+    // makeDb() seeds account id=1 as 'Chase' (cash). Replace it with a
+    // debt account + add a separate cash account for the payroll comparison.
+    sqlite.prepare('DELETE FROM finance_accounts').run()
+    sqlite.prepare("INSERT INTO finance_accounts (id, name, is_debt) VALUES (1, 'Amex', 1)").run()
+    sqlite.prepare("INSERT INTO finance_accounts (id, name, is_debt) VALUES (2, 'Chase', 0)").run()
+    const ins = sqlite.prepare(
+      'INSERT INTO finance_transactions (account_id, date, amount, description) VALUES (?, ?, ?, ?)'
+    )
+    // Three monthly $300 payments from the user TO the credit card —
+    // appear as positive amounts on the debt account.
+    ins.run(1, '2026-01-15', 300, 'Payment from Chase')
+    ins.run(1, '2026-02-15', 300, 'Payment from Chase')
+    ins.run(1, '2026-03-15', 300, 'Payment from Chase')
+    // For comparison: a real biweekly payroll on the cash account.
+    ins.run(2, '2026-01-09', 3000, 'Acme Inc Direct Deposit')
+    ins.run(2, '2026-01-23', 3000, 'Acme Inc Direct Deposit')
+    ins.run(2, '2026-02-06', 3000, 'Acme Inc Direct Deposit')
+
+    const streams = detectRecurringIncome(sqlite, { today: new Date(2026, 2, 20) })
+    // Only the payroll stream — debt-account positives are excluded.
+    expect(streams).toHaveLength(1)
+    expect(streams[0].accountId).toBe(2)
+    expect(streams[0].cadence).toBe('biweekly')
+  })
+})
+
+describe('applyOverrides — same-day same-account collision', () => {
+  const today = new Date(2026, 4, 1)
+
+  it('skips only the matching event when two events land on the same account+day', () => {
+    const events: ForecastEvent[] = [
+      {
+        date: '2026-05-15',
+        accountId: 1,
+        amount: -16,
+        label: 'netflix',
+        source: 'subscription',
+        confidence: 'high'
+      },
+      {
+        date: '2026-05-15',
+        accountId: 1,
+        amount: -10,
+        label: 'spotify',
+        source: 'subscription',
+        confidence: 'high'
+      }
+    ]
+    const overrides: ForecastOverride[] = [
+      {
+        accountId: 1,
+        date: '2026-05-15',
+        amount: null,
+        label: 'netflix',
+        kind: 'skip',
+        shiftToDate: null
+      }
+    ]
+    const out = applyOverrides(events, overrides)
+    expect(out).toHaveLength(1)
+    expect(out[0].label).toBe('spotify')
+  })
+
+  it('shifts only the matching event', () => {
+    const events: ForecastEvent[] = [
+      {
+        date: '2026-05-15',
+        accountId: 1,
+        amount: -1500,
+        label: 'rent',
+        source: 'calendar',
+        confidence: 'low'
+      },
+      {
+        date: '2026-05-15',
+        accountId: 1,
+        amount: 3000,
+        label: 'payroll',
+        source: 'income',
+        confidence: 'high'
+      }
+    ]
+    const overrides: ForecastOverride[] = [
+      {
+        accountId: 1,
+        date: '2026-05-15',
+        amount: null,
+        label: 'rent',
+        kind: 'shift',
+        shiftToDate: '2026-05-20'
+      }
+    ]
+    const out = applyOverrides(events, overrides)
+    const rent = out.find((e) => e.label === 'rent')
+    const payroll = out.find((e) => e.label === 'payroll')
+    expect(rent?.date).toBe('2026-05-20')
+    expect(payroll?.date).toBe('2026-05-15') // untouched
+  })
+
+  it('falls back to date-only matching when override has no label (legacy rows)', () => {
+    const events: ForecastEvent[] = [
+      {
+        date: '2026-05-15',
+        accountId: 1,
+        amount: -16,
+        label: 'netflix',
+        source: 'subscription',
+        confidence: 'high'
+      }
+    ]
+    const overrides: ForecastOverride[] = [
+      {
+        accountId: 1,
+        date: '2026-05-15',
+        amount: null,
+        label: null,
+        kind: 'skip',
+        shiftToDate: null
+      }
+    ]
+    const out = applyOverrides(events, overrides)
+    expect(out).toHaveLength(0)
+  })
+
+  // Suppress unused-var lint for `today` — kept for parity with other suites.
+  void today
 })
