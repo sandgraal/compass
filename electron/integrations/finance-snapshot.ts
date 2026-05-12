@@ -105,8 +105,20 @@ export function captureSnapshots(
  * Infer the current balance of a transaction-backed account from its last
  * snapshot plus all txns since then. Falls back to summing every txn (with
  * `account.balance` as a baseline of 0) when there's no prior snapshot.
+ *
+ * Sign convention: transaction `amount` follows the codebase rule of
+ * `negative = expense / charge, positive = income / payment`. For ASSET
+ * accounts that maps directly to balance change. For DEBT accounts the sign
+ * inverts — a $50 charge (`amount = -50`) INCREASES the amount owed by 50,
+ * and a $200 payment (`amount = +200`) DECREASES the amount owed by 200 —
+ * because the stored snapshot.balance for a debt is the positive amount owed.
  */
 export function inferBalance(sqlite: SqliteForSnapshot, accountId: number, asOfMs: number): number {
+  const acct = sqlite
+    .prepare('SELECT is_debt FROM finance_accounts WHERE id = ? LIMIT 1')
+    .get(accountId) as { is_debt: number } | undefined
+  const isDebt = acct?.is_debt === 1
+
   const last = sqlite
     .prepare(
       'SELECT id, account_id, captured_at, balance, source FROM finance_balance_snapshots WHERE account_id = ? AND captured_at <= ? ORDER BY captured_at DESC LIMIT 1'
@@ -132,7 +144,10 @@ export function inferBalance(sqlite: SqliteForSnapshot, accountId: number, asOfM
 
   const sum = (sumRow as { s: number }).s
   const baseline = last ? last.balance : 0
-  return Math.round((baseline + sum) * 100) / 100
+  // For debt accounts the txn sign convention is opposite of the stored
+  // balance: charges (-) raise what's owed, payments (+) reduce it.
+  const delta = isDebt ? -sum : sum
+  return Math.round((baseline + delta) * 100) / 100
 }
 
 /**

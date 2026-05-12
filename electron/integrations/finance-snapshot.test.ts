@@ -107,6 +107,47 @@ describe('inferBalance', () => {
       .run()
     expect(inferBalance(sqlite, 1, new Date('2026-05-01').getTime())).toBe(1250)
   })
+
+  it('inverts the txn-sum sign for debt accounts (charges raise owed amount)', () => {
+    // Credit-card stub: $1,000 owed at the snapshot.
+    sqlite
+      .prepare(
+        "INSERT INTO finance_accounts (id, name, is_debt, asset_class) VALUES (1, 'Amex', 1, 'liability')"
+      )
+      .run()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (1, ?, 1000, 'manual')"
+      )
+      .run(new Date('2026-04-01T00:00:00').getTime())
+    // A $50 charge stored as -50 should INCREASE owed → 1050, not decrease it.
+    sqlite
+      .prepare(
+        "INSERT INTO finance_transactions (account_id, date, amount) VALUES (1, '2026-04-10', -50)"
+      )
+      .run()
+    expect(inferBalance(sqlite, 1, new Date('2026-05-01').getTime())).toBe(1050)
+  })
+
+  it('inverts the txn-sum sign for debt accounts (payments reduce owed amount)', () => {
+    sqlite
+      .prepare(
+        "INSERT INTO finance_accounts (id, name, is_debt, asset_class) VALUES (1, 'Amex', 1, 'liability')"
+      )
+      .run()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (1, ?, 1000, 'manual')"
+      )
+      .run(new Date('2026-04-01T00:00:00').getTime())
+    // A $200 payment stored as +200 should DECREASE owed → 800.
+    sqlite
+      .prepare(
+        "INSERT INTO finance_transactions (account_id, date, amount) VALUES (1, '2026-04-15', 200)"
+      )
+      .run()
+    expect(inferBalance(sqlite, 1, new Date('2026-05-01').getTime())).toBe(800)
+  })
 })
 
 describe('captureSnapshots', () => {
@@ -176,6 +217,30 @@ describe('captureSnapshots', () => {
     }
     expect(row.balance).toBe(250000)
     expect(row.source).toBe('manual')
+  })
+
+  it('end-to-end: nightly capture on a debt account adds charges to the owed amount', () => {
+    sqlite
+      .prepare(
+        "INSERT INTO finance_accounts (id, name, is_debt, asset_class) VALUES (1, 'Amex', 1, 'liability')"
+      )
+      .run()
+    // Day 1 manual snapshot: $1,000 owed.
+    setAccountBalance(sqlite, 1, 1000, new Date('2026-04-01T00:00:00').getTime())
+    // A $50 charge during the day.
+    sqlite
+      .prepare(
+        "INSERT INTO finance_transactions (account_id, date, amount) VALUES (1, '2026-04-02', -50)"
+      )
+      .run()
+    // Day 2 nightly capture should see $1,050 owed, NOT $950.
+    captureSnapshots(sqlite, new Date('2026-04-02T00:05:00').getTime())
+    const latest = sqlite
+      .prepare(
+        "SELECT balance FROM finance_balance_snapshots WHERE account_id = 1 AND source = 'inferred' ORDER BY captured_at DESC LIMIT 1"
+      )
+      .get() as { balance: number }
+    expect(latest.balance).toBe(1050)
   })
 })
 
