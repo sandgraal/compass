@@ -25,6 +25,8 @@ export type RawTxn = {
   category?: string
   subcategory?: string
   notes?: string
+  geo?: string // set by tagGeoAndPurpose
+  purpose?: string // set by tagGeoAndPurpose (CR transactions only)
   sourceFile: string
   hash: string
 }
@@ -500,8 +502,7 @@ export async function ingestCsvFolder(
     const parsed = parser.parse(headers, rows, f, hint)
     const categorized = rules.length ? categorize(parsed, rules) : parsed
     // Tag every categorized txn with geo (CR/US/etc.) + purpose (capex/household/…
-    // for CR rows). Stored in `notes` as `geo:X | purpose:Y` tokens so queries
-    // can filter without a schema migration. Idempotent on re-ingest.
+    // for CR rows). Written to indexed `geo` / `purpose` columns. Idempotent on re-ingest.
     const txns = tagGeoAndPurpose(categorized)
     const fresh = txns.filter((t) => !existingHashes.has(t.hash))
 
@@ -516,6 +517,8 @@ export async function ingestCsvFolder(
           category: t.category ?? 'Uncategorized',
           subcategory: t.subcategory,
           notes: t.notes,
+          geo: t.geo ?? 'US',
+          purpose: t.purpose ?? null,
           sourceFile: t.sourceFile,
           ingestedAt: new Date()
         })
@@ -1257,6 +1260,8 @@ export async function ingestFinanceFiles(
           category: t.category ?? 'Uncategorized',
           subcategory: t.subcategory,
           notes: t.notes,
+          geo: t.geo ?? 'US',
+          purpose: t.purpose ?? null,
           sourceFile: t.sourceFile,
           ingestedAt: new Date()
         })

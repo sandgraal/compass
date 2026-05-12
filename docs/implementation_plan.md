@@ -9,12 +9,12 @@
 |---|---|---|
 | **Phase 0** — Agent infrastructure | 7 sub-areas | 100% |
 | **Phase 0+** — Leading-edge agent infra | 10 items | 80% (0+.6, 0+.9, 0+.10 deferred) |
-| **Phase 1** — Critical bug fixes | 5 items | 0% |
-| **Phase 2** — Remaining PRD features | 7 items | partial (2.1 vault edit shipped in PR #10 follow-up) |
-| **Phase 3** — Beyond-PRD polish | 2 selected items | 0% |
-| **Phase 4** — Finance forward roadmap | 7 items | partial (Rocket Money import + geo/CR-purpose UI + subscription audit shipped in `feat/finance-rocket-money-import`) |
+| **Phase 1** — Critical bug fixes | 5 items | 100% (all shipped prior to this branch) |
+| **Phase 2** — Remaining PRD features | 7 items | 100% (2.1–2.7 all shipped prior to this branch) |
+| **Phase 3** — Beyond-PRD polish | 2 selected items | 100% (onboarding wizard + tray/notifications shipped) |
+| **Phase 4** — Finance forward roadmap | 7 items | partial (4.0 Rocket Money + 4.1 db:migrate + 4.2 geo/purpose columns shipped) |
 
-PRD-completion of the running app: **~91%** (10 PRs merged through #10).
+PRD-completion of the running app: **~97%** (all Phases 1–3 + Phase 4.0–4.2 merged).
 
 ---
 
@@ -109,26 +109,19 @@ Modern (Nov 2025+) Claude Code best practice splits guidance into 4 layers. This
 ## Phase 1 — Critical bug fixes
 
 ### 1.1 Fix dual `CommandPalette` mounting
-**Bug**: `App.tsx` mounts `./components/CommandPalette` AND `AppLayout.tsx` mounts `../ui/CommandPalette`. Both have ⌘K listeners.
-- [ ] Delete `src/components/ui/CommandPalette.tsx`
-- [ ] Remove `import { CommandPalette }` and `cmdOpen` state + listener from `AppLayout.tsx`
+- [x] **Shipped** — `AppLayout.tsx` never mounted a duplicate; `App.tsx` owns the single ⌘K listener
 
 ### 1.2 Cron interval doesn't restart on Settings change
-**Bug**: `restartCronJobs()` exists but `settings:set` never calls it.
-- [ ] In `electron/ipc/settings.ts`, when `key === 'syncInterval'`, call `restartCronJobs()`
+- [x] **Shipped** — `electron/ipc/settings.ts` calls `restartCronJobs()` when `key === 'syncInterval'`
 
 ### 1.3 Cron `0` ("Manual only") crashes
-**Bug**: `cron.schedule('*/0 * * * *', ...)` is invalid.
-- [ ] In `restartCronJobs()` and `startCronJobs()`: if interval ≤ 0, stop and don't reschedule
+- [x] **Shipped** — `cronExpressionForIntervalMinutes()` returns null for interval ≤ 0; scheduler skips
 
 ### 1.4 Replace `alert()` and `confirm()` with toast/dialog primitives
-- [ ] Promote Vault's `Toast` UX into `src/components/ui/toast.tsx` + `useToast()` hook
-- [ ] Promote a `ConfirmDialog` into `src/components/ui/confirm-dialog.tsx` (Radix dialog already installed)
-- [ ] Replace 5 `alert()` calls (`Settings.tsx`, `Daily.tsx`, `Integrations.tsx`)
-- [ ] Replace 4 `confirm()` calls (`Settings.tsx`, `Vault.tsx`, `Integrations.tsx`)
+- [x] **Shipped** — All pages use `useConfirm()` / `useToast()` from `src/components/ui/`
 
-### 1.5 Verify pre-commit still passes
-- [ ] After Phase 0 changes, `git commit -m test` should not be blocked
+### 1.5 Pre-commit passes
+- [x] **Verified** — `npm run typecheck && npm run check && npm test` all green
 
 ---
 
@@ -138,47 +131,32 @@ Modern (Nov 2025+) Claude Code best practice splits guidance into 4 layers. This
 - [x] **Shipped** in PR #10 follow-up — `Pencil` button + `updateEntry` via `vault:update-entry` IPC
 
 ### 2.2 Finance — account management UI
-- [ ] List accounts grouped by type (debt vs asset) in `Finance.tsx`
-- [ ] Inline add/edit/delete with ConfirmDialog (IPC `finance:upsert-account`, `finance:delete-account` exist)
+- [x] **Shipped** — `AccountsTab` in `Finance.tsx` (grouped by type, inline add/edit/delete with ConfirmDialog)
 
 ### 2.3 Finance — transaction edit/delete
-- [ ] Inline edit for category/subcategory/notes per row
-- [ ] Hover-reveal delete with ConfirmDialog
+- [x] **Shipped** — Inline edit for category/subcategory/notes; hover-reveal delete with ConfirmDialog
 
 ### 2.4 Finance — categorization rules manager
-- [ ] List rules (id, pattern, category, priority)
-- [ ] Add/edit/delete via existing IPC
+- [x] **Shipped** — `RulesTab` in `Finance.tsx` (list, add, edit, delete, re-apply)
 
-### 2.5 Per-integration sync frequency (DECIDED: now)
-- [ ] `appSettings` keys `syncInterval:google`, `syncInterval:github` (fall back to global)
-- [ ] Refactor `cron.ts` to a `Map<service, ScheduledTask>` with `startCronJobs`, `restartCronJobsFor(service)`
-- [ ] Per-card 5m/15m/30m/1h/Manual select in `Integrations.tsx`
-- [ ] Update Settings global "sync interval" copy to clarify it's the default
+### 2.5 Per-integration sync frequency
+- [x] **Shipped** — `syncIntervalMinutes` column on `integrations`; `cron.ts` uses `Map<service, ScheduledTask>`; per-card select in `Integrations.tsx`
 
 ### 2.6 Weekly: "events attended" stat
-- [ ] Count calendar events with `startAt < now` AND within current week → display next to task completion %
+- [x] **Shipped** — `attendedEvents` in `Weekly.tsx` counts past events in current week
 
 ### 2.7 Knowledge "Suggest edit" — regex baseline + opt-in Ollama
-**Baseline (always-on)**: regex extract sender names, attendees → append checkboxes to `inbox/suggestions.md`
-**Opt-in Ollama**: Settings → "AI assist" toggle + endpoint URL + model picker
-- [ ] `electron/integrations/ollama.ts` — wrapper around `/api/generate`
-- [ ] Structured-output prompt extracts action items, people, dates as JSON
-- [ ] Render checkboxes in KnowledgeBase with 🤖 vs 📝 indicators
-- [ ] Privacy banner: localhost-only, never outbound to OpenAI/Anthropic
+- [x] **Shipped** — `electron/knowledge/suggestions.ts` (regex baseline) + `electron/knowledge/ollama.ts` (opt-in); Settings toggle; checkboxes in `KnowledgeBase.tsx`
 
 ---
 
 ## Phase 3 — Beyond-PRD product improvements (DECIDED scope: 3.1 + 3.2)
 
 ### 3.1 Onboarding wizard
-- [ ] Detect first launch (zero integrations + zero checklist + zero vault entries)
-- [ ] 4-step modal: Welcome → Theme/Sync → Connect integration (skippable) → Done
-- [ ] Persist `onboardingCompleted=true` in `appSettings` + Settings "Replay tour" button
-- [ ] Playwright E2E spec
+- [x] **Shipped** — `OnboardingWizard.tsx` shown once on first launch; `onboardingCompleted` in `appSettings`; legacy key handled
 
 ### 3.2 System notifications + macOS menu-bar quick-capture
-**Notifications**: per-habit reminder time, daily roll-over reminder (default 10pm), Electron `Notification` API, click → deep link
-**Tray**: macOS Tray icon with menu (Quick add task / Open / Sync now / Quit), frameless 320×80 popup window for quick-capture, global shortcut (default `Cmd+Shift+T`), error-dot indicator
+- [x] **Shipped** — `electron/menu-bar.ts` (Tray + global shortcut); `src/quickCapture/` (320×80 popup); `QuickCapture.tsx`
 
 ---
 
@@ -195,12 +173,10 @@ Each item below has its own plan doc under [`docs/finance/`](finance/) sized to 
 Shipped in `feat/finance-rocket-money-import`. Adds Rocket Money parser, `categorize()` smart fallbacks (CR ATM regex + RM category map), `finance-geo.ts` (geo + purpose tagger via `notes` tokens), `finance-atm-split.ts` (idempotent 70/30 CR ATM split), `finance-subscriptions.ts`, `scripts/import-from-excel.ts`, plus the **CR & Subs** Finance tab and the *Hide Property* budget toggle.
 
 ### 4.1 [`db-migrate-fix.md`](finance/db-migrate-fix.md) — restore `npm run db:migrate`
-Tiny prerequisite. Today the npm script points at a missing file. Land before the schema-changing items below so each one's migration is verifiable in isolation.
-*Owner: `migration-author` · ~150 LOC*
+- [x] **Shipped** — `electron/db/migrate.ts` created with `--check` / `--reset --yes` flags + 7 tests in `migrate.test.ts`
 
 ### 4.2 [`geo-purpose-schema-promotion.md`](finance/geo-purpose-schema-promotion.md) — promote tags to indexed columns
-Move `geo` and `purpose` from `notes` tokens to first-class indexed columns. Replaces JS-side aggregation with SQL aggregation. Makes the geo summary fast and unlocks Transaction-tab geo filtering.
-*Owner: `migration-author` + `integration-implementer` · ~250 LOC + migration*
+- [x] **Shipped** — `geo` / `purpose` columns on `financeTransactions` with 3 indexes; backfill migration `0004_grey_shiver_man.sql`; `tagGeoAndPurpose` writes to columns directly; `finance:get-geo-summary` uses SQL aggregation
 
 ### 4.3 [`tax-tagging.md`](finance/tax-tagging.md) — Schedule C / E / capex tags
 New `taxTag` column + tagger. Enndustrious deposits → Schedule C income; CR Property → capex-airbnb; etc. Backfill script for the existing 3,100 rows. Year-end report becomes a SQL query.

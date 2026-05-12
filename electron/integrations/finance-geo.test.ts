@@ -113,8 +113,9 @@ describe('tagGeoAndPurpose', () => {
         notes: 'rm:Home & Garden'
       }
     ])
-    expect(out[0].notes).toContain('geo:CR')
-    expect(out[0].notes).toContain('purpose:capex')
-    expect(out[0].notes).toContain('rm:Home & Garden')
+    expect(out[0].geo).toBe('CR')
+    expect(out[0].purpose).toBe('capex')
+    // notes should be unmodified — geo/purpose are now separate fields
+    expect(out[0].notes).toBe('rm:Home & Garden')
   })
 })
