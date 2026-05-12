@@ -220,13 +220,13 @@ const api = {
     setForecastOverride: (override: {
       accountId: number
       date: string
+      label: string
       kind: 'skip' | 'shift' | 'override'
       amount?: number | null
-      label?: string | null
       shiftToDate?: string | null
     }) => ipcRenderer.invoke('finance:set-forecast-override', override),
-    deleteForecastOverride: (accountId: number, date: string) =>
-      ipcRenderer.invoke('finance:delete-forecast-override', accountId, date),
+    deleteForecastOverride: (accountId: number, date: string, label: string) =>
+      ipcRenderer.invoke('finance:delete-forecast-override', accountId, date, label),
 
     getInboxPath: () => ipcRenderer.invoke('finance:get-inbox-path'),
 

@@ -12,7 +12,8 @@ import {
   projectCashflow,
   projectDebtEvents,
   projectIncomeEvents,
-  projectSubscriptionEvents
+  projectSubscriptionEvents,
+  startOfDayLocal
 } from './finance-forecast'
 import type { Subscription } from './finance-subscriptions'
 
@@ -51,6 +52,26 @@ describe('localDateString / parseLocalDate', () => {
   it('zero-pads month and day', () => {
     const d = new Date(2026, 0, 5)
     expect(localDateString(d)).toBe('2026-01-05')
+  })
+})
+
+describe('startOfDayLocal', () => {
+  it('strips time-of-day, leaving a midnight Date', () => {
+    const d = new Date(2026, 4, 11, 14, 30, 45, 123)
+    const start = startOfDayLocal(d)
+    expect(start.getFullYear()).toBe(2026)
+    expect(start.getMonth()).toBe(4)
+    expect(start.getDate()).toBe(11)
+    expect(start.getHours()).toBe(0)
+    expect(start.getMinutes()).toBe(0)
+    expect(start.getSeconds()).toBe(0)
+    expect(start.getMilliseconds()).toBe(0)
+  })
+
+  it('does not mutate the input', () => {
+    const d = new Date(2026, 4, 11, 14, 30)
+    startOfDayLocal(d)
+    expect(d.getHours()).toBe(14)
   })
 })
 
@@ -235,7 +256,7 @@ describe('applyOverrides', () => {
         accountId: 1,
         date: '2026-05-15',
         amount: null,
-        label: null,
+        label: 'netflix',
         kind: 'skip',
         shiftToDate: null
       }
@@ -250,7 +271,7 @@ describe('applyOverrides', () => {
         accountId: 1,
         date: '2026-05-15',
         amount: null,
-        label: null,
+        label: 'netflix',
         kind: 'shift',
         shiftToDate: '2026-05-20'
       }
@@ -285,7 +306,7 @@ describe('applyOverrides', () => {
         accountId: 1,
         date: '2026-05-15',
         amount: null,
-        label: null,
+        label: 'netflix',
         kind: 'skip',
         shiftToDate: null
       }
@@ -383,6 +404,65 @@ describe('projectCashflow', () => {
     ]
     const result = projectCashflow(events, { 1: 1000 }, today, 30)
     expect(result.trajectory).toHaveLength(1) // seed only
+  })
+
+  it('aggregates same-day events on the same account so within-day order does not affect low-cash detection', () => {
+    // Day-end balance: 1000 - 800 + 200 = 400. With threshold=500, this
+    // SHOULD trigger low cash (final balance dipped below). Without
+    // aggregation, the order matters: outflow-first transiently dips to
+    // 200, inflow-first goes to 1200 then down to 400. Both should produce
+    // the same low-cash outcome (final < 500 = low).
+    const events: ForecastEvent[] = [
+      {
+        date: '2026-05-15',
+        accountId: 1,
+        amount: 200,
+        label: 'small inflow',
+        source: 'income',
+        confidence: 'medium'
+      },
+      {
+        date: '2026-05-15',
+        accountId: 1,
+        amount: -800,
+        label: 'rent',
+        source: 'calendar',
+        confidence: 'low'
+      }
+    ]
+    const result = projectCashflow(events, { 1: 1000 }, today, 30, 500)
+    // One trajectory point per (account, day): seed + one for 5/15.
+    const day15 = result.trajectory.filter((p) => p.date === '2026-05-15')
+    expect(day15).toHaveLength(1)
+    expect(day15[0].balance).toBe(400)
+    expect(result.lowDates).toHaveLength(1)
+    expect(result.lowDates[0].balance).toBe(400)
+  })
+
+  it('does NOT trigger low-cash when same-day inflow + outflow nets above threshold', () => {
+    // Day-end: 1000 - 500 + 600 = 1100. Above 500 threshold → no warning.
+    // Without aggregation, outflow-first would briefly hit 500 (right on
+    // the threshold) which could spuriously fire.
+    const events: ForecastEvent[] = [
+      {
+        date: '2026-05-15',
+        accountId: 1,
+        amount: -500,
+        label: 'rent',
+        source: 'calendar',
+        confidence: 'low'
+      },
+      {
+        date: '2026-05-15',
+        accountId: 1,
+        amount: 600,
+        label: 'payroll',
+        source: 'income',
+        confidence: 'high'
+      }
+    ]
+    const result = projectCashflow(events, { 1: 1000 }, today, 30, 501)
+    expect(result.lowDates).toHaveLength(0)
   })
 })
 
@@ -549,7 +629,9 @@ describe('applyOverrides — same-day same-account collision', () => {
     expect(payroll?.date).toBe('2026-05-15') // untouched
   })
 
-  it('falls back to date-only matching when override has no label (legacy rows)', () => {
+  it('ignores overrides with a null label (must come through IPC with label)', () => {
+    // Defensive: if a null-label row somehow ended up in the DB (e.g. via
+    // direct SQL), it must not silently apply to all events on the day.
     const events: ForecastEvent[] = [
       {
         date: '2026-05-15',
@@ -571,7 +653,8 @@ describe('applyOverrides — same-day same-account collision', () => {
       }
     ]
     const out = applyOverrides(events, overrides)
-    expect(out).toHaveLength(0)
+    expect(out).toHaveLength(1) // event NOT skipped
+    expect(out[0].label).toBe('netflix')
   })
 
   // Suppress unused-var lint for `today` — kept for parity with other suites.

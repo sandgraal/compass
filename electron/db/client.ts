@@ -220,13 +220,17 @@ function ensureNewTables(sqlite: Database.Database): void {
   } catch {
     /* ignore */
   }
-  // Phase 4.5 — forecast columns + index. payment_day_of_month is nullable
-  // (defaults to 1 in the engine when not set). The forecast_overrides
-  // table is created in the CREATE TABLE block above; just ensure the index.
+  // Phase 4.5 — forecast columns + UNIQUE index. payment_day_of_month is
+  // nullable (defaults to 1 in the engine when not set). The unique index
+  // on (account_id, date, label) lets the IPC use atomic upsert semantics
+  // and enforces "at most one override per (account, date, event-label)"
+  // at the DB level.
   ensureColumn(sqlite, 'finance_accounts', 'payment_day_of_month', 'INTEGER')
   try {
+    // Drop the legacy non-unique index if it exists from a pre-0008 install.
+    sqlite.exec('DROP INDEX IF EXISTS idx_forecast_overrides_account_date')
     sqlite.exec(
-      'CREATE INDEX IF NOT EXISTS idx_forecast_overrides_account_date ON forecast_overrides(account_id, date)'
+      'CREATE UNIQUE INDEX IF NOT EXISTS uq_forecast_overrides_account_date_label ON forecast_overrides(account_id, date, label)'
     )
   } catch {
     /* ignore */

@@ -458,14 +458,15 @@ declare global {
         setForecastOverride(override: {
           accountId: number
           date: string
+          label: string
           kind: 'skip' | 'shift' | 'override'
           amount?: number | null
-          label?: string | null
           shiftToDate?: string | null
         }): Promise<{ success: boolean; error?: string }>
         deleteForecastOverride(
           accountId: number,
-          date: string
+          date: string,
+          label: string
         ): Promise<{ success: boolean; error?: string; removed?: number }>
 
         getInboxPath(): Promise<string>

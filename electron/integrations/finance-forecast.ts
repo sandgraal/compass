@@ -104,6 +104,13 @@ function addDays(d: Date, days: number): Date {
   return next
 }
 
+/** Returns a new Date at local midnight of the same calendar day. */
+export function startOfDayLocal(d: Date): Date {
+  const next = new Date(d)
+  next.setHours(0, 0, 0, 0)
+  return next
+}
+
 function confidenceFromCharges(n: number): 'high' | 'medium' | 'low' {
   if (n > 6) return 'high'
   if (n >= 3) return 'medium'
@@ -409,27 +416,23 @@ export function projectCalendarEvents(
  * array with skip/shift/override semantics applied; original input is not
  * mutated.
  *
- * Match key is `accountId:date:label` — including label so two events on
- * the same account+day (e.g. payroll and rent, or two subscriptions) can
- * be edited independently. An override row stored without a label
- * (`label: null`) falls back to date-only matching for backward compat,
- * but the IPC `set-forecast-override` handler should always pass one.
+ * Match key is `accountId:date:label` — label is required so two events on
+ * the same account+day (e.g. payroll and rent, or two subscriptions) can be
+ * edited independently. The DB enforces uniqueness via the unique index
+ * `uq_forecast_overrides_account_date_label`, and the IPC rejects writes
+ * without a label, so the (accountId, date, label) tuple is the only valid
+ * shape going forward. Override rows with a null label are ignored — they
+ * can only enter the DB through direct writes that bypass the IPC, and we
+ * don't want to silently apply a no-label override to multiple events.
  */
 export function applyOverrides(
   events: ForecastEvent[],
   overrides: ForecastOverride[]
 ): ForecastEvent[] {
-  // Two lookup tables: precise (accountId+date+label) and a fallback
-  // (accountId+date) for legacy rows that didn't supply a label.
-  const byPreciseKey = new Map<string, ForecastOverride>()
-  const byFallbackKey = new Map<string, ForecastOverride>()
+  const byKey = new Map<string, ForecastOverride>()
   for (const o of overrides) {
-    if (o.accountId === null || !o.date) continue
-    if (o.label) {
-      byPreciseKey.set(`${o.accountId}:${o.date}:${o.label}`, o)
-    } else {
-      byFallbackKey.set(`${o.accountId}:${o.date}`, o)
-    }
+    if (o.accountId === null || !o.date || !o.label) continue
+    byKey.set(`${o.accountId}:${o.date}:${o.label}`, o)
   }
 
   const out: ForecastEvent[] = []
@@ -438,9 +441,7 @@ export function applyOverrides(
       out.push(ev)
       continue
     }
-    const o =
-      byPreciseKey.get(`${ev.accountId}:${ev.date}:${ev.label}`) ??
-      byFallbackKey.get(`${ev.accountId}:${ev.date}`)
+    const o = byKey.get(`${ev.accountId}:${ev.date}:${ev.label}`)
     if (!o) {
       out.push(ev)
       continue
@@ -467,10 +468,13 @@ export function applyOverrides(
 
 /**
  * Walk events day-by-day applying them to per-account starting balances.
- * Returns one TrajectoryPoint per (account, day) where the balance changed
- * (no point on quiet days — the UI fills horizontally).
+ * Returns one TrajectoryPoint per (account, day) when the balance changed.
  *
- * This is the hot loop. ~90 days × 12 accounts × ~30 events = trivial.
+ * Same-day events for the same account are AGGREGATED before walking — so
+ * a $100 outflow and a $200 inflow on 5/15 become a single +$100 day-end
+ * change. Without this, walking events in arbitrary within-day order could
+ * spuriously dip the intermediate balance below the low-cash threshold even
+ * though the day ends in a net surplus.
  */
 export function projectCashflow(
   events: ForecastEvent[],
@@ -485,25 +489,39 @@ export function projectCashflow(
   const lowDates: ForecastResult['lowDates'] = []
   const seenLow = new Set<number>()
 
-  // Seed: today's balance for every known account.
   const todayKey = localDateString(today)
+  const horizonKey = localDateString(addDays(today, windowDays))
+
+  // Seed: today's balance for every known account.
   for (const [acctIdStr, bal] of Object.entries(balances)) {
     const acctId = Number(acctIdStr)
     trajectory.push({ date: todayKey, accountId: acctId, balance: round2(bal) })
   }
 
-  const horizonKey = localDateString(addDays(today, windowDays))
-
+  // Aggregate by (date, accountId) so same-day events fold into one net change.
+  const aggregated = new Map<string, { date: string; accountId: number; netAmount: number }>()
   for (const ev of sorted) {
     if (ev.accountId === null) continue
     if (ev.date < todayKey || ev.date > horizonKey) continue
-    const prev = balances[ev.accountId] ?? 0
-    const next = prev + ev.amount
-    balances[ev.accountId] = next
-    trajectory.push({ date: ev.date, accountId: ev.accountId, balance: round2(next) })
-    if (next < lowCashThreshold && !seenLow.has(ev.accountId)) {
-      seenLow.add(ev.accountId)
-      lowDates.push({ accountId: ev.accountId, date: ev.date, balance: round2(next) })
+    const key = `${ev.date}:${ev.accountId}`
+    const existing = aggregated.get(key)
+    if (existing) {
+      existing.netAmount += ev.amount
+    } else {
+      aggregated.set(key, { date: ev.date, accountId: ev.accountId, netAmount: ev.amount })
+    }
+  }
+
+  // Walk in chronological order. Same-day entries are already merged.
+  const inOrder = [...aggregated.values()].sort((a, b) => a.date.localeCompare(b.date))
+  for (const day of inOrder) {
+    const prev = balances[day.accountId] ?? 0
+    const next = prev + day.netAmount
+    balances[day.accountId] = next
+    trajectory.push({ date: day.date, accountId: day.accountId, balance: round2(next) })
+    if (next < lowCashThreshold && !seenLow.has(day.accountId)) {
+      seenLow.add(day.accountId)
+      lowDates.push({ accountId: day.accountId, date: day.date, balance: round2(next) })
     }
   }
 
@@ -532,7 +550,11 @@ export function buildForecast(
   startingBalances: Record<number, number>,
   options: BuildForecastOptions = {}
 ): ForecastResult {
-  const today = options.today ?? new Date()
+  // Normalize to local midnight so the projection is stable within a calendar
+  // day regardless of when the user opens the Forecast tab. Without this,
+  // `cursor <= today` comparisons in the per-stream projections would shift
+  // event inclusion based on time-of-day.
+  const today = options.today ? startOfDayLocal(options.today) : startOfDayLocal(new Date())
   const windowDays = options.windowDays ?? 90
   const lowCashThreshold = options.lowCashThreshold ?? LOW_CASH_DEFAULT
 
