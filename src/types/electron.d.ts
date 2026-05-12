@@ -403,6 +403,14 @@ declare global {
           crCapex: number
           since: string | null
         }>
+        getTaxSummary(opts?: { year?: number }): Promise<{
+          year: number
+          tags: Array<{ taxTag: string; count: number; total: number }>
+        }>
+        setTransactionTaxTag(
+          id: number,
+          taxTag: string
+        ): Promise<{ success: boolean; error?: string }>
         getInboxPath(): Promise<string>
 
         // Watched folder

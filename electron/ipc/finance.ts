@@ -354,6 +354,68 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     return { geo: geoRows, purpose, crCapex: Math.round(crCapex * 100) / 100, since: cutoff }
   })
 
+  // ── Tax summary for a given year (Phase 4.3) ──────────────────────────────
+  // Returns per-tag count + total signed amount for the requested calendar
+  // year. Uses the (tax_year, tax_tag) index for fast aggregation. The UI
+  // renders this as a year-end report; sums are signed (negative = expense).
+  ipcMain.handle('finance:get-tax-summary', (_event, opts?: { year?: number }) => {
+    const db = getDb()
+    const now = new Date()
+    const requested = Number.isFinite(opts?.year)
+      ? Math.floor(opts!.year as number)
+      : now.getFullYear()
+    const year = Math.max(2000, Math.min(2100, requested))
+
+    const rows = db
+      .select({
+        taxTag: financeTransactions.taxTag,
+        count: sql<number>`COUNT(*)`,
+        total: sql<number>`ROUND(SUM(${financeTransactions.amount}) * 100) / 100`
+      })
+      .from(financeTransactions)
+      .where(eq(financeTransactions.taxYear, year))
+      .groupBy(financeTransactions.taxTag)
+      .orderBy(sql`SUM(ABS(${financeTransactions.amount})) DESC`)
+      .all() as { taxTag: string; count: number; total: number }[]
+
+    return { year, tags: rows }
+  })
+
+  // ── Override a transaction's tax tag (Phase 4.3) ──────────────────────────
+  // Marks taxTagSource='user' so future re-tag passes won't overwrite it.
+  ipcMain.handle('finance:set-transaction-tax-tag', (_event, id: number, taxTag: string) => {
+    const db = getDb()
+    if (!Number.isFinite(id) || !Number.isInteger(id) || id <= 0) {
+      return { success: false, error: `Invalid transaction id: ${id}` }
+    }
+    // Whitelist accepted values to keep schema clean.
+    const allowed = new Set([
+      'tax:capex-airbnb',
+      'tax:schedule-c-income',
+      'tax:schedule-c-expense',
+      'tax:schedule-e-income',
+      'tax:schedule-e-expense',
+      'tax:charitable',
+      'tax:medical',
+      'tax:home-office',
+      'tax:personal',
+      'tax:investment',
+      'tax:none'
+    ])
+    if (!allowed.has(taxTag)) {
+      return { success: false, error: `Unknown tax tag: ${taxTag}` }
+    }
+    const result = db
+      .update(financeTransactions)
+      .set({ taxTag, taxTagSource: 'user' })
+      .where(eq(financeTransactions.id, id))
+      .run()
+    if (result.changes === 0) {
+      return { success: false, error: `Transaction not found: ${id}` }
+    }
+    return { success: true }
+  })
+
   // ── Upcoming payments (Dashboard "Payments Due" card) ────────────────────
   // Returns debt accounts whose payment_due_date is within the next
   // `daysAhead` days (default 14), sorted by date ascending. Past-due dates

@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { backfillTaxTags } from '../integrations/finance-tax'
 import { DATA_DIR } from '../paths'
 import { reconcileMigrationState } from './reconcile'
 import * as schema from './schema'
@@ -111,6 +112,48 @@ function ensureNewTables(sqlite: Database.Database): void {
       } catch {
         /* ignore */
       }
+    }
+  }
+  // Phase 4.3 — tax disposition columns. taxYear is derived from `date.year`
+  // in SQL (cheap); the taxTag classification runs through the JS classifier
+  // (backfillTaxTags below) so the rule logic lives in one place.
+  const addedTaxTag = ensureColumn(
+    sqlite,
+    'finance_transactions',
+    'tax_tag',
+    "TEXT NOT NULL DEFAULT 'tax:none'"
+  )
+  ensureColumn(sqlite, 'finance_transactions', 'tax_tag_source', "TEXT NOT NULL DEFAULT 'auto'")
+  const addedTaxYear = ensureColumn(sqlite, 'finance_transactions', 'tax_year', 'INTEGER')
+  if (addedTaxYear) {
+    try {
+      sqlite
+        .prepare(
+          'UPDATE finance_transactions SET tax_year = CAST(SUBSTR(date, 1, 4) AS INTEGER) WHERE tax_year IS NULL'
+        )
+        .run()
+    } catch {
+      /* ignore */
+    }
+  }
+  // Mirror the (tax_year, tax_tag) compound index from migration 0005 so the
+  // finance:get-tax-summary query stays fast on legacy DBs that bypass the
+  // migration runner.
+  try {
+    sqlite.exec(
+      'CREATE INDEX IF NOT EXISTS idx_finance_transactions_tax_year_tag ON finance_transactions(tax_year, tax_tag)'
+    )
+  } catch {
+    /* ignore */
+  }
+  if (addedTaxTag) {
+    // Re-classify every existing row so historical Charity / Health /
+    // Enndustrious / CR-capex rows aren't silently reported as tax:none.
+    // User overrides (tax_tag_source='user') are not touched.
+    try {
+      backfillTaxTags(sqlite)
+    } catch {
+      /* ignore — leaves rows at tax:none default; user can re-ingest to retry */
     }
   }
   if (addedSyncInterval) {

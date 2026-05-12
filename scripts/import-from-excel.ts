@@ -31,6 +31,7 @@ import { eq } from 'drizzle-orm'
 import { getDb, initDb } from '../electron/db/client'
 import { categorizationRules, financeAccounts, financeTransactions } from '../electron/db/schema'
 import { tagGeoAndPurpose } from '../electron/integrations/finance-geo'
+import { tagTax } from '../electron/integrations/finance-tax'
 import { DATA_DIR } from '../electron/paths'
 
 const PROJECT_DIR =
@@ -178,20 +179,26 @@ async function main(): Promise<void> {
       .all()
       .map((r) => r.h)
   )
-  // Re-tag geo+purpose at import time so existing rows are consistent with
-  // what new ingests will produce going forward (idempotent).
-  const tagged = tagGeoAndPurpose(
-    ledger.map((r) => ({
-      date: r.date,
-      amount: r.amount,
-      description: r.description,
-      account: r.account,
-      category: r.category,
-      subcategory: r.subcategory ?? undefined,
-      notes: r.notes ?? undefined,
-      sourceFile: r.sourceFile ?? '',
-      hash: r.hash
-    }))
+  // Tag geo+purpose AND tax disposition before insert so freshly-imported rows
+  // arrive with the same shape as ones produced by the live CSV ingest path.
+  // Note: rows whose hash already exists in the DB are skipped below — this
+  // script only tags rows on first import. Re-tagging existing rows is the job
+  // of the in-app classifier path (initDb → backfillTaxTags) and a future
+  // explicit re-tag IPC.
+  const tagged = tagTax(
+    tagGeoAndPurpose(
+      ledger.map((r) => ({
+        date: r.date,
+        amount: r.amount,
+        description: r.description,
+        account: r.account,
+        category: r.category,
+        subcategory: r.subcategory ?? undefined,
+        notes: r.notes ?? undefined,
+        sourceFile: r.sourceFile ?? '',
+        hash: r.hash
+      }))
+    )
   )
   let inserted = 0
   for (const t of tagged) {
@@ -208,6 +215,9 @@ async function main(): Promise<void> {
         notes: t.notes,
         geo: t.geo ?? 'US',
         purpose: t.purpose ?? null,
+        taxTag: t.taxTag ?? 'tax:none',
+        taxTagSource: 'auto',
+        taxYear: t.taxYear ?? null,
         sourceFile: t.sourceFile,
         ingestedAt: new Date()
       })

@@ -160,6 +160,15 @@ export const financeTransactions = sqliteTable('finance_transactions', {
   geo: text('geo').notNull().default('US'),
   // Only set for CR transactions: 'capex' | 'household' | 'operating' | 'travel' | 'other'.
   purpose: text('purpose'),
+  // Tax disposition (Phase 4.3). 'tax:capex-airbnb' | 'tax:schedule-c-income' |
+  // 'tax:schedule-c-expense' | 'tax:schedule-e-income' | 'tax:schedule-e-expense' |
+  // 'tax:charitable' | 'tax:medical' | 'tax:home-office' | 'tax:personal' |
+  // 'tax:investment' | 'tax:none'. Indexed with taxYear for year-end aggregation.
+  taxTag: text('tax_tag').notNull().default('tax:none'),
+  // 'auto' (set by classifier at ingest) or 'user' (manual override — never overwritten).
+  taxTagSource: text('tax_tag_source').notNull().default('auto'),
+  // Derived from `date` (year only) so year-end queries can use the index.
+  taxYear: integer('tax_year'),
   sourceFile: text('source_file'),
   ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
