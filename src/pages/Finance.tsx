@@ -787,34 +787,22 @@ function NetWorthTab(): JSX.Element {
     }
   }
 
-  // Build the chart data: one point per date with net = Σ(assets) − Σ(liabilities)
-  const isLiabilityClass = (c: string) => c === 'liability'
-  const chartData = buildTrajectoryChartData(trajectory, isLiabilityClass)
+  // Match the backend semantics — `is_debt` is the source of truth, not
+  // `asset_class` (Accounts upsert IPC doesn't currently set asset_class).
+  const chartData = buildTrajectoryChartData(trajectory)
 
   const hasAnySnapshot = snapshot?.byAccount.some((a) => a.capturedAt != null) ?? false
+  const hasManualAssetWithoutBalance =
+    snapshot?.byAccount.some((a) => a.assetClass === 'manual_asset' && a.capturedAt == null) ??
+    false
 
   if (loading) {
     return <p className="text-sm text-muted-foreground p-4">Loading net worth…</p>
   }
 
-  if (!snapshot || !hasAnySnapshot) {
+  if (!snapshot) {
     return (
-      <div className="bg-card border border-border rounded-xl p-8 text-center">
-        <h3 className="text-sm font-semibold mb-2">No snapshots yet</h3>
-        <p className="text-xs text-muted-foreground mb-4 max-w-md mx-auto">
-          A snapshot is one row per account per day, capturing the current balance. The nightly cron
-          at 00:05 local time will start filling these in automatically — or capture one now to see
-          the chart.
-        </p>
-        <button
-          type="button"
-          onClick={capture}
-          disabled={capturing}
-          className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-md hover:opacity-90 disabled:opacity-50"
-        >
-          {capturing ? 'Capturing…' : 'Capture snapshot'}
-        </button>
-      </div>
+      <p className="text-sm text-muted-foreground p-4">Net worth unavailable. Try refreshing.</p>
     )
   }
 
@@ -855,9 +843,19 @@ function NetWorthTab(): JSX.Element {
           </button>
         </div>
         {chartData.length < 2 ? (
-          <p className="text-xs text-muted-foreground py-8 text-center">
-            Need at least 2 snapshot days to draw a trajectory. Capture again tomorrow.
-          </p>
+          <div className="py-8 text-center space-y-2">
+            <p className="text-xs text-muted-foreground">
+              {hasAnySnapshot
+                ? 'Need at least 2 snapshot days to draw a trajectory. Capture again tomorrow.'
+                : 'No snapshots yet. The nightly cron at 00:05 captures these automatically — or use "Capture now" to seed one.'}
+            </p>
+            {hasManualAssetWithoutBalance && (
+              <p className="text-xs text-muted-foreground">
+                Heads up: manual-asset accounts with a $0 balance get skipped. Use the table below
+                to set their starting value.
+              </p>
+            )}
+          </div>
         ) : (
           <div style={{ width: '100%', height: 240 }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -1021,17 +1019,22 @@ function NetWorthTile({
  * Roll up per-account snapshots into per-date `{ date, net }` chart points.
  * Latest known balance per account is forward-filled across days the chart
  * spans, so a single missing snapshot doesn't leave a hole in the line.
+ *
+ * Liabilities are classified by `isDebt` to match the backend's
+ * `getNetWorthSnapshot` totals. (`asset_class` is informational only — the
+ * Accounts upsert IPC doesn't always set it on debt accounts, so relying
+ * on `assetClass === 'liability'` produces a chart that contradicts the
+ * tile math.)
  */
 export function buildTrajectoryChartData(
-  trajectory: NetWorthTrajectory,
-  isLiability: (assetClass: string) => boolean
+  trajectory: NetWorthTrajectory
 ): Array<{ date: string; net: number }> {
   if (trajectory.length === 0) return []
 
   // Group all snapshots by date (sorted), then walk forward maintaining the
   // latest known balance per account.
   const dates = Array.from(new Set(trajectory.map((p) => p.date))).sort()
-  const latestByAccount = new Map<number, { balance: number; assetClass: string }>()
+  const latestByAccount = new Map<number, { balance: number; isDebt: boolean }>()
 
   // Pre-index trajectory by (date → accountId → snapshot)
   const byDate = new Map<string, NetWorthTrajectory>()
@@ -1044,12 +1047,12 @@ export function buildTrajectoryChartData(
   const out: Array<{ date: string; net: number }> = []
   for (const date of dates) {
     for (const p of byDate.get(date) ?? []) {
-      latestByAccount.set(p.accountId, { balance: p.balance, assetClass: p.assetClass })
+      latestByAccount.set(p.accountId, { balance: p.balance, isDebt: p.isDebt })
     }
     let assets = 0
     let liabilities = 0
-    for (const { balance, assetClass } of latestByAccount.values()) {
-      if (isLiability(assetClass)) liabilities += balance
+    for (const { balance, isDebt } of latestByAccount.values()) {
+      if (isDebt) liabilities += balance
       else assets += balance
     }
     out.push({ date, net: Math.round((assets - liabilities) * 100) / 100 })

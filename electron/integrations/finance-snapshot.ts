@@ -302,6 +302,12 @@ export type TrajectoryPoint = {
   accountId: number
   accountName: string
   assetClass: string
+  // Snapshot totals (and tile math) classify liabilities by `is_debt`, not by
+  // `asset_class`. The Accounts-tab upsert IPC only persists `is_debt` and
+  // leaves `asset_class` at the default 'spending' for new debt accounts, so
+  // the trajectory must surface `is_debt` too — otherwise the chart and the
+  // tiles disagree about which buckets count as liabilities.
+  isDebt: boolean
   date: string // 'YYYY-MM-DD'
   balance: number
 }
@@ -319,7 +325,7 @@ export function getNetWorthTrajectory(
 
   const rows = sqlite
     .prepare(
-      `SELECT s.account_id, a.name, a.asset_class, s.captured_at, s.balance
+      `SELECT s.account_id, a.name, a.asset_class, a.is_debt, s.captured_at, s.balance
          FROM finance_balance_snapshots s
          JOIN finance_accounts a ON a.id = s.account_id
         WHERE s.captured_at >= ? AND s.captured_at <= ?
@@ -329,6 +335,7 @@ export function getNetWorthTrajectory(
     account_id: number
     name: string
     asset_class: string
+    is_debt: number
     captured_at: number
     balance: number
   }>
@@ -337,6 +344,7 @@ export function getNetWorthTrajectory(
     accountId: r.account_id,
     accountName: r.name,
     assetClass: r.asset_class,
+    isDebt: r.is_debt === 1,
     // Local-day formatter — matches the snapshot's local-day bucket.
     date: localDateString(r.captured_at),
     balance: r.balance
