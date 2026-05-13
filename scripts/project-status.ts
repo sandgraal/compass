@@ -9,15 +9,21 @@
  *
  * Phase 0+.10 in the implementation plan.
  *
- * IMPORTANT: this file is purely descriptive — nothing reads it at
- * runtime. It can drift between regenerations; that's the trade-off.
- * Future work (Phase 0+.6 living-docs hook) can auto-regen on schema /
- * preload edits if drift becomes a problem.
+ * Implementation notes:
+ * - File enumeration walks directories in Node — no shelling out to
+ *   `find` / `grep` / `awk`. That avoids portability headaches across
+ *   GNU vs BSD vs minimal CI images.
+ * - Individual section failures are isolated: a missing directory or a
+ *   parse error in one section emits a `[status] warn:` line to stderr
+ *   and leaves the field at a safe default (0 / null / []). The whole
+ *   command still exits 0 with the rest of the snapshot intact.
+ * - `git log` IS shelled out (no point reimplementing) but failures are
+ *   surfaced via the same warn channel rather than silently swallowed.
  */
 
 import { execSync } from 'node:child_process'
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { join, posix, relative, sep } from 'node:path'
 
 const ROOT = join(__dirname, '..')
 
@@ -42,33 +48,83 @@ type Status = {
   recentMerges: Array<{ sha: string; title: string; date: string }>
 }
 
+function warn(msg: string): void {
+  process.stderr.write(`[status] warn: ${msg}\n`)
+}
+
 function readFile(path: string): string {
   return readFileSync(join(ROOT, path), 'utf8')
 }
 
-function exec(cmd: string): string {
-  try {
-    return execSync(cmd, { cwd: ROOT, encoding: 'utf8' }).trim()
-  } catch {
-    return ''
+/**
+ * Walk a directory tree depth-first, yielding repo-relative POSIX paths
+ * for every regular file under `dir`. Skips common churn directories.
+ * Returns `[]` if the root path doesn't exist.
+ */
+function walkFiles(dir: string): string[] {
+  const abs = join(ROOT, dir)
+  if (!existsSync(abs)) return []
+  const out: string[] = []
+  const skip = new Set(['node_modules', '.git', 'out', 'dist', '.vite', '.turbo'])
+
+  const visit = (p: string): void => {
+    let entries: ReturnType<typeof readdirSync>
+    try {
+      entries = readdirSync(p, { withFileTypes: true })
+    } catch (err) {
+      warn(`readdir ${p}: ${err instanceof Error ? err.message : err}`)
+      return
+    }
+    for (const entry of entries) {
+      if (skip.has(entry.name)) continue
+      const child = join(p, entry.name)
+      if (entry.isDirectory()) {
+        visit(child)
+      } else if (entry.isFile()) {
+        // Repo-relative POSIX path so the JSON is platform-stable.
+        out.push(relative(ROOT, child).split(sep).join(posix.sep))
+      }
+    }
   }
+  visit(abs)
+  return out
 }
 
 function getAppVersion(): string {
-  const pkg = JSON.parse(readFile('package.json')) as { version: string }
-  return pkg.version
+  try {
+    const pkg = JSON.parse(readFile('package.json')) as { version: string }
+    return pkg.version
+  } catch (err) {
+    warn(`read package.json: ${err instanceof Error ? err.message : err}`)
+    return 'unknown'
+  }
 }
 
 function getDbInfo(): Status['db'] {
-  const schema = readFile('electron/db/schema.ts')
-  // Match `export const foo = sqliteTable('foo_name', { ... })`
-  const tableMatches = [...schema.matchAll(/sqliteTable\(\s*['"]([a-z_]+)['"]/g)]
-  const tableNames = tableMatches.map((m) => m[1]).sort()
+  let tableNames: string[] = []
+  try {
+    const schema = readFile('electron/db/schema.ts')
+    // Match `sqliteTable('foo_name', ...)`.
+    const tableMatches = [...schema.matchAll(/sqliteTable\(\s*['"]([a-z_]+)['"]/g)]
+    tableNames = tableMatches.map((m) => m[1]).sort()
+  } catch (err) {
+    warn(`read schema.ts: ${err instanceof Error ? err.message : err}`)
+  }
 
+  let migrations: string[] = []
   const migDir = join(ROOT, 'electron/db/migrations')
-  const migrations = readdirSync(migDir)
-    .filter((f) => f.endsWith('.sql'))
-    .sort()
+  if (existsSync(migDir)) {
+    try {
+      migrations = readdirSync(migDir)
+        .filter((f) => f.endsWith('.sql') && statSync(join(migDir, f)).isFile())
+        .sort()
+    } catch (err) {
+      warn(`readdir migrations: ${err instanceof Error ? err.message : err}`)
+    }
+  } else {
+    warn('electron/db/migrations does not exist; migration count = 0')
+  }
+
   const latestMigration = migrations.length
     ? migrations[migrations.length - 1].replace(/\.sql$/, '')
     : null
@@ -81,67 +137,93 @@ function getDbInfo(): Status['db'] {
   }
 }
 
+/**
+ * Scan all `.ts` files under `electron/` for `ipcMain.handle(` and bucket
+ * by source domain. `electron/ipc/<x>.ts` → `<x>`; anything else uses
+ * its basename so the lone `electron/main.ts` handler shows up as `main`.
+ */
 function getIpcInfo(): Status['ipc'] {
-  // grep for `ipcMain.handle(` across all electron/ TS files.
-  const lines = exec("grep -rEn 'ipcMain\\.handle\\(' electron/ --include='*.ts'")
-    .split('\n')
-    .filter(Boolean)
-
-  // Bucket by source filename: `electron/ipc/<domain>.ts` → `domain`;
-  // anything else → its basename so `electron/main.ts` shows up as `main`.
+  const handlerRe = /ipcMain\.handle\s*\(/g
+  const files = walkFiles('electron').filter((p) => p.endsWith('.ts') && !p.endsWith('.test.ts'))
   const byDomain: Record<string, number> = {}
-  for (const line of lines) {
-    const ipcMatch = line.match(/electron\/ipc\/([^/.]+)\.ts:/)
+  let total = 0
+
+  for (const file of files) {
+    let content: string
+    try {
+      content = readFile(file)
+    } catch (err) {
+      warn(`read ${file}: ${err instanceof Error ? err.message : err}`)
+      continue
+    }
+    const count = (content.match(handlerRe) ?? []).length
+    if (count === 0) continue
+
+    const ipcMatch = file.match(/^electron\/ipc\/([^/]+)\.ts$/)
     let domain = ipcMatch?.[1]
     if (!domain) {
-      const fileMatch = line.match(/electron\/([^:]+):/)
-      domain = fileMatch?.[1]?.replace(/\.ts$/, '').replace(/\//g, '_') ?? 'unknown'
+      // `electron/foo/bar.ts` → `foo_bar`; `electron/main.ts` → `main`.
+      domain = file
+        .replace(/^electron\//, '')
+        .replace(/\.ts$/, '')
+        .replace(/\//g, '_')
     }
-    byDomain[domain] = (byDomain[domain] ?? 0) + 1
+    byDomain[domain] = (byDomain[domain] ?? 0) + count
+    total += count
   }
-  return { handlerCount: lines.length, handlersByDomain: byDomain }
+  return { handlerCount: total, handlersByDomain: byDomain }
 }
 
 function getTestsInfo(): Status['tests'] {
-  const list = exec("find electron src -name '*.test.ts' -o -name '*.test.tsx'")
-    .split('\n')
-    .filter(Boolean)
-    .map((p) => p.replace(/^\.\//, ''))
-    .sort()
+  // Look in both electron/ and src/ for `.test.ts` and `.test.tsx`.
+  const allFiles = [...walkFiles('electron'), ...walkFiles('src')]
+  const list = allFiles.filter((p) => p.endsWith('.test.ts') || p.endsWith('.test.tsx')).sort()
   return { files: list.length, list }
 }
 
 /**
  * Parse the phase status snapshot table from `docs/implementation_plan.md`.
- * The table looks like:
+ * Each row looks like:
  *
  *   | **Phase 0** — Agent infrastructure | 7 sub-areas | 100% |
  *
  * We extract the bolded phase name + the % column.
  */
 function getPhases(): Status['phases'] {
-  const plan = readFile('docs/implementation_plan.md')
+  let plan: string
+  try {
+    plan = readFile('docs/implementation_plan.md')
+  } catch (err) {
+    warn(`read implementation_plan.md: ${err instanceof Error ? err.message : err}`)
+    return []
+  }
   const phases: Status['phases'] = []
   const rowRe = /^\|\s*\*\*([^*]+)\*\*\s*[—-]\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|/gm
   let match: RegExpExecArray | null
   while (true) {
     match = rowRe.exec(plan)
     if (match === null) break
-    const id = match[1].trim()
-    const name = match[2].trim()
-    const status = match[4].trim()
-    phases.push({ id, name, status })
+    phases.push({ id: match[1].trim(), name: match[2].trim(), status: match[4].trim() })
   }
   return phases
 }
 
+function tryGit(cmd: string): string | null {
+  try {
+    return execSync(cmd, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  } catch (err) {
+    warn(`git command failed: ${err instanceof Error ? err.message.split('\n')[0] : err}`)
+    return null
+  }
+}
+
 function getRecentMerges(): Status['recentMerges'] {
   // Last 8 merge commits along the current branch's first-parent line.
-  // We prefer `origin/main` when available (so a worktree branched from
-  // a stale local `main` still sees the live merge log) and fall back to
-  // HEAD otherwise.
-  const ref = exec('git rev-parse --verify -q origin/main') ? 'origin/main' : 'HEAD'
-  const raw = exec(`git log --merges --first-parent --pretty=format:'%h|%s|%cs' -n 8 ${ref}`)
+  // Prefer `origin/main` so a worktree branched from a stale local `main`
+  // still sees the live merge log; fall back to `HEAD` otherwise.
+  const ref = tryGit('git rev-parse --verify -q origin/main') ? 'origin/main' : 'HEAD'
+  const raw = tryGit(`git log --merges --first-parent --pretty=format:'%h|%s|%cs' -n 8 ${ref}`)
+  if (raw == null) return []
   return raw
     .split('\n')
     .filter(Boolean)
