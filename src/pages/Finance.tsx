@@ -80,7 +80,37 @@ type GeoSummary = {
 }
 type TaxSummary = Awaited<ReturnType<Window['api']['finance']['getTaxSummary']>>
 
-type Tab = 'overview' | 'networth' | 'forecast' | 'transactions' | 'accounts' | 'rules' | 'crsubs'
+export type Tab =
+  | 'overview'
+  | 'networth'
+  | 'forecast'
+  | 'transactions'
+  | 'accounts'
+  | 'rules'
+  | 'crsubs'
+
+/**
+ * Whitelist of tab values the command palette can deep-link to. Exported
+ * alongside `Tab` so callers can both type-check their target at compile
+ * time AND validate session-storage / event payloads at runtime (where
+ * a stale value could otherwise slip in).
+ */
+export const VALID_FINANCE_TABS: ReadonlySet<Tab> = new Set<Tab>([
+  'overview',
+  'networth',
+  'forecast',
+  'transactions',
+  'accounts',
+  'rules',
+  'crsubs'
+])
+
+/**
+ * Shared keys for the tab-switch handoff between CommandPalette and this
+ * page. Both files import these so a rename can't drift them out of sync.
+ */
+export const FINANCE_TAB_EVENT = 'compass:set-finance-tab'
+export const FINANCE_TAB_STORAGE_KEY = 'compass:pending-finance-tab'
 
 const ACCOUNT_TYPES = [
   { value: 'checking', label: 'Checking' },
@@ -186,7 +216,17 @@ const PREDEFINED_CATEGORIES = [
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function Finance(): JSX.Element {
-  const [tab, setTab] = useState<Tab>('overview')
+  // Initial tab: honor a pending command-palette deep-link if present,
+  // otherwise default to Overview. Read at mount; consumed once.
+  const [tab, setTab] = useState<Tab>(() => {
+    if (typeof window === 'undefined') return 'overview'
+    const pending = sessionStorage.getItem(FINANCE_TAB_STORAGE_KEY)
+    if (pending && VALID_FINANCE_TABS.has(pending as Tab)) {
+      sessionStorage.removeItem(FINANCE_TAB_STORAGE_KEY)
+      return pending as Tab
+    }
+    return 'overview'
+  })
   const [txns, setTxns] = useState<Txn[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [debts, setDebts] = useState<Account[]>([])
@@ -269,6 +309,19 @@ export default function Finance(): JSX.Element {
       setWatchFolder(status)
     }
   }
+
+  // Listen for command-palette tab-switch events (fired when the user
+  // picks "Net Worth" or "Cash-flow forecast" while already on /finance).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const target = (e as CustomEvent<string>).detail
+      if (typeof target === 'string' && VALID_FINANCE_TABS.has(target as Tab)) {
+        setTab(target as Tab)
+      }
+    }
+    window.addEventListener(FINANCE_TAB_EVENT, handler)
+    return () => window.removeEventListener(FINANCE_TAB_EVENT, handler)
+  }, [])
 
   useEffect(() => {
     void refresh()

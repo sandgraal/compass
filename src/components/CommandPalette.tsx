@@ -6,17 +6,20 @@ import {
   CalendarRange,
   FolderOpen,
   LayoutDashboard,
+  LineChart,
   Plug,
   Plus,
   RefreshCw,
   Search,
   Settings,
   ShieldCheck,
-  TrendingUp
+  TrendingUp,
+  Wallet
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { cn } from '../lib/utils'
+import { FINANCE_TAB_EVENT, FINANCE_TAB_STORAGE_KEY, type Tab } from '../pages/Finance'
 
 interface Command {
   id: string
@@ -42,6 +45,26 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
   const nav = (path: string) => {
     navigate(path)
     onClose()
+  }
+
+  // Jump straight to a specific Finance tab. Two cases:
+  //   - Already on /finance: dispatch a CustomEvent that Finance.tsx
+  //     listens for (the component is mounted and setTab handles it).
+  //   - Elsewhere: stash the target tab in sessionStorage and navigate;
+  //     Finance.tsx's useState initializer reads + consumes it on mount.
+  // Mirrors the new-task pattern in this file.
+  //
+  // `target` is typed as `Tab` (imported from ../pages/Finance) so a typo
+  // here fails the TypeScript build at the call site rather than landing
+  // in storage and getting silently dropped by the runtime allowlist.
+  const switchFinanceTab = (target: Tab) => {
+    onClose()
+    if (window.location.hash === '#/finance') {
+      window.dispatchEvent(new CustomEvent(FINANCE_TAB_EVENT, { detail: target }))
+    } else {
+      sessionStorage.setItem(FINANCE_TAB_STORAGE_KEY, target)
+      navigate('/finance')
+    }
   }
 
   const COMMANDS: Command[] = [
@@ -136,6 +159,22 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       icon: <TrendingUp size={15} />,
       action: () => nav('/finance'),
       keywords: ['budget', 'money', 'debt', 'spending']
+    },
+    {
+      id: 'finance-networth',
+      label: 'Net Worth',
+      description: 'Assets, liabilities, and 12-month trajectory',
+      icon: <Wallet size={15} />,
+      action: () => switchFinanceTab('networth'),
+      keywords: ['net worth', 'assets', 'liabilities', 'wealth', 'finance', 'trajectory']
+    },
+    {
+      id: 'finance-forecast',
+      label: 'Cash-flow forecast',
+      description: '90-day projection with low-cash warnings',
+      icon: <LineChart size={15} />,
+      action: () => switchFinanceTab('forecast'),
+      keywords: ['forecast', 'projection', 'cash flow', 'low cash', 'subscriptions', 'finance']
     },
     {
       id: 'integrations',
