@@ -27,12 +27,22 @@ const DAY_MS = 24 * 60 * 60 * 1000
 export type ForecastSource = 'subscription' | 'income' | 'debt' | 'calendar' | 'override'
 
 export type ForecastEvent = {
-  date: string // YYYY-MM-DD
+  date: string // YYYY-MM-DD — DISPLAY date (after any shift)
   accountId: number | null
   amount: number // negative = outflow, positive = inflow
   label: string
   source: ForecastSource
   confidence: 'high' | 'medium' | 'low'
+  // Original auto-event date — set whenever the row was produced from a
+  // 'shift' override so the UI can call delete-forecast-override with the
+  // ORIGINAL date the row is keyed by in the DB. Undefined for non-shifted
+  // rows (in which case `date` is the original).
+  originalDate?: string
+  // True for events the user marked 'skip'. The trajectory walker excludes
+  // these from balance math, but they remain in the events list so the UI
+  // can offer a Reset path. Without this flag a skipped event would
+  // disappear entirely from the UI and become un-restorable.
+  skipped?: boolean
 }
 
 export type ForecastOverride = {
@@ -446,9 +456,22 @@ export function applyOverrides(
       out.push(ev)
       continue
     }
-    if (o.kind === 'skip') continue
+    if (o.kind === 'skip') {
+      // Keep the row but flag it skipped so the UI can offer Reset.
+      // projectCashflow filters these out before walking balances.
+      out.push({ ...ev, source: 'override', confidence: 'high', skipped: true })
+      continue
+    }
     if (o.kind === 'shift' && o.shiftToDate) {
-      out.push({ ...ev, date: o.shiftToDate, source: 'override', confidence: 'high' })
+      // `date` becomes the shifted display date; preserve the original so
+      // the UI can call delete-forecast-override with the right key.
+      out.push({
+        ...ev,
+        date: o.shiftToDate,
+        originalDate: ev.date,
+        source: 'override',
+        confidence: 'high'
+      })
       continue
     }
     if (o.kind === 'override') {
@@ -499,9 +522,12 @@ export function projectCashflow(
   }
 
   // Aggregate by (date, accountId) so same-day events fold into one net change.
+  // Skipped events are kept in `events` for UI rendering (so the user can
+  // restore them) but excluded from the trajectory math here.
   const aggregated = new Map<string, { date: string; accountId: number; netAmount: number }>()
   for (const ev of sorted) {
     if (ev.accountId === null) continue
+    if (ev.skipped) continue
     if (ev.date < todayKey || ev.date > horizonKey) continue
     const key = `${ev.date}:${ev.accountId}`
     const existing = aggregated.get(key)

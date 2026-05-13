@@ -1232,7 +1232,10 @@ function ForecastTab({ accounts }: { accounts: Account[] }): JSX.Element {
                         // biome-ignore lint/a11y/useSemanticElements: clickable <tr> mirrors the Transactions tab pattern; a button child would break tabular flow
                         role="button"
                         tabIndex={0}
-                        className="border-t border-border hover:bg-muted/50 cursor-pointer"
+                        className={cn(
+                          'border-t border-border hover:bg-muted/50 cursor-pointer',
+                          ev.skipped && 'text-muted-foreground line-through'
+                        )}
                         onClick={() => setEditing(ev)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
@@ -1241,9 +1244,7 @@ function ForecastTab({ accounts }: { accounts: Account[] }): JSX.Element {
                           }
                         }}
                       >
-                        <td className="py-1.5 w-20 text-muted-foreground text-xs tabular-nums">
-                          {ev.date}
-                        </td>
+                        <td className="py-1.5 w-20 text-xs tabular-nums">{ev.date}</td>
                         <td className="w-3">
                           <span
                             aria-label={`${ev.confidence} confidence`}
@@ -1253,17 +1254,25 @@ function ForecastTab({ accounts }: { accounts: Account[] }): JSX.Element {
                             )}
                           />
                         </td>
-                        <td className="py-1.5">{ev.label}</td>
-                        <td className="text-xs text-muted-foreground">
-                          {SOURCE_LABEL[ev.source] ?? ev.source}
+                        <td className="py-1.5">
+                          {ev.label}
+                          {ev.skipped && (
+                            <span className="ml-2 text-xs text-amber-500 not-italic no-underline">
+                              skipped — click to restore
+                            </span>
+                          )}
                         </td>
-                        <td className="text-xs text-muted-foreground">
-                          {accountName(ev.accountId)}
-                        </td>
+                        <td className="text-xs">{SOURCE_LABEL[ev.source] ?? ev.source}</td>
+                        <td className="text-xs">{accountName(ev.accountId)}</td>
                         <td
                           className={cn(
                             'text-right tabular-nums',
-                            ev.amount < 0 ? 'text-red-500' : ev.amount > 0 ? 'text-emerald-500' : ''
+                            !ev.skipped &&
+                              (ev.amount < 0
+                                ? 'text-red-500'
+                                : ev.amount > 0
+                                  ? 'text-emerald-500'
+                                  : '')
                           )}
                         >
                           {ev.amount === 0 ? '?' : fmtSignedMoney(ev.amount)}
@@ -1437,9 +1446,14 @@ function ForecastOverrideDialog({
     if (event.accountId == null) return
     setSaving(true)
     try {
+      // For shifted events, `event.date` is the SHIFTED display date;
+      // override rows are keyed in the DB by the original auto-event date.
+      // Without this fallback, Reset on a shifted row would delete nothing
+      // and the shift would stay stuck in place.
+      const dbKeyDate = event.originalDate ?? event.date
       const result = await window.api.finance.deleteForecastOverride(
         event.accountId,
-        event.date,
+        dbKeyDate,
         event.label
       )
       if (!result.success) {
