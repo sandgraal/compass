@@ -250,7 +250,7 @@ describe('applyOverrides', () => {
     confidence: 'high'
   }
 
-  it('skip removes the matching event', () => {
+  it('skip flags the event with skipped=true so the UI can offer Reset', () => {
     const overrides: ForecastOverride[] = [
       {
         accountId: 1,
@@ -262,10 +262,14 @@ describe('applyOverrides', () => {
       }
     ]
     const out = applyOverrides([baseEvent], overrides)
-    expect(out).toHaveLength(0)
+    expect(out).toHaveLength(1) // event preserved for UI
+    expect(out[0].skipped).toBe(true)
+    expect(out[0].source).toBe('override')
   })
 
-  it('shift moves the event to a new date', () => {
+  it('shift moves the event to a new date AND preserves originalDate', () => {
+    // originalDate matters because the DB row is keyed by the original
+    // auto-event date — the UI needs it to call delete-forecast-override.
     const overrides: ForecastOverride[] = [
       {
         accountId: 1,
@@ -279,6 +283,7 @@ describe('applyOverrides', () => {
     const out = applyOverrides([baseEvent], overrides)
     expect(out).toHaveLength(1)
     expect(out[0].date).toBe('2026-05-20')
+    expect(out[0].originalDate).toBe('2026-05-15')
     expect(out[0].source).toBe('override')
   })
 
@@ -312,8 +317,13 @@ describe('applyOverrides', () => {
       }
     ]
     const out = applyOverrides([baseEvent, other], overrides)
-    expect(out).toHaveLength(1)
-    expect(out[0].label).toBe('spotify')
+    // Both events kept; netflix gets skipped flag, spotify is untouched.
+    expect(out).toHaveLength(2)
+    const netflix = out.find((e) => e.label === 'netflix')
+    const spotify = out.find((e) => e.label === 'spotify')
+    expect(netflix?.skipped).toBe(true)
+    expect(spotify?.skipped).toBeUndefined()
+    expect(spotify?.source).toBe('subscription')
   })
 })
 
@@ -437,6 +447,34 @@ describe('projectCashflow', () => {
     expect(day15[0].balance).toBe(400)
     expect(result.lowDates).toHaveLength(1)
     expect(result.lowDates[0].balance).toBe(400)
+  })
+
+  it('excludes skipped events from balance math but keeps them in the events list', () => {
+    const events: ForecastEvent[] = [
+      {
+        date: '2026-05-10',
+        accountId: 1,
+        amount: -800,
+        label: 'rent',
+        source: 'override',
+        confidence: 'high',
+        skipped: true
+      },
+      {
+        date: '2026-05-15',
+        accountId: 1,
+        amount: -50,
+        label: 'netflix',
+        source: 'subscription',
+        confidence: 'high'
+      }
+    ]
+    const result = projectCashflow(events, { 1: 1000 }, today, 30)
+    // Skipped rent doesn't move the balance; only netflix does.
+    const final = result.trajectory[result.trajectory.length - 1]
+    expect(final.balance).toBe(950) // 1000 - 50, NOT 150
+    // But both events stay in the result so the UI can show the skipped row.
+    expect(result.events).toHaveLength(2)
   })
 
   it('does NOT trigger low-cash when same-day inflow + outflow nets above threshold', () => {
@@ -589,8 +627,13 @@ describe('applyOverrides — same-day same-account collision', () => {
       }
     ]
     const out = applyOverrides(events, overrides)
-    expect(out).toHaveLength(1)
-    expect(out[0].label).toBe('spotify')
+    // Both events kept (skip flags the row, doesn't drop it). Only netflix
+    // is marked skipped.
+    expect(out).toHaveLength(2)
+    const netflix = out.find((e) => e.label === 'netflix')
+    const spotify = out.find((e) => e.label === 'spotify')
+    expect(netflix?.skipped).toBe(true)
+    expect(spotify?.skipped).toBeUndefined()
   })
 
   it('shifts only the matching event', () => {
@@ -653,8 +696,10 @@ describe('applyOverrides — same-day same-account collision', () => {
       }
     ]
     const out = applyOverrides(events, overrides)
-    expect(out).toHaveLength(1) // event NOT skipped
+    expect(out).toHaveLength(1)
     expect(out[0].label).toBe('netflix')
+    expect(out[0].skipped).toBeUndefined() // null-label override didn't apply
+    expect(out[0].source).toBe('subscription') // not promoted to 'override'
   })
 
   // Suppress unused-var lint for `today` — kept for parity with other suites.

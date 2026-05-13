@@ -452,6 +452,8 @@ declare global {
             label: string
             source: 'subscription' | 'income' | 'debt' | 'calendar' | 'override'
             confidence: 'high' | 'medium' | 'low'
+            originalDate?: string
+            skipped?: boolean
           }>
           trajectory: Array<{ date: string; accountId: number; balance: number }>
           lowDates: Array<{ accountId: number; date: string; balance: number }>
