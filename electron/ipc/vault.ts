@@ -1,48 +1,12 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { type IpcMain, dialog, safeStorage } from 'electron'
+import { type IpcMain, dialog } from 'electron'
+import { decryptBlob, encryptBlob, getOrCreateKey } from '../lib/crypto-vault'
 import { VAULT_DIR } from '../paths'
 
-const ALGORITHM = 'aes-256-gcm'
-const KEY_SIZE = 32 // 256 bits
-const IV_SIZE = 16
-
-// The AES key is stored encrypted in the OS Keychain via safeStorage
-// The encrypted key blob is saved in .vault/key.enc
-function getOrCreateKey(): Buffer {
-  const keyPath = join(VAULT_DIR, 'key.enc')
-
-  if (existsSync(keyPath)) {
-    const encrypted = readFileSync(keyPath)
-    const decrypted = safeStorage.decryptString(encrypted)
-    return Buffer.from(decrypted, 'hex')
-  }
-
-  // Generate a new 256-bit key
-  const key = randomBytes(KEY_SIZE)
-  const encryptedKey = safeStorage.encryptString(key.toString('hex'))
-  writeFileSync(keyPath, encryptedKey)
-  return key
-}
-
-function encryptBlob(plaintext: string, key: Buffer): Buffer {
-  const iv = randomBytes(IV_SIZE)
-  const cipher = createCipheriv(ALGORITHM, key, iv)
-  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()])
-  const authTag = cipher.getAuthTag()
-  // Layout: [IV(16)] [authTag(16)] [ciphertext]
-  return Buffer.concat([iv, authTag, encrypted])
-}
-
-function decryptBlob(blob: Buffer, key: Buffer): string {
-  const iv = blob.subarray(0, IV_SIZE)
-  const authTag = blob.subarray(IV_SIZE, IV_SIZE + 16)
-  const ciphertext = blob.subarray(IV_SIZE + 16)
-  const decipher = createDecipheriv(ALGORITHM, key, iv)
-  decipher.setAuthTag(authTag)
-  return decipher.update(ciphertext) + decipher.final('utf8')
-}
+// Crypto primitives live in `electron/lib/crypto-vault.ts` so the Plaid
+// token vault can share the same master key + AES layout.
 
 function readVaultCategory(category: string, key: Buffer): unknown[] {
   const path = join(VAULT_DIR, `${category}.enc`)
