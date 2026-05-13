@@ -18,6 +18,8 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -74,7 +76,7 @@ type GeoSummary = {
   since: string | null
 }
 
-type Tab = 'overview' | 'networth' | 'transactions' | 'accounts' | 'rules' | 'crsubs'
+type Tab = 'overview' | 'networth' | 'forecast' | 'transactions' | 'accounts' | 'rules' | 'crsubs'
 
 const ACCOUNT_TYPES = [
   { value: 'checking', label: 'Checking' },
@@ -449,6 +451,7 @@ export default function Finance(): JSX.Element {
           [
             ['overview', 'Overview'],
             ['networth', 'Net Worth'],
+            ['forecast', 'Forecast'],
             ['transactions', 'Transactions'],
             ['accounts', 'Accounts'],
             ['rules', 'Rules'],
@@ -490,6 +493,8 @@ export default function Finance(): JSX.Element {
       )}
 
       {tab === 'networth' && <NetWorthTab />}
+
+      {tab === 'forecast' && <ForecastTab accounts={accounts} />}
 
       {tab === 'crsubs' && <CrSubsTab geoSummary={geoSummary} subscriptions={subscriptions} />}
 
@@ -1058,6 +1063,508 @@ export function buildTrajectoryChartData(
     out.push({ date, net: Math.round((assets - liabilities) * 100) / 100 })
   }
   return out
+}
+
+// ─── Forecast Tab (Phase 4.5 UI) ─────────────────────────────────────────────
+
+type ForecastResult = Awaited<ReturnType<Window['api']['finance']['getForecast']>>
+type ForecastEvent = ForecastResult['events'][number]
+
+const SOURCE_LABEL: Record<string, string> = {
+  subscription: 'Subscription',
+  income: 'Income',
+  debt: 'Debt payment',
+  calendar: 'Calendar bill',
+  override: 'Override'
+}
+
+const CONFIDENCE_DOT_CLASS: Record<string, string> = {
+  high: 'bg-emerald-500',
+  medium: 'bg-amber-500',
+  low: 'bg-muted-foreground/40'
+}
+
+function ForecastTab({ accounts }: { accounts: Account[] }): JSX.Element {
+  const [forecast, setForecast] = useState<ForecastResult | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [editing, setEditing] = useState<ForecastEvent | null>(null)
+  const { toast: showToast } = useToast()
+
+  const refresh = useCallback(async () => {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron || !window.api.finance) return
+    setLoading(true)
+    try {
+      const result = await window.api.finance.getForecast({ windowDays: 90 })
+      setForecast(result)
+    } catch (err) {
+      console.error('[forecast] refresh failed', err)
+      showToast('Failed to load forecast.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }, [showToast])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const accountById = new Map(accounts.map((a) => [a.id, a]))
+  const accountName = (id: number | null): string =>
+    id == null ? '—' : (accountById.get(id)?.name ?? `Account ${id}`)
+
+  const chartData = forecast
+    ? buildForecastChartData(forecast.trajectory)
+    : { points: [] as Array<Record<string, number | string>>, accountIds: [] as number[] }
+  const eventsByWeek = forecast ? groupEventsByWeek(forecast.events) : []
+
+  if (loading) {
+    return <p className="text-sm text-muted-foreground p-4">Loading forecast…</p>
+  }
+
+  if (!forecast) {
+    return (
+      <p className="text-sm text-muted-foreground p-4">Forecast unavailable. Try refreshing.</p>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Low-cash banner */}
+      {forecast.lowDates.length > 0 && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-start gap-3">
+          <AlertCircle className="text-amber-500 mt-0.5" size={18} />
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold mb-1">Cash low warning</h3>
+            <ul className="text-xs text-muted-foreground space-y-0.5">
+              {forecast.lowDates.map((l) => (
+                <li key={`${l.accountId}:${l.date}`}>
+                  <span className="text-foreground font-medium">{accountName(l.accountId)}</span>{' '}
+                  drops to {fmtMoney(l.balance)} on {l.date}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {/* Trajectory chart */}
+      <div className="bg-card border border-border rounded-xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="text-sm font-semibold">90-day trajectory</h3>
+            <p className="text-xs text-muted-foreground">
+              Per-account daily balance · combines subscriptions, income, debt minimums, calendar
+              bills, and your overrides
+            </p>
+          </div>
+        </div>
+        {chartData.points.length < 2 ? (
+          <p className="text-xs text-muted-foreground py-8 text-center">
+            Not enough projected events to draw a trajectory.
+          </p>
+        ) : (
+          <div style={{ width: '100%', height: 260 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart
+                data={chartData.points}
+                margin={{ top: 10, right: 20, bottom: 10, left: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                  tickMargin={6}
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                  tickFormatter={(v) => fmtMoney(v as number)}
+                  width={70}
+                />
+                <Tooltip
+                  formatter={(v) => fmtMoney(Number(v))}
+                  contentStyle={{
+                    background: 'hsl(var(--card))',
+                    border: '1px solid hsl(var(--border))',
+                    fontSize: 12
+                  }}
+                />
+                {chartData.accountIds.map((id, idx) => (
+                  <Line
+                    key={id}
+                    type="monotone"
+                    dataKey={`acct_${id}`}
+                    name={accountName(id)}
+                    stroke={`hsl(var(--chart-${(idx % 5) + 1}, ${FALLBACK_COLORS[idx % FALLBACK_COLORS.length]}))`}
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      {/* Event list grouped by week */}
+      <div className="bg-card border border-border rounded-xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold">Projected events</h3>
+          <span className="text-xs text-muted-foreground">
+            {forecast.events.length} event{forecast.events.length === 1 ? '' : 's'} · click any row
+            to skip / shift / override
+          </span>
+        </div>
+        {eventsByWeek.length === 0 ? (
+          <p className="text-xs text-muted-foreground py-4">No projected events in the window.</p>
+        ) : (
+          <div className="space-y-4">
+            {eventsByWeek.map((week) => (
+              <div key={week.weekStart}>
+                <div className="text-xs text-muted-foreground font-medium mb-1">
+                  Week of {week.weekStart}
+                </div>
+                <table className="w-full text-sm">
+                  <tbody>
+                    {week.events.map((ev) => (
+                      <tr
+                        key={`${ev.date}:${ev.accountId}:${ev.label}:${ev.source}`}
+                        // biome-ignore lint/a11y/useSemanticElements: clickable <tr> mirrors the Transactions tab pattern; a button child would break tabular flow
+                        role="button"
+                        tabIndex={0}
+                        className="border-t border-border hover:bg-muted/50 cursor-pointer"
+                        onClick={() => setEditing(ev)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            setEditing(ev)
+                          }
+                        }}
+                      >
+                        <td className="py-1.5 w-20 text-muted-foreground text-xs tabular-nums">
+                          {ev.date}
+                        </td>
+                        <td className="w-3">
+                          <span
+                            aria-label={`${ev.confidence} confidence`}
+                            className={cn(
+                              'inline-block w-2 h-2 rounded-full',
+                              CONFIDENCE_DOT_CLASS[ev.confidence] ?? 'bg-muted-foreground/40'
+                            )}
+                          />
+                        </td>
+                        <td className="py-1.5">{ev.label}</td>
+                        <td className="text-xs text-muted-foreground">
+                          {SOURCE_LABEL[ev.source] ?? ev.source}
+                        </td>
+                        <td className="text-xs text-muted-foreground">
+                          {accountName(ev.accountId)}
+                        </td>
+                        <td
+                          className={cn(
+                            'text-right tabular-nums',
+                            ev.amount < 0 ? 'text-red-500' : ev.amount > 0 ? 'text-emerald-500' : ''
+                          )}
+                        >
+                          {ev.amount === 0 ? '?' : fmtSignedMoney(ev.amount)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {editing && (
+        <ForecastOverrideDialog
+          event={editing}
+          accountName={accountName(editing.accountId)}
+          onClose={() => setEditing(null)}
+          onSaved={async () => {
+            setEditing(null)
+            await refresh()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// Tailwind `var(--chart-N)` aren't defined in the design tokens yet; these
+// fallbacks keep multi-line charts readable in both light and dark themes.
+const FALLBACK_COLORS = ['221 83% 53%', '142 71% 45%', '38 92% 50%', '262 83% 58%', '199 89% 48%']
+
+/**
+ * Build per-day chart points. Each point is `{ date, acct_<id>: balance, ... }`
+ * so Recharts can render one line per account by indexing the keys directly.
+ * Only emits dates where at least one account's balance changed (the trajectory
+ * already produces points only on event days plus today's seed).
+ */
+export function buildForecastChartData(trajectory: ForecastResult['trajectory']): {
+  points: Array<Record<string, number | string>>
+  accountIds: number[]
+} {
+  if (trajectory.length === 0) return { points: [], accountIds: [] }
+
+  const accountIds = Array.from(new Set(trajectory.map((p) => p.accountId))).sort((a, b) => a - b)
+  // Date → accountId → latest balance on or before that date.
+  const dates = Array.from(new Set(trajectory.map((p) => p.date))).sort()
+  const latestByAccount = new Map<number, number>()
+
+  // Index the trajectory by date for ordered walking.
+  const byDate = new Map<string, ForecastResult['trajectory']>()
+  for (const p of trajectory) {
+    const list = byDate.get(p.date) ?? []
+    list.push(p)
+    byDate.set(p.date, list)
+  }
+
+  const points: Array<Record<string, number | string>> = []
+  for (const date of dates) {
+    for (const p of byDate.get(date) ?? []) {
+      latestByAccount.set(p.accountId, p.balance)
+    }
+    const point: Record<string, number | string> = { date }
+    for (const id of accountIds) {
+      const v = latestByAccount.get(id)
+      if (v !== undefined) point[`acct_${id}`] = v
+    }
+    points.push(point)
+  }
+
+  return { points, accountIds }
+}
+
+/**
+ * Group forecast events into ISO-week buckets (week starts Monday). Events
+ * inside each week stay in chronological order. Used by the event list UI.
+ */
+export function groupEventsByWeek(
+  events: ForecastEvent[]
+): Array<{ weekStart: string; events: ForecastEvent[] }> {
+  const buckets = new Map<string, ForecastEvent[]>()
+  for (const ev of events) {
+    const weekStart = startOfIsoWeek(ev.date)
+    const list = buckets.get(weekStart) ?? []
+    list.push(ev)
+    buckets.set(weekStart, list)
+  }
+  return Array.from(buckets.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([weekStart, evs]) => ({
+      weekStart,
+      events: evs.slice().sort((a, b) => a.date.localeCompare(b.date))
+    }))
+}
+
+/** Returns the ISO date string of the Monday in the same week as `dateStr`. */
+function startOfIsoWeek(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  const dow = dt.getDay() // 0 = Sun, 1 = Mon, ... 6 = Sat
+  const offsetToMonday = dow === 0 ? -6 : 1 - dow
+  dt.setDate(dt.getDate() + offsetToMonday)
+  const yy = dt.getFullYear()
+  const mm = String(dt.getMonth() + 1).padStart(2, '0')
+  const dd = String(dt.getDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
+}
+
+function ForecastOverrideDialog({
+  event,
+  accountName,
+  onClose,
+  onSaved
+}: {
+  event: ForecastEvent
+  accountName: string
+  onClose: () => void
+  onSaved: () => void | Promise<void>
+}): JSX.Element {
+  const [kind, setKind] = useState<'skip' | 'shift' | 'override'>('skip')
+  const [shiftDate, setShiftDate] = useState(event.date)
+  const [amount, setAmount] = useState(String(event.amount))
+  const [saving, setSaving] = useState(false)
+  const { toast: showToast } = useToast()
+
+  const submit = async () => {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron || !window.api.finance) {
+      showToast('Cannot save override outside the Electron app.', 'error')
+      return
+    }
+    if (event.accountId == null) {
+      showToast('This event has no account; cannot override.', 'error')
+      return
+    }
+    if (kind === 'shift' && !/^\d{4}-\d{2}-\d{2}$/.test(shiftDate)) {
+      showToast('Shift date must be YYYY-MM-DD.', 'error')
+      return
+    }
+    if (kind === 'override' && !Number.isFinite(Number(amount))) {
+      showToast('Override amount must be a number.', 'error')
+      return
+    }
+    setSaving(true)
+    try {
+      const result = await window.api.finance.setForecastOverride({
+        accountId: event.accountId,
+        date: event.date,
+        label: event.label,
+        kind,
+        amount: kind === 'override' ? Number(amount) : null,
+        shiftToDate: kind === 'shift' ? shiftDate : null
+      })
+      if (!result.success) {
+        showToast(result.error ?? 'Failed to save override.', 'error')
+        return
+      }
+      await onSaved()
+    } catch (err) {
+      console.error('[forecast] override failed', err)
+      showToast('Override failed.', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const reset = async () => {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron || !window.api.finance) return
+    if (event.accountId == null) return
+    setSaving(true)
+    try {
+      const result = await window.api.finance.deleteForecastOverride(
+        event.accountId,
+        event.date,
+        event.label
+      )
+      if (!result.success) {
+        showToast(result.error ?? 'Failed to clear override.', 'error')
+        return
+      }
+      await onSaved()
+    } catch (err) {
+      console.error('[forecast] clear failed', err)
+      showToast('Clear failed.', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Esc-to-close: bind a window listener while the dialog is mounted instead
+  // of putting onKeyDown on the backdrop (Biome a11y rules dislike static
+  // elements with key handlers).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <button
+        type="button"
+        aria-label="Close override dialog"
+        onClick={onClose}
+        className="absolute inset-0 w-full h-full cursor-default"
+      />
+      <dialog
+        open
+        aria-modal="true"
+        aria-labelledby="forecast-override-title"
+        className="relative bg-card border border-border rounded-xl p-6 w-96 text-foreground open:flex open:flex-col gap-4 m-0"
+      >
+        <div>
+          <h3 id="forecast-override-title" className="text-sm font-semibold">
+            Override forecasted event
+          </h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            <span className="font-medium text-foreground">{event.label}</span> ·{' '}
+            {fmtSignedMoney(event.amount)} on {event.date} · {accountName}
+          </p>
+        </div>
+        <fieldset className="space-y-2">
+          <legend className="sr-only">Override action</legend>
+          {(['skip', 'shift', 'override'] as const).map((k) => (
+            <label key={k} className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="radio"
+                name="override-kind"
+                value={k}
+                checked={kind === k}
+                onChange={() => setKind(k)}
+              />
+              <span className="capitalize">{k}</span>
+              <span className="text-xs text-muted-foreground">
+                {k === 'skip' && '— remove this event from the projection'}
+                {k === 'shift' && '— move it to a different date'}
+                {k === 'override' && '— change the amount'}
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        {kind === 'shift' && (
+          <label className="block text-sm">
+            <span className="block mb-1 text-xs text-muted-foreground">New date</span>
+            <input
+              type="date"
+              value={shiftDate}
+              onChange={(e) => setShiftDate(e.target.value)}
+              className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
+            />
+          </label>
+        )}
+        {kind === 'override' && (
+          <label className="block text-sm">
+            <span className="block mb-1 text-xs text-muted-foreground">
+              New amount (negative = outflow)
+            </span>
+            <input
+              type="number"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
+            />
+          </label>
+        )}
+        <div className="flex items-center justify-between pt-2">
+          <button
+            type="button"
+            onClick={reset}
+            disabled={saving}
+            className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+          >
+            Reset (clear any override)
+          </button>
+          <div className="space-x-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              className="px-3 py-1.5 text-sm border border-border rounded hover:bg-muted disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={submit}
+              disabled={saving}
+              className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded hover:opacity-90 disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      </dialog>
+    </div>
+  )
 }
 
 // ─── CR & Subscriptions Tab ──────────────────────────────────────────────────

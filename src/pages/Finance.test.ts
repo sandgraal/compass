@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { buildTrajectoryChartData } from './Finance'
+import { buildForecastChartData, buildTrajectoryChartData, groupEventsByWeek } from './Finance'
 
 type Point = {
   accountId: number
@@ -121,5 +121,96 @@ describe('buildTrajectoryChartData', () => {
     ])
     // 1000 - 300 = 700, NOT 1300.
     expect(out[0].net).toBe(700)
+  })
+})
+
+// ─── Forecast helpers ────────────────────────────────────────────────────────
+
+type TrajectoryRow = { date: string; accountId: number; balance: number }
+
+describe('buildForecastChartData', () => {
+  it('returns empty shape for empty input', () => {
+    expect(buildForecastChartData([])).toEqual({ points: [], accountIds: [] })
+  })
+
+  it('produces one point per date with one column per account', () => {
+    const traj: TrajectoryRow[] = [
+      { date: '2026-05-01', accountId: 1, balance: 1000 },
+      { date: '2026-05-01', accountId: 2, balance: 500 },
+      { date: '2026-05-15', accountId: 1, balance: 900 }
+    ]
+    const out = buildForecastChartData(traj)
+    expect(out.accountIds).toEqual([1, 2])
+    expect(out.points).toEqual([
+      { date: '2026-05-01', acct_1: 1000, acct_2: 500 },
+      { date: '2026-05-15', acct_1: 900, acct_2: 500 } // account 2 forward-filled
+    ])
+  })
+
+  it('sorts dates chronologically', () => {
+    const traj: TrajectoryRow[] = [
+      { date: '2026-06-01', accountId: 1, balance: 300 },
+      { date: '2026-04-01', accountId: 1, balance: 100 },
+      { date: '2026-05-01', accountId: 1, balance: 200 }
+    ]
+    const out = buildForecastChartData(traj)
+    expect(out.points.map((p) => p.date)).toEqual(['2026-04-01', '2026-05-01', '2026-06-01'])
+  })
+
+  it('keys account columns by id so Recharts can index them', () => {
+    const traj: TrajectoryRow[] = [{ date: '2026-05-01', accountId: 42, balance: 100 }]
+    const out = buildForecastChartData(traj)
+    expect(out.points[0]).toHaveProperty('acct_42', 100)
+  })
+})
+
+type ForecastEvent = {
+  date: string
+  accountId: number | null
+  amount: number
+  label: string
+  source: 'subscription' | 'income' | 'debt' | 'calendar' | 'override'
+  confidence: 'high' | 'medium' | 'low'
+}
+
+const ev = (date: string, label = 'x'): ForecastEvent => ({
+  date,
+  accountId: 1,
+  amount: -10,
+  label,
+  source: 'subscription',
+  confidence: 'high'
+})
+
+describe('groupEventsByWeek', () => {
+  it('groups events into ISO weeks starting Monday', () => {
+    // 2026-05-11 is a Monday. 2026-05-13 is the Wednesday in that week.
+    // 2026-05-18 is the next Monday (start of the following week).
+    const out = groupEventsByWeek([
+      ev('2026-05-13', 'a'),
+      ev('2026-05-18', 'b'),
+      ev('2026-05-11', 'c')
+    ])
+    expect(out).toHaveLength(2)
+    expect(out[0].weekStart).toBe('2026-05-11')
+    expect(out[0].events.map((e) => e.label)).toEqual(['c', 'a'])
+    expect(out[1].weekStart).toBe('2026-05-18')
+    expect(out[1].events.map((e) => e.label)).toEqual(['b'])
+  })
+
+  it('treats Sunday as the last day of the previous Monday-based week', () => {
+    // 2026-05-17 is a Sunday; its ISO-week Monday is 2026-05-11.
+    const out = groupEventsByWeek([ev('2026-05-17', 'sun'), ev('2026-05-11', 'mon')])
+    expect(out).toHaveLength(1)
+    expect(out[0].weekStart).toBe('2026-05-11')
+  })
+
+  it('returns [] for empty input', () => {
+    expect(groupEventsByWeek([])).toEqual([])
+  })
+
+  it('sorts weeks chronologically', () => {
+    const out = groupEventsByWeek([ev('2026-07-06'), ev('2026-05-04'), ev('2026-06-01')])
+    expect(out.map((w) => w.weekStart)).toEqual(['2026-05-04', '2026-06-01', '2026-07-06'])
   })
 })
