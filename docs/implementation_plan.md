@@ -8,7 +8,7 @@
 | Bucket | Items | % done |
 |---|---|---|
 | **Phase 0** — Agent infrastructure | 7 sub-areas | 100% |
-| **Phase 0+** — Leading-edge agent infra | 10 items | 80% (0+.6, 0+.9, 0+.10 deferred) |
+| **Phase 0+** — Leading-edge agent infra | 10 items | 90% (0+.6, 0+.9 deferred; 0+.10 shipped) |
 | **Phase 1** — Critical bug fixes | 5 items | 100% (all shipped prior to this branch) |
 | **Phase 2** — Remaining PRD features | 7 items | 100% (2.1–2.7 all shipped prior to this branch) |
 | **Phase 3** — Beyond-PRD polish | 2 selected items | 100% (onboarding wizard + tray/notifications shipped) |
@@ -102,7 +102,7 @@ Modern (Nov 2025+) Claude Code best practice splits guidance into 4 layers. This
 - [x] **0+.7 Parallel PR review pipeline** — `claude-code-action` runs security-auditor + ui-polish + bug-triager in parallel
 - [x] **0+.8 Worktree workflow** — `scripts/worktree.sh` + `docs/agent-orchestration.md`
 - [ ] **0+.9 Background scheduled-task agents** — nightly bug-triager, weekly docs-keeper, monthly security-auditor
-- [ ] **0+.10 Project status JSON** (`.claude/project-status.json`) — agent-readable snapshot of repo state
+- [x] **0+.10 Project status JSON** (`.claude/project-status.json`) — `scripts/project-status.ts` regenerates it; `npm run status` is wired. Captures table list, IPC count by domain, test files, phase status (parsed from this doc), and the last 8 merge commits. Manual regen for now; the 0+.6 living-docs hook can wire auto-update later.
 
 ---
 
