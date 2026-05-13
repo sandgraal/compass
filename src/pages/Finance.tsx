@@ -763,6 +763,11 @@ function NetWorthTab(): JSX.Element {
   }
 
   const saveEdit = async (accountId: number) => {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron || !window.api.finance) {
+      showToast('Cannot save balance outside the Electron app.', 'error')
+      return
+    }
     const balance = Number(editValue)
     if (!Number.isFinite(balance)) {
       showToast('Balance must be a number.', 'error')
@@ -930,6 +935,7 @@ function NetWorthTab(): JSX.Element {
                         step="0.01"
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
+                        aria-label={`New balance for ${a.name}`}
                         // biome-ignore lint/a11y/noAutofocus: keyboard focus follows the click on the inline edit row, mirroring how the existing Accounts/Transactions inline editors behave
                         autoFocus
                         className="w-28 bg-background border border-border rounded px-2 py-1 text-right text-sm"
