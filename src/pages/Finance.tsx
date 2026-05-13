@@ -41,6 +41,9 @@ type Txn = {
   category: string | null
   subcategory: string | null
   notes: string | null
+  taxTag?: string | null
+  taxTagSource?: string | null
+  taxYear?: number | null
   sourceFile?: string | null
 }
 type Account = {
@@ -75,6 +78,7 @@ type GeoSummary = {
   crCapex: number
   since: string | null
 }
+type TaxSummary = Awaited<ReturnType<Window['api']['finance']['getTaxSummary']>>
 
 type Tab = 'overview' | 'networth' | 'forecast' | 'transactions' | 'accounts' | 'rules' | 'crsubs'
 
@@ -84,6 +88,84 @@ const ACCOUNT_TYPES = [
   { value: 'credit', label: 'Credit card' },
   { value: 'investment', label: 'Investment' }
 ] as const
+
+// ─── Tax tagging (Phase 4.3 UI) ──────────────────────────────────────────────
+
+const TAX_TAGS = [
+  'tax:none',
+  'tax:capex-airbnb',
+  'tax:schedule-c-income',
+  'tax:schedule-c-expense',
+  'tax:schedule-e-income',
+  'tax:schedule-e-expense',
+  'tax:charitable',
+  'tax:medical',
+  'tax:home-office',
+  'tax:personal',
+  'tax:investment'
+] as const
+
+const TAX_TAG_LABEL: Record<string, string> = {
+  'tax:none': 'No tax impact',
+  'tax:capex-airbnb': 'Capex (Airbnb)',
+  'tax:schedule-c-income': 'Schedule C income',
+  'tax:schedule-c-expense': 'Schedule C expense',
+  'tax:schedule-e-income': 'Schedule E income',
+  'tax:schedule-e-expense': 'Schedule E expense',
+  'tax:charitable': 'Charitable',
+  'tax:medical': 'Medical',
+  'tax:home-office': 'Home office',
+  'tax:personal': 'Personal',
+  'tax:investment': 'Investment'
+}
+
+// Short form for the inline badge — full label gets long fast in a table cell.
+const TAX_TAG_SHORT_LABEL: Record<string, string> = {
+  'tax:none': '—',
+  'tax:capex-airbnb': 'Capex',
+  'tax:schedule-c-income': 'Sched C in',
+  'tax:schedule-c-expense': 'Sched C',
+  'tax:schedule-e-income': 'Sched E in',
+  'tax:schedule-e-expense': 'Sched E',
+  'tax:charitable': 'Charity',
+  'tax:medical': 'Medical',
+  'tax:home-office': 'Home off',
+  'tax:personal': 'Personal',
+  'tax:investment': 'Invest'
+}
+
+// Tailwind colour classes per tag. Muted for tax:none; semantic colour for
+// deductible/income categories so the user can scan the column quickly.
+const TAX_TAG_CLASS: Record<string, string> = {
+  'tax:none': 'bg-muted text-muted-foreground',
+  'tax:capex-airbnb': 'bg-purple-500/15 text-purple-400',
+  'tax:schedule-c-income': 'bg-emerald-500/15 text-emerald-400',
+  'tax:schedule-c-expense': 'bg-emerald-500/15 text-emerald-400',
+  'tax:schedule-e-income': 'bg-cyan-500/15 text-cyan-400',
+  'tax:schedule-e-expense': 'bg-cyan-500/15 text-cyan-400',
+  'tax:charitable': 'bg-pink-500/15 text-pink-400',
+  'tax:medical': 'bg-red-500/15 text-red-400',
+  'tax:home-office': 'bg-blue-500/15 text-blue-400',
+  'tax:personal': 'bg-muted text-muted-foreground',
+  'tax:investment': 'bg-amber-500/15 text-amber-400'
+}
+
+function TaxBadge({ tag, source }: { tag: string; source: string }): JSX.Element {
+  const label = TAX_TAG_SHORT_LABEL[tag] ?? '—'
+  const cls = TAX_TAG_CLASS[tag] ?? 'bg-muted text-muted-foreground'
+  return (
+    <span
+      title={`${TAX_TAG_LABEL[tag] ?? tag}${source === 'user' ? ' · manual' : ''}`}
+      className={cn(
+        'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs',
+        cls,
+        source === 'user' && 'ring-1 ring-amber-500/40'
+      )}
+    >
+      {label}
+    </span>
+  )
+}
 
 const PREDEFINED_CATEGORIES = [
   'Groceries',
@@ -126,6 +208,7 @@ export default function Finance(): JSX.Element {
   const [detectedAccounts, setDetectedAccounts] = useState<string[]>([])
   const [subscriptions, setSubscriptions] = useState<SubscriptionsData | null>(null)
   const [geoSummary, setGeoSummary] = useState<GeoSummary | null>(null)
+  const [taxSummary, setTaxSummary] = useState<TaxSummary | null>(null)
   const [excludeProperty, setExcludeProperty] = useState(false)
 
   const { toast: showToast } = useToast()
@@ -142,14 +225,15 @@ export default function Finance(): JSX.Element {
       const since = new Date()
       since.setFullYear(since.getFullYear() - 1)
       const sinceIso = since.toISOString().slice(0, 10)
-      const [t, a, d, b, r, s, g] = await Promise.all([
+      const [t, a, d, b, r, s, g, x] = await Promise.all([
         window.api.finance.getTransactions({ month, limit: 200 }),
         window.api.finance.getAccounts(),
         window.api.finance.getDebtSummary(),
         window.api.finance.getBudgetStatus(month),
         window.api.finance.getRules(),
         window.api.finance.getSubscriptions().catch(() => null),
-        window.api.finance.getGeoSummary({ since: sinceIso }).catch(() => null)
+        window.api.finance.getGeoSummary({ since: sinceIso }).catch(() => null),
+        window.api.finance.getTaxSummary().catch(() => null)
       ])
       setTxns(t)
       setAccounts(a)
@@ -158,6 +242,7 @@ export default function Finance(): JSX.Element {
       setRules(r)
       if (s) setSubscriptions(s)
       if (g) setGeoSummary(g)
+      if (x) setTaxSummary(x)
     } catch (err) {
       console.error('[finance] refresh failed', err)
       showToast('Failed to load finance data.', 'error')
@@ -289,6 +374,23 @@ export default function Finance(): JSX.Element {
       console.error('[finance] updateTxn failed', err)
       showToast('Failed to update transaction.', 'error')
       throw err
+    }
+  }
+
+  async function setTaxTag(id: number, taxTag: string) {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron || !window.api.finance) return
+    try {
+      const result = await window.api.finance.setTransactionTaxTag(id, taxTag)
+      if (!result.success) {
+        showToast(result.error ?? 'Failed to set tax tag.', 'error')
+        return
+      }
+      showToast('Tax tag updated.', 'success')
+      await refresh()
+    } catch (err) {
+      console.error('[finance] setTaxTag failed', err)
+      showToast('Failed to set tax tag.', 'error')
     }
   }
 
@@ -487,6 +589,7 @@ export default function Finance(): JSX.Element {
           budget={budget}
           crCapex={geoSummary?.crCapex ?? 0}
           subsAnnual={subscriptions?.totalActiveAnnual ?? 0}
+          taxSummary={taxSummary}
           excludeProperty={excludeProperty}
           onToggleExcludeProperty={() => setExcludeProperty((v) => !v)}
         />
@@ -504,6 +607,7 @@ export default function Finance(): JSX.Element {
           accounts={accounts}
           onUpdate={updateTxn}
           onDelete={deleteTxn}
+          onSetTaxTag={setTaxTag}
         />
       )}
 
@@ -538,6 +642,7 @@ function Overview({
   budget,
   crCapex,
   subsAnnual,
+  taxSummary,
   excludeProperty,
   onToggleExcludeProperty
 }: {
@@ -552,6 +657,7 @@ function Overview({
   budget: BudgetLine[]
   crCapex: number
   subsAnnual: number
+  taxSummary: TaxSummary | null
   excludeProperty: boolean
   onToggleExcludeProperty: () => void
 }): JSX.Element {
@@ -688,6 +794,63 @@ function Overview({
           )}
         </div>
       </div>
+
+      {taxSummary && taxSummary.tags.length > 0 && (
+        <div className="bg-card border border-border rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold">
+              Tax summary{' '}
+              <span className="text-muted-foreground font-normal">
+                · {taxSummary.year} year-to-date
+              </span>
+            </h3>
+            <span className="text-xs text-muted-foreground">
+              Click a transaction's tax badge to override the auto-classification
+            </span>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="text-xs text-muted-foreground">
+              <tr>
+                <th className="text-left">Tag</th>
+                <th className="text-right">Count</th>
+                <th className="text-right">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {taxSummary.tags
+                .filter((row) => row.taxTag !== 'tax:none')
+                .map((row) => (
+                  <tr key={row.taxTag} className="border-t border-border">
+                    <td className="py-1.5">
+                      <TaxBadge tag={row.taxTag} source="auto" />
+                      <span className="ml-2 text-muted-foreground text-xs">
+                        {TAX_TAG_LABEL[row.taxTag] ?? row.taxTag}
+                      </span>
+                    </td>
+                    <td className="text-right tabular-nums text-muted-foreground">
+                      {row.count.toLocaleString()}
+                    </td>
+                    <td
+                      className={cn(
+                        'text-right tabular-nums',
+                        row.total < 0 ? 'text-red-400' : 'text-emerald-400'
+                      )}
+                    >
+                      {fmtSignedMoney(row.total)}
+                    </td>
+                  </tr>
+                ))}
+              {taxSummary.tags.filter((row) => row.taxTag !== 'tax:none').length === 0 && (
+                <tr className="border-t border-border">
+                  <td colSpan={3} className="py-3 text-xs text-muted-foreground text-center">
+                    No tax-relevant transactions classified yet this year.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </>
   )
 }
@@ -1761,7 +1924,8 @@ function TransactionsTab({
   txns,
   accounts,
   onUpdate,
-  onDelete
+  onDelete,
+  onSetTaxTag
 }: {
   txns: Txn[]
   accounts: Account[]
@@ -1770,6 +1934,7 @@ function TransactionsTab({
     updates: { category?: string; subcategory?: string; notes?: string; accountId?: number | null }
   ) => Promise<void>
   onDelete: (id: number) => Promise<void>
+  onSetTaxTag: (id: number, taxTag: string) => Promise<void>
 }): JSX.Element {
   const [expandedId, setExpandedId] = useState<number | null>(null)
 
@@ -1797,6 +1962,7 @@ function TransactionsTab({
             <th className="text-left">Date</th>
             <th className="text-left">Description</th>
             <th className="text-left">Category</th>
+            <th className="text-left">Tax</th>
             <th className="text-right">Amount</th>
             <th className="w-10" />
           </tr>
@@ -1812,6 +1978,7 @@ function TransactionsTab({
               onUpdate={onUpdate}
               onDelete={onDelete}
               onCancel={() => setExpandedId(null)}
+              onSetTaxTag={onSetTaxTag}
             />
           ))}
         </tbody>
@@ -1827,7 +1994,8 @@ function TransactionRow({
   onToggle,
   onUpdate,
   onDelete,
-  onCancel
+  onCancel,
+  onSetTaxTag
 }: {
   txn: Txn
   accounts: Account[]
@@ -1839,6 +2007,7 @@ function TransactionRow({
   ) => Promise<void>
   onDelete: (id: number) => Promise<void>
   onCancel: () => void
+  onSetTaxTag: (id: number, taxTag: string) => Promise<void>
 }): JSX.Element {
   const [category, setCategory] = useState(txn.category ?? 'Uncategorized')
   const [customCategory, setCustomCategory] = useState('')
@@ -1915,6 +2084,9 @@ function TransactionRow({
           {txn.category ?? 'Uncategorized'}
           {txn.subcategory ? ` / ${txn.subcategory}` : ''}
         </td>
+        <td>
+          <TaxBadge tag={txn.taxTag ?? 'tax:none'} source={txn.taxTagSource ?? 'auto'} />
+        </td>
         <td className={cn('text-right', txn.amount < 0 ? 'text-red-400' : 'text-emerald-400')}>
           {fmtMoney(txn.amount)}
         </td>
@@ -1934,7 +2106,7 @@ function TransactionRow({
       </tr>
       {expanded && (
         <tr className="bg-secondary/40">
-          <td colSpan={5} className="px-3 py-4">
+          <td colSpan={6} className="px-3 py-4">
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div>
                 <label
@@ -2000,6 +2172,31 @@ function TransactionRow({
                   {accounts.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label
+                  htmlFor={`txn-taxtag-${txn.id}`}
+                  className="text-xs text-muted-foreground mb-1 block"
+                >
+                  Tax tag
+                  {txn.taxTagSource === 'user' && (
+                    <span className="ml-1 text-amber-500">· manual override</span>
+                  )}
+                </label>
+                <select
+                  id={`txn-taxtag-${txn.id}`}
+                  value={txn.taxTag ?? 'tax:none'}
+                  onChange={(e) => {
+                    void onSetTaxTag(txn.id, e.target.value)
+                  }}
+                  className="w-full bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+                >
+                  {TAX_TAGS.map((t) => (
+                    <option key={t} value={t}>
+                      {TAX_TAG_LABEL[t]}
                     </option>
                   ))}
                 </select>
