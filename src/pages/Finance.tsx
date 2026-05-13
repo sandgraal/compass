@@ -1092,7 +1092,14 @@ function ForecastTab({ accounts }: { accounts: Account[] }): JSX.Element {
 
   const refresh = useCallback(async () => {
     const isElectron = typeof window !== 'undefined' && !!window.api
-    if (!isElectron || !window.api.finance) return
+    if (!isElectron || !window.api.finance) {
+      // Without the bridge there's nothing to load. Clear loading so the
+      // tab shows the "Forecast unavailable" branch instead of being stuck
+      // on the spinner forever.
+      setForecast(null)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const result = await window.api.finance.getForecast({ windowDays: 90 })
@@ -1413,9 +1420,14 @@ function ForecastOverrideDialog({
       showToast('Shift date must be YYYY-MM-DD.', 'error')
       return
     }
-    if (kind === 'override' && !Number.isFinite(Number(amount))) {
-      showToast('Override amount must be a number.', 'error')
-      return
+    if (kind === 'override') {
+      // Number('') === 0, so an empty/whitespace input would silently save
+      // a zero override. Reject it explicitly so the user has to type
+      // something — a real "0" is still allowed.
+      if (amount.trim() === '' || !Number.isFinite(Number(amount))) {
+        showToast('Override amount must be a number.', 'error')
+        return
+      }
     }
     setSaving(true)
     try {
@@ -1486,6 +1498,9 @@ function ForecastOverrideDialog({
         type="button"
         aria-label="Close override dialog"
         onClick={onClose}
+        // Excluded from keyboard tab order — Esc handles keyboard close, and
+        // a viewport-sized invisible Tab stop just confuses users.
+        tabIndex={-1}
         className="absolute inset-0 w-full h-full cursor-default"
       />
       <dialog
