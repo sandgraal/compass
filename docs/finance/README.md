@@ -13,6 +13,7 @@ is the canonical status tracker; this folder holds the per-feature briefs.
 | 4.5 | [`cash-flow-forecast.md`](cash-flow-forecast.md) | `integration-implementer` + `ui-polish` | medium (~500–700 LOC) |
 | 4.6 | [`plaid-integration.md`](plaid-integration.md) | `director` orchestrating | multi-PR (~1,500–2,000 LOC) |
 | ops | [`legacy-cutover.md`](legacy-cutover.md) | `docs-keeper` + `director` | operational, no code |
+| ops | [`cutover-reconciliation.md`](cutover-reconciliation.md) | `docs-keeper` | active log; one row per Sunday until 2026-06-10 |
 
 ## How an agent should use these
 
