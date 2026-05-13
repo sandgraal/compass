@@ -194,6 +194,13 @@ Shipped in `feat/finance-rocket-money-import`. Adds Rocket Money parser, `catego
 Plaid Link in a child BrowserWindow, encrypted tokens in Vault, `transactions/sync` cursor loop, daily 06:00 cron. CSV watcher stays as fallback for institutions Plaid can't reach (CR Banco Popular). Multi-PR effort — orchestrate via `director`.
 *Owner: `director` orchestrating `migration-author` + `integration-implementer` + `security-auditor` + `ui-polish` · ~1,500–2,000 LOC across 5–6 PRs*
 
+- [x] **PR 1 — Schema** — `plaid_items` table + `plaidItemId`/`plaidAccountId`/`mask` columns on `financeAccounts` (indexed via `idx_finance_accounts_plaid`); migration 0009; backward compat in `client.ts` for both `ensureNewTables` + `createTablesIfNeeded`; migrate test asserts the new columns exist
+- [ ] PR 2 — Plaid client wrapper (`electron/integrations/plaid/client.ts`) + `safeStorage`-encrypted token vault (`.vault/plaid.enc`)
+- [ ] PR 3 — Plaid Link flow (child BrowserWindow + CSP allowlist for `cdn.plaid.com`)
+- [ ] PR 4 — Sync loop (`/transactions/sync` cursor pagination, normalize → `RawTxn`, hash dedupe, idempotent)
+- [ ] PR 5 — Integrations card UI + Accounts-tab "linked" badge
+- [ ] PR 6 — Daily 06:00 cron + error-surface UX
+
 ### 4.7 [`legacy-cutover.md`](finance/legacy-cutover.md) — retire the Excel pipeline (2026-06-10)
 Operational doc. Transition rules for the parallel-run window, cutover-day checklist, rollback plan. Not a PR — `docs-keeper` maintains the reconciliation log here during the window.
 *Owner: `docs-keeper` + `director` · operational, no code*

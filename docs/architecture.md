@@ -52,7 +52,7 @@ CSP enforced in production builds (no eval, no remote scripts, allowlist for OAu
 
 ## Database (Drizzle / SQLite via `better-sqlite3`)
 
-19 tables. Lives at `~/Library/Application Support/Compass/.data/compass.db`.
+20 tables. Lives at `~/Library/Application Support/Compass/.data/compass.db`.
 
 | Table | Purpose |
 |---|---|
@@ -67,7 +67,8 @@ CSP enforced in production builds (no eval, no remote scripts, allowlist for OAu
 | `knowledge_files` | Index of `knowledge-base/*.md` files (path, title, word count). |
 | `knowledge_suggestions` | Pending edits proposed by the regex / Ollama suggestion pipeline (Phase 2.7). |
 | `app_settings` | Key/value (`syncInterval`, `theme`, weekly goals JSON, `quickCaptureShortcut`, etc.). |
-| `finance_accounts` | Bank, credit, investment, debt accounts. Phase 4 added columns: `assetClass` (Phase 4.4 net-worth bucket), `paymentDayOfMonth` (Phase 4.5 forecast), `institution`, `paymentDueDate`. No additional indexes — every read is a small full-table scan. |
+| `finance_accounts` | Bank, credit, investment, debt accounts. Phase 4 added columns: `assetClass` (Phase 4.4 net-worth bucket), `paymentDayOfMonth` (Phase 4.5 forecast), `plaidItemId` + `plaidAccountId` + `mask` (Phase 4.6 Plaid linkage; indexed via `idx_finance_accounts_plaid`), `institution`, `paymentDueDate`. |
+| `plaid_items` | One row per connected Plaid Item (institution). Cursor for `/transactions/sync` pagination, last sync timestamp, error code surface. Access tokens live in `.vault/plaid.enc` — NEVER here. (Phase 4.6) |
 | `finance_transactions` | Hashed for dedup. Phase 4.2 promoted `geo` + `purpose` from `notes` tokens to **indexed** columns (`idx_..._geo`, `idx_..._geo_purpose`, `idx_..._geo_date`); Phase 4.3 added the **indexed** `(taxYear, taxTag)` pair for year-end aggregation. |
 | `finance_balance_snapshots` | Per-(account, day) balance for net-worth trajectory + delta queries. Source = `manual` / `inferred` / `plaid`. (Phase 4.4) |
 | `forecast_overrides` | User skip / shift / override edits to the auto-projected cash-flow stream. UNIQUE on `(account_id, date, label)`. (Phase 4.5) |
