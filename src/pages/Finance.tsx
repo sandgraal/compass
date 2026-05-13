@@ -387,7 +387,20 @@ export default function Finance(): JSX.Element {
         return
       }
       showToast('Tax tag updated.', 'success')
-      await refresh()
+      // Surgical update of the one row instead of a full refresh.
+      // A full refresh would replace the `txns` array, propagating new
+      // `txn` props into the expanded TransactionRow, whose `useEffect`
+      // would then reset the user's unsaved category/notes/account edits.
+      setTxns((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, taxTag, taxTagSource: 'user' as const } : t))
+      )
+      // Tax summary aggregate IS affected by the change — refresh just that.
+      try {
+        const fresh = await window.api.finance.getTaxSummary()
+        setTaxSummary(fresh)
+      } catch {
+        /* aggregate refresh failure is non-fatal */
+      }
     } catch (err) {
       console.error('[finance] setTaxTag failed', err)
       showToast('Failed to set tax tag.', 'error')
