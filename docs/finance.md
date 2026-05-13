@@ -10,7 +10,7 @@ finance project directory (in transition through 2026-06-10 — see
 
 | Layer | File | Purpose |
 |---|---|---|
-| Schema | `electron/db/schema.ts` (finance section) | `financeAccounts` (debts via `isDebt=true`, net-worth bucket via `assetClass`, debt pay day via `paymentDayOfMonth`), `financeTransactions` (with indexed `geo`, `purpose`, `taxTag`, `taxYear`), `categorizationRules`, `budgetRules`, `financeBalanceSnapshots`, `forecastOverrides` |
+| Schema | `electron/db/schema.ts` (finance section) | `financeAccounts` (debts via `isDebt=true`, net-worth bucket via `assetClass`, debt pay day via `paymentDayOfMonth`, optional Plaid linkage via `plaidItemId`+`plaidAccountId`+`mask`), `financeTransactions` (with indexed `geo`, `purpose`, `taxTag`, `taxYear`), `categorizationRules`, `budgetRules`, `financeBalanceSnapshots`, `forecastOverrides`, `plaidItems` |
 | Ingest | `electron/integrations/finance.ts` | CSV parsers (Chase, Amex, Cap One, Discover, BoA, USAA, Rocket Money, generic), categorizer, dedupe |
 | PDF | `electron/integrations/finance-pdf.ts` | Statement extractors (USAA, AMEX, generic) |
 | Watcher | `electron/integrations/finance-watcher.ts` | Chokidar watch on `~/Documents/Money/` (configurable), 3-level subfolder depth, `.csv` + `.xlsx` + `.pdf` allowlist |

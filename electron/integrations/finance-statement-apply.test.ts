@@ -29,6 +29,9 @@ function makeDb(): ReturnType<typeof drizzle<typeof schema>> {
       payment_day_of_month INTEGER,
       payment_due_date TEXT,
       last_statement_synced_at INTEGER,
+      plaid_item_id INTEGER,
+      plaid_account_id TEXT,
+      mask TEXT,
       updated_at INTEGER
     );
   `)

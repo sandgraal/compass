@@ -103,6 +103,16 @@ function ensureNewTables(sqlite: Database.Database): void {
       shift_to_date TEXT,
       created_at INTEGER
     );
+    CREATE TABLE IF NOT EXISTS plaid_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id TEXT NOT NULL UNIQUE,
+      institution_id TEXT NOT NULL,
+      institution_name TEXT NOT NULL,
+      cursor TEXT,
+      last_synced_at INTEGER,
+      error_code TEXT,
+      created_at INTEGER
+    );
   `)
 
   // Backfill new columns on pre-existing tables (safe no-op when columns already exist).
@@ -231,6 +241,21 @@ function ensureNewTables(sqlite: Database.Database): void {
     sqlite.exec('DROP INDEX IF EXISTS idx_forecast_overrides_account_date')
     sqlite.exec(
       'CREATE UNIQUE INDEX IF NOT EXISTS uq_forecast_overrides_account_date_label ON forecast_overrides(account_id, date, label)'
+    )
+  } catch {
+    /* ignore */
+  }
+  // Phase 4.6 — Plaid linkage columns + lookup index. The `plaid_items`
+  // table is created in the CREATE TABLE block above; here we just thread
+  // the FK columns onto legacy `finance_accounts` rows. All three are
+  // nullable so manually-created and CSV-ingested accounts coexist with
+  // Plaid-linked ones.
+  ensureColumn(sqlite, 'finance_accounts', 'plaid_item_id', 'INTEGER REFERENCES plaid_items(id)')
+  ensureColumn(sqlite, 'finance_accounts', 'plaid_account_id', 'TEXT')
+  ensureColumn(sqlite, 'finance_accounts', 'mask', 'TEXT')
+  try {
+    sqlite.exec(
+      'CREATE INDEX IF NOT EXISTS idx_finance_accounts_plaid ON finance_accounts(plaid_item_id, plaid_account_id)'
     )
   } catch {
     /* ignore */
@@ -404,7 +429,21 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       payment_day_of_month INTEGER,
       payment_due_date TEXT,
       last_statement_synced_at INTEGER,
+      plaid_item_id INTEGER REFERENCES plaid_items(id),
+      plaid_account_id TEXT,
+      mask TEXT,
       updated_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS plaid_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id TEXT NOT NULL UNIQUE,
+      institution_id TEXT NOT NULL,
+      institution_name TEXT NOT NULL,
+      cursor TEXT,
+      last_synced_at INTEGER,
+      error_code TEXT,
+      created_at INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS finance_balance_snapshots (

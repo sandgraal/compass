@@ -1,4 +1,4 @@
-import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { type AnySQLiteColumn, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 // ---- Integrations ----
 export const integrations = sqliteTable('integrations', {
@@ -144,6 +144,17 @@ export const financeAccounts = sqliteTable('finance_accounts', {
   // the cash-flow forecast (Phase 4.5) to schedule debt outflows. Default
   // null = "no fixed pay day, fall back to paymentDueDate".
   paymentDayOfMonth: integer('payment_day_of_month'),
+  // Plaid linkage (Phase 4.6). When set, this account is owned by a Plaid
+  // Item — its balance is refreshed by the Plaid sync loop instead of by
+  // CSV ingest, and the user-facing Accounts UI marks it as linked.
+  // Nullable so manually-created accounts and CSV-only accounts coexist.
+  plaidItemId: integer('plaid_item_id').references((): AnySQLiteColumn => plaidItems.id),
+  // Plaid's per-Item unique account id (returned from /accounts/get).
+  // Used as the JOIN key when normalizing /transactions/sync output.
+  plaidAccountId: text('plaid_account_id'),
+  // Last 4 digits of the account number — Plaid returns this as `mask`.
+  // Surfaced in the Accounts UI badge; intentionally never the full number.
+  mask: text('mask'),
   // ISO 'YYYY-MM-DD'. Surfaced as a "Payments Due" reminder on the Dashboard
   // when within the next 14 days. Populated from PDF statement metadata.
   paymentDueDate: text('payment_due_date'),
@@ -183,6 +194,34 @@ export const forecastOverrides = sqliteTable('forecast_overrides', {
   label: text('label'),
   kind: text('kind').notNull(), // 'skip' | 'shift' | 'override'
   shiftToDate: text('shift_to_date'), // populated when kind='shift'
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
+// ---- Plaid items (Phase 4.6) ----
+// One row per connected institution (Item in Plaid's vocabulary). The
+// access_token for each Item is encrypted via safeStorage and stored in
+// .vault/plaid.enc — NEVER in SQLite. The columns here are non-secret
+// metadata that the sync loop and UI need to surface.
+export const plaidItems = sqliteTable('plaid_items', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  // Plaid's stable item_id (returned from /item/public_token/exchange).
+  // Used as the natural key — UNIQUE so a re-connect updates the existing
+  // row rather than creating a duplicate.
+  itemId: text('item_id').notNull().unique(),
+  // Plaid's institution_id (e.g. `ins_3` for Chase). Stable across Plaid
+  // environments.
+  institutionId: text('institution_id').notNull(),
+  // Human-readable institution name (e.g. "Chase"). Shown in the
+  // Integrations card and Accounts badge.
+  institutionName: text('institution_name').notNull(),
+  // Cursor for /transactions/sync pagination. Null on first sync; updated
+  // after each successful pull. Plaid guarantees idempotency keyed by this
+  // cursor, so we can crash mid-sync and resume without dupes.
+  cursor: text('cursor'),
+  lastSyncedAt: integer('last_synced_at', { mode: 'timestamp_ms' }),
+  // Plaid error code (e.g. `ITEM_LOGIN_REQUIRED`). When non-null, the
+  // Integrations card surfaces a "re-authenticate" CTA.
+  errorCode: text('error_code'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 

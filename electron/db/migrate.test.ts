@@ -45,6 +45,23 @@ describe('runMigrations', () => {
     expect(tables).toContain('finance_accounts')
     expect(tables).toContain('finance_transactions')
     expect(tables).toContain('checklist_items')
+    expect(tables).toContain('plaid_items')
+  })
+
+  it('migration 0009 adds Plaid linkage columns to finance_accounts', () => {
+    runMigrations(tmpDb)
+    const sqlite = new Database(tmpDb, { readonly: true })
+    try {
+      const cols = sqlite.prepare('PRAGMA table_info(finance_accounts)').all() as Array<{
+        name: string
+      }>
+      const colNames = cols.map((c) => c.name)
+      expect(colNames).toContain('plaid_item_id')
+      expect(colNames).toContain('plaid_account_id')
+      expect(colNames).toContain('mask')
+    } finally {
+      sqlite.close()
+    }
   })
 
   it('is idempotent — running twice reports 0 applied the second time', () => {
