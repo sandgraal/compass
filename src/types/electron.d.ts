@@ -432,6 +432,7 @@ declare global {
             accountId: number
             accountName: string
             assetClass: string
+            isDebt: boolean
             date: string
             balance: number
           }>
