@@ -25,6 +25,7 @@
     "test:coverage": "vitest --run --coverage --passWithNoTests",
     "test:e2e": "playwright test --pass-with-no-tests",
     "knip": "knip",
+    "status": "tsx scripts/project-status.ts",
     "prepare": "lefthook install"
   },
   "dependencies": {
