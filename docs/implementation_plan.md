@@ -12,9 +12,9 @@
 | **Phase 1** — Critical bug fixes | 5 items | 100% (all shipped prior to this branch) |
 | **Phase 2** — Remaining PRD features | 7 items | 100% (2.1–2.7 all shipped prior to this branch) |
 | **Phase 3** — Beyond-PRD polish | 2 selected items | 100% (onboarding wizard + tray/notifications shipped) |
-| **Phase 4** — Finance forward roadmap | 7 items | partial (4.0–4.5 shipped; 4.6 outstanding) |
+| **Phase 4** — Finance forward roadmap | 7 items | partial (4.0–4.5 shipped backend+UI; 4.6 + 4.7 outstanding) |
 
-PRD-completion of the running app: **~99%** (all Phases 1–3 + Phase 4.0–4.5 merged).
+PRD-completion of the running app: **~99%** (all Phases 1–3 + Phase 4.0–4.5 merged with UIs).
 
 ---
 
@@ -180,7 +180,7 @@ Shipped in `feat/finance-rocket-money-import`. Adds Rocket Money parser, `catego
 
 ### 4.3 [`tax-tagging.md`](finance/tax-tagging.md) — Schedule C / E / capex tags
 - [x] **Backend shipped** — `taxTag` / `taxTagSource` / `taxYear` columns on `financeTransactions` (indexed on `(taxYear, taxTag)`); `electron/integrations/finance-tax.ts` classifier wired into both ingest paths + Excel import; historical-row backfill via `backfillTaxTags()` runs from both `initDb()` and the standalone `db:migrate` runner; `finance:get-tax-summary` and `finance:set-transaction-tax-tag` IPC handlers exposed through preload + types; user overrides sticky via `taxTagSource='user'`; 21 classifier + backfill tests
-- [ ] **UI follow-up** — tax badge in Transactions tab + override dropdown + year-end summary card (separate `ui-polish` PR)
+- [x] **UI shipped** — color-coded `TaxBadge` column in Transactions tab (short label per tag, ring around manually-overridden rows, full label + source on hover); tax-tag `<select>` in the expanded transaction editor calls `setTransactionTaxTag` and marks `taxTagSource='user'`; year-to-date Tax summary card on the Overview tab listing per-tag count + signed total
 
 ### 4.4 [`net-worth.md`](finance/net-worth.md) — asset-side tracking + trajectory
 - [x] **Backend shipped** — `assetClass` column on `financeAccounts` + new `finance_balance_snapshots` table (indexed on `(accountId, capturedAt)`); `electron/integrations/finance-snapshot.ts` with `captureSnapshots()` (idempotent within a day), `inferBalance()` (snapshot baseline + Σ newer txns, with debt-account sign flip), `setAccountBalance()`, `getNetWorthSnapshot()` (assets / liabilities / net + 30/90/365-day deltas), `getNetWorthTrajectory()`; nightly cron at 00:05 local time
