@@ -195,7 +195,8 @@ Plaid Link in a child BrowserWindow, encrypted tokens in Vault, `transactions/sy
 *Owner: `director` orchestrating `migration-author` + `integration-implementer` + `security-auditor` + `ui-polish` · ~1,500–2,000 LOC across 5–6 PRs*
 
 - [x] **PR 1 — Schema** — `plaid_items` table + `plaidItemId`/`plaidAccountId`/`mask` columns on `financeAccounts` (indexed via `idx_finance_accounts_plaid`); migration 0009; backward compat in `client.ts` for both `ensureNewTables` + `createTablesIfNeeded`; migrate test asserts the new columns exist
-- [ ] PR 2 — Plaid client wrapper (`electron/integrations/plaid/client.ts`) + `safeStorage`-encrypted token vault (`.vault/plaid.enc`)
+- [x] **PR 2a — Vault layer** — extracted shared crypto primitives to `electron/lib/crypto-vault.ts` (the existing vault now imports from there; no behaviour change); new `electron/integrations/plaid/vault.ts` encrypts both per-env Plaid API secrets AND per-Item access tokens into a single `.vault/plaid.enc` blob via AES-256-GCM; 32 unit tests with mocked safeStorage covering round-trip, tamper detection, wrong-key, unicode, isolation per env / per Item, sorted ID listing without token leakage, and the "wipe leaves an encrypted empty blob on disk" invariant
+- [ ] PR 2b — Plaid SDK wrapper (`electron/integrations/plaid/client.ts`) that consumes the vault + config and exposes `getPlaidClient(env)` for the upcoming Link / sync handlers
 - [ ] PR 3 — Plaid Link flow (child BrowserWindow + CSP allowlist for `cdn.plaid.com`)
 - [ ] PR 4 — Sync loop (`/transactions/sync` cursor pagination, normalize → `RawTxn`, hash dedupe, idempotent)
 - [ ] PR 5 — Integrations card UI + Accounts-tab "linked" badge
