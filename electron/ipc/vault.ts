@@ -8,7 +8,20 @@ import { VAULT_DIR } from '../paths'
 // Crypto primitives live in `electron/lib/crypto-vault.ts` so the Plaid
 // token vault can share the same master key + AES layout.
 
+/**
+ * Reject any `category` that isn't one of the IDs declared in
+ * `VAULT_CATEGORIES`. Without this, a hostile (or buggy) renderer could
+ * pass `'../foo'` / `'key'` / etc. via `vault:get-entries` and write
+ * outside `VAULT_DIR` or clobber the master-key blob.
+ */
+function assertKnownCategory(category: string): void {
+  if (!VAULT_CATEGORIES.some((c) => c.id === category)) {
+    throw new Error(`Unknown vault category: ${category}`)
+  }
+}
+
 function readVaultCategory(category: string, key: Buffer): unknown[] {
+  assertKnownCategory(category)
   const path = join(VAULT_DIR, `${category}.enc`)
   if (!existsSync(path)) return []
   try {
@@ -21,6 +34,7 @@ function readVaultCategory(category: string, key: Buffer): unknown[] {
 }
 
 function writeVaultCategory(category: string, entries: unknown[], key: Buffer): void {
+  assertKnownCategory(category)
   const path = join(VAULT_DIR, `${category}.enc`)
   const blob = encryptBlob(JSON.stringify(entries), key)
   writeFileSync(path, blob)

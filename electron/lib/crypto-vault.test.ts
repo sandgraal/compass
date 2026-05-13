@@ -18,6 +18,7 @@ let TMP_VAULT_DIR: string
 
 vi.mock('electron', () => ({
   safeStorage: {
+    isEncryptionAvailable: () => true,
     encryptString: (s: string) => Buffer.from(`SAFE:${s}`, 'utf8'),
     decryptString: (b: Buffer) => {
       const s = b.toString('utf8')
@@ -114,6 +115,24 @@ describe('encryptBlob / decryptBlob', () => {
   })
 })
 
+describe('getOrCreateKey — validation', () => {
+  it('throws when the persisted key blob is malformed (wrong hex length)', () => {
+    // Pre-create a bogus key blob via the same SAFE: wrapping the mock uses,
+    // but with non-hex content. Reading should refuse rather than silently
+    // returning an invalid-length Buffer.
+    const fs = require('node:fs') as typeof import('node:fs')
+    fs.writeFileSync(join(TMP_VAULT_DIR, 'key.enc'), Buffer.from('SAFE:not-hex-at-all', 'utf8'))
+    expect(() => getOrCreateKey()).toThrow(/corrupted/)
+  })
+
+  it('throws when the persisted key is short hex (decoded byte length wrong)', () => {
+    const fs = require('node:fs') as typeof import('node:fs')
+    // 16 hex chars = 8 bytes, far short of 32 — caught by the hex-length regex.
+    fs.writeFileSync(join(TMP_VAULT_DIR, 'key.enc'), Buffer.from('SAFE:abcdef0123456789', 'utf8'))
+    expect(() => getOrCreateKey()).toThrow(/corrupted/)
+  })
+})
+
 describe('readEncryptedJson / writeEncryptedJson', () => {
   it('returns null when the file does not exist', () => {
     const key = getOrCreateKey()
@@ -143,5 +162,26 @@ describe('readEncryptedJson / writeEncryptedJson', () => {
     blob[20] = blob[20] ^ 0xff
     require('node:fs').writeFileSync(path, blob)
     expect(() => readEncryptedJson('test', key)).toThrow()
+  })
+
+  it('rejects names containing path separators or traversal', () => {
+    const key = getOrCreateKey()
+    for (const bad of ['../escape', 'sub/dir', 'foo bar', '..', '']) {
+      expect(() => readEncryptedJson(bad, key)).toThrow(/Invalid vault name/)
+      expect(() => writeEncryptedJson(bad, { v: 1 }, key)).toThrow(/Invalid vault name/)
+    }
+  })
+
+  it('rejects the reserved name "key" (which would clobber the master)', () => {
+    const key = getOrCreateKey()
+    expect(() => writeEncryptedJson('key', { v: 1 }, key)).toThrow(/reserved/)
+    expect(() => readEncryptedJson('key', key)).toThrow(/reserved/)
+  })
+
+  it('atomic write: leaves no .tmp behind on success', () => {
+    const key = getOrCreateKey()
+    writeEncryptedJson('atomic-ok', { v: 1 }, key)
+    expect(require('node:fs').existsSync(join(TMP_VAULT_DIR, 'atomic-ok.enc.tmp'))).toBe(false)
+    expect(require('node:fs').existsSync(join(TMP_VAULT_DIR, 'atomic-ok.enc'))).toBe(true)
   })
 })

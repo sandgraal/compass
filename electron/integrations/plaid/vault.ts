@@ -20,14 +20,9 @@
  * this module.
  */
 
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import {
-  encryptBlob,
-  getOrCreateKey,
-  readEncryptedJson,
-  writeEncryptedJson
-} from '../../lib/crypto-vault'
+import { getOrCreateKey, readEncryptedJson, writeEncryptedJson } from '../../lib/crypto-vault'
 import { VAULT_DIR } from '../../paths'
 
 export type PlaidEnv = 'sandbox' | 'development' | 'production'
@@ -129,15 +124,16 @@ export function listItemIds(): string[] {
 
 /**
  * Wipe the Plaid vault entirely. Used on user-initiated "disconnect
- * everything" or when the encrypted file is corrupt. The next call to
- * `readVault()` regenerates an empty blob lazily.
+ * everything" or when the encrypted file is corrupt. We overwrite the
+ * blob with an encrypted-empty form (rather than `unlink`) so on-disk
+ * observers can't tell "wiped" from "never used". A no-op if no blob
+ * exists yet.
+ *
+ * Uses the shared `writeEncryptedJson` so any future improvements
+ * there (atomic write, audit log, etc.) apply here too.
  */
 export function clearPlaidVault(): void {
   const path = join(VAULT_DIR, `${VAULT_NAME}.enc`)
-  if (existsSync(path)) {
-    // Overwrite with an encrypted empty blob (rather than rm) so on-disk
-    // observers can't tell the difference between "wiped" and "never used".
-    const key = getOrCreateKey()
-    writeFileSync(path, encryptBlob(JSON.stringify(EMPTY_VAULT), key))
-  }
+  if (!existsSync(path)) return
+  writeVault(EMPTY_VAULT)
 }

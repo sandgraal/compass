@@ -21,6 +21,7 @@ let TMP_VAULT_DIR: string
 
 vi.mock('electron', () => ({
   safeStorage: {
+    isEncryptionAvailable: () => true,
     // Trivial round-trip: wrap/unwrap with a fixed prefix so the
     // "decrypts back to the original" invariant is testable.
     encryptString: (s: string) => Buffer.from(`SAFE:${s}`, 'utf8'),
