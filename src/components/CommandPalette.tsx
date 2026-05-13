@@ -6,13 +6,15 @@ import {
   CalendarRange,
   FolderOpen,
   LayoutDashboard,
+  LineChart,
   Plug,
   Plus,
   RefreshCw,
   Search,
   Settings,
   ShieldCheck,
-  TrendingUp
+  TrendingUp,
+  Wallet
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -42,6 +44,22 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
   const nav = (path: string) => {
     navigate(path)
     onClose()
+  }
+
+  // Jump straight to a specific Finance tab. Two cases:
+  //   - Already on /finance: dispatch a CustomEvent that Finance.tsx
+  //     listens for (the component is mounted and setTab handles it).
+  //   - Elsewhere: stash the target tab in sessionStorage and navigate;
+  //     Finance.tsx's useState initializer reads + consumes it on mount.
+  // Mirrors the new-task pattern in this file.
+  const switchFinanceTab = (target: string) => {
+    onClose()
+    if (window.location.hash === '#/finance') {
+      window.dispatchEvent(new CustomEvent('compass:set-finance-tab', { detail: target }))
+    } else {
+      sessionStorage.setItem('compass:pending-finance-tab', target)
+      navigate('/finance')
+    }
   }
 
   const COMMANDS: Command[] = [
@@ -136,6 +154,22 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       icon: <TrendingUp size={15} />,
       action: () => nav('/finance'),
       keywords: ['budget', 'money', 'debt', 'spending']
+    },
+    {
+      id: 'finance-networth',
+      label: 'Net Worth',
+      description: 'Assets, liabilities, and 12-month trajectory',
+      icon: <Wallet size={15} />,
+      action: () => switchFinanceTab('networth'),
+      keywords: ['net worth', 'assets', 'liabilities', 'wealth', 'finance', 'trajectory']
+    },
+    {
+      id: 'finance-forecast',
+      label: 'Cash-flow forecast',
+      description: '90-day projection with low-cash warnings',
+      icon: <LineChart size={15} />,
+      action: () => switchFinanceTab('forecast'),
+      keywords: ['forecast', 'projection', 'cash flow', 'low cash', 'subscriptions', 'finance']
     },
     {
       id: 'integrations',

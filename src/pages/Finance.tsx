@@ -185,8 +185,30 @@ const PREDEFINED_CATEGORIES = [
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
+// Tab values the command palette can deep-link to. Same string as the
+// `Tab` union below so a typo in the palette wouldn't pass typecheck.
+const VALID_TABS: ReadonlySet<Tab> = new Set([
+  'overview',
+  'networth',
+  'forecast',
+  'transactions',
+  'accounts',
+  'rules',
+  'crsubs'
+])
+
 export default function Finance(): JSX.Element {
-  const [tab, setTab] = useState<Tab>('overview')
+  // Initial tab: honor a pending command-palette deep-link if present,
+  // otherwise default to Overview. Read at mount; consumed once.
+  const [tab, setTab] = useState<Tab>(() => {
+    if (typeof window === 'undefined') return 'overview'
+    const pending = sessionStorage.getItem('compass:pending-finance-tab')
+    if (pending && VALID_TABS.has(pending as Tab)) {
+      sessionStorage.removeItem('compass:pending-finance-tab')
+      return pending as Tab
+    }
+    return 'overview'
+  })
   const [txns, setTxns] = useState<Txn[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [debts, setDebts] = useState<Account[]>([])
@@ -269,6 +291,19 @@ export default function Finance(): JSX.Element {
       setWatchFolder(status)
     }
   }
+
+  // Listen for command-palette tab-switch events (fired when the user
+  // picks "Net Worth" or "Cash-flow forecast" while already on /finance).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const target = (e as CustomEvent<string>).detail
+      if (typeof target === 'string' && VALID_TABS.has(target as Tab)) {
+        setTab(target as Tab)
+      }
+    }
+    window.addEventListener('compass:set-finance-tab', handler)
+    return () => window.removeEventListener('compass:set-finance-tab', handler)
+  }, [])
 
   useEffect(() => {
     void refresh()
