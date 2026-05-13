@@ -14,6 +14,15 @@ import {
   Wallet
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis
+} from 'recharts'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
 import { cn } from '../lib/utils'
@@ -65,7 +74,7 @@ type GeoSummary = {
   since: string | null
 }
 
-type Tab = 'overview' | 'transactions' | 'accounts' | 'rules' | 'crsubs'
+type Tab = 'overview' | 'networth' | 'transactions' | 'accounts' | 'rules' | 'crsubs'
 
 const ACCOUNT_TYPES = [
   { value: 'checking', label: 'Checking' },
@@ -439,6 +448,7 @@ export default function Finance(): JSX.Element {
         {(
           [
             ['overview', 'Overview'],
+            ['networth', 'Net Worth'],
             ['transactions', 'Transactions'],
             ['accounts', 'Accounts'],
             ['rules', 'Rules'],
@@ -478,6 +488,8 @@ export default function Finance(): JSX.Element {
           onToggleExcludeProperty={() => setExcludeProperty((v) => !v)}
         />
       )}
+
+      {tab === 'networth' && <NetWorthTab />}
 
       {tab === 'crsubs' && <CrSubsTab geoSummary={geoSummary} subscriptions={subscriptions} />}
 
@@ -673,6 +685,370 @@ function Overview({
       </div>
     </>
   )
+}
+
+// ─── Net Worth Tab (Phase 4.4 UI) ────────────────────────────────────────────
+
+type NetWorthSnapshot = Awaited<ReturnType<Window['api']['finance']['getNetWorthSnapshot']>>
+type NetWorthTrajectory = Awaited<ReturnType<Window['api']['finance']['getNetWorthTrajectory']>>
+
+const ASSET_CLASS_LABEL: Record<string, string> = {
+  spending: 'Spending',
+  savings: 'Savings',
+  retirement: 'Retirement',
+  real_estate: 'Real estate',
+  manual_asset: 'Manual asset',
+  liability: 'Liability'
+}
+
+function NetWorthTab(): JSX.Element {
+  const [snapshot, setSnapshot] = useState<NetWorthSnapshot | null>(null)
+  const [trajectory, setTrajectory] = useState<NetWorthTrajectory>([])
+  const [loading, setLoading] = useState(true)
+  const [capturing, setCapturing] = useState(false)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editValue, setEditValue] = useState('')
+  const { toast: showToast } = useToast()
+
+  const refresh = useCallback(async () => {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron || !window.api.finance) return
+    setLoading(true)
+    try {
+      const [s, t] = await Promise.all([
+        window.api.finance.getNetWorthSnapshot(),
+        window.api.finance.getNetWorthTrajectory({ sinceDays: 365 })
+      ])
+      setSnapshot(s)
+      setTrajectory(t)
+    } catch (err) {
+      console.error('[networth] refresh failed', err)
+      showToast('Failed to load net worth.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }, [showToast])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const capture = async () => {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron || !window.api.finance) return
+    setCapturing(true)
+    try {
+      const result = await window.api.finance.captureSnapshot()
+      showToast(
+        `Captured ${result.written} snapshot${result.written === 1 ? '' : 's'}.`,
+        result.written > 0 ? 'success' : 'info'
+      )
+      await refresh()
+    } catch (err) {
+      console.error('[networth] capture failed', err)
+      showToast('Capture failed.', 'error')
+    } finally {
+      setCapturing(false)
+    }
+  }
+
+  const beginEdit = (accountId: number, currentBalance: number) => {
+    setEditingId(accountId)
+    setEditValue(String(currentBalance))
+  }
+
+  const cancelEdit = () => {
+    setEditingId(null)
+    setEditValue('')
+  }
+
+  const saveEdit = async (accountId: number) => {
+    const balance = Number(editValue)
+    if (!Number.isFinite(balance)) {
+      showToast('Balance must be a number.', 'error')
+      return
+    }
+    try {
+      const result = await window.api.finance.setAccountBalance(accountId, balance)
+      if (!result.success) {
+        showToast(result.error ?? 'Failed to save balance.', 'error')
+        return
+      }
+      cancelEdit()
+      await refresh()
+    } catch (err) {
+      console.error('[networth] save failed', err)
+      showToast('Save failed.', 'error')
+    }
+  }
+
+  // Build the chart data: one point per date with net = Σ(assets) − Σ(liabilities)
+  const isLiabilityClass = (c: string) => c === 'liability'
+  const chartData = buildTrajectoryChartData(trajectory, isLiabilityClass)
+
+  const hasAnySnapshot = snapshot?.byAccount.some((a) => a.capturedAt != null) ?? false
+
+  if (loading) {
+    return <p className="text-sm text-muted-foreground p-4">Loading net worth…</p>
+  }
+
+  if (!snapshot || !hasAnySnapshot) {
+    return (
+      <div className="bg-card border border-border rounded-xl p-8 text-center">
+        <h3 className="text-sm font-semibold mb-2">No snapshots yet</h3>
+        <p className="text-xs text-muted-foreground mb-4 max-w-md mx-auto">
+          A snapshot is one row per account per day, capturing the current balance. The nightly cron
+          at 00:05 local time will start filling these in automatically — or capture one now to see
+          the chart.
+        </p>
+        <button
+          type="button"
+          onClick={capture}
+          disabled={capturing}
+          className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-md hover:opacity-90 disabled:opacity-50"
+        >
+          {capturing ? 'Capturing…' : 'Capture snapshot'}
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* 4-tile summary */}
+      <div className="grid grid-cols-4 gap-4">
+        <NetWorthTile label="Assets" value={fmtMoney(snapshot.assets)} />
+        <NetWorthTile label="Liabilities" value={fmtMoney(snapshot.liabilities)} />
+        <NetWorthTile label="Net worth" value={fmtMoney(snapshot.net)} emphasize />
+        <NetWorthTile
+          label="Δ 30d"
+          value={snapshot.deltas.d30 == null ? '—' : fmtSignedMoney(snapshot.deltas.d30)}
+          sub={
+            snapshot.deltas.d90 == null
+              ? undefined
+              : `${fmtSignedMoney(snapshot.deltas.d90)} 90d · ${snapshot.deltas.d365 == null ? '—' : fmtSignedMoney(snapshot.deltas.d365)} 1y`
+          }
+        />
+      </div>
+
+      {/* Trajectory chart */}
+      <div className="bg-card border border-border rounded-xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="text-sm font-semibold">Trajectory · last 12 months</h3>
+            <p className="text-xs text-muted-foreground">
+              Net worth (Assets − Liabilities) per snapshot date
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={capture}
+            disabled={capturing}
+            className="px-3 py-1.5 text-xs border border-border rounded-md hover:bg-muted disabled:opacity-50"
+          >
+            {capturing ? 'Capturing…' : 'Capture now'}
+          </button>
+        </div>
+        {chartData.length < 2 ? (
+          <p className="text-xs text-muted-foreground py-8 text-center">
+            Need at least 2 snapshot days to draw a trajectory. Capture again tomorrow.
+          </p>
+        ) : (
+          <div style={{ width: '100%', height: 240 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
+                <defs>
+                  <linearGradient id="netGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                  tickMargin={6}
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                  tickFormatter={(v) => fmtMoney(v as number)}
+                  width={70}
+                />
+                <Tooltip
+                  formatter={(v) => fmtMoney(Number(v))}
+                  contentStyle={{
+                    background: 'hsl(var(--card))',
+                    border: '1px solid hsl(var(--border))',
+                    fontSize: 12
+                  }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="net"
+                  stroke="hsl(var(--primary))"
+                  fill="url(#netGradient)"
+                  strokeWidth={2}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      {/* Per-account breakdown */}
+      <div className="bg-card border border-border rounded-xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold">Accounts</h3>
+          <span className="text-xs text-muted-foreground">
+            Click "Set" on a manual asset to update its balance
+          </span>
+        </div>
+        <table className="w-full text-sm">
+          <thead className="text-xs text-muted-foreground">
+            <tr>
+              <th className="text-left">Account</th>
+              <th className="text-left">Class</th>
+              <th className="text-right">Balance</th>
+              <th className="text-left">Last captured</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {snapshot.byAccount.map((a) => {
+              const isManual = a.assetClass === 'manual_asset'
+              const editing = editingId === a.accountId
+              return (
+                <tr key={a.accountId} className="border-t border-border">
+                  <td className="py-1.5">{a.name}</td>
+                  <td className="text-muted-foreground">
+                    {ASSET_CLASS_LABEL[a.assetClass] ?? a.assetClass}
+                  </td>
+                  <td className="text-right tabular-nums">
+                    {editing ? (
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        // biome-ignore lint/a11y/noAutofocus: keyboard focus follows the click on the inline edit row, mirroring how the existing Accounts/Transactions inline editors behave
+                        autoFocus
+                        className="w-28 bg-background border border-border rounded px-2 py-1 text-right text-sm"
+                      />
+                    ) : (
+                      <span className={a.isDebt ? 'text-foreground' : ''}>
+                        {fmtMoney(a.balance)}
+                      </span>
+                    )}
+                  </td>
+                  <td className="text-muted-foreground text-xs">
+                    {a.capturedAt ? format(new Date(a.capturedAt), 'yyyy-MM-dd') : 'never'}
+                  </td>
+                  <td className="text-right">
+                    {isManual && !editing && (
+                      <button
+                        type="button"
+                        onClick={() => beginEdit(a.accountId, a.balance)}
+                        className="text-xs text-primary hover:underline"
+                      >
+                        Set
+                      </button>
+                    )}
+                    {editing && (
+                      <span className="space-x-2">
+                        <button
+                          type="button"
+                          onClick={() => saveEdit(a.accountId)}
+                          className="text-xs text-primary hover:underline"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelEdit}
+                          className="text-xs text-muted-foreground hover:underline"
+                        >
+                          Cancel
+                        </button>
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function NetWorthTile({
+  label,
+  value,
+  sub,
+  emphasize
+}: {
+  label: string
+  value: string
+  sub?: string
+  emphasize?: boolean
+}): JSX.Element {
+  return (
+    <div
+      className={cn(
+        'bg-card border border-border rounded-xl p-4',
+        emphasize && 'border-primary/50'
+      )}
+    >
+      <div className="text-xs text-muted-foreground mb-1">{label}</div>
+      <div
+        className={cn('tabular-nums', emphasize ? 'text-2xl font-semibold' : 'text-xl font-medium')}
+      >
+        {value}
+      </div>
+      {sub && <div className="text-xs text-muted-foreground mt-1">{sub}</div>}
+    </div>
+  )
+}
+
+/**
+ * Roll up per-account snapshots into per-date `{ date, net }` chart points.
+ * Latest known balance per account is forward-filled across days the chart
+ * spans, so a single missing snapshot doesn't leave a hole in the line.
+ */
+export function buildTrajectoryChartData(
+  trajectory: NetWorthTrajectory,
+  isLiability: (assetClass: string) => boolean
+): Array<{ date: string; net: number }> {
+  if (trajectory.length === 0) return []
+
+  // Group all snapshots by date (sorted), then walk forward maintaining the
+  // latest known balance per account.
+  const dates = Array.from(new Set(trajectory.map((p) => p.date))).sort()
+  const latestByAccount = new Map<number, { balance: number; assetClass: string }>()
+
+  // Pre-index trajectory by (date → accountId → snapshot)
+  const byDate = new Map<string, NetWorthTrajectory>()
+  for (const p of trajectory) {
+    const list = byDate.get(p.date) ?? []
+    list.push(p)
+    byDate.set(p.date, list)
+  }
+
+  const out: Array<{ date: string; net: number }> = []
+  for (const date of dates) {
+    for (const p of byDate.get(date) ?? []) {
+      latestByAccount.set(p.accountId, { balance: p.balance, assetClass: p.assetClass })
+    }
+    let assets = 0
+    let liabilities = 0
+    for (const { balance, assetClass } of latestByAccount.values()) {
+      if (isLiability(assetClass)) liabilities += balance
+      else assets += balance
+    }
+    out.push({ date, net: Math.round((assets - liabilities) * 100) / 100 })
+  }
+  return out
 }
 
 // ─── CR & Subscriptions Tab ──────────────────────────────────────────────────
@@ -1782,4 +2158,10 @@ function fmtMoney(n: number): string {
     (n < 0 ? '-$' : '$') +
     Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
   )
+}
+
+function fmtSignedMoney(n: number): string {
+  if (n === undefined || n === null || Number.isNaN(n)) return '—'
+  const sign = n > 0 ? '+' : n < 0 ? '-' : ''
+  return `${sign}$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
 }
