@@ -808,62 +808,66 @@ function Overview({
         </div>
       </div>
 
-      {taxSummary && taxSummary.tags.length > 0 && (
-        <div className="bg-card border border-border rounded-xl p-5">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold">
-              Tax summary{' '}
-              <span className="text-muted-foreground font-normal">
-                · {taxSummary.year} year-to-date
-              </span>
-            </h3>
-            <span className="text-xs text-muted-foreground">
-              Click a transaction's tax badge to override the auto-classification
-            </span>
-          </div>
-          <table className="w-full text-sm">
-            <thead className="text-xs text-muted-foreground">
-              <tr>
-                <th className="text-left">Tag</th>
-                <th className="text-right">Count</th>
-                <th className="text-right">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {taxSummary.tags
-                .filter((row) => row.taxTag !== 'tax:none')
-                .map((row) => (
-                  <tr key={row.taxTag} className="border-t border-border">
-                    <td className="py-1.5">
-                      <TaxBadge tag={row.taxTag} source="auto" />
-                      <span className="ml-2 text-muted-foreground text-xs">
-                        {TAX_TAG_LABEL[row.taxTag] ?? row.taxTag}
-                      </span>
-                    </td>
-                    <td className="text-right tabular-nums text-muted-foreground">
-                      {row.count.toLocaleString()}
-                    </td>
-                    <td
-                      className={cn(
-                        'text-right tabular-nums',
-                        row.total < 0 ? 'text-red-400' : 'text-emerald-400'
-                      )}
-                    >
-                      {fmtSignedMoney(row.total)}
-                    </td>
+      {taxSummary &&
+        (() => {
+          const rows = taxSummary.tags.filter((row) => row.taxTag !== 'tax:none')
+          return (
+            <div className="bg-card border border-border rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold">
+                  Tax summary{' '}
+                  <span className="text-muted-foreground font-normal">
+                    · {taxSummary.year} year-to-date
+                  </span>
+                </h3>
+                <span className="text-xs text-muted-foreground">
+                  Expand a transaction in the Transactions tab to change its tax tag
+                </span>
+              </div>
+              <table className="w-full text-sm">
+                <thead className="text-xs text-muted-foreground">
+                  <tr>
+                    <th className="text-left">Tag</th>
+                    <th className="text-right">Count</th>
+                    <th className="text-right">Total</th>
                   </tr>
-                ))}
-              {taxSummary.tags.filter((row) => row.taxTag !== 'tax:none').length === 0 && (
-                <tr className="border-t border-border">
-                  <td colSpan={3} className="py-3 text-xs text-muted-foreground text-center">
-                    No tax-relevant transactions classified yet this year.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr key={row.taxTag} className="border-t border-border">
+                      <td className="py-1.5">
+                        <TaxBadge tag={row.taxTag} source="auto" />
+                        <span className="ml-2 text-muted-foreground text-xs">
+                          {TAX_TAG_LABEL[row.taxTag] ?? row.taxTag}
+                        </span>
+                      </td>
+                      <td className="text-right tabular-nums text-muted-foreground">
+                        {row.count.toLocaleString()}
+                      </td>
+                      <td
+                        className={cn(
+                          'text-right tabular-nums',
+                          row.total < 0 ? 'text-red-400' : 'text-emerald-400'
+                        )}
+                      >
+                        {fmtSignedMoney(row.total)}
+                      </td>
+                    </tr>
+                  ))}
+                  {rows.length === 0 && (
+                    <tr className="border-t border-border">
+                      <td colSpan={3} className="py-3 text-xs text-muted-foreground text-center">
+                        {taxSummary.tags.length === 0
+                          ? `No transactions yet for ${taxSummary.year}.`
+                          : 'No tax-relevant transactions classified yet this year.'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )
+        })()}
     </>
   )
 }
