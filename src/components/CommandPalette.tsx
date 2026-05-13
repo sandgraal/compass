@@ -19,6 +19,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { cn } from '../lib/utils'
+import { FINANCE_TAB_EVENT, FINANCE_TAB_STORAGE_KEY, type Tab } from '../pages/Finance'
 
 interface Command {
   id: string
@@ -52,12 +53,16 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
   //   - Elsewhere: stash the target tab in sessionStorage and navigate;
   //     Finance.tsx's useState initializer reads + consumes it on mount.
   // Mirrors the new-task pattern in this file.
-  const switchFinanceTab = (target: string) => {
+  //
+  // `target` is typed as `Tab` (imported from ../pages/Finance) so a typo
+  // here fails the TypeScript build at the call site rather than landing
+  // in storage and getting silently dropped by the runtime allowlist.
+  const switchFinanceTab = (target: Tab) => {
     onClose()
     if (window.location.hash === '#/finance') {
-      window.dispatchEvent(new CustomEvent('compass:set-finance-tab', { detail: target }))
+      window.dispatchEvent(new CustomEvent(FINANCE_TAB_EVENT, { detail: target }))
     } else {
-      sessionStorage.setItem('compass:pending-finance-tab', target)
+      sessionStorage.setItem(FINANCE_TAB_STORAGE_KEY, target)
       navigate('/finance')
     }
   }
