@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNotNull, isNull, or } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, isNotNull, isNull, or } from 'drizzle-orm'
 import { BrowserWindow, type IpcMain, Notification } from 'electron'
 import { getDb } from '../db/client'
 import {
@@ -794,7 +794,15 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     }))
   })
 
-  // Calendar events query
+  // Calendar events query.
+  //
+  // Returns events from every supported source (currently `google` +
+  // `apple`). Earlier versions hard-coded the filter to `google` only,
+  // which meant Apple Calendar rows synced into `calendar_events` were
+  // silently invisible to the Dashboard / Daily / Weekly views. The
+  // `inArray` constraint keeps the boundary explicit — adding a new
+  // source means flipping a switch here rather than every dashboard
+  // page seeing every-third-party row by default.
   ipcMain.handle('calendar:get-events', (_event, start: string, end: string) => {
     const db = getDb()
     const startMs = new Date(start).getTime()
@@ -802,7 +810,7 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     return db
       .select()
       .from(calendarEvents)
-      .where(and(eq(calendarEvents.source, 'google')))
+      .where(inArray(calendarEvents.source, ['google', 'apple']))
       .all()
       .filter((e) => e.startAt && e.startAt.getTime() >= startMs && e.startAt.getTime() <= endMs)
   })
