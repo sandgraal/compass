@@ -154,7 +154,7 @@ END:VCALENDAR`
     expect(events.map((e) => e.uid)).toEqual(['a', 'b'])
   })
 
-  it('skips events missing UID or SUMMARY', () => {
+  it('skips events missing UID but keeps untitled events', () => {
     const ics = `BEGIN:VCALENDAR
 BEGIN:VEVENT
 DTSTART:20260515T140000Z
@@ -164,7 +164,9 @@ UID:has-uid-no-summary
 DTSTART:20260515T140000Z
 END:VEVENT
 END:VCALENDAR`
-    expect(parseIcsFile(ics, 'X')).toHaveLength(0)
+    const events = parseIcsFile(ics, 'X')
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ uid: 'has-uid-no-summary', title: '' })
   })
 })
 

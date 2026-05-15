@@ -134,11 +134,11 @@ export function parseIcsFile(content: string, calendarName: string): AppleCalend
       continue
     }
     if (line === 'END:VEVENT') {
-      if (current?.uid && current.title) {
+      if (current?.uid) {
         events.push({
           uid: current.uid,
           calendarName,
-          title: current.title,
+          title: current.title ?? '',
           startAt: current.startAt ?? null,
           endAt: current.endAt ?? null,
           allDay,

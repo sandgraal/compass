@@ -28,6 +28,9 @@ import { getDb } from './db/client'
 import { checklistItems } from './db/schema'
 
 const SCHEME = 'compass'
+const CAPTURE_RATE_LIMIT_WINDOW_MS = 60_000
+const CAPTURE_RATE_LIMIT_MAX = 20
+const recentCaptureTimestamps: number[] = []
 
 /** Top-level pages we'll honour for `compass://open/<page>`. Anything else is ignored. */
 const ALLOWED_PAGES = new Set([
@@ -98,6 +101,16 @@ export function executeCompassCommand(
     case 'capture': {
       const trimmed = (command.text ?? '').trim()
       if (!trimmed) return { ok: false, reason: 'capture requires non-empty text' }
+      const now = Date.now()
+      while (
+        recentCaptureTimestamps.length > 0 &&
+        now - recentCaptureTimestamps[0] > CAPTURE_RATE_LIMIT_WINDOW_MS
+      ) {
+        recentCaptureTimestamps.shift()
+      }
+      if (recentCaptureTimestamps.length >= CAPTURE_RATE_LIMIT_MAX) {
+        return { ok: false, reason: 'capture rate limit exceeded' }
+      }
       try {
         const db = getDb()
         const today = new Date().toISOString().slice(0, 10)
@@ -112,6 +125,7 @@ export function executeCompassCommand(
             createdAt: new Date()
           })
           .run()
+        recentCaptureTimestamps.push(now)
         mainWindow?.webContents.send('compass-url:captured', { title: trimmed })
         return { ok: true }
       } catch (err) {
@@ -167,15 +181,43 @@ export function registerCompassUrlScheme(getMainWindow: () => BrowserWindow | nu
   }
 
   const queue: string[] = []
+  let loadListenerAttachedTo: BrowserWindow | null = null
+
+  function pump(): void {
+    if (queue.length === 0) return
+    const pending = queue.splice(0, queue.length)
+    for (const queuedUrl of pending) dispatch(queuedUrl)
+  }
+
+  function attachDidFinishLoadPump(win: BrowserWindow): void {
+    if (loadListenerAttachedTo === win) return
+    loadListenerAttachedTo = win
+    win.webContents.once('did-finish-load', () => {
+      loadListenerAttachedTo = null
+      pump()
+    })
+  }
 
   function dispatch(url: string): void {
     const win = getMainWindow()
-    if (!win) {
+    if (!win || win.isDestroyed()) {
       queue.push(url)
       return
     }
+    if (win.webContents.isLoadingMainFrame()) {
+      queue.push(url)
+      attachDidFinishLoadPump(win)
+      return
+    }
     const cmd = parseCompassUrl(url)
-    executeCompassCommand(cmd, win)
+    const result = executeCompassCommand(cmd, win)
+    if (!result.ok) {
+      console.warn('[url-scheme] command failed:', {
+        url,
+        kind: cmd.kind,
+        reason: result.reason ?? 'unknown'
+      })
+    }
   }
 
   // macOS: native event when the URL is opened against the app.
@@ -189,10 +231,7 @@ export function registerCompassUrlScheme(getMainWindow: () => BrowserWindow | nu
   // but cron-mode tests don't get a window, so we no-op gracefully if
   // the lock is denied.
   const gotLock = app.requestSingleInstanceLock()
-  if (!gotLock) {
-    // Another instance owns the scheme — exit cleanly so it can handle.
-    app.quit()
-  } else {
+  if (gotLock) {
     app.on('second-instance', (_event, argv) => {
       const win = getMainWindow()
       if (win) {
@@ -203,22 +242,19 @@ export function registerCompassUrlScheme(getMainWindow: () => BrowserWindow | nu
       const url = findCompassUrlInArgv(argv)
       if (url) dispatch(url)
     })
+  } else {
+    console.warn('[url-scheme] single-instance lock denied; skipping URL routing in this process')
   }
 
   // Cold-launch URL in argv (Windows/Linux). macOS uses `open-url`
   // which fires later so we don't double-process here.
-  if (process.platform !== 'darwin') {
+  if (process.platform !== 'darwin' && gotLock) {
     const url = findCompassUrlInArgv(process.argv)
     if (url) dispatch(url)
   }
 
   return {
-    pump: () => {
-      while (queue.length > 0) {
-        const url = queue.shift()
-        if (url) dispatch(url)
-      }
-    }
+    pump
   }
 }
 

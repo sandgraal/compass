@@ -308,7 +308,7 @@ function maybeSendNotification(service: string, recordsUpdated: number, error?: 
  */
 export async function syncAppleCalendar(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
   const db = getDb()
-  const integrationId = getIntegrationId(db, 'apple-calendar')
+  let integrationId: number | null = null
   let recordsUpdated = 0
 
   try {
@@ -362,6 +362,7 @@ export async function syncAppleCalendar(mainWindow?: BrowserWindow | null): Prom
       })
       .run()
 
+    integrationId = getIntegrationId(db, 'apple-calendar')
     if (integrationId != null) {
       db.insert(syncEvents)
         .values({ integrationId, syncedAt: new Date(), recordsUpdated, errors: null })
@@ -380,6 +381,7 @@ export async function syncAppleCalendar(mainWindow?: BrowserWindow | null): Prom
       .set({ status: 'error', errorMessage: message })
       .where(eq(integrations.service, 'apple-calendar'))
       .run()
+    integrationId = getIntegrationId(db, 'apple-calendar')
     if (integrationId != null) {
       db.insert(syncEvents)
         .values({ integrationId, syncedAt: new Date(), recordsUpdated: 0, errors: message })
