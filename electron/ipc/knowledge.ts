@@ -1,5 +1,13 @@
-import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { basename, extname, join, relative } from 'node:path'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
+import { basename, dirname, extname, join, relative } from 'node:path'
 import chokidar from 'chokidar'
 import { and, eq } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
@@ -110,6 +118,14 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
     const fullPath = join(KNOWLEDGE_DIR, relativePath)
     if (!fullPath.startsWith(KNOWLEDGE_DIR)) throw new Error('Path traversal blocked')
     if (existsSync(fullPath)) throw new Error('File already exists')
+    // The unresolved-wikilink path drops files under `general/<slug>.md`,
+    // but `general/` isn't one of the dirs `ensureDirectories()` seeds.
+    // Create the parent so the first wikilink on a fresh profile works
+    // instead of failing silently with ENOENT.
+    const parent = dirname(fullPath)
+    if (parent.startsWith(KNOWLEDGE_DIR) && !existsSync(parent)) {
+      mkdirSync(parent, { recursive: true })
+    }
     writeFileSync(fullPath, `# ${title}\n\n`, 'utf8')
     return { success: true }
   })
@@ -147,6 +163,65 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
         return { ...f, snippet }
       })
       .filter(Boolean)
+  })
+
+  // Backlinks (May 2026 strategic-review Tier 1 #4).
+  //
+  // `[[link]]` semantics: a target is matched if the bracketed text equals
+  //   - the file's title (the H1 line), case-insensitive, OR
+  //   - the file's basename without `.md`, case-insensitive, OR
+  //   - the file's relative path with or without the `.md` extension.
+  //
+  // We return one row per referencing file with a short snippet centred on
+  // the matched `[[...]]` token. Heavy file ops live in the main process so
+  // the renderer can render the panel synchronously off the result.
+  ipcMain.handle('knowledge:get-backlinks', (_event, relativePath: string) => {
+    if (typeof relativePath !== 'string' || relativePath.includes('..')) {
+      return [] as Array<{ path: string; title: string; snippet: string }>
+    }
+    const targetFull = join(KNOWLEDGE_DIR, relativePath)
+    if (!targetFull.startsWith(KNOWLEDGE_DIR) || !existsSync(targetFull)) {
+      return [] as Array<{ path: string; title: string; snippet: string }>
+    }
+    const targetContent = readFileSync(targetFull, 'utf8')
+    const titleMatch = targetContent.match(/^#\s+(.+)$/m)
+    const targetTitle = (titleMatch ? titleMatch[1].trim() : '').toLowerCase()
+    const targetBasename = relativePath.replace(/^.*\//, '').replace(/\.md$/, '').toLowerCase()
+    const targetPathNoExt = relativePath.replace(/\.md$/, '').toLowerCase()
+    const targetPathLc = relativePath.toLowerCase()
+
+    const aliases = new Set(
+      [targetTitle, targetBasename, targetPathNoExt, targetPathLc].filter(Boolean)
+    )
+
+    const files = walkDir(KNOWLEDGE_DIR, KNOWLEDGE_DIR)
+    const hits: Array<{ path: string; title: string; snippet: string }> = []
+    const wikilinkRe = /\[\[([^\]]+)\]\]/g
+
+    for (const f of files) {
+      if (f.path === relativePath) continue
+      const content = readFileSync(join(KNOWLEDGE_DIR, f.path), 'utf8')
+      let m: RegExpExecArray | null
+      let firstMatchIdx = -1
+      wikilinkRe.lastIndex = 0
+      while ((m = wikilinkRe.exec(content)) != null) {
+        const inner = m[1].trim().toLowerCase()
+        // Strip optional "|alias" — `[[foo|display]]` still links to foo.
+        const target = inner.split('|')[0].trim()
+        if (aliases.has(target)) {
+          firstMatchIdx = m.index
+          break
+        }
+      }
+      if (firstMatchIdx === -1) continue
+      const snippet = content
+        .slice(Math.max(0, firstMatchIdx - 60), firstMatchIdx + 100)
+        .replace(/\n+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+      hits.push({ path: f.path, title: f.title, snippet })
+    }
+    return hits
   })
 
   // ---- Knowledge Suggestions ----
