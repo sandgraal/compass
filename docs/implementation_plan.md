@@ -233,19 +233,23 @@ Net Worth view has live balances waiting.
 
 ---
 
+## Phase 5 (cont.) — strategic-review follow-ups (Tier 3 cross-platform polish)
+
+- [x] **5.7 Apple Calendar (iCal) local read** — `electron/integrations/apple-calendar.ts` walks `~/Library/Calendars/*.calendar/Events/*.ics`, parses VEVENTs (line unfolding, escape decode, DATE / DATE-TIME / TZID handling, RRULE flagging) and upserts into `calendar_events` with `source: 'apple'`. `syncAppleCalendar()` wired into `sync:trigger`, `sync:trigger-all`, and the per-integration cron schedule. Integrations card is local-only — "Connect" runs the sync, no OAuth. RRULE expansion is a follow-up (base instance is emitted today); TZID bodies parse as floating local time.
+- [x] **5.8 `compass://` URL scheme** — `electron/url-scheme.ts` registers Compass as the default handler and routes a small command vocabulary (`capture`, `open/<page>`, `search`) into the running process via `open-url` (macOS) or single-instance argv (Win/Linux). `electron-builder.protocols` advertises the scheme on packaged installs. Renderer-side bridge inside `<HashRouter>` handles navigation + palette pre-fill.
+
 ## Backlog (deferred, considered but out of scope this round)
 
-- Encrypted backup/restore (high value — Phase 4)
-- Apple Calendar (iCal) local read
 - Habit streaks badges
-- Wiki-style `[[link]]` between knowledge files
-- Global search via ⌘K (knowledge + vault titles + tasks inline)
 - Privacy auto-lock (Vault re-auth after N min idle)
 - Distraction-free reading mode
 - Bulk operations in Daily checklist
 - Apple Spotlight integration
 - Apple Contacts import
 - PWA / web companion
+- Semantic search via local embeddings (extend Ollama opt-in path)
+- In-app AI assistant panel (BYO Claude/OpenAI key)
+- RRULE expansion for Apple Calendar (currently only base instance is emitted)
 
 ---
 

@@ -104,6 +104,7 @@ Registered in `electron/main.ts`:
 - `registerFinanceHandlers` — txns, accounts, debt summary, budget, rules, **geo summary, tax summary + override (Phase 4.3), net-worth snapshot/trajectory + capture + manual balance (Phase 4.4), forecast + override CRUD (Phase 4.5)**
 - `registerHabitsHandlers` — habit CRUD + toggle entries
 - `registerUpdaterHandlers` — `updater:check`, `updater:install-and-restart`; pushes `updater:status` events to renderer
+- `registerCompassUrlScheme` (in `electron/url-scheme.ts`) — registers the `compass://` protocol handler (`capture`, `open/<page>`, `search`); routes URLs from `open-url` (macOS) and `second-instance` (Win/Linux) into IPC events the renderer consumes. `electron/integrations/apple-calendar.ts` adds `syncAppleCalendar` (Phase 5.7) which is dispatched from `sync.ts` for the `apple-calendar` service.
 
 Pattern: every IPC handler lives in `electron/ipc/<domain>.ts`, is exposed through `electron/preload.ts`, and has a TypeScript signature in `src/types/electron.d.ts`. Drift between these three is the leading source of bugs — see `electron-trpc` migration plan in `docs/implementation_plan.md` Phase 0.7.
 

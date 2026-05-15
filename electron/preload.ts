@@ -269,6 +269,30 @@ const api = {
     }
   },
 
+  // --- compass:// URL scheme events (May 2026 Tier 3 #11) ---
+  // The main process pushes these when a URL like `compass://open/<page>`
+  // or `compass://search?q=…` arrives. Capture events stay in main —
+  // the renderer just gets a notification.
+  urlScheme: {
+    onCaptured: (cb: (data: { title: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: { title: string }): void =>
+        cb(data)
+      ipcRenderer.on('compass-url:captured', listener)
+      return () => ipcRenderer.removeListener('compass-url:captured', listener)
+    },
+    onOpen: (cb: (data: { page: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: { page: string }): void => cb(data)
+      ipcRenderer.on('compass-url:open', listener)
+      return () => ipcRenderer.removeListener('compass-url:open', listener)
+    },
+    onSearch: (cb: (data: { query: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: { query: string }): void =>
+        cb(data)
+      ipcRenderer.on('compass-url:search', listener)
+      return () => ipcRenderer.removeListener('compass-url:search', listener)
+    }
+  },
+
   // --- Theme ---
   theme: {
     getNativeTheme: () => ipcRenderer.invoke('get-native-theme'),

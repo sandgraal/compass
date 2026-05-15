@@ -129,6 +129,12 @@
       "category": "public.app-category.productivity",
       "icon": "resources/icon.icns"
     },
+    "protocols": [
+      {
+        "name": "Compass URL",
+        "schemes": ["compass"]
+      }
+    ],
     "files": ["out/**/*", "package.json"],
     "asarUnpack": ["**/*.node"],
     "directories": {

@@ -1,0 +1,251 @@
+/**
+ * Apple Calendar (iCal) parser tests. We never touch the host
+ * filesystem here — every test feeds a synthetic ICS string through
+ * `parseIcsFile` or builds a temp dir for `readAppleCalendars`. The
+ * real `~/Library/Calendars` integration is covered by the smoke test
+ * in the PR plan.
+ */
+
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { _internal, parseIcsFile, readAppleCalendars } from './apple-calendar'
+
+const { unfoldIcs, unescapeText, parseDateValue, splitProperty } = _internal
+
+const BASE_VEVENT = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:event-123
+SUMMARY:Standup
+DTSTART:20260515T140000Z
+DTEND:20260515T143000Z
+LOCATION:Office
+DESCRIPTION:Daily standup\\, no laptops
+END:VEVENT
+END:VCALENDAR`
+
+describe('unfoldIcs', () => {
+  it('joins continuation lines (leading space)', () => {
+    const raw = 'DESCRIPTION:hello\n world'
+    expect(unfoldIcs(raw)).toEqual(['DESCRIPTION:helloworld'])
+  })
+
+  it('joins continuation lines (leading tab)', () => {
+    const raw = 'X-FOO:line1\n\tcontinued'
+    expect(unfoldIcs(raw)).toEqual(['X-FOO:line1continued'])
+  })
+
+  it('handles CRLF line endings', () => {
+    const raw = 'A\r\nB\r\n'
+    expect(unfoldIcs(raw)).toEqual(['A', 'B', ''])
+  })
+})
+
+describe('unescapeText', () => {
+  it('decodes \\n, \\,, \\;, \\\\', () => {
+    expect(unescapeText('a\\nb\\,c\\;d\\\\e')).toBe('a\nb,c;d\\e')
+  })
+
+  it('also accepts \\N (uppercase) for newline', () => {
+    expect(unescapeText('a\\Nb')).toBe('a\nb')
+  })
+})
+
+describe('parseDateValue', () => {
+  it('parses a Z-suffixed UTC date-time', () => {
+    const d = parseDateValue('20260515T140000Z', false)
+    expect(d?.toISOString()).toBe('2026-05-15T14:00:00.000Z')
+  })
+
+  it('parses a DATE-only value as midnight local', () => {
+    const d = parseDateValue('20260515', true)
+    expect(d?.getFullYear()).toBe(2026)
+    expect(d?.getMonth()).toBe(4) // zero-indexed → May
+    expect(d?.getDate()).toBe(15)
+    expect(d?.getHours()).toBe(0)
+  })
+
+  it('returns null for malformed values', () => {
+    expect(parseDateValue('garbage', false)).toBeNull()
+    expect(parseDateValue('2026-05-15', false)).toBeNull()
+    expect(parseDateValue('garbage', true)).toBeNull()
+  })
+})
+
+describe('splitProperty', () => {
+  it('parses a bare property', () => {
+    expect(splitProperty('SUMMARY:Hello world')).toEqual({
+      name: 'SUMMARY',
+      params: {},
+      value: 'Hello world'
+    })
+  })
+
+  it('parses TZID and other parameters', () => {
+    expect(splitProperty('DTSTART;TZID=America/New_York:20260515T100000')).toEqual({
+      name: 'DTSTART',
+      params: { TZID: 'America/New_York' },
+      value: '20260515T100000'
+    })
+  })
+
+  it('returns null when there is no colon', () => {
+    expect(splitProperty('NO_COLON_HERE')).toBeNull()
+  })
+})
+
+describe('parseIcsFile', () => {
+  it('parses a single VEVENT with escaped description', () => {
+    const events = parseIcsFile(BASE_VEVENT, 'Work')
+    expect(events).toHaveLength(1)
+    expect(events[0].uid).toBe('event-123')
+    expect(events[0].title).toBe('Standup')
+    expect(events[0].calendarName).toBe('Work')
+    expect(events[0].location).toBe('Office')
+    expect(events[0].description).toBe('Daily standup, no laptops')
+    expect(events[0].allDay).toBe(false)
+    expect(events[0].recurring).toBe(false)
+    expect(events[0].startAt?.toISOString()).toBe('2026-05-15T14:00:00.000Z')
+    expect(events[0].endAt?.toISOString()).toBe('2026-05-15T14:30:00.000Z')
+  })
+
+  it('flags all-day events from DTSTART;VALUE=DATE', () => {
+    const ics = `BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:allday
+SUMMARY:Holiday
+DTSTART;VALUE=DATE:20260704
+END:VEVENT
+END:VCALENDAR`
+    const [ev] = parseIcsFile(ics, 'Personal')
+    expect(ev.allDay).toBe(true)
+    expect(ev.title).toBe('Holiday')
+  })
+
+  it('flags recurring events when RRULE is present', () => {
+    const ics = `BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:weekly
+SUMMARY:Team sync
+DTSTART:20260515T140000Z
+RRULE:FREQ=WEEKLY;BYDAY=MO
+END:VEVENT
+END:VCALENDAR`
+    const [ev] = parseIcsFile(ics, 'Work')
+    expect(ev.recurring).toBe(true)
+  })
+
+  it('returns multiple events from a single file', () => {
+    const ics = `BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:a
+SUMMARY:A
+DTSTART:20260515T140000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:b
+SUMMARY:B
+DTSTART:20260516T140000Z
+END:VEVENT
+END:VCALENDAR`
+    const events = parseIcsFile(ics, 'Work')
+    expect(events.map((e) => e.uid)).toEqual(['a', 'b'])
+  })
+
+  it('skips events missing UID or SUMMARY', () => {
+    const ics = `BEGIN:VCALENDAR
+BEGIN:VEVENT
+DTSTART:20260515T140000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:has-uid-no-summary
+DTSTART:20260515T140000Z
+END:VEVENT
+END:VCALENDAR`
+    expect(parseIcsFile(ics, 'X')).toHaveLength(0)
+  })
+})
+
+describe('readAppleCalendars', () => {
+  let tmp: string
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'compass-cal-test-'))
+  })
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true })
+  })
+
+  function makeCalendar(name: string, title: string, events: string): void {
+    const calDir = join(tmp, `${name}.calendar`)
+    const eventsDir = join(calDir, 'Events')
+    mkdirSync(eventsDir, { recursive: true })
+    writeFileSync(
+      join(calDir, 'Info.plist'),
+      `<plist><dict><key>Title</key><string>${title}</string></dict></plist>`
+    )
+    writeFileSync(join(eventsDir, 'event.ics'), events)
+  }
+
+  it('returns events within the configured window', () => {
+    makeCalendar('Work', 'Work', BASE_VEVENT)
+    const events = readAppleCalendars({
+      root: tmp,
+      windowStart: new Date('2026-05-01T00:00:00Z'),
+      windowEnd: new Date('2026-05-31T00:00:00Z')
+    })
+    expect(events).toHaveLength(1)
+    expect(events[0].title).toBe('Standup')
+    expect(events[0].calendarName).toBe('Work')
+  })
+
+  it('filters events outside the window', () => {
+    makeCalendar('Work', 'Work', BASE_VEVENT)
+    const events = readAppleCalendars({
+      root: tmp,
+      windowStart: new Date('2026-07-01T00:00:00Z'),
+      windowEnd: new Date('2026-07-15T00:00:00Z')
+    })
+    expect(events).toHaveLength(0)
+  })
+
+  it('returns an empty array for a missing root', () => {
+    expect(readAppleCalendars({ root: join(tmp, 'does-not-exist') })).toEqual([])
+  })
+
+  it('sorts events by start time', () => {
+    const ics = `BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:b
+SUMMARY:B
+DTSTART:20260520T140000Z
+DTEND:20260520T150000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:a
+SUMMARY:A
+DTSTART:20260515T140000Z
+DTEND:20260515T150000Z
+END:VEVENT
+END:VCALENDAR`
+    makeCalendar('Mix', 'Mix', ics)
+    const events = readAppleCalendars({
+      root: tmp,
+      windowStart: new Date('2026-05-01T00:00:00Z'),
+      windowEnd: new Date('2026-05-31T00:00:00Z')
+    })
+    expect(events.map((e) => e.uid)).toEqual(['a', 'b'])
+  })
+
+  it('reads the calendar title from Info.plist', () => {
+    makeCalendar('home-7C5', 'Home', BASE_VEVENT)
+    const events = readAppleCalendars({
+      root: tmp,
+      windowStart: new Date('2026-05-01T00:00:00Z'),
+      windowEnd: new Date('2026-05-31T00:00:00Z')
+    })
+    expect(events[0].calendarName).toBe('Home')
+  })
+})

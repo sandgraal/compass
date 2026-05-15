@@ -251,6 +251,11 @@ declare global {
         getNativeTheme(): Promise<'dark' | 'light'>
         onThemeChange(cb: (theme: string) => void): () => void
       }
+      urlScheme: {
+        onCaptured(cb: (data: { title: string }) => void): () => void
+        onOpen(cb: (data: { page: string }) => void): () => void
+        onSearch(cb: (data: { query: string }) => void): () => void
+      }
       finance: {
         ingestFolder(folder?: string): Promise<{
           filesProcessed: number
