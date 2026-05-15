@@ -102,11 +102,15 @@ export function executeCompassCommand(
       const trimmed = (command.text ?? '').trim()
       if (!trimmed) return { ok: false, reason: 'capture requires non-empty text' }
       const now = Date.now()
+      let expiredCount = 0
       while (
-        recentCaptureTimestamps.length > 0 &&
-        now - recentCaptureTimestamps[0] > CAPTURE_RATE_LIMIT_WINDOW_MS
+        expiredCount < recentCaptureTimestamps.length &&
+        now - recentCaptureTimestamps[expiredCount] > CAPTURE_RATE_LIMIT_WINDOW_MS
       ) {
-        recentCaptureTimestamps.shift()
+        expiredCount += 1
+      }
+      if (expiredCount > 0) {
+        recentCaptureTimestamps.splice(0, expiredCount)
       }
       if (recentCaptureTimestamps.length >= CAPTURE_RATE_LIMIT_MAX) {
         return { ok: false, reason: 'capture rate limit exceeded' }
@@ -185,11 +189,18 @@ export function registerCompassUrlScheme(getMainWindow: () => BrowserWindow | nu
 
   function pump(): void {
     if (queue.length === 0) return
-    const pending = queue.splice(0, queue.length)
-    for (const queuedUrl of pending) dispatch(queuedUrl)
+    const pendingCount = queue.length
+    for (let i = 0; i < pendingCount; i += 1) {
+      dispatch(queue[i])
+    }
+    queue.splice(0, pendingCount)
   }
 
   function attachDidFinishLoadPump(win: BrowserWindow): void {
+    if (!win.webContents.isLoadingMainFrame()) {
+      pump()
+      return
+    }
     if (loadListenerAttachedTo === win) return
     loadListenerAttachedTo = win
     win.webContents.once('did-finish-load', () => {
@@ -213,7 +224,6 @@ export function registerCompassUrlScheme(getMainWindow: () => BrowserWindow | nu
     const result = executeCompassCommand(cmd, win)
     if (!result.ok) {
       console.warn('[url-scheme] command failed:', {
-        url,
         kind: cmd.kind,
         reason: result.reason ?? 'unknown'
       })
