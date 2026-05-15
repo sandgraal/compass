@@ -11,10 +11,12 @@ import {
   Check,
   ChevronRight,
   FileText,
+  Focus,
   Folder,
   GitCompare,
   Lightbulb,
   Link2,
+  Minimize2,
   Plus,
   RefreshCw,
   Save,
@@ -56,6 +58,10 @@ export default function KnowledgeBase(): JSX.Element {
   const [saving, setSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [showDiff, setShowDiff] = useState(false)
+  // Distraction-free reading mode (Phase 5 backlog): hides the file
+  // sidebar + header so the editor pane occupies the full content area.
+  // Esc exits.
+  const [readingMode, setReadingMode] = useState(false)
   const [diffOld, setDiffOld] = useState<string | null>(null) // content before last sync
   const [suggestions, setSuggestions] = useState<KnowledgeSuggestion[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
@@ -121,6 +127,21 @@ export default function KnowledgeBase(): JSX.Element {
     window.addEventListener('compass:focus-search', handler)
     return () => window.removeEventListener('compass:focus-search', handler)
   }, [])
+
+  // Reading-mode shortcut: Esc exits. Tied to `readingMode` so we don't
+  // intercept Escape in normal mode (the editor / palette already handle
+  // their own dismissals).
+  useEffect(() => {
+    if (!readingMode) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setReadingMode(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [readingMode])
 
   // CommandPalette "open knowledge X" → load that note (also fired on
   // mount when the palette put the path into sessionStorage before nav).
@@ -345,9 +366,14 @@ export default function KnowledgeBase(): JSX.Element {
   const selectedFile = files.find((f) => f.path === selectedPath)
 
   return (
-    <div className="flex h-full pt-10">
-      {/* File tree sidebar */}
-      <div className="w-64 shrink-0 border-r border-border flex flex-col bg-card/40">
+    <div className={cn('flex h-full', readingMode ? 'pt-0' : 'pt-10')}>
+      {/* File tree sidebar — hidden in distraction-free reading mode */}
+      <div
+        className={cn(
+          'w-64 shrink-0 border-r border-border flex flex-col bg-card/40',
+          readingMode && 'hidden'
+        )}
+      >
         {/* Search */}
         <div className="px-3 py-3 border-b border-border">
           <div className="relative">
@@ -540,6 +566,23 @@ export default function KnowledgeBase(): JSX.Element {
                   </button>
                 )}
                 <button
+                  type="button"
+                  onClick={() => setReadingMode((v) => !v)}
+                  aria-pressed={readingMode}
+                  title={
+                    readingMode ? 'Exit reading mode (Esc)' : 'Enter distraction-free reading mode'
+                  }
+                  className={cn(
+                    'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors',
+                    readingMode
+                      ? 'bg-primary/20 text-primary border border-primary/30'
+                      : 'bg-secondary hover:bg-secondary/80'
+                  )}
+                >
+                  {readingMode ? <Minimize2 size={12} /> : <Focus size={12} />}
+                  {readingMode ? 'Exit' : 'Focus'}
+                </button>
+                <button
                   onClick={saveContent}
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors"
                 >
@@ -627,10 +670,18 @@ export default function KnowledgeBase(): JSX.Element {
             )}
 
             {/* TipTap editor */}
-            <div className="flex-1 overflow-y-auto px-10 py-6">
+            <div
+              className={cn(
+                'flex-1 overflow-y-auto',
+                readingMode ? 'px-6 py-16 md:py-24' : 'px-10 py-6'
+              )}
+            >
               <EditorContent
                 editor={editor}
-                className="tiptap-editor prose prose-invert max-w-none text-foreground"
+                className={cn(
+                  'tiptap-editor prose prose-invert text-foreground',
+                  readingMode ? 'max-w-2xl mx-auto text-[15px] leading-7' : 'max-w-none'
+                )}
               />
             </div>
           </>

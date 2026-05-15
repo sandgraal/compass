@@ -1,13 +1,17 @@
 import { addDays, format, subDays } from 'date-fns'
 import {
+  Check,
+  CheckSquare,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Download,
   FileText,
   GripVertical,
+  ListChecks,
   Plus,
   RefreshCcw,
+  RotateCcw,
   Trash2,
   X
 } from 'lucide-react'
@@ -62,6 +66,12 @@ export default function Daily(): JSX.Element {
   const [loading, setLoading] = useState(true)
   const [templateOpen, setTemplateOpen] = useState(false)
   const [templateContent, setTemplateContent] = useState('')
+  // Bulk-select mode (Phase 5 follow-up backlog). When ON, every row
+  // grows a leading checkbox and a sticky toolbar at the top lists the
+  // batch actions. Selected ids cleared on exit so leaving + re-entering
+  // doesn't carry stale picks.
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const inputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
 
@@ -233,6 +243,80 @@ export default function Daily(): JSX.Element {
     )
   }
 
+  // ─── Bulk-select helpers ────────────────────────────────────────────────
+  //
+  // Selection state lives in `selectedIds`; the toolbar reads `items` to
+  // decide which action labels to show (e.g. "Complete 4"). Per-item
+  // checkbox state is the existing `item.checked` — selection is a
+  // separate concept ("which rows should this bulk action apply to") so
+  // a user can multi-select still-unchecked tasks AND apply Complete
+  // in one click.
+
+  function toggleSelectionMode(): void {
+    setSelectionMode((on) => {
+      if (on) setSelectedIds(new Set())
+      return !on
+    })
+  }
+
+  function toggleSelected(id: number): void {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function selectAll(): void {
+    setSelectedIds(new Set(items.map((i) => i.id)))
+  }
+
+  function clearSelection(): void {
+    setSelectedIds(new Set())
+  }
+
+  async function bulkSetChecked(checked: boolean): Promise<void> {
+    if (selectedIds.size === 0) return
+    const ids = Array.from(selectedIds)
+    setItems((prev) => prev.map((i) => (selectedIds.has(i.id) ? { ...i, checked } : i)))
+    if (window.api) {
+      await Promise.all(ids.map((id) => window.api!.checklist.updateItem(id, { checked })))
+    }
+    toast(
+      `${checked ? 'Completed' : 'Reopened'} ${ids.length} task${ids.length === 1 ? '' : 's'}`,
+      'success'
+    )
+    clearSelection()
+  }
+
+  async function bulkDelete(): Promise<void> {
+    if (selectedIds.size === 0) return
+    const ids = Array.from(selectedIds)
+    setItems((prev) => prev.filter((i) => !selectedIds.has(i.id)))
+    if (window.api) {
+      await Promise.all(ids.map((id) => window.api!.checklist.deleteItem(id)))
+    }
+    toast(`Deleted ${ids.length} task${ids.length === 1 ? '' : 's'}`, 'success')
+    clearSelection()
+  }
+
+  async function bulkMoveToTomorrow(): Promise<void> {
+    if (selectedIds.size === 0) return
+    const tomorrow = isoDate(addDays(date, 1))
+    const ids = Array.from(selectedIds)
+    // Optimistically remove from today's view — they belong to a
+    // different date now and won't be loaded for `dateStr` next render.
+    setItems((prev) => prev.filter((i) => !selectedIds.has(i.id)))
+    if (window.api) {
+      await Promise.all(
+        ids.map((id) => window.api!.checklist.updateItem(id, { listDate: tomorrow }))
+      )
+    }
+    toast(`Moved ${ids.length} task${ids.length === 1 ? '' : 's'} to ${tomorrow}`, 'success')
+    clearSelection()
+  }
+
   async function openTemplateEditor() {
     if (window.api) {
       const content = await window.api.checklist.getTemplate('daily')
@@ -309,6 +393,21 @@ export default function Daily(): JSX.Element {
         </div>
 
         <div className="flex items-center gap-2">
+          {items.length > 0 && (
+            <button
+              type="button"
+              onClick={toggleSelectionMode}
+              aria-pressed={selectionMode}
+              className={cn(
+                'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors',
+                selectionMode
+                  ? 'bg-primary/20 text-primary border border-primary/30'
+                  : 'bg-secondary hover:bg-secondary/80'
+              )}
+            >
+              <ListChecks size={12} /> {selectionMode ? 'Done' : 'Select'}
+            </button>
+          )}
           {isToday && (
             <button
               onClick={rollOver}
@@ -331,6 +430,68 @@ export default function Daily(): JSX.Element {
           </button>
         </div>
       </div>
+
+      {/* Bulk-select toolbar */}
+      {selectionMode && (
+        <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/20 text-xs">
+          <span className="font-medium text-primary">{selectedIds.size} selected</span>
+          <span className="text-muted-foreground">·</span>
+          <button
+            type="button"
+            onClick={selectAll}
+            className="text-primary hover:underline"
+            disabled={selectedIds.size === items.length}
+          >
+            Select all
+          </button>
+          {selectedIds.size > 0 && (
+            <>
+              <span className="text-muted-foreground">·</span>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                Clear
+              </button>
+            </>
+          )}
+          <div className="ml-auto flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => bulkSetChecked(true)}
+              disabled={selectedIds.size === 0}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-primary/15 hover:bg-primary/25 text-primary transition-colors disabled:opacity-40"
+            >
+              <Check size={11} /> Complete
+            </button>
+            <button
+              type="button"
+              onClick={() => bulkSetChecked(false)}
+              disabled={selectedIds.size === 0}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-secondary hover:bg-secondary/80 transition-colors disabled:opacity-40"
+            >
+              <RotateCcw size={11} /> Reopen
+            </button>
+            <button
+              type="button"
+              onClick={bulkMoveToTomorrow}
+              disabled={selectedIds.size === 0}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-secondary hover:bg-secondary/80 transition-colors disabled:opacity-40"
+            >
+              <CheckSquare size={11} /> Move to tomorrow
+            </button>
+            <button
+              type="button"
+              onClick={bulkDelete}
+              disabled={selectedIds.size === 0}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-destructive/15 hover:bg-destructive/25 text-destructive transition-colors disabled:opacity-40"
+            >
+              <Trash2 size={11} /> Delete
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Progress bar */}
       {items.length > 0 && (
@@ -382,6 +543,9 @@ export default function Daily(): JSX.Element {
               category={cat}
               items={catItems}
               expanded={expandedItems}
+              selectionMode={selectionMode}
+              selectedIds={selectedIds}
+              onToggleSelected={toggleSelected}
               onToggleItem={toggleItem}
               onDeleteItem={deleteItem}
               onUpdateBody={updateBody}
@@ -556,6 +720,9 @@ function CategorySection({
   category,
   items,
   expanded,
+  selectionMode,
+  selectedIds,
+  onToggleSelected,
   onToggleItem,
   onDeleteItem,
   onUpdateBody,
@@ -565,6 +732,9 @@ function CategorySection({
   category: Category
   items: ChecklistItem[]
   expanded: Set<number>
+  selectionMode: boolean
+  selectedIds: Set<number>
+  onToggleSelected: (id: number) => void
   onToggleItem: (id: number, checked: boolean) => void
   onDeleteItem: (id: number) => void
   onUpdateBody: (id: number, body: string) => void
@@ -610,6 +780,9 @@ function CategorySection({
             item={item}
             isExpanded={expanded.has(item.id)}
             isDragTarget={dragOverId === item.id}
+            selectionMode={selectionMode}
+            isSelected={selectedIds.has(item.id)}
+            onToggleSelected={() => onToggleSelected(item.id)}
             onToggle={(checked) => onToggleItem(item.id, checked)}
             onDelete={() => onDeleteItem(item.id)}
             onUpdateBody={(body) => onUpdateBody(item.id, body)}
@@ -635,6 +808,9 @@ function ChecklistRow({
   item,
   isExpanded,
   isDragTarget,
+  selectionMode,
+  isSelected,
+  onToggleSelected,
   onToggle,
   onDelete,
   onUpdateBody,
@@ -647,6 +823,9 @@ function ChecklistRow({
   item: ChecklistItem
   isExpanded: boolean
   isDragTarget: boolean
+  selectionMode: boolean
+  isSelected: boolean
+  onToggleSelected: () => void
   onToggle: (checked: boolean) => void
   onDelete: () => void
   onUpdateBody: (body: string) => void
@@ -681,10 +860,33 @@ function ChecklistRow({
             : 'border-transparent hover:border-border bg-card/60 hover:bg-card'
       )}
     >
-      <div className="flex items-center gap-3 px-3 py-2.5">
+      <div
+        className={cn(
+          'flex items-center gap-3 px-3 py-2.5',
+          selectionMode && isSelected && 'bg-primary/5'
+        )}
+      >
+        {selectionMode && (
+          <button
+            type="button"
+            onClick={onToggleSelected}
+            aria-label={isSelected ? 'Deselect task' : 'Select task'}
+            aria-pressed={isSelected}
+            className={cn(
+              'w-4 h-4 rounded border shrink-0 flex items-center justify-center transition-colors',
+              isSelected ? 'bg-primary border-primary' : 'border-border hover:border-primary'
+            )}
+          >
+            {isSelected && <Check size={10} className="text-white" />}
+          </button>
+        )}
         <span
-          draggable={true}
+          draggable={!selectionMode}
           onDragStart={(e) => {
+            if (selectionMode) {
+              e.preventDefault()
+              return
+            }
             setIsDragging(true)
             onDragStart(e)
           }}
@@ -693,7 +895,10 @@ function ChecklistRow({
         >
           <GripVertical
             size={14}
-            className="text-muted-foreground/30 cursor-grab active:cursor-grabbing"
+            className={cn(
+              'text-muted-foreground/30',
+              selectionMode ? 'opacity-30' : 'cursor-grab active:cursor-grabbing'
+            )}
           />
         </span>
         <button
