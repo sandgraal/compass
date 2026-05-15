@@ -6,9 +6,11 @@ import { BrowserWindow, app, ipcMain, nativeTheme, shell } from 'electron'
 import { startCronJobs } from './cron'
 import { initDb } from './db/client'
 import { registerAuthHandlers } from './ipc/auth'
+import { registerBackupHandlers } from './ipc/backup'
 import { registerFinanceHandlers } from './ipc/finance'
 import { registerHabitsHandlers } from './ipc/habits'
 import { registerKnowledgeHandlers } from './ipc/knowledge'
+import { registerSearchHandlers } from './ipc/search'
 import { registerSettingsHandlers } from './ipc/settings'
 import { registerSyncHandlers } from './ipc/sync'
 import { initAutoUpdater, registerUpdaterHandlers, scheduleUpdateChecks } from './ipc/updater'
@@ -127,6 +129,8 @@ app.whenReady().then(async () => {
   registerFinanceHandlers(ipcMain)
   registerHabitsHandlers(ipcMain)
   registerUpdaterHandlers(ipcMain)
+  registerBackupHandlers(ipcMain)
+  registerSearchHandlers(ipcMain)
 
   // Toggle content protection when navigating to/from vault
   ipcMain.on('vault:set-content-protection', (_event, enabled: boolean) => {
