@@ -61,31 +61,38 @@ export type GlobalSearchHit =
 
 const MAX_RESULTS = 40
 const MAX_PER_KIND = 12
+const MAX_QUERY_LENGTH = 200
 
 // Same five categories the vault knows about; mirrored here so we don't
 // have to take a dependency on `electron/ipc/vault.ts` (which would
 // pull in its own dialog-using imports).
 const VAULT_CATEGORIES = ['financial', 'identity', 'credentials', 'medical', 'legal']
 
-// Per-category preferred title field. Falls back to the next available
-// human-readable label so we always emit *something* searchable.
+// Per-category label-only allowlist. The renderer must NEVER see
+// secret-bearing fields (passwords, account numbers, API keys, SSNs,
+// notes, etc.) through search — so we don't have a generic fallback.
+// If none of these fields are populated for an entry, the entry simply
+// isn't searchable. That's intentional: a vault row without a label is
+// not something the user can find by typing, but also not something we
+// should expose by leaking a different field through Object.values().
+//
+// `username` is excluded from `credentials` even though it's the most
+// natural alternate label, because usernames are sensitive in their own
+// right (think: linked email addresses, identifiers used elsewhere).
 const TITLE_FIELDS_BY_CATEGORY: Record<string, string[]> = {
-  financial: ['institution', 'accountType', 'name', 'title'],
-  identity: ['name', 'documentType', 'title'],
-  credentials: ['service', 'name', 'username', 'title'],
-  medical: ['provider', 'condition', 'name', 'title'],
-  legal: ['title', 'name', 'documentType']
+  financial: ['institution', 'accountType'],
+  identity: ['documentType', 'name'],
+  credentials: ['service'],
+  medical: ['provider', 'condition'],
+  legal: ['title', 'documentType']
 }
 
-function pickTitle(category: string, entry: Record<string, unknown>): string {
+function pickTitle(category: string, entry: Record<string, unknown>): string | null {
   for (const field of TITLE_FIELDS_BY_CATEGORY[category] ?? []) {
     const v = entry[field]
     if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 120)
   }
-  for (const v of Object.values(entry)) {
-    if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 120)
-  }
-  return '(untitled)'
+  return null
 }
 
 function walkKnowledge(dir: string, base: string): string[] {
@@ -180,6 +187,7 @@ function searchVault(query: string): GlobalSearchHit[] {
         const id = entry.id
         if (typeof id !== 'string') continue
         const title = pickTitle(category, entry)
+        if (title === null) continue // no allowlisted label → not searchable
         const score = scoreMatch(title, lq)
         if (score === 0) continue
         hits.push({ kind: 'vault', category, id, title, score })
@@ -256,6 +264,10 @@ function searchTransactions(query: string): GlobalSearchHit[] {
 export function registerSearchHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('search:global', (_event, query: unknown) => {
     if (typeof query !== 'string') return { hits: [] as GlobalSearchHit[] }
+    // IPC boundary cap. Unbounded queries would let a buggy or hostile
+    // renderer cause the search helpers to scan every file/row with a
+    // pathological needle.
+    if (query.length > MAX_QUERY_LENGTH) return { hits: [] as GlobalSearchHit[] }
     const trimmed = query.trim().toLowerCase()
     if (trimmed.length < 2) return { hits: [] as GlobalSearchHit[] }
 

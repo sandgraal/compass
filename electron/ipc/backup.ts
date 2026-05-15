@@ -3,19 +3,24 @@
  *
  * Produces a single passphrase-encrypted `.compass-backup` file containing
  * everything a fresh machine needs to come back online: the SQLite tables
- * as JSON, every knowledge-base markdown file, and every `.vault/*.enc`
- * blob INCLUDING the `key.enc` master-key wrapper.
+ * as JSON, every knowledge-base markdown file, every `.vault/*.enc` blob
+ * EXCEPT `key.enc`, and the master AES-256 key as plaintext hex inside
+ * the bundle.
  *
- * Why passphrase-encrypt (vs. relying on the Keychain master key like the
- * vault does): backups are meant to survive a dead machine. The OS
- * Keychain is by definition not portable — if the disk fails we have no
- * way to recover the master key. The user-supplied passphrase is the only
- * thing they bring with them.
+ * Why bundle the plaintext master key (and NOT `key.enc`): `key.enc` is
+ * wrapped with Electron `safeStorage`, which is keyed by the OS Keychain
+ * entry for THIS machine + user account. If the user restores onto a new
+ * machine, the imported `key.enc` blob is undecryptable there — every
+ * vault entry stays sealed forever. So at backup time we unwrap the
+ * master key through `safeStorage`, put the plaintext hex inside the
+ * passphrase-encrypted bundle (the passphrase is the only secret that
+ * matters), and at restore time we rewrap the hex with the destination
+ * machine's `safeStorage` and write a fresh `key.enc`.
  *
  * Crypto layout on disk:
  *
  *     [magic "COMPASSB" (8 bytes)]
- *     [version (1 byte) = 0x01]
+ *     [version (1 byte) = 0x02]
  *     [salt   (16 bytes)]   → scrypt salt
  *     [IV     (16 bytes)]   → AES-256-GCM IV
  *     [tag    (16 bytes)]   → AES-256-GCM auth tag
@@ -23,6 +28,12 @@
  *
  * scrypt parameters: N=2^15, r=8, p=1, keylen=32. ~150 ms on modern Macs;
  * dramatically harder to brute-force than a bare key.
+ *
+ * Version history:
+ *   - 0x01 (pre-public): shipped `key.enc` verbatim and used the host
+ *     path separator. Never released — no compat shim needed.
+ *   - 0x02 (current):    plaintext master key inside bundle, POSIX paths,
+ *     atomic restore (DB succeeds before filesystem is touched).
  */
 
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
@@ -35,8 +46,8 @@ import {
   statSync,
   writeFileSync
 } from 'node:fs'
-import { join, relative } from 'node:path'
-import { type IpcMain, app, dialog } from 'electron'
+import { sep as PATH_SEP, join, relative } from 'node:path'
+import { type IpcMain, app, dialog, safeStorage } from 'electron'
 import { getDb } from '../db/client'
 import {
   appSettings,
@@ -60,10 +71,11 @@ import {
   plaidItems,
   syncEvents
 } from '../db/schema'
+import { getOrCreateKey } from '../lib/crypto-vault'
 import { KNOWLEDGE_DIR, VAULT_DIR } from '../paths'
 
 const MAGIC = Buffer.from('COMPASSB', 'utf8') // 8 bytes
-const VERSION = 0x01
+const VERSION = 0x02
 const SALT_SIZE = 16
 const IV_SIZE = 16
 const TAG_SIZE = 16
@@ -75,14 +87,23 @@ const SCRYPT_P = 1
 const HEADER_SIZE = MAGIC.length + 1 + SALT_SIZE + IV_SIZE + TAG_SIZE
 
 interface Bundle {
-  version: 1
+  version: 2
   exportedAt: string
   appVersion: string
   tables: Record<string, unknown[]>
-  // path → markdown text
+  // Bundle keys are ALWAYS POSIX-slashed regardless of the source OS, so
+  // a Windows-created backup with `work\projects.md` round-trips cleanly
+  // onto macOS/Linux.
   knowledge: Record<string, string>
-  // filename → base64 of the encrypted blob bytes (includes key.enc)
+  // filename → base64 of the encrypted blob bytes. `key.enc` is
+  // deliberately NOT included here — see masterKeyHex below.
   vault: Record<string, string>
+  // The raw 64-char hex of the AES-256 master key. Sensitive in clear,
+  // but the whole bundle is passphrase-encrypted so it's protected by
+  // scrypt + AES-256-GCM. Required for cross-machine restore: the
+  // destination machine wraps this with its own `safeStorage` to
+  // rebuild `.vault/key.enc`.
+  masterKeyHex: string
 }
 
 function deriveKey(passphrase: string, salt: Buffer): Buffer {
@@ -95,6 +116,20 @@ function deriveKey(passphrase: string, salt: Buffer): Buffer {
   })
 }
 
+/** Convert a host-native relative path into POSIX form for stable bundle keys. */
+function toPosix(rel: string): string {
+  return PATH_SEP === '\\' ? rel.split('\\').join('/') : rel
+}
+
+/** Reject bundle paths that try to escape the target dir. */
+function isSafeRelativePath(rel: string): boolean {
+  if (!rel || rel.startsWith('/') || rel.startsWith('\\')) return false
+  // Accept either separator at the bundle layer — we still defensively
+  // check both because old v0.1-pre dev builds wrote backslash keys.
+  const parts = rel.split(/[/\\]+/)
+  return parts.every((p) => p !== '..' && p.length > 0)
+}
+
 function walkMarkdown(dir: string, base: string): string[] {
   const out: string[] = []
   if (!existsSync(dir)) return out
@@ -103,7 +138,7 @@ function walkMarkdown(dir: string, base: string): string[] {
     if (entry.isDirectory()) {
       out.push(...walkMarkdown(full, base))
     } else if (entry.isFile() && entry.name.endsWith('.md')) {
-      out.push(relative(base, full))
+      out.push(toPosix(relative(base, full)))
     }
   }
   return out
@@ -137,26 +172,36 @@ function collectBundle(): Bundle {
 
   const knowledge: Record<string, string> = {}
   for (const rel of walkMarkdown(KNOWLEDGE_DIR, KNOWLEDGE_DIR)) {
-    knowledge[rel] = readFileSync(join(KNOWLEDGE_DIR, rel), 'utf8')
+    knowledge[rel] = readFileSync(join(KNOWLEDGE_DIR, ...rel.split('/')), 'utf8')
   }
 
+  // Vault: copy every `.enc` blob EXCEPT `key.enc`. The master key
+  // travels in `masterKeyHex` so it survives cross-machine restore.
   const vault: Record<string, string> = {}
   if (existsSync(VAULT_DIR)) {
     for (const entry of readdirSync(VAULT_DIR)) {
       if (!entry.endsWith('.enc')) continue
+      if (entry === 'key.enc') continue
       const full = join(VAULT_DIR, entry)
       if (!statSync(full).isFile()) continue
       vault[entry] = readFileSync(full).toString('base64')
     }
   }
 
+  // Unwrap the master key through `safeStorage` so the bundle carries
+  // it as plaintext hex. `getOrCreateKey()` handles the safeStorage
+  // round-trip; the only secret then is the user's passphrase.
+  const masterKey = getOrCreateKey()
+  const masterKeyHex = masterKey.toString('hex')
+
   return {
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     appVersion: app.getVersion(),
     tables,
     knowledge,
-    vault
+    vault,
+    masterKeyHex
   }
 }
 
@@ -201,78 +246,79 @@ function decryptBundle(blob: Buffer, passphrase: string): Bundle {
     // GCM auth failure ≡ wrong passphrase OR tampered blob — same surface.
     throw new Error('Wrong passphrase or corrupted backup')
   }
-  return JSON.parse(plaintext.toString('utf8')) as Bundle
+  const parsed = JSON.parse(plaintext.toString('utf8')) as Bundle
+  // Light structural validation — `applyRestore` is destructive, we'd
+  // rather fail loud here than half-apply on a malformed payload.
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    parsed.version !== 2 ||
+    typeof parsed.masterKeyHex !== 'string' ||
+    !/^[0-9a-fA-F]{64}$/.test(parsed.masterKeyHex) ||
+    !parsed.tables ||
+    typeof parsed.tables !== 'object' ||
+    !parsed.knowledge ||
+    typeof parsed.knowledge !== 'object' ||
+    !parsed.vault ||
+    typeof parsed.vault !== 'object'
+  ) {
+    throw new Error('Backup payload structure is invalid')
+  }
+  return parsed
 }
 
 /**
- * Restore writes back to disk in three stages:
- *   1. Wipe + write vault `.enc` files (the master key wrapper has to land
- *      before any subsequent vault op runs)
- *   2. Wipe + write knowledge `.md` files
- *   3. Truncate + bulk-insert every table inside a single transaction
+ * Restore is staged so the user's current data only gets wiped after the
+ * destructive DB operation has succeeded in a single transaction:
  *
- * Order matters: the DB tables reference vault entries by id; we restore
- * the vault first so a half-applied restore doesn't leave the DB pointing
- * at vault files that don't exist.
+ *   1. Validate bundle structure (decryptBundle throws on missing fields)
+ *   2. Pre-materialise the new vault + knowledge bytes into memory
+ *   3. Run DB truncate + bulk-insert in ONE sqlite transaction. If it
+ *      fails, the transaction rolls back and we have not touched the
+ *      filesystem yet.
+ *   4. Only after the DB transaction commits do we wipe + rewrite the
+ *      vault directory and the knowledge directory, then rewrap the
+ *      master key with the destination machine's `safeStorage` and
+ *      write a fresh `key.enc`.
+ *
+ * The remaining failure window is between the DB commit and the
+ * filesystem writes — if the machine power-cycles right there, the user
+ * has DB state from the backup but their pre-restore vault/knowledge
+ * files still on disk. The DB-vs-filesystem state will look inconsistent
+ * until a re-restore. That's a far smaller blast radius than "passphrase
+ * was wrong → vault is gone."
  */
 function applyRestore(bundle: Bundle): {
   vaultFiles: number
   knowledgeFiles: number
   rows: number
 } {
-  // --- Vault ---
-  let vaultFiles = 0
-  if (!existsSync(VAULT_DIR)) mkdirSync(VAULT_DIR, { recursive: true })
-  for (const existing of readdirSync(VAULT_DIR)) {
-    if (existing.endsWith('.enc') || existing.endsWith('.enc.tmp')) {
-      rmSync(join(VAULT_DIR, existing), { force: true })
-    }
-  }
+  // --- Stage 1: materialise vault writes (decode + sanity-check filenames) ---
+  const vaultWrites: Array<[string, Buffer]> = []
   for (const [name, b64] of Object.entries(bundle.vault)) {
-    // Filenames are constrained by the bundle producer; reject anything
-    // that tries to escape the vault dir.
     if (name.includes('/') || name.includes('\\') || name.includes('..')) continue
     if (!name.endsWith('.enc')) continue
-    writeFileSync(join(VAULT_DIR, name), Buffer.from(b64, 'base64'))
-    vaultFiles++
-  }
-
-  // --- Knowledge ---
-  let knowledgeFilesWritten = 0
-  if (!existsSync(KNOWLEDGE_DIR)) mkdirSync(KNOWLEDGE_DIR, { recursive: true })
-  // Wipe existing .md (preserve .prev snapshots — they're not in the bundle
-  // by design, the user has the source of truth back).
-  function wipeMd(dir: string): void {
-    if (!existsSync(dir)) return
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        wipeMd(full)
-      } else if (entry.isFile() && entry.name.endsWith('.md')) {
-        rmSync(full, { force: true })
-      }
+    if (name === 'key.enc') continue // rebuilt locally from masterKeyHex
+    try {
+      vaultWrites.push([name, Buffer.from(b64, 'base64')])
+    } catch {
+      // a malformed base64 string would surface as an empty buffer; the
+      // explicit catch is a belt-and-suspenders guard.
     }
   }
-  wipeMd(KNOWLEDGE_DIR)
 
+  // --- Stage 2: materialise knowledge writes (path normalize + safety) ---
+  const knowledgeWrites: Array<[string[], string]> = []
   for (const [rel, content] of Object.entries(bundle.knowledge)) {
-    if (rel.includes('..') || rel.startsWith('/')) continue
-    const full = join(KNOWLEDGE_DIR, rel)
-    if (!full.startsWith(KNOWLEDGE_DIR)) continue
-    const parent = full.slice(0, full.lastIndexOf('/'))
-    if (parent && !existsSync(parent)) mkdirSync(parent, { recursive: true })
-    writeFileSync(full, content, 'utf8')
-    knowledgeFilesWritten++
+    if (!isSafeRelativePath(rel)) continue
+    // Bundle keys are POSIX, but old v0.1-pre Windows backups (if any)
+    // used `\\`. Split on either so we re-join with the host separator.
+    const parts = rel.split(/[/\\]+/)
+    knowledgeWrites.push([parts, content])
   }
 
-  // --- Tables ---
-  // Use better-sqlite3 directly so we can run inside one transaction and
-  // re-coerce ms-timestamp columns from JSON numbers back to Date objects
-  // the way Drizzle expects them on insert.
+  // --- Stage 3: DB restore inside a single transaction ---
   const db = getDb()
-  // Drizzle wraps better-sqlite3; reach through `session` to get the
-  // raw connection so we can drive a single nested transaction across
-  // every truncate + insert.
   const drizzleSession = (
     db as unknown as {
       session: {
@@ -308,9 +354,6 @@ function applyRestore(bundle: Bundle): {
     habitEntries
   } as const
 
-  // Columns whose Drizzle definition uses `mode: 'timestamp_ms'` — the
-  // JSON we serialized turned those Date objects into milliseconds. On
-  // re-insert, Drizzle expects Date objects, not numbers.
   const TIMESTAMP_COLUMNS = new Set([
     'connectedAt',
     'lastSyncedAt',
@@ -346,9 +389,6 @@ function applyRestore(bundle: Bundle): {
 
   let rows = 0
   const txn = sqlite.transaction(() => {
-    // Order matters for FK-aware deletes if we ever turn pragma foreign_keys
-    // on. better-sqlite3 has it off by default; we still order child-first
-    // so a future toggle won't break this path.
     const wipeOrder: Array<keyof typeof TABLES> = [
       'syncEvents',
       'forecastOverrides',
@@ -404,9 +444,6 @@ function applyRestore(bundle: Bundle): {
       for (const rawRow of data) {
         if (!rawRow || typeof rawRow !== 'object') continue
         const row = rehydrate(rawRow as Record<string, unknown>)
-        // `.values()` is typed per table; we operate on a heterogenous
-        // union here intentionally so a `as never` cast keeps the loop
-        // simple without a 20-arm switch on `name`.
         ;(db.insert(table) as unknown as { values: (v: unknown) => { run: () => void } })
           .values(row as never)
           .run()
@@ -414,9 +451,57 @@ function applyRestore(bundle: Bundle): {
       }
     }
   })
+  // If this throws, the sqlite transaction rolls back AND no FS writes have
+  // happened yet. The user keeps their pre-restore state.
   txn()
 
-  return { vaultFiles, knowledgeFiles: knowledgeFilesWritten, rows }
+  // --- Stage 4: FS writes — only reached if DB restore committed. ---
+  // 4a. Vault: wipe existing .enc files, write the bundle's, then rewrap
+  // the master key with this machine's safeStorage and emit fresh
+  // key.enc.
+  if (!existsSync(VAULT_DIR)) mkdirSync(VAULT_DIR, { recursive: true })
+  for (const existing of readdirSync(VAULT_DIR)) {
+    if (existing.endsWith('.enc') || existing.endsWith('.enc.tmp')) {
+      rmSync(join(VAULT_DIR, existing), { force: true })
+    }
+  }
+  for (const [name, bytes] of vaultWrites) {
+    writeFileSync(join(VAULT_DIR, name), bytes)
+  }
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('safeStorage unavailable — cannot rewrap the master key on this machine')
+  }
+  const wrapped = safeStorage.encryptString(bundle.masterKeyHex)
+  writeFileSync(join(VAULT_DIR, 'key.enc'), wrapped)
+
+  // 4b. Knowledge: wipe .md files (preserve .prev snapshots), then write.
+  if (!existsSync(KNOWLEDGE_DIR)) mkdirSync(KNOWLEDGE_DIR, { recursive: true })
+  function wipeMd(dir: string): void {
+    if (!existsSync(dir)) return
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        wipeMd(full)
+      } else if (entry.isFile() && entry.name.endsWith('.md')) {
+        rmSync(full, { force: true })
+      }
+    }
+  }
+  wipeMd(KNOWLEDGE_DIR)
+
+  let knowledgeFilesWritten = 0
+  for (const [parts, content] of knowledgeWrites) {
+    const full = join(KNOWLEDGE_DIR, ...parts)
+    if (!full.startsWith(KNOWLEDGE_DIR)) continue
+    const parent = full.slice(0, full.lastIndexOf(PATH_SEP))
+    if (parent && parent !== KNOWLEDGE_DIR && !existsSync(parent)) {
+      mkdirSync(parent, { recursive: true })
+    }
+    writeFileSync(full, content, 'utf8')
+    knowledgeFilesWritten++
+  }
+
+  return { vaultFiles: vaultWrites.length, knowledgeFiles: knowledgeFilesWritten, rows }
 }
 
 export function registerBackupHandlers(ipcMain: IpcMain): void {
@@ -480,4 +565,11 @@ export function registerBackupHandlers(ipcMain: IpcMain): void {
 
 // Exported for unit tests so the round-trip can be exercised without
 // dialog / disk I/O.
-export const _internal = { collectBundle, encryptBundle, decryptBundle, applyRestore }
+export const _internal = {
+  collectBundle,
+  encryptBundle,
+  decryptBundle,
+  applyRestore,
+  toPosix,
+  isSafeRelativePath
+}

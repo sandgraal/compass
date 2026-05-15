@@ -504,6 +504,9 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       for (const [tag, txns] of byTag) {
         const slug = tag.replace(/^tax:/, '').replace(/[^a-z0-9-]+/gi, '-')
         const file = join(outDir, `compass-tax-${year}-${slug}.csv`)
+        // Per-tag CSVs are pure transaction rows — every line conforms to
+        // HEADER so the file is a clean import target for TurboTax / a
+        // spreadsheet pivot. The summary lives in the manifest below.
         const lines: string[] = [HEADER.join(',')]
         let total = 0
         for (const t of txns) {
@@ -524,8 +527,6 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
             ].join(',')
           )
         }
-        // Trailing total row — keeps the file self-summarizing.
-        lines.push(`,,,,,,,,,total,${total.toFixed(2)}`)
         writeFileSync(file, `${lines.join('\n')}\n`, 'utf-8')
         written.push({ tag, file, count: txns.length, total: Math.round(total * 100) / 100 })
       }

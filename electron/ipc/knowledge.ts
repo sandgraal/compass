@@ -1,5 +1,13 @@
-import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { basename, extname, join, relative } from 'node:path'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
+import { basename, dirname, extname, join, relative } from 'node:path'
 import chokidar from 'chokidar'
 import { and, eq } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
@@ -110,6 +118,14 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
     const fullPath = join(KNOWLEDGE_DIR, relativePath)
     if (!fullPath.startsWith(KNOWLEDGE_DIR)) throw new Error('Path traversal blocked')
     if (existsSync(fullPath)) throw new Error('File already exists')
+    // The unresolved-wikilink path drops files under `general/<slug>.md`,
+    // but `general/` isn't one of the dirs `ensureDirectories()` seeds.
+    // Create the parent so the first wikilink on a fresh profile works
+    // instead of failing silently with ENOENT.
+    const parent = dirname(fullPath)
+    if (parent.startsWith(KNOWLEDGE_DIR) && !existsSync(parent)) {
+      mkdirSync(parent, { recursive: true })
+    }
     writeFileSync(fullPath, `# ${title}\n\n`, 'utf8')
     return { success: true }
   })
