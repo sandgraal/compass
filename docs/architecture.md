@@ -98,7 +98,7 @@ Plain markdown files at `~/Library/Application Support/Compass/knowledge-base/<c
 Registered in `electron/main.ts`:
 - `registerAuthHandlers` — OAuth flows
 - `registerSyncHandlers` — sync trigger, status, event log
-- `registerKnowledgeHandlers` — file CRUD, search, prev snapshot, suggestions accept/dismiss
+- `registerKnowledgeHandlers` — file CRUD, search, prev snapshot, suggestions accept/dismiss, **semantic search (Phase 5.9): `knowledge:get-embedding-status`, `knowledge:rebuild-embeddings`, `knowledge:semantic-search`** — backed by `electron/knowledge/embeddings.ts` and a JSON-on-disk index at `.data/knowledge-embeddings.json`
 - `registerVaultHandlers` — entry CRUD, 1Password CSV import, history
 - `registerSettingsHandlers` — get/set/getAll, data export, wipe, **per-integration sync interval**, Ollama detect, quick-capture shortcut
 - `registerFinanceHandlers` — txns, accounts, debt summary, budget, rules, **geo summary, tax summary + override (Phase 4.3), net-worth snapshot/trajectory + capture + manual balance (Phase 4.4), forecast + override CRUD (Phase 4.5)**

@@ -41,6 +41,17 @@ export default function KnowledgeBase(): JSX.Element {
   const [searchResults, setSearchResults] = useState<Array<FileNode & { snippet: string }> | null>(
     null
   )
+  const [semanticHits, setSemanticHits] = useState<
+    Array<{
+      path: string
+      title: string
+      chunkIndex: number
+      snippet: string
+      score: number
+    }>
+  >([])
+  const [semanticEnabled, setSemanticEnabled] = useState(false)
+  const [semanticReason, setSemanticReason] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [showDiff, setShowDiff] = useState(false)
@@ -116,8 +127,46 @@ export default function KnowledgeBase(): JSX.Element {
       }
     } else {
       setSearchResults(null)
+      setSemanticHits([])
+      setSemanticReason(null)
     }
   }, [debouncedSearch])
+
+  // Read the semantic-search setting once on mount so the renderer knows
+  // whether to call the embedding IPC alongside the keyword search.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.api) return
+    void window.api.settings.getAll().then((s) => {
+      setSemanticEnabled(s.semanticSearchEnabled === 'true')
+    })
+  }, [])
+
+  // Semantic pass — runs in parallel with the keyword search above so the
+  // renderer never blocks on the embedding round-trip. If the index is
+  // missing or Ollama is offline the surfaced `reason` lets us render a
+  // one-line hint without spamming the user with toasts.
+  useEffect(() => {
+    if (!semanticEnabled) {
+      setSemanticHits([])
+      setSemanticReason(null)
+      return
+    }
+    const q = debouncedSearch.trim()
+    if (q.length < 2) {
+      setSemanticHits([])
+      setSemanticReason(null)
+      return
+    }
+    let cancelled = false
+    void window.api?.knowledge.semanticSearch(q).then((res) => {
+      if (cancelled) return
+      setSemanticHits(res.hits ?? [])
+      setSemanticReason(res.reason ?? null)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [debouncedSearch, semanticEnabled])
 
   async function loadFiles() {
     const isElectron = typeof window !== 'undefined' && !!window.api
@@ -242,8 +291,49 @@ export default function KnowledgeBase(): JSX.Element {
         <div className="flex-1 overflow-y-auto py-2">
           {searchResults ? (
             <div>
+              {semanticEnabled && semanticHits.length > 0 && (
+                <div className="mb-3">
+                  <p className="text-xs text-muted-foreground px-4 py-1 font-medium flex items-center gap-1.5">
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary" />
+                    By meaning ({semanticHits.length})
+                  </p>
+                  {semanticHits.map((hit) => (
+                    <button
+                      key={`${hit.path}::${hit.chunkIndex}`}
+                      type="button"
+                      onClick={() => {
+                        setSearchQuery('')
+                        setSearchResults(null)
+                        setSemanticHits([])
+                        selectFile(hit.path)
+                      }}
+                      className={cn(
+                        'w-full text-left px-4 py-1.5 hover:bg-secondary/60 transition-colors',
+                        selectedPath === hit.path && 'bg-secondary/40'
+                      )}
+                    >
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-sm text-foreground truncate">{hit.title}</span>
+                        <span className="text-[10px] text-muted-foreground tabular-nums">
+                          {(hit.score * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground truncate">{hit.snippet}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {semanticEnabled && semanticReason && semanticHits.length === 0 && (
+                <p className="px-4 py-1 text-[10px] text-muted-foreground italic">
+                  {semanticReason === 'index-missing'
+                    ? 'Semantic index not built — Settings → AI assist → Build index.'
+                    : semanticReason === 'ollama-error'
+                      ? 'Ollama unreachable — semantic search skipped.'
+                      : ''}
+                </p>
+              )}
               <p className="text-xs text-muted-foreground px-4 py-1 font-medium">
-                {searchResults.length} results
+                {searchResults.length} keyword results
               </p>
               {searchResults.map((r) => (
                 <FileTreeItem
@@ -253,6 +343,7 @@ export default function KnowledgeBase(): JSX.Element {
                   onClick={() => {
                     setSearchQuery('')
                     setSearchResults(null)
+                    setSemanticHits([])
                     selectFile(r.path)
                   }}
                 />

@@ -326,6 +326,11 @@ export default function Settings(): JSX.Element {
             </select>
           </SettingsRow>
         )}
+
+        {/* Semantic search — uses a dedicated embedding model, separate
+           from the suggestion-extraction one above. Visible whenever
+           Ollama is running. */}
+        {ollamaStatus?.available && <SemanticSearchSettings />}
       </SettingsSection>
 
       <SettingsSection icon={<RefreshCw size={16} />} title="Updates">
@@ -469,6 +474,116 @@ function Toggle({
         )}
       />
     </button>
+  )
+}
+
+// ─── Semantic search settings (May 2026 Tier 2 #6) ────────────────────────────
+//
+// Tucks under the existing "AI assist (Ollama)" section because it shares the
+// same trust posture: opt-in, local-only, runs against the user's machine.
+// Two controls: an enable toggle (gates whether the renderer queries the
+// semantic IPC) and a rebuild button (calls Ollama to (re)compute embeddings
+// for every knowledge file).
+
+const DEFAULT_EMBEDDING_MODEL = 'nomic-embed-text'
+
+function SemanticSearchSettings(): JSX.Element {
+  const { toast } = useToast()
+  const [enabled, setEnabled] = useState(false)
+  const [embeddingModel, setEmbeddingModel] = useState(DEFAULT_EMBEDDING_MODEL)
+  const [status, setStatus] = useState<{
+    builtAt: number | null
+    model: string | null
+    fileCount: number
+    chunkCount: number
+    building: boolean
+  } | null>(null)
+  const [building, setBuilding] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.api) return
+    void window.api.settings.getAll().then((s) => {
+      setEnabled(s.semanticSearchEnabled === 'true')
+      if (s.embeddingModel && s.embeddingModel.trim().length > 0) {
+        setEmbeddingModel(s.embeddingModel)
+      }
+    })
+    void window.api.knowledge.getEmbeddingStatus().then(setStatus)
+  }, [])
+
+  async function persist(key: string, value: string): Promise<void> {
+    if (typeof window !== 'undefined' && window.api) {
+      await window.api.settings.set(key, value)
+    }
+  }
+
+  async function rebuild(): Promise<void> {
+    if (typeof window === 'undefined' || !window.api) return
+    setBuilding(true)
+    try {
+      const r = await window.api.knowledge.rebuildEmbeddings()
+      if (r.success) {
+        toast(
+          `Indexed ${r.builtFiles ?? 0} new file(s) (${r.totalChunks ?? 0} chunks, ${Math.round((r.durationMs ?? 0) / 100) / 10}s)`,
+          'success'
+        )
+      } else {
+        toast(r.error ?? 'Rebuild failed', 'error')
+      }
+      const fresh = await window.api.knowledge.getEmbeddingStatus()
+      setStatus(fresh)
+    } finally {
+      setBuilding(false)
+    }
+  }
+
+  return (
+    <>
+      <SettingsRow
+        label="Semantic search across knowledge base"
+        description="Find notes by meaning, not just keywords. Uses a local Ollama embedding model — nothing leaves your machine."
+      >
+        <Toggle
+          enabled={enabled}
+          onChange={(v) => {
+            setEnabled(v)
+            void persist('semanticSearchEnabled', String(v))
+          }}
+        />
+      </SettingsRow>
+
+      <SettingsRow
+        label="Embedding model"
+        description="Pulled via Ollama. Default works on most machines; install via `ollama pull nomic-embed-text`."
+      >
+        <input
+          type="text"
+          value={embeddingModel}
+          onChange={(e) => setEmbeddingModel(e.target.value)}
+          onBlur={() => void persist('embeddingModel', embeddingModel || DEFAULT_EMBEDDING_MODEL)}
+          aria-label="Embedding model name"
+          className="bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary w-48"
+        />
+      </SettingsRow>
+
+      <SettingsRow
+        label="Knowledge embedding index"
+        description={
+          status?.builtAt
+            ? `${status.fileCount} files · ${status.chunkCount} chunks · model ${status.model ?? '?'} · built ${new Date(status.builtAt).toLocaleString()}`
+            : 'Not built yet — run a rebuild to enable semantic search.'
+        }
+      >
+        <button
+          type="button"
+          onClick={rebuild}
+          disabled={building}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
+        >
+          {building ? 'Building…' : status?.builtAt ? 'Rebuild index' : 'Build index'}
+        </button>
+      </SettingsRow>
+    </>
   )
 }
 

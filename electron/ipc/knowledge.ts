@@ -5,7 +5,14 @@ import { and, eq } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
 import type { BrowserWindow } from 'electron'
 import { getDb } from '../db/client'
-import { knowledgeFiles, knowledgeSuggestions } from '../db/schema'
+import { appSettings, knowledgeFiles, knowledgeSuggestions } from '../db/schema'
+import {
+  DEFAULT_EMBED_MODEL,
+  buildEmbeddingsIndex,
+  loadIndex,
+  saveIndex,
+  semanticSearch
+} from '../knowledge/embeddings'
 import { KNOWLEDGE_DIR } from '../paths'
 
 // Target paths that are user-owned and safe to auto-append via suggestions
@@ -226,5 +233,80 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
       .run()
 
     return { success: true }
+  })
+
+  // ─── Semantic search via Ollama embeddings (Tier 2 #6) ──────────────────
+  //
+  // The build call runs entirely on the main process so the renderer
+  // never owns the embedding index. We treat builds as serial — the
+  // simple lock avoids two concurrent rebuilds racing on the JSON file.
+  let buildInFlight: Promise<unknown> | null = null
+
+  function readEmbeddingModelFromSettings(): string {
+    try {
+      const db = getDb()
+      const row = db.select().from(appSettings).where(eq(appSettings.key, 'embeddingModel')).get()
+      return row?.value && row.value.trim().length > 0 ? row.value : DEFAULT_EMBED_MODEL
+    } catch {
+      return DEFAULT_EMBED_MODEL
+    }
+  }
+
+  ipcMain.handle('knowledge:get-embedding-status', () => {
+    const index = loadIndex()
+    if (!index) {
+      return {
+        builtAt: null,
+        model: null,
+        fileCount: 0,
+        chunkCount: 0,
+        building: buildInFlight !== null
+      }
+    }
+    return {
+      builtAt: index.builtAt,
+      model: index.model,
+      fileCount: Object.keys(index.fileMtimes).length,
+      chunkCount: index.chunks.length,
+      building: buildInFlight !== null
+    }
+  })
+
+  ipcMain.handle('knowledge:rebuild-embeddings', async () => {
+    if (buildInFlight) {
+      return { success: false, error: 'A rebuild is already in progress' }
+    }
+    const model = readEmbeddingModelFromSettings()
+    const promise = (async () => {
+      try {
+        const { index, result } = await buildEmbeddingsIndex({ model })
+        saveIndex(index)
+        return result
+      } catch (err) {
+        throw err instanceof Error ? err : new Error(String(err))
+      }
+    })()
+    buildInFlight = promise
+    try {
+      const result = await promise
+      return { success: true, ...result }
+    } catch (err) {
+      return { success: false, error: (err as Error).message }
+    } finally {
+      buildInFlight = null
+    }
+  })
+
+  ipcMain.handle('knowledge:semantic-search', async (_event, query: unknown) => {
+    if (typeof query !== 'string') return { hits: [], reason: 'invalid-query' }
+    if (query.length > 500) return { hits: [], reason: 'query-too-long' }
+    const model = readEmbeddingModelFromSettings()
+    try {
+      const hits = await semanticSearch(query, { model })
+      if (hits === null) return { hits: [], reason: 'index-missing' }
+      return { hits }
+    } catch (err) {
+      return { hits: [], reason: 'ollama-error', error: (err as Error).message }
+    }
   })
 }

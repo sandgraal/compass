@@ -233,19 +233,20 @@ Net Worth view has live balances waiting.
 
 ---
 
+## Phase 5 (cont.) — strategic-review follow-ups (Tier 2 AI/PKM differentiation)
+
+- [x] **5.9 Semantic search via local Ollama embeddings** — `electron/knowledge/embeddings.ts` adds a paragraph-aware chunker (~700-char target), an `/api/embeddings` round-trip against the user's local Ollama, a JSON-on-disk index at `.data/knowledge-embeddings.json`, and cosine-similarity ranking with per-path dedup. Incremental builds reuse chunks whose `(path, mtime)` still matches; a model-version change invalidates the whole index. Three IPC handlers (`knowledge:get-embedding-status`, `knowledge:rebuild-embeddings`, `knowledge:semantic-search`) feed the Settings UI (rebuild button + status) and a "By meaning" section in the Knowledge Base sidebar that runs alongside the existing keyword search. Defaults off; same opt-in trust posture as the existing Ollama-backed suggestions.
+
 ## Backlog (deferred, considered but out of scope this round)
 
-- Encrypted backup/restore (high value — Phase 4)
-- Apple Calendar (iCal) local read
 - Habit streaks badges
-- Wiki-style `[[link]]` between knowledge files
-- Global search via ⌘K (knowledge + vault titles + tasks inline)
 - Privacy auto-lock (Vault re-auth after N min idle)
 - Distraction-free reading mode
 - Bulk operations in Daily checklist
 - Apple Spotlight integration
 - Apple Contacts import
 - PWA / web companion
+- In-app AI assistant panel (BYO Claude/OpenAI key) — composes with 5.9 once shipped
 
 ---
 

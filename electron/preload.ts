@@ -73,7 +73,11 @@ const api = {
     listSuggestions: (targetPath?: string) =>
       ipcRenderer.invoke('knowledge:list-suggestions', targetPath),
     acceptSuggestion: (id: number) => ipcRenderer.invoke('knowledge:accept-suggestion', id),
-    dismissSuggestion: (id: number) => ipcRenderer.invoke('knowledge:dismiss-suggestion', id)
+    dismissSuggestion: (id: number) => ipcRenderer.invoke('knowledge:dismiss-suggestion', id),
+    // Tier 2 #6 — semantic search via local Ollama embeddings
+    getEmbeddingStatus: () => ipcRenderer.invoke('knowledge:get-embedding-status'),
+    rebuildEmbeddings: () => ipcRenderer.invoke('knowledge:rebuild-embeddings'),
+    semanticSearch: (query: string) => ipcRenderer.invoke('knowledge:semantic-search', query)
   },
 
   // --- Vault (Sensitive Data) ---
