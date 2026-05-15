@@ -17,6 +17,7 @@ import { initAutoUpdater, registerUpdaterHandlers, scheduleUpdateChecks } from '
 import { registerVaultHandlers } from './ipc/vault'
 import { initMenuBar } from './menu-bar'
 import { APP_DATA_DIR, DATA_DIR, KNOWLEDGE_DIR, VAULT_DIR } from './paths'
+import { registerCompassUrlScheme } from './url-scheme'
 
 export { APP_DATA_DIR, DATA_DIR, VAULT_DIR, KNOWLEDGE_DIR }
 
@@ -37,6 +38,12 @@ function ensureDirectories(): void {
 }
 
 let mainWindow: BrowserWindow | null = null
+
+// Register the `compass://` URL scheme BEFORE app.whenReady — the
+// `open-url` event on macOS can fire as soon as the app launches, and
+// `requestSingleInstanceLock()` has to run early to deduplicate
+// second-instance launches on Windows/Linux.
+const urlScheme = registerCompassUrlScheme(() => mainWindow)
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -154,6 +161,8 @@ app.whenReady().then(async () => {
   startCronJobs()
   await startOrRefreshFinanceWatcher()
   initMenuBar(__dirname)
+  // Drain any compass:// URLs that arrived before the window existed.
+  urlScheme.pump()
 
   if (!is.dev) {
     initAutoUpdater()

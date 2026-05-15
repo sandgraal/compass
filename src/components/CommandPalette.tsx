@@ -302,10 +302,18 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
 
   const filtered: Command[] = [...filteredCommands, ...searchCommands]
 
-  // Focus input when opened
+  // Focus input when opened. If a `compass://search?q=…` command put a
+  // query into sessionStorage, pre-fill the input with it instead of
+  // resetting.
   useEffect(() => {
     if (open) {
-      setQuery('')
+      const initial = sessionStorage.getItem('compass:palette-initial-query')
+      if (initial !== null) {
+        sessionStorage.removeItem('compass:palette-initial-query')
+        setQuery(initial)
+      } else {
+        setQuery('')
+      }
       setSearchHits([])
       setSelectedIdx(0)
       setTimeout(() => inputRef.current?.focus(), 10)

@@ -11,6 +11,7 @@ import {
   knowledgeSuggestions,
   syncEvents
 } from '../db/schema'
+import { readAppleCalendars } from '../integrations/apple-calendar'
 import {
   updateCalendarKnowledge,
   updateDriveKnowledge,
@@ -44,7 +45,7 @@ type SyncResultInternal = SyncResult & {
   githubSuggestionInputs?: GitHubInputItem[]
 }
 
-const SUPPORTED_SYNC_SERVICES = new Set(['google', 'github'])
+const SUPPORTED_SYNC_SERVICES = new Set(['google', 'github', 'apple-calendar'])
 
 function normalizeSupportedSyncService(service: unknown): string | null {
   if (typeof service !== 'string') return null
@@ -295,6 +296,103 @@ function maybeSendNotification(service: string, recordsUpdated: number, error?: 
     new Notification({ title, body }).show()
   } catch {
     // Best-effort only: never let notification failures affect sync results.
+  }
+}
+
+/**
+ * Apple Calendar (iCal) local read. No tokens, no network — we walk
+ * `~/Library/Calendars` directly and upsert the next 14 days of events
+ * into `calendar_events` with `source: 'apple'`. The renderer surfaces
+ * them through the same Dashboard / Daily / Weekly UI that already
+ * consumes Google calendar rows, so this is purely an ingest path.
+ */
+export async function syncAppleCalendar(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
+  const db = getDb()
+  let integrationId: number | null = null
+  let recordsUpdated = 0
+
+  try {
+    const events = readAppleCalendars()
+    for (const ev of events) {
+      // Apple-side UIDs are stable per event; namespace them so they
+      // never collide with Google's `id` values in the same column.
+      const externalId = `apple:${ev.uid}`
+      db.insert(calendarEvents)
+        .values({
+          source: 'apple',
+          externalId,
+          title: ev.title || '(No title)',
+          startAt: ev.startAt,
+          endAt: ev.endAt,
+          allDay: ev.allDay,
+          location: ev.location,
+          description: ev.description,
+          htmlLink: null,
+          syncedAt: new Date()
+        })
+        .onConflictDoUpdate({
+          target: calendarEvents.externalId,
+          set: {
+            title: ev.title || '(No title)',
+            startAt: ev.startAt,
+            endAt: ev.endAt,
+            allDay: ev.allDay,
+            location: ev.location,
+            description: ev.description,
+            syncedAt: new Date()
+          }
+        })
+        .run()
+      recordsUpdated++
+    }
+
+    // Update the integration row + log a sync event so the UI shows
+    // last-synced / counts like every other service.
+    db.insert(integrations)
+      .values({
+        service: 'apple-calendar',
+        status: 'connected',
+        connectedAt: new Date(),
+        lastSyncedAt: new Date(),
+        errorMessage: null
+      })
+      .onConflictDoUpdate({
+        target: integrations.service,
+        set: { status: 'connected', lastSyncedAt: new Date(), errorMessage: null }
+      })
+      .run()
+
+    integrationId = getIntegrationId(db, 'apple-calendar')
+    if (integrationId != null) {
+      db.insert(syncEvents)
+        .values({ integrationId, syncedAt: new Date(), recordsUpdated, errors: null })
+        .run()
+    }
+    mainWindow?.webContents.send('sync:update', {
+      service: 'apple-calendar',
+      status: 'done',
+      recordsUpdated
+    })
+    maybeSendNotification('apple-calendar', recordsUpdated)
+    return { service: 'apple-calendar', success: true, recordsUpdated }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    db.update(integrations)
+      .set({ status: 'error', errorMessage: message })
+      .where(eq(integrations.service, 'apple-calendar'))
+      .run()
+    integrationId = getIntegrationId(db, 'apple-calendar')
+    if (integrationId != null) {
+      db.insert(syncEvents)
+        .values({ integrationId, syncedAt: new Date(), recordsUpdated: 0, errors: message })
+        .run()
+    }
+    mainWindow?.webContents.send('sync:update', {
+      service: 'apple-calendar',
+      status: 'error',
+      error: message
+    })
+    return { service: 'apple-calendar', success: false, error: message }
   }
 }
 
@@ -615,19 +713,25 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     const win = BrowserWindow.getAllWindows()[0]
     if (service === 'google') return syncGoogle(win)
     if (service === 'github') return toPublicSyncResult(await syncGitHub(win))
+    if (service === 'apple-calendar') return syncAppleCalendar(win)
     return { error: 'Unknown service' }
   })
 
   ipcMain.handle('sync:trigger-all', async () => {
     const win = BrowserWindow.getAllWindows()[0]
-    const [googleResult, githubResult] = await Promise.all([
+    const [googleResult, githubResult, appleResult] = await Promise.all([
       syncGoogle(win, false),
-      syncGitHub(win, false)
+      syncGitHub(win, false),
+      syncAppleCalendar(win)
     ])
     if (googleResult.success || githubResult.success) {
       await runSuggestionExtractors(githubResult.githubSuggestionInputs ?? [])
     }
-    return [toPublicSyncResult(googleResult), toPublicSyncResult(githubResult)]
+    return [
+      toPublicSyncResult(googleResult),
+      toPublicSyncResult(githubResult),
+      toPublicSyncResult(appleResult)
+    ]
   })
 
   ipcMain.handle('sync:set-interval', async (_event, service: string, minutes: number) => {

@@ -146,6 +146,12 @@
         { "target": "deb", "arch": ["x64", "arm64"] }
       ]
     },
+    "protocols": [
+      {
+        "name": "Compass URL",
+        "schemes": ["compass"]
+      }
+    ],
     "files": ["out/**/*", "package.json"],
     "asarUnpack": ["**/*.node"],
     "directories": {
