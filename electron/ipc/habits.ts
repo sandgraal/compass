@@ -90,6 +90,20 @@ export function registerHabitsHandlers(ipcMain: IpcMain): void {
     return map
   })
 
+  // ── Get ALL entries (all habits, all time) — used for streak computation ──
+  // Returns: { [habitId]: { [date]: boolean } }
+  ipcMain.handle('habits:get-all-entries', (_event) => {
+    const db = getDb()
+    const rows = db.select().from(habitEntries).all()
+    const map: Record<number, Record<string, boolean>> = {}
+    for (const e of rows) {
+      if (!e.habitId) continue
+      if (!map[e.habitId]) map[e.habitId] = {}
+      map[e.habitId][e.date] = e.completed ?? false
+    }
+    return map
+  })
+
   // ── Toggle (upsert) a habit entry ─────────────────────────────────────────
   ipcMain.handle('habits:toggle', async (_event, habitId: number, date: string) => {
     const db = getDb()

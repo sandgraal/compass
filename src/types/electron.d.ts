@@ -204,6 +204,7 @@ declare global {
         ): Promise<{ success: boolean }>
         delete(id: number): Promise<{ success: boolean }>
         getEntries(month: string): Promise<Record<number, Record<string, boolean>>>
+        getAllEntries(): Promise<Record<number, Record<string, boolean>>>
         toggle(habitId: number, date: string): Promise<{ success: boolean; completed: boolean }>
       }
       checklist: {

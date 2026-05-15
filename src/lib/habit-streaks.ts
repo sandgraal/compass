@@ -14,8 +14,6 @@
  * Future dates are ignored.
  */
 
-const MS_PER_DAY = 86_400_000
-
 export type DateMap = Record<string, boolean>
 
 /** Normalise a Date (or ISO string) to a `YYYY-MM-DD` local-date key. */
@@ -26,8 +24,12 @@ function toDateKey(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
+/**
+ * Shift a Date by `deltaDays` calendar days using year/month/day components
+ * so DST transitions (±1 h) don't accidentally skip or repeat a day.
+ */
 function shiftDay(d: Date, deltaDays: number): Date {
-  return new Date(d.getTime() + deltaDays * MS_PER_DAY)
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + deltaDays)
 }
 
 export interface HabitStreak {
@@ -82,10 +84,11 @@ function computeLongest(entries: DateMap): number {
   let longest = 1
   let run = 1
   for (let i = 1; i < completedKeys.length; i++) {
-    const prev = new Date(completedKeys[i - 1])
-    const curr = new Date(completedKeys[i])
-    const deltaDays = Math.round((curr.getTime() - prev.getTime()) / MS_PER_DAY)
-    if (deltaDays === 1) {
+    // Parse by components (not `new Date(string)` which is UTC) so DST
+    // transitions don't shift the calendar date and break the comparison.
+    const [py, pm, pd] = completedKeys[i - 1].split('-').map(Number)
+    const expectedNext = new Date(py, pm - 1, pd + 1)
+    if (toDateKey(expectedNext) === completedKeys[i]) {
       run++
       if (run > longest) longest = run
     } else {

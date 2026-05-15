@@ -51,6 +51,10 @@ export default function Monthly(): JSX.Element {
   const [month, setMonth] = useState(() => startOfMonth(new Date()))
   const [habits, setHabits] = useState<Habit[]>([])
   const [habitEntries, setHabitEntries] = useState<Record<number, Record<string, boolean>>>({})
+  // All-time entries for accurate streak computation across month boundaries.
+  const [allHabitEntries, setAllHabitEntries] = useState<Record<number, Record<string, boolean>>>(
+    {}
+  )
   const [goals, setGoals] = useState(['', '', ''])
   const [reflection, setReflection] = useState({ win: '', challenge: '', focus: '' })
   const [events, setEvents] = useState<CalendarEvent[]>([])
@@ -85,14 +89,16 @@ export default function Monthly(): JSX.Element {
       window.api.settings.getAll(),
       window.api.habits.list(),
       window.api.habits.getEntries(monthKey),
+      window.api.habits.getAllEntries(),
       window.api.finance.getDebtSummary().catch(() => ({ debts: [] })),
       window.api.finance
         .getBudgetStatus(monthKey)
         .catch(() => ({ lines: [], totals: { budget: 0, actual: 0 } }))
-    ]).then(([calEvents, s, habitList, entries, debtData, budgetData]) => {
+    ]).then(([calEvents, s, habitList, entries, allEntries, debtData, budgetData]) => {
       setEvents(calEvents)
       setHabits(habitList)
       setHabitEntries(entries)
+      setAllHabitEntries(allEntries)
 
       // Finance snapshot
       const d = debtData as {
@@ -169,6 +175,10 @@ export default function Monthly(): JSX.Element {
     if (!isElectron) return
     const { completed } = await window.api.habits.toggle(habitId, date)
     setHabitEntries((prev) => ({
+      ...prev,
+      [habitId]: { ...(prev[habitId] ?? {}), [date]: completed }
+    }))
+    setAllHabitEntries((prev) => ({
       ...prev,
       [habitId]: { ...(prev[habitId] ?? {}), [date]: completed }
     }))
@@ -461,11 +471,9 @@ export default function Monthly(): JSX.Element {
                       const doneCount = daysInMonth.filter((d) => entries[isoDate(d)]).length
                       const pct = Math.round((doneCount / daysInMonth.length) * 100)
                       const color = habit.color ?? '#6272f1'
-                      // Streaks span all loaded months — `habitEntries[habit.id]`
-                      // is the full per-habit map the IPC returned, not just
-                      // the current month. The flame badge only shows when
-                      // there's an active streak (>=2) to avoid clutter.
-                      const streak = computeHabitStreak(entries)
+                      // Streaks use all-time entries so month boundaries are handled
+                      // correctly (e.g. Apr 30 → May 2 = 3-day streak, not 2).
+                      const streak = computeHabitStreak(allHabitEntries[habit.id] || {})
                       return (
                         <tr key={habit.id} className="border-t border-border/40 group">
                           <td className="py-1.5 pr-3 font-medium" style={{ color }}>

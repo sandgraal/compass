@@ -144,10 +144,14 @@ export default function Vault(): JSX.Element {
       'mousemove',
       'mousedown',
       'keydown',
-      'scroll',
-      'touchstart'
+      'wheel',
+      'touchstart',
+      'touchmove'
     ]
     for (const ev of events) document.addEventListener(ev, reset, { passive: true })
+    // scroll does not bubble out of overflow containers, so we listen in capture
+    // phase to catch scrolling anywhere in the page (including nested panels).
+    document.addEventListener('scroll', reset, { passive: true, capture: true })
     const onBlur = () => {
       // Hard-lock on focus loss — leaving Compass for another window
       // shouldn't leave secrets visible in a recoverable screenshot.
@@ -159,6 +163,7 @@ export default function Vault(): JSX.Element {
     reset()
     return () => {
       for (const ev of events) document.removeEventListener(ev, reset)
+      document.removeEventListener('scroll', reset, { capture: true })
       window.removeEventListener('blur', onBlur)
       if (idleTimerRef.current) {
         clearTimeout(idleTimerRef.current)
@@ -358,7 +363,7 @@ export default function Vault(): JSX.Element {
       </div>
 
       {/* Entries panel */}
-      <div className="flex-1 flex flex-col overflow-hidden relative">
+      <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
           <div>
@@ -369,7 +374,7 @@ export default function Vault(): JSX.Element {
             <p className="text-xs text-muted-foreground mt-0.5">{selectedCat?.description}</p>
           </div>
           <div className="flex items-center gap-2">
-            {idleMinutes > 0 && !locked && (
+            {!locked && (
               <button
                 type="button"
                 onClick={() => {
@@ -378,7 +383,9 @@ export default function Vault(): JSX.Element {
                   setAdding(false)
                 }}
                 aria-label="Lock vault now"
-                title={`Auto-locks after ${idleMinutes}m of inactivity`}
+                title={
+                  idleMinutes > 0 ? `Auto-locks after ${idleMinutes}m of inactivity` : 'Lock vault'
+                }
                 className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-border hover:border-primary/50 text-muted-foreground hover:text-foreground rounded-lg transition-colors"
               >
                 <Lock size={11} /> Lock
@@ -398,11 +405,11 @@ export default function Vault(): JSX.Element {
           </div>
         </div>
 
-        {/* Lock overlay — sits above the entries area but below the header so
-            the user can see which category they're in. Counts the entries
-            without revealing any field values. */}
-        {locked && (
-          <div className="absolute inset-x-0 top-[73px] bottom-0 z-10 bg-background/95 backdrop-blur-sm flex flex-col items-center justify-center gap-4 p-8">
+        {/* Lock screen replaces the entries area entirely so underlying
+            controls are removed from the DOM and cannot be reached via
+            keyboard navigation or accessibility APIs. */}
+        {locked ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
             <div className="w-16 h-16 rounded-full bg-secondary flex items-center justify-center text-primary">
               <Lock size={28} />
             </div>
@@ -410,8 +417,8 @@ export default function Vault(): JSX.Element {
               <p className="text-sm font-semibold text-foreground">Vault is locked</p>
               <p className="text-xs text-muted-foreground mt-1 max-w-sm">
                 {entries.length} {entries.length === 1 ? 'entry' : 'entries'} in{' '}
-                {selectedCat?.label.toLowerCase()} · auto-locked after {idleMinutes}m idle or focus
-                loss
+                {selectedCat?.label.toLowerCase()}
+                {idleMinutes > 0 ? ` · auto-locks after ${idleMinutes}m idle or focus loss` : ''}
               </p>
             </div>
             <button
@@ -422,94 +429,94 @@ export default function Vault(): JSX.Element {
               <ShieldCheck size={14} /> Unlock
             </button>
           </div>
-        )}
+        ) : (
+          <div className="flex-1 overflow-y-auto p-6">
+            {/* Add form */}
+            {adding && (
+              <div className="bg-card border border-primary/30 rounded-xl p-5 mb-6">
+                <h3 className="text-sm font-semibold mb-4">New {selectedCat?.label} Entry</h3>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  {fields.map((field) => (
+                    <div key={field.key}>
+                      <label
+                        htmlFor={`new-entry-${field.key}`}
+                        className="text-xs text-muted-foreground mb-1 block"
+                      >
+                        {field.label}
+                      </label>
+                      <input
+                        id={`new-entry-${field.key}`}
+                        type={field.sensitive ? 'password' : 'text'}
+                        value={newEntry[field.key] || ''}
+                        onChange={(e) =>
+                          setNewEntry((prev) => ({ ...prev, [field.key]: e.target.value }))
+                        }
+                        className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setAdding(false)}
+                    className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={addEntry}
+                    className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+                  >
+                    Save encrypted
+                  </button>
+                </div>
+              </div>
+            )}
 
-        <div className="flex-1 overflow-y-auto p-6">
-          {/* Add form */}
-          {adding && (
-            <div className="bg-card border border-primary/30 rounded-xl p-5 mb-6">
-              <h3 className="text-sm font-semibold mb-4">New {selectedCat?.label} Entry</h3>
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                {fields.map((field) => (
-                  <div key={field.key}>
-                    <label
-                      htmlFor={`new-entry-${field.key}`}
-                      className="text-xs text-muted-foreground mb-1 block"
-                    >
-                      {field.label}
-                    </label>
-                    <input
-                      id={`new-entry-${field.key}`}
-                      type={field.sensitive ? 'password' : 'text'}
-                      value={newEntry[field.key] || ''}
-                      onChange={(e) =>
-                        setNewEntry((prev) => ({ ...prev, [field.key]: e.target.value }))
-                      }
-                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
+            {/* Entries */}
+            {loading ? (
+              <div className="space-y-3">
+                {[1, 2].map((n) => (
+                  <div key={n} className="h-24 bg-secondary/30 rounded-xl animate-pulse" />
                 ))}
               </div>
-              <div className="flex gap-2 justify-end">
+            ) : entries.length === 0 && !adding ? (
+              <div className="flex flex-col items-center py-16 gap-3">
+                <div className="w-12 h-12 rounded-full bg-secondary flex items-center justify-center text-muted-foreground">
+                  {CATEGORY_ICONS[selectedCategory]}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  No {selectedCat?.label.toLowerCase()} entries yet
+                </p>
                 <button
                   type="button"
-                  onClick={() => setAdding(false)}
-                  className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={() => setAdding(true)}
+                  className="text-xs text-primary hover:underline"
                 >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={addEntry}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-                >
-                  Save encrypted
+                  Add your first entry
                 </button>
               </div>
-            </div>
-          )}
-
-          {/* Entries */}
-          {loading ? (
-            <div className="space-y-3">
-              {[1, 2].map((n) => (
-                <div key={n} className="h-24 bg-secondary/30 rounded-xl animate-pulse" />
-              ))}
-            </div>
-          ) : entries.length === 0 && !adding ? (
-            <div className="flex flex-col items-center py-16 gap-3">
-              <div className="w-12 h-12 rounded-full bg-secondary flex items-center justify-center text-muted-foreground">
-                {CATEGORY_ICONS[selectedCategory]}
+            ) : (
+              <div className="space-y-4">
+                {entries.map((entry) => (
+                  <EntryCard
+                    key={entry.id}
+                    entry={entry}
+                    fields={fields}
+                    revealedFields={revealedFields}
+                    copiedField={copiedField}
+                    onToggleReveal={toggleReveal}
+                    onCopy={copyToClipboard}
+                    onUpdate={(updates) => updateEntry(entry.id, updates)}
+                    onDelete={() => deleteEntry(entry.id)}
+                  />
+                ))}
               </div>
-              <p className="text-sm text-muted-foreground">
-                No {selectedCat?.label.toLowerCase()} entries yet
-              </p>
-              <button
-                type="button"
-                onClick={() => setAdding(true)}
-                className="text-xs text-primary hover:underline"
-              >
-                Add your first entry
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {entries.map((entry) => (
-                <EntryCard
-                  key={entry.id}
-                  entry={entry}
-                  fields={fields}
-                  revealedFields={revealedFields}
-                  copiedField={copiedField}
-                  onToggleReveal={toggleReveal}
-                  onCopy={copyToClipboard}
-                  onUpdate={(updates) => updateEntry(entry.id, updates)}
-                  onDelete={() => deleteEntry(entry.id)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
