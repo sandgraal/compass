@@ -3,13 +3,15 @@ import {
   Bot,
   Database,
   Download,
+  HardDriveDownload,
   Keyboard,
   Monitor,
   Moon,
   RefreshCw,
   Shield,
   Sun,
-  Trash2
+  Trash2,
+  Upload
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useConfirm } from '../components/ui/ConfirmDialog'
@@ -361,6 +363,12 @@ export default function Settings(): JSX.Element {
         </SettingsRow>
       </SettingsSection>
 
+      {/* Encrypted backup / restore */}
+      <SettingsSection icon={<HardDriveDownload size={16} />} title="Encrypted Backup">
+        <BackupRow />
+        <RestoreRow />
+      </SettingsSection>
+
       {/* Danger zone */}
       <div className="border border-destructive/30 rounded-xl p-5 bg-destructive/5">
         <h3 className="text-sm font-semibold text-destructive mb-1 flex items-center gap-2">
@@ -452,6 +460,143 @@ function SettingsRow({
       </div>
       <div className="ml-4 shrink-0">{children}</div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Backup / Restore rows (May 2026 Tier 1 #2)
+//
+// Both rows share the same passphrase-in-input UX. We deliberately don't
+// persist the passphrase anywhere — even in component state across modal
+// open/close — so it's typed each time. That's a slight friction win
+// against the much worse "Compass remembered my backup password" failure
+// mode.
+// ---------------------------------------------------------------------------
+
+function BackupRow(): JSX.Element {
+  const { toast } = useToast()
+  const [passphrase, setPassphrase] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const canSubmit = passphrase.length >= 8 && passphrase === confirm && !busy
+
+  async function run() {
+    if (!canSubmit) return
+    setBusy(true)
+    try {
+      const r = await window.api.backup.create(passphrase)
+      if (r.success) {
+        toast(
+          `Backup written (${Math.round((r.size ?? 0) / 1024)} KB · ${r.stats?.knowledgeFiles ?? 0} notes, ${r.stats?.vaultFiles ?? 0} vault files)`,
+          'success'
+        )
+        setPassphrase('')
+        setConfirm('')
+      } else if (!r.canceled) {
+        toast(r.error ?? 'Backup failed', 'error')
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <SettingsRow
+      label="Create encrypted backup"
+      description="Bundle DB + knowledge + vault into a single .compass-backup file (AES-256-GCM, scrypt-derived from your passphrase). Survives a dead machine."
+    >
+      <div className="flex flex-col items-end gap-1.5">
+        <input
+          type="password"
+          autoComplete="new-password"
+          placeholder="Passphrase (min 8 chars)"
+          value={passphrase}
+          onChange={(e) => setPassphrase(e.target.value)}
+          className="bg-secondary border border-border rounded-lg px-3 py-1.5 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary w-56"
+        />
+        <input
+          type="password"
+          autoComplete="new-password"
+          placeholder="Confirm passphrase"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          className={cn(
+            'bg-secondary border rounded-lg px-3 py-1.5 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary w-56',
+            confirm && confirm !== passphrase ? 'border-destructive/70' : 'border-border'
+          )}
+        />
+        <button
+          type="button"
+          onClick={run}
+          disabled={!canSubmit}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
+        >
+          <HardDriveDownload size={12} />
+          {busy ? 'Encrypting…' : 'Create backup'}
+        </button>
+      </div>
+    </SettingsRow>
+  )
+}
+
+function RestoreRow(): JSX.Element {
+  const { toast } = useToast()
+  const confirm = useConfirm()
+  const [passphrase, setPassphrase] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function run() {
+    if (passphrase.length === 0 || busy) return
+    const ok = await confirm({
+      title: 'Restore from backup?',
+      description:
+        'This replaces all current Compass data: tables, knowledge notes, and vault. Anything not in the backup will be lost. Continue?',
+      confirmLabel: 'Restore',
+      destructive: true
+    })
+    if (!ok) return
+    setBusy(true)
+    try {
+      const r = await window.api.backup.restore(passphrase)
+      if (r.success) {
+        toast(
+          `Restored from ${r.exportedAt?.slice(0, 10) ?? 'backup'} — ${r.stats?.rows ?? 0} rows, ${r.stats?.knowledgeFiles ?? 0} notes`,
+          'success'
+        )
+        setPassphrase('')
+      } else if (!r.canceled) {
+        toast(r.error ?? 'Restore failed', 'error')
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <SettingsRow
+      label="Restore from backup"
+      description="Pick a .compass-backup file and decrypt it. Overwrites current data — make a fresh backup first if you have unsaved changes."
+    >
+      <div className="flex flex-col items-end gap-1.5">
+        <input
+          type="password"
+          autoComplete="current-password"
+          placeholder="Passphrase"
+          value={passphrase}
+          onChange={(e) => setPassphrase(e.target.value)}
+          className="bg-secondary border border-border rounded-lg px-3 py-1.5 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary w-56"
+        />
+        <button
+          type="button"
+          onClick={run}
+          disabled={busy || passphrase.length === 0}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-border text-foreground hover:bg-secondary/60 rounded-lg transition-colors disabled:opacity-50"
+        >
+          <Upload size={12} />
+          {busy ? 'Restoring…' : 'Restore…'}
+        </button>
+      </div>
+    </SettingsRow>
   )
 }
 

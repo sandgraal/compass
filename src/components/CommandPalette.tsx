@@ -4,6 +4,9 @@ import {
   Calendar,
   CalendarDays,
   CalendarRange,
+  CheckSquare,
+  DollarSign,
+  FileText,
   FolderOpen,
   LayoutDashboard,
   LineChart,
@@ -39,8 +42,10 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [selectedIdx, setSelectedIdx] = useState(0)
+  const [searchHits, setSearchHits] = useState<GlobalSearchHit[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const lastSearchTokenRef = useRef(0)
 
   const nav = (path: string) => {
     navigate(path)
@@ -216,7 +221,7 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
     }
   ]
 
-  const filtered =
+  const filteredCommands =
     query.trim() === ''
       ? COMMANDS
       : COMMANDS.filter((cmd) => {
@@ -228,14 +233,114 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
           )
         })
 
+  // Convert each global search hit into a Command so navigation, keyboard
+  // selection, and the renderer's per-row code all stay identical to the
+  // existing palette flow.
+  const searchCommands: Command[] = searchHits.map((hit) => {
+    if (hit.kind === 'knowledge') {
+      return {
+        id: `kb:${hit.path}`,
+        label: hit.title,
+        description: `Note · ${hit.snippet}`,
+        icon: <FileText size={15} />,
+        action: () => {
+          onClose()
+          sessionStorage.setItem('compass:open-knowledge', hit.path)
+          if (window.location.hash === '#/knowledge') {
+            window.dispatchEvent(new CustomEvent('compass:open-knowledge', { detail: hit.path }))
+          } else {
+            navigate('/knowledge')
+          }
+        }
+      }
+    }
+    if (hit.kind === 'vault') {
+      return {
+        id: `vault:${hit.category}:${hit.id}`,
+        label: hit.title,
+        description: `Vault · ${hit.category}`,
+        icon: <ShieldCheck size={15} />,
+        action: () => {
+          onClose()
+          sessionStorage.setItem('compass:open-vault-category', hit.category)
+          navigate('/vault')
+        }
+      }
+    }
+    if (hit.kind === 'task') {
+      return {
+        id: `task:${hit.id}`,
+        label: hit.title,
+        description: `${hit.done ? '✓ ' : ''}Task · ${hit.listType} · ${hit.listDate}`,
+        icon: <CheckSquare size={15} />,
+        action: () => {
+          onClose()
+          sessionStorage.setItem('compass:pending-action', 'focus-task')
+          sessionStorage.setItem('compass:focus-task-date', hit.listDate)
+          navigate(
+            hit.listType === 'weekly'
+              ? '/weekly'
+              : hit.listType === 'monthly'
+                ? '/monthly'
+                : '/daily'
+          )
+        }
+      }
+    }
+    return {
+      id: `txn:${hit.id}`,
+      label: hit.description,
+      description: `Transaction · ${hit.date} · ${hit.amount.toFixed(2)}`,
+      icon: <DollarSign size={15} />,
+      action: () => {
+        onClose()
+        sessionStorage.setItem(FINANCE_TAB_STORAGE_KEY, 'transactions')
+        navigate('/finance')
+      }
+    }
+  })
+
+  const filtered: Command[] = [...filteredCommands, ...searchCommands]
+
   // Focus input when opened
   useEffect(() => {
     if (open) {
       setQuery('')
+      setSearchHits([])
       setSelectedIdx(0)
       setTimeout(() => inputRef.current?.focus(), 10)
     }
   }, [open])
+
+  // Debounced global search (knowledge bodies, vault titles, tasks,
+  // transactions). The lastSearchTokenRef guard makes sure an older,
+  // slower response can't overwrite a newer one when the user types
+  // quickly.
+  useEffect(() => {
+    if (!open) return
+    const trimmed = query.trim()
+    if (trimmed.length < 2) {
+      setSearchHits([])
+      return
+    }
+    if (typeof window === 'undefined' || !window.api?.search) {
+      return
+    }
+    const token = ++lastSearchTokenRef.current
+    const handle = window.setTimeout(() => {
+      window.api.search
+        .global(trimmed)
+        .then((res) => {
+          if (token !== lastSearchTokenRef.current) return
+          setSearchHits(res.hits ?? [])
+        })
+        .catch(() => {
+          if (token !== lastSearchTokenRef.current) return
+          setSearchHits([])
+        })
+    }, 120)
+    return () => window.clearTimeout(handle)
+  }, [open, query])
 
   const handleKey = useCallback(
     (e: KeyboardEvent) => {
@@ -296,7 +401,7 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
               setQuery(e.target.value)
               setSelectedIdx(0)
             }}
-            placeholder="Go to page…"
+            placeholder="Search notes, vault, tasks, transactions… or go to page"
             className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
           />
           <kbd className="text-xs text-muted-foreground bg-secondary px-1.5 py-0.5 rounded border border-border">

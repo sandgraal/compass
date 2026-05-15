@@ -40,6 +40,8 @@ import { DATA_DIR, KNOWLEDGE_DIR } from '../paths'
 
 export const DEFAULT_EMBED_MODEL = 'nomic-embed-text'
 const OLLAMA_BASE_URL = 'http://localhost:11434'
+/** Per-request timeout for Ollama embedding calls (30 s). */
+const EMBED_REQUEST_TIMEOUT_MS = 30_000
 
 const INDEX_PATH = join(DATA_DIR, 'knowledge-embeddings.json')
 
@@ -156,25 +158,41 @@ export interface EmbedOptions {
  */
 export async function embedText(text: string, options: EmbedOptions): Promise<number[]> {
   const url = `${options.baseUrl ?? OLLAMA_BASE_URL}/api/embeddings`
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: options.model, prompt: text }),
-    signal: options.signal
-  })
-  if (!resp.ok) {
-    throw new Error(`Ollama /api/embeddings returned ${resp.status} ${resp.statusText}`)
+
+  // Use the caller's signal when supplied; otherwise create a per-request
+  // timeout so a stalled Ollama instance cannot block the call indefinitely.
+  const timeoutCtrl = options.signal ? null : new AbortController()
+  const timeoutId = timeoutCtrl
+    ? setTimeout(
+        () => timeoutCtrl.abort(new Error('Ollama request timed out')),
+        EMBED_REQUEST_TIMEOUT_MS
+      )
+    : null
+  const signal = options.signal ?? timeoutCtrl!.signal
+
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: options.model, prompt: text }),
+      signal
+    })
+    if (!resp.ok) {
+      throw new Error(`Ollama /api/embeddings returned ${resp.status} ${resp.statusText}`)
+    }
+    const json = (await resp.json()) as { embedding?: unknown }
+    const embedding = json.embedding
+    if (
+      !Array.isArray(embedding) ||
+      embedding.length === 0 ||
+      embedding.some((v) => typeof v !== 'number' || !Number.isFinite(v))
+    ) {
+      throw new Error('Ollama returned a malformed embedding')
+    }
+    return embedding as number[]
+  } finally {
+    if (timeoutId !== null) clearTimeout(timeoutId)
   }
-  const json = (await resp.json()) as { embedding?: unknown }
-  const embedding = json.embedding
-  if (
-    !Array.isArray(embedding) ||
-    embedding.length === 0 ||
-    embedding.some((v) => typeof v !== 'number' || !Number.isFinite(v))
-  ) {
-    throw new Error('Ollama returned a malformed embedding')
-  }
-  return embedding as number[]
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -316,12 +334,12 @@ export async function buildEmbeddingsIndex(
     } catch {
       continue
     }
-    newMtimes[rel] = mtime
 
     const previousMtime = reuseExisting ? existing.fileMtimes[rel] : undefined
     if (reuseExisting && previousMtime === mtime) {
       const reused = existingByPath.get(rel)
       if (reused && reused.length > 0) {
+        newMtimes[rel] = mtime
         newChunks.push(...reused)
         skippedFiles++
         continue
@@ -337,22 +355,34 @@ export async function buildEmbeddingsIndex(
     }
     const chunks = chunkMarkdown(content)
     if (chunks.length === 0) {
+      newMtimes[rel] = mtime
       builtFiles++ // counted as visited even if it produced nothing
       continue
     }
+    // Buffer this file's embedded chunks locally so a mid-file failure
+    // does not leave partial entries in the index or mark the file as
+    // successfully processed. Only commit to newChunks + newMtimes once
+    // every chunk of this file has been embedded successfully.
+    const fileChunks: EmbeddingChunk[] = []
+    let fileError = false
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i]
       try {
         const vector = await embed(chunk, { model, signal: options.signal })
-        newChunks.push({ path: rel, chunkIndex: i, text: chunk, vector })
+        fileChunks.push({ path: rel, chunkIndex: i, text: chunk, vector })
       } catch (err) {
         errors.push({ path: rel, message: (err as Error).message })
         // Don't bail on the whole build — a single bad file shouldn't
         // erase the whole index. The error is surfaced to the user.
+        fileError = true
         break
       }
     }
-    builtFiles++
+    if (!fileError) {
+      newMtimes[rel] = mtime
+      newChunks.push(...fileChunks)
+      builtFiles++
+    }
   }
 
   const index: EmbeddingIndex = {

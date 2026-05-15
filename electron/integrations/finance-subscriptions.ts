@@ -40,7 +40,19 @@ export type Subscription = {
   daysSinceLast: number
   nCharges: number
   status: SubscriptionStatus
+  // True if max - min crosses 50% of the median: a coarse "amounts vary"
+  // signal that captures both genuine hikes and noisy promotional charges.
   priceBump: boolean
+  // Recent-vs-historical price-hike detection (May 2026 strategic review
+  // Tier 2 #8). Splits the charge stream into the last N charges (recent)
+  // vs everything before (historical). When the recent median is materially
+  // higher than the historical median we mark `priceHike: true` and report
+  // the delta + pct so the UI can surface a "+$X / +Y%" badge.
+  priceHike: boolean
+  priceHikeDelta: number
+  priceHikePct: number
+  recentMedian: number
+  historicalMedian: number
 }
 
 export type SubscriptionAudit = {
@@ -154,6 +166,23 @@ export function auditSubscriptions(
     else status = 'active'
     const priceBump = max - min > 0.5 * med && med > 5
 
+    // Recent-vs-historical hike: split off the last ~3 charges (or 1/3 of
+    // the stream when shorter) and compare medians. Threshold: > $0.50 of
+    // absolute delta AND > 8% relative — anything below is plausibly tax
+    // / surcharge drift, not a real price increase.
+    const recentCount = Math.max(1, Math.min(3, Math.floor(amounts.length / 3)))
+    const recentAmounts = amounts.slice(-recentCount)
+    const historicalAmounts = amounts.slice(0, amounts.length - recentCount)
+    const recentMedian = median(recentAmounts)
+    const historicalMedian = historicalAmounts.length > 0 ? median(historicalAmounts) : recentMedian
+    const priceHikeDelta = recentMedian - historicalMedian
+    const priceHikePct = historicalMedian > 0 ? (priceHikeDelta / historicalMedian) * 100 : 0
+    const priceHike =
+      historicalAmounts.length > 0 &&
+      priceHikeDelta > 0.5 &&
+      priceHikePct > 8 &&
+      historicalMedian > 1
+
     const [merchant, account] = key.split('::')
     subs.push({
       merchant,
@@ -170,7 +199,12 @@ export function auditSubscriptions(
       daysSinceLast,
       nCharges: entries.length,
       status,
-      priceBump
+      priceBump,
+      priceHike,
+      priceHikeDelta: Math.round(priceHikeDelta * 100) / 100,
+      priceHikePct: Math.round(priceHikePct * 10) / 10,
+      recentMedian: Math.round(recentMedian * 100) / 100,
+      historicalMedian: Math.round(historicalMedian * 100) / 100
     })
   }
 

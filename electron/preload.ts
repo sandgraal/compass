@@ -74,10 +74,22 @@ const api = {
       ipcRenderer.invoke('knowledge:list-suggestions', targetPath),
     acceptSuggestion: (id: number) => ipcRenderer.invoke('knowledge:accept-suggestion', id),
     dismissSuggestion: (id: number) => ipcRenderer.invoke('knowledge:dismiss-suggestion', id),
+    getBacklinks: (path: string) => ipcRenderer.invoke('knowledge:get-backlinks', path),
     // Tier 2 #6 — semantic search via local Ollama embeddings
     getEmbeddingStatus: () => ipcRenderer.invoke('knowledge:get-embedding-status'),
     rebuildEmbeddings: () => ipcRenderer.invoke('knowledge:rebuild-embeddings'),
     semanticSearch: (query: string) => ipcRenderer.invoke('knowledge:semantic-search', query)
+  },
+
+  // --- Global search (May 2026 Tier 1 #3) ---
+  search: {
+    global: (query: string) => ipcRenderer.invoke('search:global', query)
+  },
+
+  // --- Encrypted backup / restore (May 2026 Tier 1 #2) ---
+  backup: {
+    create: (passphrase: string) => ipcRenderer.invoke('backup:create', passphrase),
+    restore: (passphrase: string) => ipcRenderer.invoke('backup:restore', passphrase)
   },
 
   // --- Vault (Sensitive Data) ---
@@ -209,6 +221,8 @@ const api = {
       ipcRenderer.invoke('finance:get-tax-summary', opts),
     setTransactionTaxTag: (id: number, taxTag: string) =>
       ipcRenderer.invoke('finance:set-transaction-tax-tag', id, taxTag),
+    exportTaxPack: (opts?: { year?: number }) =>
+      ipcRenderer.invoke('finance:export-tax-pack', opts),
 
     // Net worth (Phase 4.4)
     getNetWorthSnapshot: () => ipcRenderer.invoke('finance:get-net-worth-snapshot'),

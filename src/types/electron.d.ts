@@ -54,6 +54,45 @@ declare global {
     models?: string[]
   }
 
+  type GlobalSearchHit =
+    | {
+        kind: 'knowledge'
+        path: string
+        title: string
+        snippet: string
+        score: number
+      }
+    | {
+        kind: 'vault'
+        category: string
+        id: string
+        title: string
+        score: number
+      }
+    | {
+        kind: 'task'
+        id: number
+        title: string
+        listType: string
+        listDate: string
+        done: boolean
+        score: number
+      }
+    | {
+        kind: 'transaction'
+        id: number
+        date: string
+        amount: number
+        description: string
+        score: number
+      }
+
+  interface BacklinkRow {
+    path: string
+    title: string
+    snippet: string
+  }
+
   interface IntegrationStatus {
     id: number
     service: string
@@ -173,6 +212,7 @@ declare global {
         listSuggestions(targetPath?: string): Promise<KnowledgeSuggestion[]>
         acceptSuggestion(id: number): Promise<{ success: boolean }>
         dismissSuggestion(id: number): Promise<{ success: boolean }>
+        getBacklinks(path: string): Promise<BacklinkRow[]>
         getEmbeddingStatus(): Promise<{
           builtAt: number | null
           model: string | null
@@ -198,6 +238,31 @@ declare global {
             score: number
           }>
           reason?: 'invalid-query' | 'query-too-long' | 'index-missing' | 'ollama-error'
+          error?: string
+        }>
+      }
+      search: {
+        global(query: string): Promise<{
+          hits: GlobalSearchHit[]
+          counts?: { knowledge: number; vault: number; tasks: number; transactions: number }
+        }>
+      }
+      backup: {
+        create(passphrase: string): Promise<{
+          success: boolean
+          path?: string
+          size?: number
+          stats?: { tables: number; knowledgeFiles: number; vaultFiles: number }
+          canceled?: boolean
+          error?: string
+        }>
+        restore(passphrase: string): Promise<{
+          success: boolean
+          path?: string
+          exportedAt?: string
+          appVersion?: string
+          stats?: { vaultFiles: number; knowledgeFiles: number; rows: number }
+          canceled?: boolean
           error?: string
         }>
       }
@@ -413,6 +478,11 @@ declare global {
             nCharges: number
             status: 'active' | 'zombie' | 'expired'
             priceBump: boolean
+            priceHike: boolean
+            priceHikeDelta: number
+            priceHikePct: number
+            recentMedian: number
+            historicalMedian: number
           }>
           zombies: Array<{
             merchant: string
@@ -438,6 +508,15 @@ declare global {
           id: number,
           taxTag: string
         ): Promise<{ success: boolean; error?: string }>
+        exportTaxPack(opts?: { year?: number }): Promise<{
+          success: boolean
+          year?: number
+          dir?: string
+          files?: Array<{ tag: string; file: string; count: number; total: number }>
+          manifest?: string
+          canceled?: boolean
+          error?: string
+        }>
 
         // Net worth (Phase 4.4)
         getNetWorthSnapshot(): Promise<{
