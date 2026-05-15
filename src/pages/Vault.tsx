@@ -70,6 +70,10 @@ const FIELD_TEMPLATES: Record<
   ]
 }
 
+// Default idle timeout before the Vault locks itself, in minutes. 0 = disabled.
+// The setting is per-user via `vaultAutoLockMinutes` in `app_settings`.
+const VAULT_AUTOLOCK_DEFAULT_MINUTES = 5
+
 export default function Vault(): JSX.Element {
   const [categories, setCategories] = useState<VaultCategory[]>([])
   const [selectedCategory, setSelectedCategory] = useState('financial')
@@ -80,6 +84,13 @@ export default function Vault(): JSX.Element {
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
+  // Auto-lock state. `locked=true` hides every entry behind an Unlock
+  // CTA; `idleMinutes=0` disables auto-lock entirely. The on-window-blur
+  // path locks immediately so an unattended Mac stops showing secrets
+  // the moment focus leaves the app — even before the idle timer fires.
+  const [locked, setLocked] = useState(false)
+  const [idleMinutes, setIdleMinutes] = useState(VAULT_AUTOLOCK_DEFAULT_MINUTES)
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { toast: showToast } = useToast()
   const confirm = useConfirm()
 
@@ -93,6 +104,68 @@ export default function Vault(): JSX.Element {
       window.api.vault.setContentProtection(false)
     }
   }, [])
+
+  // Load auto-lock interval from settings once on mount. We deliberately
+  // re-read this every time the page mounts (vs. subscribing to changes)
+  // so a settings update only takes effect on the next visit — keeps the
+  // active session predictable.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.api) return
+    void window.api.settings.getAll().then((s) => {
+      const parsed = Number.parseInt(s.vaultAutoLockMinutes ?? '', 10)
+      if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 240) {
+        setIdleMinutes(parsed)
+      }
+    })
+  }, [])
+
+  // Activity tracker. Any keyboard / mouse / scroll event resets the
+  // idle timer; expiry locks the page. Disabled when `idleMinutes === 0`.
+  useEffect(() => {
+    if (idleMinutes <= 0 || locked) {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current)
+        idleTimerRef.current = null
+      }
+      return
+    }
+    const reset = () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+      idleTimerRef.current = setTimeout(
+        () => {
+          setLocked(true)
+          setRevealedFields(new Set())
+          setAdding(false)
+        },
+        idleMinutes * 60 * 1000
+      )
+    }
+    const events: Array<keyof DocumentEventMap> = [
+      'mousemove',
+      'mousedown',
+      'keydown',
+      'scroll',
+      'touchstart'
+    ]
+    for (const ev of events) document.addEventListener(ev, reset, { passive: true })
+    const onBlur = () => {
+      // Hard-lock on focus loss — leaving Compass for another window
+      // shouldn't leave secrets visible in a recoverable screenshot.
+      setLocked(true)
+      setRevealedFields(new Set())
+      setAdding(false)
+    }
+    window.addEventListener('blur', onBlur)
+    reset()
+    return () => {
+      for (const ev of events) document.removeEventListener(ev, reset)
+      window.removeEventListener('blur', onBlur)
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current)
+        idleTimerRef.current = null
+      }
+    }
+  }, [idleMinutes, locked])
 
   useEffect(() => {
     const isElectron = typeof window !== 'undefined' && !!window.api
@@ -285,7 +358,7 @@ export default function Vault(): JSX.Element {
       </div>
 
       {/* Entries panel */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden relative">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
           <div>
@@ -295,17 +368,61 @@ export default function Vault(): JSX.Element {
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">{selectedCat?.description}</p>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setAdding(true)
-              setNewEntry({})
-            }}
-            className="flex items-center gap-1.5 text-sm px-3 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors"
-          >
-            <Plus size={14} /> Add entry
-          </button>
+          <div className="flex items-center gap-2">
+            {idleMinutes > 0 && !locked && (
+              <button
+                type="button"
+                onClick={() => {
+                  setLocked(true)
+                  setRevealedFields(new Set())
+                  setAdding(false)
+                }}
+                aria-label="Lock vault now"
+                title={`Auto-locks after ${idleMinutes}m of inactivity`}
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-border hover:border-primary/50 text-muted-foreground hover:text-foreground rounded-lg transition-colors"
+              >
+                <Lock size={11} /> Lock
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setAdding(true)
+                setNewEntry({})
+              }}
+              disabled={locked}
+              className="flex items-center gap-1.5 text-sm px-3 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
+            >
+              <Plus size={14} /> Add entry
+            </button>
+          </div>
         </div>
+
+        {/* Lock overlay — sits above the entries area but below the header so
+            the user can see which category they're in. Counts the entries
+            without revealing any field values. */}
+        {locked && (
+          <div className="absolute inset-x-0 top-[73px] bottom-0 z-10 bg-background/95 backdrop-blur-sm flex flex-col items-center justify-center gap-4 p-8">
+            <div className="w-16 h-16 rounded-full bg-secondary flex items-center justify-center text-primary">
+              <Lock size={28} />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-semibold text-foreground">Vault is locked</p>
+              <p className="text-xs text-muted-foreground mt-1 max-w-sm">
+                {entries.length} {entries.length === 1 ? 'entry' : 'entries'} in{' '}
+                {selectedCat?.label.toLowerCase()} · auto-locked after {idleMinutes}m idle or focus
+                loss
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setLocked(false)}
+              className="flex items-center gap-1.5 text-sm px-4 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors"
+            >
+              <ShieldCheck size={14} /> Unlock
+            </button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-6">
           {/* Add form */}

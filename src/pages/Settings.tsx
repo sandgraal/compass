@@ -28,6 +28,8 @@ export default function Settings(): JSX.Element {
 
   const [appVersion, setAppVersion] = useState('')
   const [checkingUpdate, setCheckingUpdate] = useState(false)
+  // Vault auto-lock idle minutes. 0 = disabled. Default mirrors Vault.tsx.
+  const [vaultAutoLockMinutes, setVaultAutoLockMinutes] = useState('5')
 
   // AI assist (Ollama)
   const [ollamaEnabled, setOllamaEnabled] = useState(false)
@@ -47,6 +49,7 @@ export default function Settings(): JSX.Element {
         setOllamaEnabled(s.ollamaSuggestionsEnabled === 'true')
         setOllamaModel(savedModel)
         loadedOllamaModelRef.current = savedModel
+        setVaultAutoLockMinutes(s.vaultAutoLockMinutes ?? '5')
         checkOllama({ currentModel: savedModel })
       })
     }
@@ -199,6 +202,29 @@ export default function Settings(): JSX.Element {
           <span className="text-xs text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded-full">
             AES-256-GCM
           </span>
+        </SettingsRow>
+        <SettingsRow
+          label="Vault auto-lock"
+          description="Hide vault entries behind an Unlock CTA after this many idle minutes. Also locks immediately on window focus loss. Applies on next visit to /vault."
+        >
+          <select
+            value={vaultAutoLockMinutes}
+            onChange={(e) => {
+              setVaultAutoLockMinutes(e.target.value)
+              save('vaultAutoLockMinutes', e.target.value)
+            }}
+            aria-label="Vault auto-lock idle minutes"
+            className="bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+          >
+            <option value="0">Off</option>
+            <option value="1">After 1 minute</option>
+            <option value="2">After 2 minutes</option>
+            <option value="5">After 5 minutes</option>
+            <option value="10">After 10 minutes</option>
+            <option value="15">After 15 minutes</option>
+            <option value="30">After 30 minutes</option>
+            <option value="60">After 1 hour</option>
+          </select>
         </SettingsRow>
       </SettingsSection>
 

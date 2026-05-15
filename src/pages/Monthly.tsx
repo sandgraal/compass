@@ -10,8 +10,18 @@ import {
   startOfWeek,
   subMonths
 } from 'date-fns'
-import { ChevronLeft, ChevronRight, DollarSign, Plus, Target, TrendingUp, X } from 'lucide-react'
+import {
+  ChevronLeft,
+  ChevronRight,
+  DollarSign,
+  Flame,
+  Plus,
+  Target,
+  TrendingUp,
+  X
+} from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { computeHabitStreak } from '../lib/habit-streaks'
 import { cn, isoDate } from '../lib/utils'
 
 const HABIT_COLORS = [
@@ -451,10 +461,31 @@ export default function Monthly(): JSX.Element {
                       const doneCount = daysInMonth.filter((d) => entries[isoDate(d)]).length
                       const pct = Math.round((doneCount / daysInMonth.length) * 100)
                       const color = habit.color ?? '#6272f1'
+                      // Streaks span all loaded months — `habitEntries[habit.id]`
+                      // is the full per-habit map the IPC returned, not just
+                      // the current month. The flame badge only shows when
+                      // there's an active streak (>=2) to avoid clutter.
+                      const streak = computeHabitStreak(entries)
                       return (
                         <tr key={habit.id} className="border-t border-border/40 group">
                           <td className="py-1.5 pr-3 font-medium" style={{ color }}>
-                            {habit.name}
+                            <span className="inline-flex items-center gap-2">
+                              {habit.name}
+                              {streak.current >= 2 && (
+                                <span
+                                  className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-amber-300 bg-amber-500/15 border border-amber-500/30 rounded px-1.5 py-0.5"
+                                  title={`Current streak: ${streak.current} day${streak.current === 1 ? '' : 's'}. Longest ever: ${streak.longest} day${streak.longest === 1 ? '' : 's'}.`}
+                                >
+                                  <Flame size={9} />
+                                  {streak.current}
+                                  {streak.longest > streak.current && (
+                                    <span className="text-amber-300/60 normal-case">
+                                      / best {streak.longest}
+                                    </span>
+                                  )}
+                                </span>
+                              )}
+                            </span>
                           </td>
                           {daysInMonth.map((d) => {
                             const dateStr = isoDate(d)

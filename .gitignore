@@ -80,3 +80,4 @@ resources/icon.iconset/
 # KNIP / LINT REPORTS
 # ============================================================
 knip-report.json
+.husky/_/
