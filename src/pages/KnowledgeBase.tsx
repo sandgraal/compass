@@ -14,6 +14,7 @@ import {
   Folder,
   GitCompare,
   Lightbulb,
+  Link2,
   Plus,
   RefreshCw,
   Save,
@@ -41,12 +42,25 @@ export default function KnowledgeBase(): JSX.Element {
   const [searchResults, setSearchResults] = useState<Array<FileNode & { snippet: string }> | null>(
     null
   )
+  const [semanticHits, setSemanticHits] = useState<
+    Array<{
+      path: string
+      title: string
+      chunkIndex: number
+      snippet: string
+      score: number
+    }>
+  >([])
+  const [semanticEnabled, setSemanticEnabled] = useState(false)
+  const [semanticReason, setSemanticReason] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [showDiff, setShowDiff] = useState(false)
   const [diffOld, setDiffOld] = useState<string | null>(null) // content before last sync
   const [suggestions, setSuggestions] = useState<KnowledgeSuggestion[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
+  const [backlinks, setBacklinks] = useState<BacklinkRow[]>([])
+  const [showBacklinks, setShowBacklinks] = useState(false)
   const isLoadingRef = useRef(false)
   const currentRawRef = useRef<string>('') // raw markdown of currently open file
   const selectedPathRef = useRef<string | null>(null)
@@ -108,6 +122,67 @@ export default function KnowledgeBase(): JSX.Element {
     return () => window.removeEventListener('compass:focus-search', handler)
   }, [])
 
+  // CommandPalette "open knowledge X" → load that note (also fired on
+  // mount when the palette put the path into sessionStorage before nav).
+  useEffect(() => {
+    const pending = sessionStorage.getItem('compass:open-knowledge')
+    if (pending) {
+      sessionStorage.removeItem('compass:open-knowledge')
+      selectFile(pending)
+    }
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (typeof detail === 'string' && detail) selectFile(detail)
+    }
+    window.addEventListener('compass:open-knowledge', handler)
+    return () => window.removeEventListener('compass:open-knowledge', handler)
+  }, [])
+
+  // Wikilink click handler: intercept `<a data-wikilink="…">` clicks
+  // inside the editor and route to selectFile() instead of letting the
+  // browser navigate. Resolves the target to a real .md path using the
+  // current file index — title-match wins, then basename, then full path.
+  useEffect(() => {
+    const editorRoot = document.querySelector('.tiptap-editor') as HTMLElement | null
+    if (!editorRoot) return
+    function onClick(event: MouseEvent) {
+      const target = event.target as HTMLElement | null
+      const anchor = target?.closest('a[data-wikilink]') as HTMLAnchorElement | null
+      if (!anchor) return
+      event.preventDefault()
+      const wantedRaw = anchor.getAttribute('data-wikilink') ?? ''
+      const wanted = wantedRaw.trim().toLowerCase()
+      if (!wanted) return
+      const candidate =
+        files.find((f) => f.title.toLowerCase() === wanted) ??
+        files.find((f) => f.path.replace(/\.md$/, '').toLowerCase() === wanted) ??
+        files.find(
+          (f) => f.path.replace(/^.*\//, '').replace(/\.md$/, '').toLowerCase() === wanted
+        ) ??
+        files.find((f) => f.path.toLowerCase() === wanted)
+      if (candidate) {
+        selectFile(candidate.path)
+        return
+      }
+      // Unresolved → offer to create it under general/<slug>.md
+      const slug = wanted.replace(/[^a-z0-9-_ ]/g, '').replace(/\s+/g, '-')
+      if (!slug) return
+      const newPath = `general/${slug}.md`
+      if (typeof window !== 'undefined' && window.api?.knowledge) {
+        void window.api.knowledge
+          .createFile(newPath, wantedRaw.trim())
+          .then(() => {
+            loadFiles().then(() => selectFile(newPath))
+          })
+          .catch(() => {
+            /* file may already exist; ignore */
+          })
+      }
+    }
+    editorRoot.addEventListener('click', onClick)
+    return () => editorRoot.removeEventListener('click', onClick)
+  }, [files, editor]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (debouncedSearch.trim().length > 1) {
       const isElectron = typeof window !== 'undefined' && !!window.api
@@ -116,8 +191,46 @@ export default function KnowledgeBase(): JSX.Element {
       }
     } else {
       setSearchResults(null)
+      setSemanticHits([])
+      setSemanticReason(null)
     }
   }, [debouncedSearch])
+
+  // Read the semantic-search setting once on mount so the renderer knows
+  // whether to call the embedding IPC alongside the keyword search.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.api) return
+    void window.api.settings.getAll().then((s) => {
+      setSemanticEnabled(s.semanticSearchEnabled === 'true')
+    })
+  }, [])
+
+  // Semantic pass — runs in parallel with the keyword search above so the
+  // renderer never blocks on the embedding round-trip. If the index is
+  // missing or Ollama is offline the surfaced `reason` lets us render a
+  // one-line hint without spamming the user with toasts.
+  useEffect(() => {
+    if (!semanticEnabled) {
+      setSemanticHits([])
+      setSemanticReason(null)
+      return
+    }
+    const q = debouncedSearch.trim()
+    if (q.length < 2) {
+      setSemanticHits([])
+      setSemanticReason(null)
+      return
+    }
+    let cancelled = false
+    void window.api?.knowledge.semanticSearch(q).then((res) => {
+      if (cancelled) return
+      setSemanticHits(res.hits ?? [])
+      setSemanticReason(res.reason ?? null)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [debouncedSearch, semanticEnabled])
 
   async function loadFiles() {
     const isElectron = typeof window !== 'undefined' && !!window.api
@@ -153,6 +266,17 @@ export default function KnowledgeBase(): JSX.Element {
     if (selectedPathRef.current === path) setSuggestions(items)
   }
 
+  async function loadBacklinks(path: string) {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron) return
+    try {
+      const items = await window.api.knowledge.getBacklinks(path)
+      if (selectedPathRef.current === path) setBacklinks(items)
+    } catch {
+      if (selectedPathRef.current === path) setBacklinks([])
+    }
+  }
+
   function selectFile(path: string) {
     selectedPathRef.current = path
     setSelectedPath(path)
@@ -160,8 +284,11 @@ export default function KnowledgeBase(): JSX.Element {
     setShowDiff(false)
     setShowSuggestions(false)
     setSuggestions([])
+    setBacklinks([])
+    setShowBacklinks(false)
     loadFileContent(path)
     loadSuggestions(path)
+    loadBacklinks(path)
     // Load persisted prev snapshot for diff view
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (isElectron) {
@@ -242,8 +369,49 @@ export default function KnowledgeBase(): JSX.Element {
         <div className="flex-1 overflow-y-auto py-2">
           {searchResults ? (
             <div>
+              {semanticEnabled && semanticHits.length > 0 && (
+                <div className="mb-3">
+                  <p className="text-xs text-muted-foreground px-4 py-1 font-medium flex items-center gap-1.5">
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary" />
+                    By meaning ({semanticHits.length})
+                  </p>
+                  {semanticHits.map((hit) => (
+                    <button
+                      key={`${hit.path}::${hit.chunkIndex}`}
+                      type="button"
+                      onClick={() => {
+                        setSearchQuery('')
+                        setSearchResults(null)
+                        setSemanticHits([])
+                        selectFile(hit.path)
+                      }}
+                      className={cn(
+                        'w-full text-left px-4 py-1.5 hover:bg-secondary/60 transition-colors',
+                        selectedPath === hit.path && 'bg-secondary/40'
+                      )}
+                    >
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-sm text-foreground truncate">{hit.title}</span>
+                        <span className="text-[10px] text-muted-foreground tabular-nums">
+                          {(hit.score * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground truncate">{hit.snippet}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {semanticEnabled && semanticReason && semanticHits.length === 0 && (
+                <p className="px-4 py-1 text-[10px] text-muted-foreground italic">
+                  {semanticReason === 'index-missing'
+                    ? 'Semantic index not built — Settings → AI assist → Build index.'
+                    : semanticReason === 'ollama-error'
+                      ? 'Ollama unreachable — semantic search skipped.'
+                      : ''}
+                </p>
+              )}
               <p className="text-xs text-muted-foreground px-4 py-1 font-medium">
-                {searchResults.length} results
+                {searchResults.length} keyword results
               </p>
               {searchResults.map((r) => (
                 <FileTreeItem
@@ -253,6 +421,7 @@ export default function KnowledgeBase(): JSX.Element {
                   onClick={() => {
                     setSearchQuery('')
                     setSearchResults(null)
+                    setSemanticHits([])
                     selectFile(r.path)
                   }}
                 />
@@ -324,6 +493,21 @@ export default function KnowledgeBase(): JSX.Element {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {backlinks.length > 0 && (
+                  <button
+                    aria-label={`${backlinks.length} backlink${backlinks.length === 1 ? '' : 's'} — click to review`}
+                    onClick={() => setShowBacklinks((v) => !v)}
+                    className={cn(
+                      'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors',
+                      showBacklinks
+                        ? 'bg-primary/20 text-primary border border-primary/30'
+                        : 'bg-secondary hover:bg-secondary/80 text-muted-foreground'
+                    )}
+                  >
+                    <Link2 size={12} />
+                    {backlinks.length} backlink{backlinks.length === 1 ? '' : 's'}
+                  </button>
+                )}
                 {suggestions.length > 0 && (
                   <button
                     aria-label={`${suggestions.length} suggestion${suggestions.length === 1 ? '' : 's'} — click to review`}
@@ -363,6 +547,38 @@ export default function KnowledgeBase(): JSX.Element {
                 </button>
               </div>
             </div>
+
+            {/* Backlinks panel */}
+            {showBacklinks && backlinks.length > 0 && (
+              <div className="border-b border-border bg-card/60 max-h-72 overflow-y-auto">
+                <div className="px-4 py-2 flex items-center justify-between border-b border-border/60">
+                  <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                    <Link2 size={11} /> Notes that link here
+                  </span>
+                  <button
+                    aria-label="Close backlinks panel"
+                    onClick={() => setShowBacklinks(false)}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+                <ul className="divide-y divide-border/40">
+                  {backlinks.map((b) => (
+                    <li key={b.path}>
+                      <button
+                        type="button"
+                        onClick={() => selectFile(b.path)}
+                        className="w-full text-left px-4 py-2 hover:bg-secondary/40 transition-colors"
+                      >
+                        <div className="text-sm text-foreground">{b.title}</div>
+                        <div className="text-xs text-muted-foreground truncate">{b.snippet}</div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {/* Suggestions panel */}
             {showSuggestions && suggestions.length > 0 && (
@@ -667,30 +883,66 @@ function parseCells(row: string): string[] {
 }
 
 function inlineHtml(text: string): string {
-  return text
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+  return (
+    text
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/`(.+?)`/g, '<code>$1</code>')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      // Wikilinks (May 2026 Tier 1 #4). Rendered as a styled link with a
+      // custom `data-wikilink` attribute so the editor click handler can
+      // navigate to the target note. Optional `[[target|display]]` syntax —
+      // first segment is the target, second is the display text.
+      .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_full, target: string, display?: string) => {
+        const t = target.trim()
+        const d = (display ?? target).trim()
+        return `<a href="#wikilink" data-wikilink="${escapeAttr(t)}" class="text-primary underline underline-offset-2">${escapeHtml(d)}</a>`
+      })
+  )
+}
+
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+}
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 function htmlToMarkdown(html: string): string {
-  return html
-    .replace(/<h1>(.*?)<\/h1>/gi, '# $1\n')
-    .replace(/<h2>(.*?)<\/h2>/gi, '## $1\n')
-    .replace(/<h3>(.*?)<\/h3>/gi, '### $1\n')
-    .replace(/<strong>(.*?)<\/strong>/gi, '**$1**')
-    .replace(/<em>(.*?)<\/em>/gi, '*$1*')
-    .replace(/<code>(.*?)<\/code>/gi, '`$1`')
-    .replace(/<a href="([^"]+)"[^>]*>(.*?)<\/a>/gi, '[$2]($1)')
-    .replace(/<li>(.*?)<\/li>/gi, '- $1\n')
-    .replace(/<blockquote><p>(.*?)<\/p><\/blockquote>/gi, '> $1\n')
-    .replace(/<p>(.*?)<\/p>/gi, '$1\n\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .trim()
+  return (
+    html
+      .replace(/<h1>(.*?)<\/h1>/gi, '# $1\n')
+      .replace(/<h2>(.*?)<\/h2>/gi, '## $1\n')
+      .replace(/<h3>(.*?)<\/h3>/gi, '### $1\n')
+      .replace(/<strong>(.*?)<\/strong>/gi, '**$1**')
+      .replace(/<em>(.*?)<\/em>/gi, '*$1*')
+      .replace(/<code>(.*?)<\/code>/gi, '`$1`')
+      // Wikilinks: must run BEFORE the generic <a> rule, otherwise `[[X]]`
+      // round-trips as `[X](#wikilink)` and the [[…]] semantics are lost.
+      // The target lives in `data-wikilink`; the display text is the link
+      // body. When they match we emit `[[target]]`; when they differ we
+      // emit `[[target|display]]`.
+      .replace(
+        /<a\b[^>]*data-wikilink="([^"]+)"[^>]*>(.*?)<\/a>/gi,
+        (_full, target: string, display: string) => {
+          const t = target
+            .replace(/&amp;/g, '&')
+            .replace(/&quot;/g, '"')
+            .replace(/&lt;/g, '<')
+          const d = display.replace(/<[^>]+>/g, '')
+          return t.toLowerCase() === d.toLowerCase() ? `[[${t}]]` : `[[${t}|${d}]]`
+        }
+      )
+      .replace(/<a href="([^"]+)"[^>]*>(.*?)<\/a>/gi, '[$2]($1)')
+      .replace(/<li>(.*?)<\/li>/gi, '- $1\n')
+      .replace(/<blockquote><p>(.*?)<\/p><\/blockquote>/gi, '> $1\n')
+      .replace(/<p>(.*?)<\/p>/gi, '$1\n\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .trim()
+  )
 }
 
 // ── Diff view ────────────────────────────────────────────────────────────────

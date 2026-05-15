@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import CommandPalette from './components/CommandPalette'
 import { AppLayout } from './components/layout/AppLayout'
 import Daily from './pages/Daily'
@@ -47,6 +47,12 @@ export default function App(): JSX.Element {
   return (
     <HashRouter>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <UrlSchemeBridge
+        onOpenPalette={(initial) => {
+          if (initial) sessionStorage.setItem('compass:palette-initial-query', initial)
+          setPaletteOpen(true)
+        }}
+      />
       <Routes>
         <Route path="/" element={<AppLayout />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
@@ -63,4 +69,38 @@ export default function App(): JSX.Element {
       </Routes>
     </HashRouter>
   )
+}
+
+// ─── compass:// URL-scheme bridge ─────────────────────────────────────────────
+//
+// Mounts inside the HashRouter so it can `useNavigate` when the main
+// process fires `compass-url:open` / `compass-url:search`. Captures are
+// handled in main and only surface as a passive toast here.
+function UrlSchemeBridge({
+  onOpenPalette
+}: {
+  onOpenPalette: (initialQuery: string) => void
+}): null {
+  const navigate = useNavigate()
+  useEffect(() => {
+    const isElectron = typeof window !== 'undefined' && !!window.api?.urlScheme
+    if (!isElectron) return
+    const unsubOpen = window.api.urlScheme.onOpen(({ page }) => {
+      if (typeof page === 'string' && page.length > 0) navigate(`/${page}`)
+    })
+    const unsubSearch = window.api.urlScheme.onSearch(({ query }) => {
+      onOpenPalette(query)
+    })
+    const unsubCaptured = window.api.urlScheme.onCaptured(() => {
+      // Optional surface — the capture has already landed in the DB. The
+      // toast system lives inside `<AppLayout>`, so for now we let the
+      // sync of `/daily` reflect the new row when the user navigates there.
+    })
+    return () => {
+      unsubOpen()
+      unsubSearch()
+      unsubCaptured()
+    }
+  }, [navigate, onOpenPalette])
+  return null
 }

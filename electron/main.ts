@@ -6,15 +6,18 @@ import { BrowserWindow, app, ipcMain, nativeTheme, shell } from 'electron'
 import { startCronJobs } from './cron'
 import { initDb } from './db/client'
 import { registerAuthHandlers } from './ipc/auth'
+import { registerBackupHandlers } from './ipc/backup'
 import { registerFinanceHandlers } from './ipc/finance'
 import { registerHabitsHandlers } from './ipc/habits'
 import { registerKnowledgeHandlers } from './ipc/knowledge'
+import { registerSearchHandlers } from './ipc/search'
 import { registerSettingsHandlers } from './ipc/settings'
 import { registerSyncHandlers } from './ipc/sync'
 import { initAutoUpdater, registerUpdaterHandlers, scheduleUpdateChecks } from './ipc/updater'
 import { registerVaultHandlers } from './ipc/vault'
 import { initMenuBar } from './menu-bar'
 import { APP_DATA_DIR, DATA_DIR, KNOWLEDGE_DIR, VAULT_DIR } from './paths'
+import { registerCompassUrlScheme } from './url-scheme'
 
 export { APP_DATA_DIR, DATA_DIR, VAULT_DIR, KNOWLEDGE_DIR }
 
@@ -35,6 +38,12 @@ function ensureDirectories(): void {
 }
 
 let mainWindow: BrowserWindow | null = null
+
+// Register the `compass://` URL scheme BEFORE app.whenReady — the
+// `open-url` event on macOS can fire as soon as the app launches, and
+// `requestSingleInstanceLock()` has to run early to deduplicate
+// second-instance launches on Windows/Linux.
+const urlScheme = registerCompassUrlScheme(() => mainWindow)
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -120,6 +129,8 @@ app.whenReady().then(async () => {
   registerFinanceHandlers(ipcMain)
   registerHabitsHandlers(ipcMain)
   registerUpdaterHandlers(ipcMain)
+  registerBackupHandlers(ipcMain)
+  registerSearchHandlers(ipcMain)
 
   // Toggle content protection when navigating to/from vault
   ipcMain.on('vault:set-content-protection', (_event, enabled: boolean) => {
@@ -150,6 +161,8 @@ app.whenReady().then(async () => {
   startCronJobs()
   await startOrRefreshFinanceWatcher()
   initMenuBar(__dirname)
+  // Drain any compass:// URLs that arrived before the window existed.
+  urlScheme.pump()
 
   if (!is.dev) {
     initAutoUpdater()

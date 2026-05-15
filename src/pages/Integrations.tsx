@@ -37,6 +37,18 @@ const INTEGRATIONS: IntegrationConfig[] = [
     scopes: ['repo', 'read:project', 'read:user'],
     color: 'from-gray-500/20 to-gray-700/20',
     logo: '⌥'
+  },
+  // Apple Calendar uses a local-file integration rather than OAuth: we
+  // read directly from ~/Library/Calendars, which means there is no
+  // "Connect" round-trip — just toggle sync on. The card uses the same
+  // shell but the Connect button immediately triggers a sync.
+  {
+    id: 'apple-calendar',
+    name: 'Apple Calendar',
+    description: 'Local-file read of macOS Calendar.app — next 14 days. No OAuth, no network.',
+    scopes: ['local:ics'],
+    color: 'from-zinc-400/20 to-zinc-600/20',
+    logo: ''
   }
 ]
 
@@ -158,6 +170,16 @@ export default function Integrations(): JSX.Element {
     if (!isElectron) return
     setConnecting(service)
     try {
+      // Apple Calendar is local-file based — no OAuth, just kick off a
+      // sync which will create the integration row on first success.
+      if (service === 'apple-calendar') {
+        const r = await window.api.sync.triggerSync(service)
+        if (r && 'error' in r && r.error) {
+          toast(`Sync failed: ${r.error}`, 'error')
+        }
+        await loadStatuses()
+        return
+      }
       const result =
         service === 'google'
           ? await window.api.auth.connectGoogle()

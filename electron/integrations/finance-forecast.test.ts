@@ -34,6 +34,11 @@ function makeSub(overrides: Partial<Subscription> = {}): Subscription {
     nCharges: 12,
     status: 'active',
     priceBump: false,
+    priceHike: false,
+    priceHikeDelta: 0,
+    priceHikePct: 0,
+    recentMedian: 15.99,
+    historicalMedian: 15.99,
     ...overrides
   }
 }

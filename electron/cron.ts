@@ -4,7 +4,7 @@ import cron from 'node-cron'
 import { getDb, getRawSqlite } from './db/client'
 import { appSettings, integrations } from './db/schema'
 import { captureSnapshots } from './integrations/finance-snapshot'
-import { syncGitHub, syncGoogle } from './ipc/sync'
+import { syncAppleCalendar, syncGitHub, syncGoogle } from './ipc/sync'
 
 // Map of service name -> active scheduled task (so we can stop/restart per integration).
 const scheduledTasks = new Map<string, cron.ScheduledTask>()
@@ -56,6 +56,8 @@ function runSyncForService(service: string): void {
     void syncGoogle(win)
   } else if (service === 'github') {
     void syncGitHub(win)
+  } else if (service === 'apple-calendar') {
+    void syncAppleCalendar(win)
   }
 }
 

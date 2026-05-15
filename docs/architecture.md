@@ -98,12 +98,15 @@ Plain markdown files at `~/Library/Application Support/Compass/knowledge-base/<c
 Registered in `electron/main.ts`:
 - `registerAuthHandlers` — OAuth flows
 - `registerSyncHandlers` — sync trigger, status, event log
-- `registerKnowledgeHandlers` — file CRUD, search, prev snapshot, suggestions accept/dismiss
+- `registerKnowledgeHandlers` — file CRUD, search, prev snapshot, suggestions accept/dismiss, **backlinks (Phase 5.3: `knowledge:get-backlinks`)**, **semantic search (Phase 5.9): `knowledge:get-embedding-status`, `knowledge:rebuild-embeddings`, `knowledge:semantic-search`** — backed by `electron/knowledge/embeddings.ts` and a JSON-on-disk index at `.data/knowledge-embeddings.json`
 - `registerVaultHandlers` — entry CRUD, 1Password CSV import, history
 - `registerSettingsHandlers` — get/set/getAll, data export, wipe, **per-integration sync interval**, Ollama detect, quick-capture shortcut
-- `registerFinanceHandlers` — txns, accounts, debt summary, budget, rules, **geo summary, tax summary + override (Phase 4.3), net-worth snapshot/trajectory + capture + manual balance (Phase 4.4), forecast + override CRUD (Phase 4.5)**
+- `registerFinanceHandlers` — txns, accounts, debt summary, budget, rules, **geo summary, tax summary + override (Phase 4.3), net-worth snapshot/trajectory + capture + manual balance (Phase 4.4), forecast + override CRUD (Phase 4.5), tax-pack export (Phase 5.4: `finance:export-tax-pack`)**
 - `registerHabitsHandlers` — habit CRUD + toggle entries
 - `registerUpdaterHandlers` — `updater:check`, `updater:install-and-restart`; pushes `updater:status` events to renderer
+- `registerCompassUrlScheme` (in `electron/url-scheme.ts`) — registers the `compass://` protocol handler (`capture`, `open/<page>`, `search`); routes URLs from `open-url` (macOS) and `second-instance` (Win/Linux) into IPC events the renderer consumes. `electron/integrations/apple-calendar.ts` adds `syncAppleCalendar` (Phase 5.7) which is dispatched from `sync.ts` for the `apple-calendar` service.
+- `registerBackupHandlers` — `backup:create`, `backup:restore` (Phase 5.1, passphrase-derived AES-256-GCM)
+- `registerSearchHandlers` — `search:global` (Phase 5.2; knowledge bodies + vault titles + tasks + transactions)
 
 Pattern: every IPC handler lives in `electron/ipc/<domain>.ts`, is exposed through `electron/preload.ts`, and has a TypeScript signature in `src/types/electron.d.ts`. Drift between these three is the leading source of bugs — see `electron-trpc` migration plan in `docs/implementation_plan.md` Phase 0.7.
 

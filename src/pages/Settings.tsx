@@ -3,13 +3,15 @@ import {
   Bot,
   Database,
   Download,
+  HardDriveDownload,
   Keyboard,
   Monitor,
   Moon,
   RefreshCw,
   Shield,
   Sun,
-  Trash2
+  Trash2,
+  Upload
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useConfirm } from '../components/ui/ConfirmDialog'
@@ -352,6 +354,11 @@ export default function Settings(): JSX.Element {
             </select>
           </SettingsRow>
         )}
+
+        {/* Semantic search — uses a dedicated embedding model, separate
+           from the suggestion-extraction one above. Visible whenever
+           Ollama is running. */}
+        {ollamaStatus?.available && <SemanticSearchSettings />}
       </SettingsSection>
 
       <SettingsSection icon={<RefreshCw size={16} />} title="Updates">
@@ -380,6 +387,12 @@ export default function Settings(): JSX.Element {
             {checkingUpdate ? 'Checking…' : 'Check now'}
           </button>
         </SettingsRow>
+      </SettingsSection>
+
+      {/* Encrypted backup / restore */}
+      <SettingsSection icon={<HardDriveDownload size={16} />} title="Encrypted Backup">
+        <BackupRow />
+        <RestoreRow />
       </SettingsSection>
 
       {/* Danger zone */}
@@ -476,6 +489,143 @@ function SettingsRow({
   )
 }
 
+// ---------------------------------------------------------------------------
+// Backup / Restore rows (May 2026 Tier 1 #2)
+//
+// Both rows share the same passphrase-in-input UX. We deliberately don't
+// persist the passphrase anywhere — even in component state across modal
+// open/close — so it's typed each time. That's a slight friction win
+// against the much worse "Compass remembered my backup password" failure
+// mode.
+// ---------------------------------------------------------------------------
+
+function BackupRow(): JSX.Element {
+  const { toast } = useToast()
+  const [passphrase, setPassphrase] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const canSubmit = passphrase.length >= 8 && passphrase === confirm && !busy
+
+  async function run() {
+    if (!canSubmit) return
+    setBusy(true)
+    try {
+      const r = await window.api.backup.create(passphrase)
+      if (r.success) {
+        toast(
+          `Backup written (${Math.round((r.size ?? 0) / 1024)} KB · ${r.stats?.knowledgeFiles ?? 0} notes, ${r.stats?.vaultFiles ?? 0} vault files)`,
+          'success'
+        )
+        setPassphrase('')
+        setConfirm('')
+      } else if (!r.canceled) {
+        toast(r.error ?? 'Backup failed', 'error')
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <SettingsRow
+      label="Create encrypted backup"
+      description="Bundle DB + knowledge + vault into a single .compass-backup file (AES-256-GCM, scrypt-derived from your passphrase). Survives a dead machine."
+    >
+      <div className="flex flex-col items-end gap-1.5">
+        <input
+          type="password"
+          autoComplete="new-password"
+          placeholder="Passphrase (min 8 chars)"
+          value={passphrase}
+          onChange={(e) => setPassphrase(e.target.value)}
+          className="bg-secondary border border-border rounded-lg px-3 py-1.5 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary w-56"
+        />
+        <input
+          type="password"
+          autoComplete="new-password"
+          placeholder="Confirm passphrase"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          className={cn(
+            'bg-secondary border rounded-lg px-3 py-1.5 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary w-56',
+            confirm && confirm !== passphrase ? 'border-destructive/70' : 'border-border'
+          )}
+        />
+        <button
+          type="button"
+          onClick={run}
+          disabled={!canSubmit}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
+        >
+          <HardDriveDownload size={12} />
+          {busy ? 'Encrypting…' : 'Create backup'}
+        </button>
+      </div>
+    </SettingsRow>
+  )
+}
+
+function RestoreRow(): JSX.Element {
+  const { toast } = useToast()
+  const confirm = useConfirm()
+  const [passphrase, setPassphrase] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function run() {
+    if (passphrase.length === 0 || busy) return
+    const ok = await confirm({
+      title: 'Restore from backup?',
+      description:
+        'This replaces all current Compass data: tables, knowledge notes, and vault. Anything not in the backup will be lost. Continue?',
+      confirmLabel: 'Restore',
+      destructive: true
+    })
+    if (!ok) return
+    setBusy(true)
+    try {
+      const r = await window.api.backup.restore(passphrase)
+      if (r.success) {
+        toast(
+          `Restored from ${r.exportedAt?.slice(0, 10) ?? 'backup'} — ${r.stats?.rows ?? 0} rows, ${r.stats?.knowledgeFiles ?? 0} notes`,
+          'success'
+        )
+        setPassphrase('')
+      } else if (!r.canceled) {
+        toast(r.error ?? 'Restore failed', 'error')
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <SettingsRow
+      label="Restore from backup"
+      description="Pick a .compass-backup file and decrypt it. Overwrites current data — make a fresh backup first if you have unsaved changes."
+    >
+      <div className="flex flex-col items-end gap-1.5">
+        <input
+          type="password"
+          autoComplete="current-password"
+          placeholder="Passphrase"
+          value={passphrase}
+          onChange={(e) => setPassphrase(e.target.value)}
+          className="bg-secondary border border-border rounded-lg px-3 py-1.5 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary w-56"
+        />
+        <button
+          type="button"
+          onClick={run}
+          disabled={busy || passphrase.length === 0}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-border text-foreground hover:bg-secondary/60 rounded-lg transition-colors disabled:opacity-50"
+        >
+          <Upload size={12} />
+          {busy ? 'Restoring…' : 'Restore…'}
+        </button>
+      </div>
+    </SettingsRow>
+  )
+}
+
 function Toggle({
   enabled,
   onChange
@@ -495,6 +645,116 @@ function Toggle({
         )}
       />
     </button>
+  )
+}
+
+// ─── Semantic search settings (May 2026 Tier 2 #6) ────────────────────────────
+//
+// Tucks under the existing "AI assist (Ollama)" section because it shares the
+// same trust posture: opt-in, local-only, runs against the user's machine.
+// Two controls: an enable toggle (gates whether the renderer queries the
+// semantic IPC) and a rebuild button (calls Ollama to (re)compute embeddings
+// for every knowledge file).
+
+const DEFAULT_EMBEDDING_MODEL = 'nomic-embed-text'
+
+function SemanticSearchSettings(): JSX.Element {
+  const { toast } = useToast()
+  const [enabled, setEnabled] = useState(false)
+  const [embeddingModel, setEmbeddingModel] = useState(DEFAULT_EMBEDDING_MODEL)
+  const [status, setStatus] = useState<{
+    builtAt: number | null
+    model: string | null
+    fileCount: number
+    chunkCount: number
+    building: boolean
+  } | null>(null)
+  const [building, setBuilding] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.api) return
+    void window.api.settings.getAll().then((s) => {
+      setEnabled(s.semanticSearchEnabled === 'true')
+      if (s.embeddingModel && s.embeddingModel.trim().length > 0) {
+        setEmbeddingModel(s.embeddingModel)
+      }
+    })
+    void window.api.knowledge.getEmbeddingStatus().then(setStatus)
+  }, [])
+
+  async function persist(key: string, value: string): Promise<void> {
+    if (typeof window !== 'undefined' && window.api) {
+      await window.api.settings.set(key, value)
+    }
+  }
+
+  async function rebuild(): Promise<void> {
+    if (typeof window === 'undefined' || !window.api) return
+    setBuilding(true)
+    try {
+      const r = await window.api.knowledge.rebuildEmbeddings()
+      if (r.success) {
+        toast(
+          `Indexed ${r.builtFiles ?? 0} new file(s) (${r.totalChunks ?? 0} chunks, ${Math.round((r.durationMs ?? 0) / 100) / 10}s)`,
+          'success'
+        )
+      } else {
+        toast(r.error ?? 'Rebuild failed', 'error')
+      }
+      const fresh = await window.api.knowledge.getEmbeddingStatus()
+      setStatus(fresh)
+    } finally {
+      setBuilding(false)
+    }
+  }
+
+  return (
+    <>
+      <SettingsRow
+        label="Semantic search across knowledge base"
+        description="Find notes by meaning, not just keywords. Uses a local Ollama embedding model — nothing leaves your machine."
+      >
+        <Toggle
+          enabled={enabled}
+          onChange={(v) => {
+            setEnabled(v)
+            void persist('semanticSearchEnabled', String(v))
+          }}
+        />
+      </SettingsRow>
+
+      <SettingsRow
+        label="Embedding model"
+        description="Pulled via Ollama. Default works on most machines; install via `ollama pull nomic-embed-text`."
+      >
+        <input
+          type="text"
+          value={embeddingModel}
+          onChange={(e) => setEmbeddingModel(e.target.value)}
+          onBlur={() => void persist('embeddingModel', embeddingModel || DEFAULT_EMBEDDING_MODEL)}
+          aria-label="Embedding model name"
+          className="bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary w-48"
+        />
+      </SettingsRow>
+
+      <SettingsRow
+        label="Knowledge embedding index"
+        description={
+          status?.builtAt
+            ? `${status.fileCount} files · ${status.chunkCount} chunks · model ${status.model ?? '?'} · built ${new Date(status.builtAt).toLocaleString()}`
+            : 'Not built yet — run a rebuild to enable semantic search.'
+        }
+      >
+        <button
+          type="button"
+          onClick={rebuild}
+          disabled={building}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
+        >
+          {building ? 'Building…' : status?.builtAt ? 'Rebuild index' : 'Build index'}
+        </button>
+      </SettingsRow>
+    </>
   )
 }
 

@@ -73,7 +73,23 @@ const api = {
     listSuggestions: (targetPath?: string) =>
       ipcRenderer.invoke('knowledge:list-suggestions', targetPath),
     acceptSuggestion: (id: number) => ipcRenderer.invoke('knowledge:accept-suggestion', id),
-    dismissSuggestion: (id: number) => ipcRenderer.invoke('knowledge:dismiss-suggestion', id)
+    dismissSuggestion: (id: number) => ipcRenderer.invoke('knowledge:dismiss-suggestion', id),
+    getBacklinks: (path: string) => ipcRenderer.invoke('knowledge:get-backlinks', path),
+    // Tier 2 #6 — semantic search via local Ollama embeddings
+    getEmbeddingStatus: () => ipcRenderer.invoke('knowledge:get-embedding-status'),
+    rebuildEmbeddings: () => ipcRenderer.invoke('knowledge:rebuild-embeddings'),
+    semanticSearch: (query: string) => ipcRenderer.invoke('knowledge:semantic-search', query)
+  },
+
+  // --- Global search (May 2026 Tier 1 #3) ---
+  search: {
+    global: (query: string) => ipcRenderer.invoke('search:global', query)
+  },
+
+  // --- Encrypted backup / restore (May 2026 Tier 1 #2) ---
+  backup: {
+    create: (passphrase: string) => ipcRenderer.invoke('backup:create', passphrase),
+    restore: (passphrase: string) => ipcRenderer.invoke('backup:restore', passphrase)
   },
 
   // --- Vault (Sensitive Data) ---
@@ -206,6 +222,8 @@ const api = {
       ipcRenderer.invoke('finance:get-tax-summary', opts),
     setTransactionTaxTag: (id: number, taxTag: string) =>
       ipcRenderer.invoke('finance:set-transaction-tax-tag', id, taxTag),
+    exportTaxPack: (opts?: { year?: number }) =>
+      ipcRenderer.invoke('finance:export-tax-pack', opts),
 
     // Net worth (Phase 4.4)
     getNetWorthSnapshot: () => ipcRenderer.invoke('finance:get-net-worth-snapshot'),
@@ -267,6 +285,30 @@ const api = {
       }
       ipcRenderer.on('updater:status', listener)
       return () => ipcRenderer.removeListener('updater:status', listener)
+    }
+  },
+
+  // --- compass:// URL scheme events (May 2026 Tier 3 #11) ---
+  // The main process pushes these when a URL like `compass://open/<page>`
+  // or `compass://search?q=…` arrives. Capture events stay in main —
+  // the renderer just gets a notification.
+  urlScheme: {
+    onCaptured: (cb: (data: { title: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: { title: string }): void =>
+        cb(data)
+      ipcRenderer.on('compass-url:captured', listener)
+      return () => ipcRenderer.removeListener('compass-url:captured', listener)
+    },
+    onOpen: (cb: (data: { page: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: { page: string }): void => cb(data)
+      ipcRenderer.on('compass-url:open', listener)
+      return () => ipcRenderer.removeListener('compass-url:open', listener)
+    },
+    onSearch: (cb: (data: { query: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: { query: string }): void =>
+        cb(data)
+      ipcRenderer.on('compass-url:search', listener)
+      return () => ipcRenderer.removeListener('compass-url:search', listener)
     }
   },
 
