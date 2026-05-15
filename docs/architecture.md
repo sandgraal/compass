@@ -104,6 +104,10 @@ Registered in `electron/main.ts`:
 - `registerFinanceHandlers` — txns, accounts, debt summary, budget, rules, **geo summary, tax summary + override (Phase 4.3), net-worth snapshot/trajectory + capture + manual balance (Phase 4.4), forecast + override CRUD (Phase 4.5)**
 - `registerHabitsHandlers` — habit CRUD + toggle entries
 - `registerUpdaterHandlers` — `updater:check`, `updater:install-and-restart`; pushes `updater:status` events to renderer
+- `registerBackupHandlers` — `backup:create`, `backup:restore` (Phase 5.1, passphrase-derived AES-256-GCM)
+- `registerSearchHandlers` — `search:global` (Phase 5.2; knowledge bodies + vault titles + tasks + transactions)
+- `registerKnowledgeHandlers` — adds `knowledge:get-backlinks` (Phase 5.3; `[[link]]` inbound scanner)
+- `registerFinanceHandlers` — adds `finance:export-tax-pack` (Phase 5.4; one CSV per Schedule C/E/etc. tag + manifest)
 
 Pattern: every IPC handler lives in `electron/ipc/<domain>.ts`, is exposed through `electron/preload.ts`, and has a TypeScript signature in `src/types/electron.d.ts`. Drift between these three is the leading source of bugs — see `electron-trpc` migration plan in `docs/implementation_plan.md` Phase 0.7.
 

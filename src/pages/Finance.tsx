@@ -1,6 +1,8 @@
 import { format } from 'date-fns'
 import {
   AlertCircle,
+  AlertTriangle,
+  Download,
   Eye,
   FolderOpen,
   Inbox,
@@ -11,6 +13,7 @@ import {
   Target,
   Trash2,
   TrendingDown,
+  TrendingUp,
   Wallet
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
@@ -873,9 +876,12 @@ function Overview({
                     · {taxSummary.year} year-to-date
                   </span>
                 </h3>
-                <span className="text-xs text-muted-foreground">
-                  Expand a transaction in the Transactions tab to change its tax tag
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    Expand a transaction in the Transactions tab to change its tax tag
+                  </span>
+                  <TaxPackExportButton year={taxSummary.year} hasRows={rows.length > 0} />
+                </div>
               </div>
               <table className="w-full text-sm">
                 <thead className="text-xs text-muted-foreground">
@@ -922,6 +928,49 @@ function Overview({
           )
         })()}
     </>
+  )
+}
+
+// ─── Tax-pack export button (May 2026 Tier 2 #5) ─────────────────────────────
+// Single CTA next to the year-to-date tax summary. Lets the user dump one
+// CSV per Schedule C/E/capex/charitable/etc. tag into a chosen folder so
+// the bundle is CPA-ready / TurboTax-importable without any extra prep.
+
+function TaxPackExportButton({ year, hasRows }: { year: number; hasRows: boolean }): JSX.Element {
+  const { toast } = useToast()
+  const [busy, setBusy] = useState(false)
+
+  async function run() {
+    if (busy) return
+    setBusy(true)
+    try {
+      const r = await window.api?.finance.exportTaxPack({ year })
+      if (!r) return
+      if (r.success) {
+        toast(`Wrote ${r.files?.length ?? 0} CSVs to ${r.dir}`, 'success')
+      } else if (!r.canceled) {
+        toast(r.error ?? 'Tax-pack export failed', 'error')
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={run}
+      disabled={busy || !hasRows}
+      title={
+        hasRows
+          ? `Export ${year} tax pack as CSV per Schedule C / E / capex / charitable / etc.`
+          : `No tagged ${year} transactions yet — nothing to export.`
+      }
+      className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg bg-secondary hover:bg-secondary/80 text-foreground transition-colors disabled:opacity-40"
+    >
+      <Download size={11} />
+      {busy ? 'Exporting…' : `Export ${year} pack`}
+    </button>
   )
 }
 
@@ -1920,30 +1969,76 @@ function CrSubsTab({
             No subscriptions detected. Need ≥3 charges with consistent cadence to qualify.
           </p>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="text-xs text-muted-foreground">
-              <tr>
-                <th className="text-left">Merchant</th>
-                <th className="text-left">Account</th>
-                <th className="text-left">Cadence</th>
-                <th className="text-right">Each</th>
-                <th className="text-right">Annual</th>
-                <th className="text-left">Last seen</th>
-              </tr>
-            </thead>
-            <tbody>
-              {subscriptions.active.map((s) => (
-                <tr key={`${s.merchant}::${s.account}`} className="border-t border-border">
-                  <td className="py-1.5">{s.merchant}</td>
-                  <td className="text-muted-foreground">{s.account}</td>
-                  <td>{s.cadence}</td>
-                  <td className="text-right">{fmtMoney(s.medianAmount)}</td>
-                  <td className="text-right font-medium">{fmtMoney(s.annualCost)}</td>
-                  <td className="text-muted-foreground">{s.lastSeen}</td>
+          <>
+            {(() => {
+              const hikes = subscriptions.active.filter((s) => s.priceHike)
+              const annualImpact = hikes.reduce(
+                (sum, s) =>
+                  sum + s.priceHikeDelta * (s.annualCost > 0 ? s.annualCost / s.medianAmount : 0),
+                0
+              )
+              if (hikes.length === 0) return null
+              return (
+                <div className="mb-3 flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">
+                  <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-medium">
+                      {hikes.length} recent price hike{hikes.length === 1 ? '' : 's'}
+                    </span>{' '}
+                    detected — projected annual impact{' '}
+                    <span className="font-semibold">+{fmtMoney(annualImpact)}</span>. Highlighted
+                    rows below.
+                  </div>
+                </div>
+              )
+            })()}
+            <table className="w-full text-sm">
+              <thead className="text-xs text-muted-foreground">
+                <tr>
+                  <th className="text-left">Merchant</th>
+                  <th className="text-left">Account</th>
+                  <th className="text-left">Cadence</th>
+                  <th className="text-right">Each</th>
+                  <th className="text-right">Annual</th>
+                  <th className="text-left">Last seen</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {subscriptions.active.map((s) => (
+                  <tr
+                    key={`${s.merchant}::${s.account}`}
+                    className={cn('border-t border-border', s.priceHike && 'bg-amber-500/5')}
+                  >
+                    <td className="py-1.5">
+                      <div className="flex items-center gap-2">
+                        <span>{s.merchant}</span>
+                        {s.priceHike && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-amber-300 bg-amber-500/15 border border-amber-500/30 rounded px-1.5 py-0.5"
+                            title={`Recent charges median ${fmtMoney(s.recentMedian)}, was ${fmtMoney(s.historicalMedian)} (+${fmtMoney(s.priceHikeDelta)} / +${s.priceHikePct.toFixed(1)}%)`}
+                          >
+                            <TrendingUp size={9} />+{s.priceHikePct.toFixed(0)}%
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="text-muted-foreground">{s.account}</td>
+                    <td>{s.cadence}</td>
+                    <td className="text-right">
+                      {fmtMoney(s.medianAmount)}
+                      {s.priceHike && (
+                        <span className="block text-[10px] text-amber-300/80">
+                          was {fmtMoney(s.historicalMedian)}
+                        </span>
+                      )}
+                    </td>
+                    <td className="text-right font-medium">{fmtMoney(s.annualCost)}</td>
+                    <td className="text-muted-foreground">{s.lastSeen}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         )}
       </div>
 

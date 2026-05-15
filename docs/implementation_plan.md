@@ -233,19 +233,29 @@ Net Worth view has live balances waiting.
 
 ---
 
-## Backlog (deferred, considered but out of scope this round)
+## Phase 5 — Strategic-review follow-ups (May 2026)
 
-- Encrypted backup/restore (high value — Phase 4)
+Driven by the May 2026 strategic review (`/Users/christopherennis/.claude/plans/give-me-a-detailed-logical-whisper.md`). Promotes the Tier 1 + Tier 2 items the review flagged as the highest-impact next moves.
+
+- [x] **5.1 Encrypted backup / restore** — passphrase-derived AES-256-GCM bundle of all SQLite tables + knowledge markdown + `.vault/*.enc` (master key wrapper included). `electron/ipc/backup.ts` with `backup:create` / `backup:restore` IPC, Settings UI panel, 7 round-trip tests (wrong passphrase, tampered blob, bad magic, version mismatch). Survives a dead machine — the only thing the user has to bring is the passphrase.
+- [x] **5.2 Global ⌘K search** — new `search:global` IPC returns ranked hits across knowledge bodies, vault titles (never bodies), task titles, and transaction descriptions. CommandPalette renders matches inline. Vault decryption happens in the main process so secrets never cross the IPC boundary.
+- [x] **5.3 Wikilinks + backlinks** — `[[target]]` and `[[target|display]]` syntax parsed in `markdownToHtml` and re-emitted by `htmlToMarkdown`. New `knowledge:get-backlinks` handler scans for inbound links by title / basename / path. Clicking a wikilink in the editor navigates (or offers to create) the target note. Panel in `KnowledgeBase.tsx` lists referencing files with snippets.
+- [x] **5.4 Tax-pack export** — `finance:export-tax-pack` IPC writes one CSV per non-`tax:none` tag for the requested year into a user-chosen folder, plus a `*-manifest.txt` index. Button next to the YTD Tax summary card on the Finance Overview tab. CPA-ready / TurboTax-importable.
+- [x] **5.5 Subscription price-hike alerts** — `auditSubscriptions` now splits each subscription's charge stream into recent (last ~3) vs historical and reports `priceHike` + `priceHikeDelta` + `priceHikePct`. The Active Subscriptions table highlights hike rows, shows a `+X%` chip, and surfaces a top-of-table banner with the projected annual impact. Three new unit tests cover the clean hike / flat stream / noisy drift cases.
+- [x] **5.6 Windows + Linux build targets** — `electron-builder` config now emits `dmg+zip` for macOS (arm64+x64), `nsis+portable` for Windows, and `AppImage+deb` for Linux. The release workflow fans out into three OS jobs (`macos-latest`, `windows-latest`, `ubuntu-latest`).
+
+### Deferred to Phase 5+ (next round)
+
 - Apple Calendar (iCal) local read
 - Habit streaks badges
-- Wiki-style `[[link]]` between knowledge files
-- Global search via ⌘K (knowledge + vault titles + tasks inline)
 - Privacy auto-lock (Vault re-auth after N min idle)
 - Distraction-free reading mode
 - Bulk operations in Daily checklist
 - Apple Spotlight integration
 - Apple Contacts import
 - PWA / web companion
+- Semantic search via local embeddings (extend the existing Ollama opt-in path)
+- In-app AI assistant panel (BYO Claude / OpenAI key, read-only via Compass MCP)
 
 ---
 

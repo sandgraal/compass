@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { and, desc, eq, gt, gte, isNull, lt, ne, or, sql } from 'drizzle-orm'
@@ -422,6 +422,131 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       return { success: false, error: `Transaction not found: ${id}` }
     }
     return { success: true }
+  })
+
+  // ── Tax-pack export (May 2026 strategic review Tier 2 #5) ─────────────────
+  // Writes one CSV per non-`none` tax tag for the requested year into a
+  // user-chosen folder. Filenames are stable / human-readable so the user
+  // can drop the bundle straight into TurboTax / a CPA shared folder.
+  ipcMain.handle('finance:export-tax-pack', async (_event, opts?: { year?: number }) => {
+    try {
+      const db = getDb()
+      const now = new Date()
+      const requested = Number.isFinite(opts?.year)
+        ? Math.floor(opts!.year as number)
+        : now.getFullYear()
+      const year = Math.max(2000, Math.min(2100, requested))
+
+      const { canceled, filePaths } = await dialog.showOpenDialog({
+        title: `Choose a folder for your ${year} tax pack`,
+        properties: ['openDirectory', 'createDirectory']
+      })
+      if (canceled || filePaths.length === 0) {
+        return { success: false, canceled: true }
+      }
+      const outDir = filePaths[0]
+
+      const rows = db
+        .select({
+          id: financeTransactions.id,
+          date: financeTransactions.date,
+          amount: financeTransactions.amount,
+          description: financeTransactions.description,
+          accountId: financeTransactions.accountId,
+          category: financeTransactions.category,
+          subcategory: financeTransactions.subcategory,
+          notes: financeTransactions.notes,
+          taxTag: financeTransactions.taxTag,
+          taxTagSource: financeTransactions.taxTagSource,
+          geo: financeTransactions.geo,
+          purpose: financeTransactions.purpose
+        })
+        .from(financeTransactions)
+        .where(
+          and(eq(financeTransactions.taxYear, year), ne(financeTransactions.taxTag, 'tax:none'))
+        )
+        .all()
+
+      const accounts = db
+        .select({ id: financeAccounts.id, name: financeAccounts.name })
+        .from(financeAccounts)
+        .all()
+      const accountName = new Map(accounts.map((a) => [a.id, a.name]))
+
+      function csvEscape(v: unknown): string {
+        if (v == null) return ''
+        const s = String(v)
+        if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`
+        return s
+      }
+
+      const byTag = new Map<string, typeof rows>()
+      for (const r of rows) {
+        if (!byTag.has(r.taxTag)) byTag.set(r.taxTag, [])
+        byTag.get(r.taxTag)!.push(r)
+      }
+
+      const HEADER = [
+        'date',
+        'amount',
+        'description',
+        'account',
+        'category',
+        'subcategory',
+        'geo',
+        'purpose',
+        'tax_tag',
+        'tax_tag_source',
+        'notes'
+      ]
+
+      const written: Array<{ tag: string; file: string; count: number; total: number }> = []
+      for (const [tag, txns] of byTag) {
+        const slug = tag.replace(/^tax:/, '').replace(/[^a-z0-9-]+/gi, '-')
+        const file = join(outDir, `compass-tax-${year}-${slug}.csv`)
+        const lines: string[] = [HEADER.join(',')]
+        let total = 0
+        for (const t of txns) {
+          total += t.amount
+          lines.push(
+            [
+              csvEscape(t.date),
+              csvEscape(t.amount.toFixed(2)),
+              csvEscape(t.description),
+              csvEscape(accountName.get(t.accountId ?? -1) ?? ''),
+              csvEscape(t.category ?? ''),
+              csvEscape(t.subcategory ?? ''),
+              csvEscape(t.geo ?? ''),
+              csvEscape(t.purpose ?? ''),
+              csvEscape(t.taxTag),
+              csvEscape(t.taxTagSource),
+              csvEscape(t.notes ?? '')
+            ].join(',')
+          )
+        }
+        // Trailing total row — keeps the file self-summarizing.
+        lines.push(`,,,,,,,,,total,${total.toFixed(2)}`)
+        writeFileSync(file, `${lines.join('\n')}\n`, 'utf-8')
+        written.push({ tag, file, count: txns.length, total: Math.round(total * 100) / 100 })
+      }
+
+      // Manifest — single index of what was written, sums included.
+      const manifestPath = join(outDir, `compass-tax-${year}-manifest.txt`)
+      const manifestLines = [
+        `Compass tax pack — ${year}`,
+        `Exported ${new Date().toISOString()}`,
+        '',
+        ...written.map(
+          (w) =>
+            `${w.tag.padEnd(28)} ${String(w.count).padStart(5)} rows   total $${w.total.toFixed(2)}   ${w.file}`
+        )
+      ]
+      writeFileSync(manifestPath, `${manifestLines.join('\n')}\n`, 'utf-8')
+
+      return { success: true, year, dir: outDir, files: written, manifest: manifestPath }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
   })
 
   // ── Net-worth snapshot (Phase 4.4) ────────────────────────────────────────
