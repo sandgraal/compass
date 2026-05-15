@@ -164,6 +164,7 @@ const api = {
     ) => ipcRenderer.invoke('habits:update', id, updates),
     delete: (id: number) => ipcRenderer.invoke('habits:delete', id),
     getEntries: (month: string) => ipcRenderer.invoke('habits:get-entries', month),
+    getAllEntries: () => ipcRenderer.invoke('habits:get-all-entries'),
     toggle: (habitId: number, date: string) => ipcRenderer.invoke('habits:toggle', habitId, date)
   },
 

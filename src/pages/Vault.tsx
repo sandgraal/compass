@@ -70,6 +70,10 @@ const FIELD_TEMPLATES: Record<
   ]
 }
 
+// Default idle timeout before the Vault locks itself, in minutes. 0 = disabled.
+// The setting is per-user via `vaultAutoLockMinutes` in `app_settings`.
+const VAULT_AUTOLOCK_DEFAULT_MINUTES = 5
+
 export default function Vault(): JSX.Element {
   const [categories, setCategories] = useState<VaultCategory[]>([])
   const [selectedCategory, setSelectedCategory] = useState('financial')
@@ -80,6 +84,13 @@ export default function Vault(): JSX.Element {
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
+  // Auto-lock state. `locked=true` hides every entry behind an Unlock
+  // CTA; `idleMinutes=0` disables auto-lock entirely. The on-window-blur
+  // path locks immediately so an unattended Mac stops showing secrets
+  // the moment focus leaves the app — even before the idle timer fires.
+  const [locked, setLocked] = useState(false)
+  const [idleMinutes, setIdleMinutes] = useState(VAULT_AUTOLOCK_DEFAULT_MINUTES)
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { toast: showToast } = useToast()
   const confirm = useConfirm()
 
@@ -93,6 +104,76 @@ export default function Vault(): JSX.Element {
       window.api.vault.setContentProtection(false)
     }
   }, [])
+
+  // Load auto-lock interval from settings once on mount. We deliberately
+  // re-read this every time the page mounts (vs. subscribing to changes)
+  // so a settings update only takes effect on the next visit — keeps the
+  // active session predictable.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.api) return
+    void window.api.settings.getAll().then((s) => {
+      const parsed = Number.parseInt(s.vaultAutoLockMinutes ?? '', 10)
+      if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 240) {
+        setIdleMinutes(parsed)
+      }
+    })
+  }, [])
+
+  // Activity tracker. Any keyboard / mouse / scroll event resets the
+  // idle timer; expiry locks the page. Disabled when `idleMinutes === 0`.
+  useEffect(() => {
+    if (idleMinutes <= 0 || locked) {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current)
+        idleTimerRef.current = null
+      }
+      return
+    }
+    const reset = () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+      idleTimerRef.current = setTimeout(
+        () => {
+          setLocked(true)
+          setRevealedFields(new Set())
+          setAdding(false)
+        },
+        idleMinutes * 60 * 1000
+      )
+    }
+    const events: Array<keyof DocumentEventMap> = [
+      'mousemove',
+      'mousedown',
+      'keydown',
+      // `wheel` and `touchmove` bubble, so they catch scrolling activity even
+      // inside nested overflow containers where `scroll` events don't bubble.
+      'wheel',
+      'touchstart',
+      'touchmove'
+    ]
+    for (const ev of events) document.addEventListener(ev, reset, { passive: true })
+    // `scroll` itself doesn't bubble, but capture phase lets us intercept it
+    // on the way down to any element — covering containers that don't dispatch
+    // `wheel` (e.g. programmatic scrolls via scrollTop).
+    document.addEventListener('scroll', reset, { passive: true, capture: true })
+    const onBlur = () => {
+      // Hard-lock on focus loss — leaving Compass for another window
+      // shouldn't leave secrets visible in a recoverable screenshot.
+      setLocked(true)
+      setRevealedFields(new Set())
+      setAdding(false)
+    }
+    window.addEventListener('blur', onBlur)
+    reset()
+    return () => {
+      for (const ev of events) document.removeEventListener(ev, reset)
+      document.removeEventListener('scroll', reset, { capture: true })
+      window.removeEventListener('blur', onBlur)
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current)
+        idleTimerRef.current = null
+      }
+    }
+  }, [idleMinutes, locked])
 
   useEffect(() => {
     const isElectron = typeof window !== 'undefined' && !!window.api
@@ -295,104 +376,150 @@ export default function Vault(): JSX.Element {
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">{selectedCat?.description}</p>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setAdding(true)
-              setNewEntry({})
-            }}
-            className="flex items-center gap-1.5 text-sm px-3 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors"
-          >
-            <Plus size={14} /> Add entry
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6">
-          {/* Add form */}
-          {adding && (
-            <div className="bg-card border border-primary/30 rounded-xl p-5 mb-6">
-              <h3 className="text-sm font-semibold mb-4">New {selectedCat?.label} Entry</h3>
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                {fields.map((field) => (
-                  <div key={field.key}>
-                    <label
-                      htmlFor={`new-entry-${field.key}`}
-                      className="text-xs text-muted-foreground mb-1 block"
-                    >
-                      {field.label}
-                    </label>
-                    <input
-                      id={`new-entry-${field.key}`}
-                      type={field.sensitive ? 'password' : 'text'}
-                      value={newEntry[field.key] || ''}
-                      onChange={(e) =>
-                        setNewEntry((prev) => ({ ...prev, [field.key]: e.target.value }))
-                      }
-                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                ))}
-              </div>
-              <div className="flex gap-2 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setAdding(false)}
-                  className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={addEntry}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-                >
-                  Save encrypted
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Entries */}
-          {loading ? (
-            <div className="space-y-3">
-              {[1, 2].map((n) => (
-                <div key={n} className="h-24 bg-secondary/30 rounded-xl animate-pulse" />
-              ))}
-            </div>
-          ) : entries.length === 0 && !adding ? (
-            <div className="flex flex-col items-center py-16 gap-3">
-              <div className="w-12 h-12 rounded-full bg-secondary flex items-center justify-center text-muted-foreground">
-                {CATEGORY_ICONS[selectedCategory]}
-              </div>
-              <p className="text-sm text-muted-foreground">
-                No {selectedCat?.label.toLowerCase()} entries yet
-              </p>
+          <div className="flex items-center gap-2">
+            {!locked && (
               <button
                 type="button"
-                onClick={() => setAdding(true)}
-                className="text-xs text-primary hover:underline"
+                onClick={() => {
+                  setLocked(true)
+                  setRevealedFields(new Set())
+                  setAdding(false)
+                }}
+                aria-label="Lock vault now"
+                title={
+                  idleMinutes > 0 ? `Auto-locks after ${idleMinutes}m of inactivity` : 'Lock vault'
+                }
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-border hover:border-primary/50 text-muted-foreground hover:text-foreground rounded-lg transition-colors"
               >
-                Add your first entry
+                <Lock size={11} /> Lock
               </button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {entries.map((entry) => (
-                <EntryCard
-                  key={entry.id}
-                  entry={entry}
-                  fields={fields}
-                  revealedFields={revealedFields}
-                  copiedField={copiedField}
-                  onToggleReveal={toggleReveal}
-                  onCopy={copyToClipboard}
-                  onUpdate={(updates) => updateEntry(entry.id, updates)}
-                  onDelete={() => deleteEntry(entry.id)}
-                />
-              ))}
-            </div>
-          )}
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setAdding(true)
+                setNewEntry({})
+              }}
+              disabled={locked}
+              className="flex items-center gap-1.5 text-sm px-3 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
+            >
+              <Plus size={14} /> Add entry
+            </button>
+          </div>
         </div>
+
+        {/* Lock screen replaces the entries area entirely so underlying
+            controls are removed from the DOM and cannot be reached via
+            keyboard navigation or accessibility APIs. */}
+        {locked ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
+            <div className="w-16 h-16 rounded-full bg-secondary flex items-center justify-center text-primary">
+              <Lock size={28} />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-semibold text-foreground">Vault is locked</p>
+              <p className="text-xs text-muted-foreground mt-1 max-w-sm">
+                {entries.length} {entries.length === 1 ? 'entry' : 'entries'} in{' '}
+                {selectedCat?.label.toLowerCase()}
+                {idleMinutes > 0 ? ` · auto-locks after ${idleMinutes}m idle or focus loss` : ''}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setLocked(false)}
+              className="flex items-center gap-1.5 text-sm px-4 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors"
+            >
+              <ShieldCheck size={14} /> Unlock
+            </button>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto p-6">
+            {/* Add form */}
+            {adding && (
+              <div className="bg-card border border-primary/30 rounded-xl p-5 mb-6">
+                <h3 className="text-sm font-semibold mb-4">New {selectedCat?.label} Entry</h3>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  {fields.map((field) => (
+                    <div key={field.key}>
+                      <label
+                        htmlFor={`new-entry-${field.key}`}
+                        className="text-xs text-muted-foreground mb-1 block"
+                      >
+                        {field.label}
+                      </label>
+                      <input
+                        id={`new-entry-${field.key}`}
+                        type={field.sensitive ? 'password' : 'text'}
+                        value={newEntry[field.key] || ''}
+                        onChange={(e) =>
+                          setNewEntry((prev) => ({ ...prev, [field.key]: e.target.value }))
+                        }
+                        className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setAdding(false)}
+                    className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={addEntry}
+                    className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+                  >
+                    Save encrypted
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Entries */}
+            {loading ? (
+              <div className="space-y-3">
+                {[1, 2].map((n) => (
+                  <div key={n} className="h-24 bg-secondary/30 rounded-xl animate-pulse" />
+                ))}
+              </div>
+            ) : entries.length === 0 && !adding ? (
+              <div className="flex flex-col items-center py-16 gap-3">
+                <div className="w-12 h-12 rounded-full bg-secondary flex items-center justify-center text-muted-foreground">
+                  {CATEGORY_ICONS[selectedCategory]}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  No {selectedCat?.label.toLowerCase()} entries yet
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setAdding(true)}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Add your first entry
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {entries.map((entry) => (
+                  <EntryCard
+                    key={entry.id}
+                    entry={entry}
+                    fields={fields}
+                    revealedFields={revealedFields}
+                    copiedField={copiedField}
+                    onToggleReveal={toggleReveal}
+                    onCopy={copyToClipboard}
+                    onUpdate={(updates) => updateEntry(entry.id, updates)}
+                    onDelete={() => deleteEntry(entry.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

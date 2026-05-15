@@ -233,6 +233,13 @@ Net Worth view has live balances waiting.
 
 ---
 
+## Phase 5 (cont.) — bounded UX wins
+
+- [x] **5.10 Vault auto-lock** — `Vault.tsx` tracks idle activity (mouse, keyboard, scroll, touch) and locks the entries panel behind an "Unlock" CTA after `vaultAutoLockMinutes` (default 5; `0` disables). Also locks immediately on `window.blur` so unattended Macs stop showing secrets when another app takes focus. Setting lives in `app_settings` under `vaultAutoLockMinutes`; Settings → Security & Privacy adds a dropdown.
+- [x] **5.11 Habit streaks badges** — `src/lib/habit-streaks.ts` adds pure `computeHabitStreak()` (current + longest) over the existing `habits:get-entries` map. "Today unchecked but yesterday checked" doesn't break a streak until end-of-yesterday. Monthly habits view shows a `🔥 N` badge next to each habit with `current >= 2`; tooltip includes longest-ever. 10 unit tests cover boundaries.
+
+## Backlog (deferred, considered but out of scope this round)
+
 ## Phase 5 — Strategic-review follow-ups (May 2026)
 
 Driven by the May 2026 strategic review (`/Users/christopherennis/.claude/plans/give-me-a-detailed-logical-whisper.md`). Promotes the Tier 1 + Tier 2 items the review flagged as the highest-impact next moves.
@@ -256,6 +263,7 @@ Driven by the May 2026 strategic review (`/Users/christopherennis/.claude/plans/
 - Apple Spotlight integration
 - Apple Contacts import
 - PWA / web companion
+- RRULE expansion for Apple Calendar
 - In-app AI assistant panel (BYO Claude/OpenAI key)
 - RRULE expansion for Apple Calendar (currently only base instance is emitted)
 

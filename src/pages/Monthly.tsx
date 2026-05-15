@@ -10,8 +10,18 @@ import {
   startOfWeek,
   subMonths
 } from 'date-fns'
-import { ChevronLeft, ChevronRight, DollarSign, Plus, Target, TrendingUp, X } from 'lucide-react'
+import {
+  ChevronLeft,
+  ChevronRight,
+  DollarSign,
+  Flame,
+  Plus,
+  Target,
+  TrendingUp,
+  X
+} from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { computeHabitStreak } from '../lib/habit-streaks'
 import { cn, isoDate } from '../lib/utils'
 
 const HABIT_COLORS = [
@@ -41,6 +51,10 @@ export default function Monthly(): JSX.Element {
   const [month, setMonth] = useState(() => startOfMonth(new Date()))
   const [habits, setHabits] = useState<Habit[]>([])
   const [habitEntries, setHabitEntries] = useState<Record<number, Record<string, boolean>>>({})
+  // All-time entries for accurate streak computation across month boundaries.
+  const [allHabitEntries, setAllHabitEntries] = useState<Record<number, Record<string, boolean>>>(
+    {}
+  )
   const [goals, setGoals] = useState(['', '', ''])
   const [reflection, setReflection] = useState({ win: '', challenge: '', focus: '' })
   const [events, setEvents] = useState<CalendarEvent[]>([])
@@ -75,14 +89,16 @@ export default function Monthly(): JSX.Element {
       window.api.settings.getAll(),
       window.api.habits.list(),
       window.api.habits.getEntries(monthKey),
+      window.api.habits.getAllEntries(),
       window.api.finance.getDebtSummary().catch(() => ({ debts: [] })),
       window.api.finance
         .getBudgetStatus(monthKey)
         .catch(() => ({ lines: [], totals: { budget: 0, actual: 0 } }))
-    ]).then(([calEvents, s, habitList, entries, debtData, budgetData]) => {
+    ]).then(([calEvents, s, habitList, entries, allEntries, debtData, budgetData]) => {
       setEvents(calEvents)
       setHabits(habitList)
       setHabitEntries(entries)
+      setAllHabitEntries(allEntries)
 
       // Finance snapshot
       const d = debtData as {
@@ -159,6 +175,10 @@ export default function Monthly(): JSX.Element {
     if (!isElectron) return
     const { completed } = await window.api.habits.toggle(habitId, date)
     setHabitEntries((prev) => ({
+      ...prev,
+      [habitId]: { ...(prev[habitId] ?? {}), [date]: completed }
+    }))
+    setAllHabitEntries((prev) => ({
       ...prev,
       [habitId]: { ...(prev[habitId] ?? {}), [date]: completed }
     }))
@@ -451,10 +471,29 @@ export default function Monthly(): JSX.Element {
                       const doneCount = daysInMonth.filter((d) => entries[isoDate(d)]).length
                       const pct = Math.round((doneCount / daysInMonth.length) * 100)
                       const color = habit.color ?? '#6272f1'
+                      // Streaks use all-time entries so month boundaries are handled
+                      // correctly (e.g. Apr 30 → May 2 = 3-day streak, not 2).
+                      const streak = computeHabitStreak(allHabitEntries[habit.id] || {})
                       return (
                         <tr key={habit.id} className="border-t border-border/40 group">
                           <td className="py-1.5 pr-3 font-medium" style={{ color }}>
-                            {habit.name}
+                            <span className="inline-flex items-center gap-2">
+                              {habit.name}
+                              {streak.current >= 2 && (
+                                <span
+                                  className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-amber-300 bg-amber-500/15 border border-amber-500/30 rounded px-1.5 py-0.5"
+                                  title={`Current streak: ${streak.current} day${streak.current === 1 ? '' : 's'}. Longest ever: ${streak.longest} day${streak.longest === 1 ? '' : 's'}.`}
+                                >
+                                  <Flame size={9} />
+                                  {streak.current}
+                                  {streak.longest > streak.current && (
+                                    <span className="text-amber-300/60 normal-case">
+                                      / best {streak.longest}
+                                    </span>
+                                  )}
+                                </span>
+                              )}
+                            </span>
                           </td>
                           {daysInMonth.map((d) => {
                             const dateStr = isoDate(d)
