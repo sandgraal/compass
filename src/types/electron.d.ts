@@ -213,6 +213,33 @@ declare global {
         acceptSuggestion(id: number): Promise<{ success: boolean }>
         dismissSuggestion(id: number): Promise<{ success: boolean }>
         getBacklinks(path: string): Promise<BacklinkRow[]>
+        getEmbeddingStatus(): Promise<{
+          builtAt: number | null
+          model: string | null
+          fileCount: number
+          chunkCount: number
+          building: boolean
+        }>
+        rebuildEmbeddings(): Promise<{
+          success: boolean
+          builtFiles?: number
+          skippedFiles?: number
+          totalChunks?: number
+          durationMs?: number
+          errors?: Array<{ path: string; message: string }>
+          error?: string
+        }>
+        semanticSearch(query: string): Promise<{
+          hits: Array<{
+            path: string
+            title: string
+            chunkIndex: number
+            snippet: string
+            score: number
+          }>
+          reason?: 'invalid-query' | 'query-too-long' | 'index-missing' | 'ollama-error'
+          error?: string
+        }>
       }
       search: {
         global(query: string): Promise<{

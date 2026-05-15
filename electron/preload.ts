@@ -74,7 +74,11 @@ const api = {
       ipcRenderer.invoke('knowledge:list-suggestions', targetPath),
     acceptSuggestion: (id: number) => ipcRenderer.invoke('knowledge:accept-suggestion', id),
     dismissSuggestion: (id: number) => ipcRenderer.invoke('knowledge:dismiss-suggestion', id),
-    getBacklinks: (path: string) => ipcRenderer.invoke('knowledge:get-backlinks', path)
+    getBacklinks: (path: string) => ipcRenderer.invoke('knowledge:get-backlinks', path),
+    // Tier 2 #6 — semantic search via local Ollama embeddings
+    getEmbeddingStatus: () => ipcRenderer.invoke('knowledge:get-embedding-status'),
+    rebuildEmbeddings: () => ipcRenderer.invoke('knowledge:rebuild-embeddings'),
+    semanticSearch: (query: string) => ipcRenderer.invoke('knowledge:semantic-search', query)
   },
 
   // --- Global search (May 2026 Tier 1 #3) ---
