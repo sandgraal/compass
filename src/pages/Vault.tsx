@@ -144,13 +144,16 @@ export default function Vault(): JSX.Element {
       'mousemove',
       'mousedown',
       'keydown',
+      // `wheel` and `touchmove` bubble, so they catch scrolling activity even
+      // inside nested overflow containers where `scroll` events don't bubble.
       'wheel',
       'touchstart',
       'touchmove'
     ]
     for (const ev of events) document.addEventListener(ev, reset, { passive: true })
-    // scroll does not bubble out of overflow containers, so we listen in capture
-    // phase to catch scrolling anywhere in the page (including nested panels).
+    // `scroll` itself doesn't bubble, but capture phase lets us intercept it
+    // on the way down to any element — covering containers that don't dispatch
+    // `wheel` (e.g. programmatic scrolls via scrollTop).
     document.addEventListener('scroll', reset, { passive: true, capture: true })
     const onBlur = () => {
       // Hard-lock on focus loss — leaving Compass for another window

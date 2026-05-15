@@ -84,8 +84,8 @@ function computeLongest(entries: DateMap): number {
   let longest = 1
   let run = 1
   for (let i = 1; i < completedKeys.length; i++) {
-    // Parse by components (not `new Date(string)` which is UTC) so DST
-    // transitions don't shift the calendar date and break the comparison.
+    // Parse components so DST transitions don't shift the calendar date.
+    // Note: JS Date month is 0-indexed, but ISO keys are 1-indexed — hence `pm - 1`.
     const [py, pm, pd] = completedKeys[i - 1].split('-').map(Number)
     const expectedNext = new Date(py, pm - 1, pd + 1)
     if (toDateKey(expectedNext) === completedKeys[i]) {
