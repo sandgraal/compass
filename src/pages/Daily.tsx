@@ -280,9 +280,7 @@ export default function Daily(): JSX.Element {
     if (selectedIds.size === 0) return
     const ids = Array.from(selectedIds)
     const status = checked ? 'done' : 'unchecked'
-    setItems((prev) =>
-      prev.map((i) => (selectedIds.has(i.id) ? { ...i, checked, status } : i))
-    )
+    setItems((prev) => prev.map((i) => (selectedIds.has(i.id) ? { ...i, checked, status } : i)))
     if (window.api) {
       await Promise.all(ids.map((id) => window.api!.checklist.updateItem(id, { checked, status })))
     }
@@ -396,7 +394,7 @@ export default function Daily(): JSX.Element {
         </div>
 
         <div className="flex items-center gap-2">
-          {items.length > 0 && (
+          {(items.length > 0 || selectionMode) && (
             <button
               type="button"
               onClick={toggleSelectionMode}
@@ -436,7 +434,7 @@ export default function Daily(): JSX.Element {
 
       {/* Bulk-select toolbar */}
       {selectionMode && (
-        <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/20 text-xs">
+        <div className="sticky top-14 z-10 mb-4 flex items-center gap-2 rounded-lg border border-primary/20 bg-background/95 px-3 py-2 text-xs backdrop-blur supports-[backdrop-filter]:bg-background/75">
           <span className="font-medium text-primary">{selectedIds.size} selected</span>
           <span className="text-muted-foreground">·</span>
           <button
