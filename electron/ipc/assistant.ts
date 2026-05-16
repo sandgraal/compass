@@ -152,7 +152,7 @@ Rules:
 - Keep the user's own terminology and acronyms; do not "translate" them.
 - Cite at least one block when you make a claim grounded in the context. Place the citation at the END of the sentence containing the fact, e.g. "Your CR property pays its electricity on the 5th [3]."
 
-Format your reply as plain text (not Markdown or code fences).`
+Format your reply as Markdown — headings, lists, bold, italic, inline code, links, and fenced code blocks all render properly in the chat. Use them when they help; don't dress up short answers with structure they don't need.`
 
 function buildContextBlock(chunks: ContextChunk[]): string {
   if (chunks.length === 0) {

@@ -27,8 +27,8 @@ describe('SYSTEM_PROMPT', () => {
   it('asks for citations at end of factual sentences', () => {
     expect(SYSTEM_PROMPT).toMatch(/Place the citation at the END/i)
   })
-  it('requests plain-text output', () => {
-    expect(SYSTEM_PROMPT).toMatch(/plain text/i)
+  it('requests Markdown output (the renderer escape-renders it safely)', () => {
+    expect(SYSTEM_PROMPT).toMatch(/Markdown/)
   })
 })
 

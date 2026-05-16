@@ -13,8 +13,9 @@
  */
 
 import { ArrowUp, Bot, ExternalLink, MessageSquare, Sparkles, Square, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { renderAssistantMarkdown } from '../lib/markdown-render'
 import { cn } from '../lib/utils'
 
 type AssistantStatus = Awaited<ReturnType<Window['api']['assistant']['getStatus']>>
@@ -217,7 +218,21 @@ export default function Ask(): JSX.Element {
               <Turn
                 key={t.id}
                 turn={t}
-                onOpenNote={(p) => navigate(`/knowledge?path=${encodeURIComponent(p)}`)}
+                onOpenNote={(p) => {
+                  // KnowledgeBase reads `compass:open-knowledge` from
+                  // sessionStorage on mount and also listens for the
+                  // matching custom event — match the same contract
+                  // the CommandPalette uses so source clicks reliably
+                  // open the cited note. The earlier `?path=` query
+                  // silently dropped because the page doesn't read
+                  // query params.
+                  sessionStorage.setItem('compass:open-knowledge', p)
+                  if (window.location.hash === '#/knowledge') {
+                    window.dispatchEvent(new CustomEvent('compass:open-knowledge', { detail: p }))
+                  } else {
+                    navigate('/knowledge')
+                  }
+                }}
               />
             ))}
           </div>
@@ -361,14 +376,7 @@ function Turn({
         ) : turn.error ? (
           <div className="text-sm text-destructive">{turn.error}</div>
         ) : (
-          <div
-            className={cn(
-              'text-sm text-foreground whitespace-pre-wrap leading-6',
-              'prose prose-invert max-w-none prose-sm'
-            )}
-          >
-            {turn.content}
-          </div>
+          <AssistantBubble content={turn.content} />
         )}
         {turn.model && !turn.pending && !turn.error && (
           <div className="mt-3 pt-2 border-t border-border/40 flex items-center gap-3 text-[10px] text-muted-foreground">
@@ -415,5 +423,24 @@ function Turn({
         </div>
       )}
     </div>
+  )
+}
+
+// ─── Markdown renderer for assistant replies ─────────────────────────────────
+//
+// We render the LLM's Markdown via our own minimal helper (see
+// `src/lib/markdown-render.ts`) and bind through `dangerouslySetInnerHTML`.
+// Safety lives in the helper: every non-Markdown construct is escaped, links
+// are restricted to `http(s):` / `mailto:`, and fenced code is verbatim.
+// `useMemo` keys on `content` so the parse only runs when a turn changes.
+
+function AssistantBubble({ content }: { content: string }): JSX.Element {
+  const html = useMemo(() => renderAssistantMarkdown(content), [content])
+  return (
+    <div
+      className={cn('text-sm text-foreground leading-6', 'prose prose-invert max-w-none prose-sm')}
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: renderer escapes everything
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   )
 }
