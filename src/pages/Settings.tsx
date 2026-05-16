@@ -899,9 +899,15 @@ function AskCompassSettings(): JSX.Element {
               />
               <div className="flex items-center gap-2">
                 <input
+                  key={`${provider}:${model}`}
                   type="text"
-                  value={model}
-                  onChange={(e) => saveModel(provider, e.target.value)}
+                  defaultValue={model}
+                  onBlur={(e) => saveModel(provider, e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.currentTarget.blur()
+                    }
+                  }}
                   aria-label={`${ASK_PROVIDER_LABEL[provider]} model`}
                   className="bg-secondary border border-border rounded-lg px-2 py-1 text-[11px] text-foreground outline-none focus:ring-1 focus:ring-primary w-40"
                 />
