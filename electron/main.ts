@@ -13,6 +13,7 @@ import { registerHabitsHandlers } from './ipc/habits'
 import { registerKnowledgeHandlers } from './ipc/knowledge'
 import { registerSearchHandlers } from './ipc/search'
 import { registerSettingsHandlers } from './ipc/settings'
+import { registerSpotlightHandlers, startKnowledgeMirrorWatcher } from './ipc/spotlight'
 import { registerSyncHandlers } from './ipc/sync'
 import { initAutoUpdater, registerUpdaterHandlers, scheduleUpdateChecks } from './ipc/updater'
 import { registerVaultHandlers } from './ipc/vault'
@@ -133,6 +134,7 @@ app.whenReady().then(async () => {
   registerUpdaterHandlers(ipcMain)
   registerBackupHandlers(ipcMain)
   registerSearchHandlers(ipcMain)
+  registerSpotlightHandlers(ipcMain)
 
   // Toggle content protection when navigating to/from vault
   ipcMain.on('vault:set-content-protection', (_event, enabled: boolean) => {
@@ -162,6 +164,9 @@ app.whenReady().then(async () => {
   createWindow()
   startCronJobs()
   await startOrRefreshFinanceWatcher()
+  // Spotlight mirror — no-op when the setting is disabled. Safe to call
+  // unconditionally; it reads its own enabled flag from app_settings.
+  startKnowledgeMirrorWatcher()
   initMenuBar(__dirname)
   // Drain any compass:// URLs that arrived before the window existed.
   urlScheme.pump()

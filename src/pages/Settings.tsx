@@ -243,6 +243,9 @@ export default function Settings(): JSX.Element {
             <Database size={12} /> Open in Finder
           </button>
         </SettingsRow>
+
+        {/* Spotlight mirror (Phase 5.14) */}
+        <SpotlightMirrorSettings />
         <SettingsRow
           label="Export data"
           description="Save all your data (tasks, habits, finance, knowledge index) as a JSON file"
@@ -1149,5 +1152,153 @@ function ShortcutRecorder(): JSX.Element {
         </button>
       )}
     </div>
+  )
+}
+
+// ─── Spotlight mirror (Phase 5.14) ───────────────────────────────────────────
+//
+// macOS doesn't index ~/Library/Application Support by default, so a
+// phrase from a Compass note doesn't show up in Spotlight. This row
+// turns on a one-way mirror to ~/Documents/Compass Notes (or any user-
+// chosen path under ~/Documents / ~/Desktop), which IS Spotlight-indexed.
+// Edits in the mirror don't flow back — the source of truth stays at
+// the original knowledge-base path.
+
+type SpotlightStatus = Awaited<ReturnType<Window['api']['spotlight']['getStatus']>>
+
+function SpotlightMirrorSettings(): JSX.Element {
+  const { toast } = useToast()
+  const [status, setStatus] = useState<SpotlightStatus | null>(null)
+  const [pathDraft, setPathDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function refresh(): Promise<void> {
+    if (typeof window === 'undefined' || !window.api?.spotlight) return
+    const s = await window.api.spotlight.getStatus()
+    setStatus(s)
+    setPathDraft(s.path)
+  }
+
+  useEffect(() => {
+    void refresh()
+  }, [])
+
+  async function toggle(enabled: boolean): Promise<void> {
+    setBusy(true)
+    try {
+      const r = await window.api.spotlight.setEnabled(enabled)
+      if (r.success) {
+        if (enabled && r.result) {
+          toast(
+            `Mirrored ${r.result.copied} note${r.result.copied === 1 ? '' : 's'} (skipped ${r.result.skipped}, removed stale ${r.result.removed})`,
+            'success'
+          )
+        } else if (!enabled) {
+          toast('Spotlight mirror disabled. Mirrored files left in place.', 'success')
+        }
+      } else {
+        toast(r.error ?? 'Failed to toggle Spotlight mirror', 'error')
+      }
+      await refresh()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function savePath(): Promise<void> {
+    if (!pathDraft.trim() || pathDraft === status?.path) return
+    setBusy(true)
+    try {
+      const r = await window.api.spotlight.setPath(pathDraft.trim())
+      if (r.success) {
+        toast('Mirror path updated.', 'success')
+      } else {
+        toast(r.error ?? 'Failed to set mirror path', 'error')
+      }
+      await refresh()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function backfill(): Promise<void> {
+    setBusy(true)
+    try {
+      const r = await window.api.spotlight.backfillNow()
+      if (r.success) {
+        toast(
+          `Reconciled mirror: ${r.result.copied} copied, ${r.result.skipped} skipped, ${r.result.removed} removed.`,
+          'success'
+        )
+      } else {
+        toast(r.error, 'error')
+      }
+      await refresh()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!status) return <></>
+
+  return (
+    <>
+      <SettingsRow
+        label="Spotlight indexing"
+        description="Mirror your knowledge notes into a Documents folder so macOS Spotlight can find them by content. One-way: edits in the mirror don't sync back."
+      >
+        <Toggle
+          enabled={status.enabled}
+          onChange={(v) => {
+            void toggle(v)
+          }}
+        />
+      </SettingsRow>
+
+      {status.enabled && (
+        <>
+          <SettingsRow
+            label="Mirror folder"
+            description={`Must live under ~/Documents or ~/Desktop (those are Spotlight-indexed). Default: ${status.defaultPath}`}
+          >
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={pathDraft}
+                onChange={(e) => setPathDraft(e.target.value)}
+                onBlur={() => void savePath()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    ;(e.target as HTMLInputElement).blur()
+                  }
+                }}
+                aria-label="Spotlight mirror path"
+                className={cn(
+                  'bg-secondary border rounded-lg px-3 py-1.5 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary w-64',
+                  status.pathAllowed ? 'border-border' : 'border-destructive/60'
+                )}
+              />
+            </div>
+          </SettingsRow>
+          <SettingsRow
+            label="Reconcile now"
+            description={
+              status.lastBackfillAt
+                ? `Last reconciled ${new Date(status.lastBackfillAt).toLocaleString()}`
+                : 'Run a one-shot copy/prune pass without changing settings.'
+            }
+          >
+            <button
+              type="button"
+              onClick={backfill}
+              disabled={busy}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={12} /> Reconcile
+            </button>
+          </SettingsRow>
+        </>
+      )}
+    </>
   )
 }

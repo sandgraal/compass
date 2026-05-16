@@ -110,6 +110,14 @@ const api = {
     restore: (passphrase: string) => ipcRenderer.invoke('backup:restore', passphrase)
   },
 
+  // --- Spotlight-friendly knowledge mirror (Phase 5.14) ---
+  spotlight: {
+    getStatus: () => ipcRenderer.invoke('spotlight:get-status'),
+    setEnabled: (enabled: boolean) => ipcRenderer.invoke('spotlight:set-enabled', enabled),
+    setPath: (path: string) => ipcRenderer.invoke('spotlight:set-path', path),
+    backfillNow: () => ipcRenderer.invoke('spotlight:backfill-now')
+  },
+
   // --- Vault (Sensitive Data) ---
   vault: {
     getCategories: () => ipcRenderer.invoke('vault:get-categories'),
