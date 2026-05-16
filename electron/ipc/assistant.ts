@@ -117,14 +117,14 @@ async function gatherContext(question: string): Promise<ContextChunk[]> {
     const titleMatch = content.match(/^#\s+(.+)$/m)
     const title = titleMatch
       ? titleMatch[1].trim()
-      : (full.split('/').pop()?.replace(/\.md$/, '') ?? full)
+      : path.basename(full, '.md')
     const firstHit = lc.indexOf(tokens[0])
     const snippet = content
       .slice(Math.max(0, firstHit - 40), firstHit + 200)
       .replace(/\s+/g, ' ')
       .trim()
     scored.push({
-      path: full.slice(KNOWLEDGE_DIR.length + 1),
+      path: path.relative(KNOWLEDGE_DIR, full),
       title,
       snippet,
       score
