@@ -279,9 +279,12 @@ export default function Daily(): JSX.Element {
   async function bulkSetChecked(checked: boolean): Promise<void> {
     if (selectedIds.size === 0) return
     const ids = Array.from(selectedIds)
-    setItems((prev) => prev.map((i) => (selectedIds.has(i.id) ? { ...i, checked } : i)))
+    const status = checked ? 'done' : 'unchecked'
+    setItems((prev) =>
+      prev.map((i) => (selectedIds.has(i.id) ? { ...i, checked, status } : i))
+    )
     if (window.api) {
-      await Promise.all(ids.map((id) => window.api!.checklist.updateItem(id, { checked })))
+      await Promise.all(ids.map((id) => window.api!.checklist.updateItem(id, { checked, status })))
     }
     toast(
       `${checked ? 'Completed' : 'Reopened'} ${ids.length} task${ids.length === 1 ? '' : 's'}`,
