@@ -9,12 +9,13 @@
  * no OAuth, no network, no permission prompt beyond Full Disk Access
  * for the running terminal/Electron app.
  *
- * Limitations of this first cut (deliberate, called out in the
- * Integrations card UI):
- *   - RRULE expansion is NOT implemented. The base instance is emitted
- *     when its DTSTART lands in the window; future occurrences of a
- *     recurring event aren't materialised. Follow-up PR can layer
- *     `rrule.js` on top of this.
+ * Limitations of this cut:
+ *   - **RRULE expansion is supported** (Phase 5.13) via the in-house
+ *     `apple-rrule.ts` expander for the common DAILY/WEEKLY/MONTHLY/
+ *     YEARLY + INTERVAL/COUNT/UNTIL/BYDAY/EXDATE subset. Unsupported
+ *     tokens fall through to "base instance only" with a console
+ *     warning, so a third-Tuesday-of-the-month rule still surfaces
+ *     its base event but won't materialize future occurrences.
  *   - TZID-with-VTIMEZONE bodies are read as floating local time. For
  *     the dashboard "what's coming up" use case this is acceptable —
  *     Apple Calendar.app shows the same conversion. Cross-zone correctness
@@ -25,6 +26,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { expandRrule, parseRrule } from './apple-rrule'
 
 export type AppleCalendarEvent = {
   uid: string
@@ -36,6 +38,17 @@ export type AppleCalendarEvent = {
   location: string | null
   description: string | null
   recurring: boolean
+}
+
+/**
+ * Internal-only — includes the raw recurrence tokens so the reader
+ * can materialize occurrences. The `AppleCalendarEvent` type the
+ * sync layer consumes doesn't expose them.
+ */
+type ParsedVEvent = AppleCalendarEvent & {
+  _rrule?: string
+  _exDates?: Date[]
+  _durationMs?: number
 }
 
 const APPLE_CALENDARS_DIR = join(homedir(), 'Library', 'Calendars')
@@ -122,9 +135,18 @@ function splitProperty(
  * — the caller decides which window they care about.
  */
 export function parseIcsFile(content: string, calendarName: string): AppleCalendarEvent[] {
+  return parseIcsFileInternal(content, calendarName)
+}
+
+/**
+ * Internal variant that also returns the raw `_rrule`/`_exDates` tokens.
+ * `readAppleCalendars` uses this to materialize occurrences; external
+ * callers (and the public `parseIcsFile` re-export) get the plain shape.
+ */
+function parseIcsFileInternal(content: string, calendarName: string): ParsedVEvent[] {
   const lines = unfoldIcs(content)
-  const events: AppleCalendarEvent[] = []
-  let current: Partial<AppleCalendarEvent> | null = null
+  const events: ParsedVEvent[] = []
+  let current: Partial<ParsedVEvent> | null = null
   let allDay = false
 
   for (const line of lines) {
@@ -135,6 +157,15 @@ export function parseIcsFile(content: string, calendarName: string): AppleCalend
     }
     if (line === 'END:VEVENT') {
       if (current?.uid) {
+        // Derive a default duration so materialized occurrences keep
+        // the same length as the base event. Defaults: 24h for all-day,
+        // 1h otherwise.
+        let durationMs: number | undefined
+        if (current.startAt && current.endAt) {
+          durationMs = current.endAt.getTime() - current.startAt.getTime()
+        } else if (current.startAt) {
+          durationMs = allDay ? 24 * 60 * 60 * 1000 : 60 * 60 * 1000
+        }
         events.push({
           uid: current.uid,
           calendarName,
@@ -144,7 +175,10 @@ export function parseIcsFile(content: string, calendarName: string): AppleCalend
           allDay,
           location: current.location ?? null,
           description: current.description ?? null,
-          recurring: current.recurring ?? false
+          recurring: current.recurring ?? false,
+          _rrule: current._rrule,
+          _exDates: current._exDates,
+          _durationMs: durationMs
         })
       }
       current = null
@@ -180,9 +214,22 @@ export function parseIcsFile(content: string, calendarName: string): AppleCalend
         break
       }
       case 'RRULE':
-        // Mark and surface — full expansion is a follow-up.
         current.recurring = true
+        current._rrule = prop.value
         break
+      case 'EXDATE': {
+        // EXDATE may carry one or more comma-separated date(-time)s.
+        // Each one is a specific occurrence to skip.
+        const isDate = prop.params.VALUE === 'DATE'
+        const stamps = prop.value
+          .split(',')
+          .map((s) => parseDateValue(s.trim(), isDate))
+          .filter((d): d is Date => d instanceof Date)
+        if (stamps.length > 0) {
+          current._exDates = [...(current._exDates ?? []), ...stamps]
+        }
+        break
+      }
     }
   }
 
@@ -281,21 +328,59 @@ export function readAppleCalendars(options: AppleCalendarReadOptions = {}): Appl
       } catch {
         continue
       }
-      const parsed = parseIcsFile(content, title)
+      const parsed = parseIcsFileInternal(content, title)
       for (const ev of parsed) {
-        // Window filter — must overlap [start, end). For all-day events
-        // with no DTEND, treat the day as 24h long. Recurring events
-        // appear if their base DTSTART falls in the window (RRULE
-        // expansion is a follow-up).
         if (!ev.startAt) continue
+        const durationMs = ev._durationMs ?? (ev.allDay ? 24 * 60 * 60 * 1000 : 60 * 60 * 1000)
+
+        if (ev._rrule) {
+          // Materialize each occurrence in the window. The expander
+          // returns the base occurrence too (when it falls in range),
+          // so we don't separately push the parsed event.
+          const rule = parseRrule(ev._rrule)
+          const expansion = expandRrule(ev.startAt, rule, {
+            windowStart: options.windowStart ?? new Date(start),
+            windowEnd: options.windowEnd ?? new Date(end),
+            exDates: ev._exDates
+          })
+          if (expansion.truncated) {
+            console.warn(`[apple-calendar] RRULE expansion truncated at hard cap for ${ev.uid}`)
+          }
+          for (const occStart of expansion.occurrences) {
+            const occEnd = new Date(occStart.getTime() + durationMs)
+            events.push({
+              // Per-occurrence external id keeps the DB upsert unique
+              // across occurrences of the same base event.
+              uid: `${ev.uid}::${occStart.toISOString()}`,
+              calendarName: title,
+              title: ev.title,
+              startAt: occStart,
+              endAt: occEnd,
+              allDay: ev.allDay,
+              location: ev.location,
+              description: ev.description,
+              recurring: true
+            })
+          }
+          if (expansion.occurrences.length === 0 && rule.freq === 'UNSUPPORTED') {
+            // Surface base instance so the user still sees something —
+            // and so the existing "this event recurs" UX shows up.
+            const evStart = ev.startAt.getTime()
+            const evEnd = evStart + durationMs
+            if (evEnd > start && evStart < end) {
+              const { _rrule, _exDates, _durationMs, ...rest } = ev
+              events.push(rest)
+            }
+          }
+          continue
+        }
+
+        // Non-recurring path — same window filter as before.
         const evStart = ev.startAt.getTime()
-        const evEnd = ev.endAt
-          ? ev.endAt.getTime()
-          : ev.allDay
-            ? evStart + 24 * 60 * 60 * 1000
-            : evStart + 60 * 60 * 1000
+        const evEnd = ev.endAt ? ev.endAt.getTime() : evStart + durationMs
         if (evEnd <= start || evStart >= end) continue
-        events.push(ev)
+        const { _rrule, _exDates, _durationMs, ...rest } = ev
+        events.push(rest)
       }
     }
   }
