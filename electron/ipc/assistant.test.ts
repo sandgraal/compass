@@ -14,7 +14,7 @@
 import { describe, expect, it } from 'vitest'
 import { _internal } from './assistant'
 
-const { buildContextBlock, SYSTEM_PROMPT } = _internal
+const { buildContextBlock, gatherContext, SYSTEM_PROMPT } = _internal
 
 describe('SYSTEM_PROMPT', () => {
   it('instructs the model to cite blocks as bracketed numbers', () => {
@@ -27,11 +27,14 @@ describe('SYSTEM_PROMPT', () => {
   it('asks for citations at end of factual sentences', () => {
     expect(SYSTEM_PROMPT).toMatch(/Place the citation at the END/i)
   })
+  it('requests plain-text output', () => {
+    expect(SYSTEM_PROMPT).toMatch(/plain text/i)
+  })
 })
 
 describe('buildContextBlock', () => {
   it('returns a no-context sentinel when no chunks are supplied', () => {
-    expect(buildContextBlock([])).toMatch(/No context blocks available/i)
+    expect(buildContextBlock([])).toMatch(/No numbered context blocks are available/i)
   })
 
   it('numbers chunks starting from 1', () => {
@@ -59,5 +62,15 @@ describe('buildContextBlock', () => {
       { path: 'b.md', title: 'B', snippet: 'two', score: 1 }
     ])
     expect(out).toContain('---')
+  })
+})
+
+describe('gatherContext', () => {
+  it('throws an abort error immediately when signal is already aborted', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(gatherContext('anything', controller.signal)).rejects.toMatchObject({
+      name: 'LlmAbortError'
+    })
   })
 })

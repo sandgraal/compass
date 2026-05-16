@@ -60,7 +60,12 @@ interface ContextChunk {
  * Prefers semantic search; falls back to a simple keyword scan over
  * the knowledge index when no embedding model is available.
  */
-async function gatherContext(question: string): Promise<ContextChunk[]> {
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new LlmAbortError()
+}
+
+async function gatherContext(question: string, signal?: AbortSignal): Promise<ContextChunk[]> {
+  throwIfAborted(signal)
   // Try semantic search first. semanticSearch returns null when the
   // index hasn't been built, throws when Ollama is offline.
   try {
@@ -79,6 +84,7 @@ async function gatherContext(question: string): Promise<ContextChunk[]> {
   } catch {
     /* fall through to keyword scan */
   }
+  throwIfAborted(signal)
 
   // Keyword fallback. Cheap N-walk over markdown files; the knowledge
   // base is typically small enough that this is fine.
@@ -90,8 +96,10 @@ async function gatherContext(question: string): Promise<ContextChunk[]> {
   const path = require('node:path') as typeof import('node:path')
 
   function walk(dir: string, out: string[] = []): string[] {
+    throwIfAborted(signal)
     if (!existsSync(dir)) return out
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      throwIfAborted(signal)
       const full = path.join(dir, entry.name)
       if (entry.isDirectory()) walk(full, out)
       else if (entry.isFile() && entry.name.endsWith('.md')) out.push(full)
@@ -101,6 +109,7 @@ async function gatherContext(question: string): Promise<ContextChunk[]> {
 
   const scored: ContextChunk[] = []
   for (const full of walk(KNOWLEDGE_DIR)) {
+    throwIfAborted(signal)
     let content: string
     try {
       content = readFileSync(full, 'utf8')
@@ -115,9 +124,7 @@ async function gatherContext(question: string): Promise<ContextChunk[]> {
     }
     if (score === 0) continue
     const titleMatch = content.match(/^#\s+(.+)$/m)
-    const title = titleMatch
-      ? titleMatch[1].trim()
-      : path.basename(full, '.md')
+    const title = titleMatch ? titleMatch[1].trim() : path.basename(full, '.md')
     const firstHit = lc.indexOf(tokens[0])
     const snippet = content
       .slice(Math.max(0, firstHit - 40), firstHit + 200)
@@ -145,11 +152,11 @@ Rules:
 - Keep the user's own terminology and acronyms; do not "translate" them.
 - Cite at least one block when you make a claim grounded in the context. Place the citation at the END of the sentence containing the fact, e.g. "Your CR property pays its electricity on the 5th [3]."
 
-Format your reply as Markdown.`
+Format your reply as plain text (not Markdown or code fences).`
 
 function buildContextBlock(chunks: ContextChunk[]): string {
   if (chunks.length === 0) {
-    return "No numbered context blocks are available for this question. Do not answer from general knowledge. Instead, say plainly that you cannot answer from the provided context and that no citations are available."
+    return 'No numbered context blocks are available for this question. Do not answer from general knowledge. Instead, say plainly that you cannot answer from the provided context and that no citations are available.'
   }
   return chunks
     .map((c, i) => `[${i + 1}] (${c.path} — ${c.title})\n${c.snippet}`)
@@ -273,7 +280,7 @@ export function registerAssistantHandlers(ipcMain: IpcMain): void {
     currentController = controller
 
     try {
-      const context = await gatherContext(question)
+      const context = await gatherContext(question, controller.signal)
       const contextBlock = buildContextBlock(context)
       const userTurnContent = `Context:\n\n${contextBlock}\n\n---\n\nQuestion: ${question}`
 
