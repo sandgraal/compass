@@ -27,6 +27,7 @@ import {
   applyMirrorChange,
   defaultMirrorPath,
   isAllowedMirrorPath,
+  normalizedMirrorPath,
   reconcileMirror
 } from '../integrations/spotlight-mirror'
 import { KNOWLEDGE_DIR } from '../paths'
@@ -64,18 +65,25 @@ function readConfig(): MirrorConfig {
 
 /**
  * Start (or restart) the mirror watcher. No-op when disabled.
- * Idempotent — closes the existing watcher before starting a new one
- * so a settings change picks up cleanly.
+ * Idempotent — fully awaits the existing watcher's close before
+ * starting a new one so a rapid enable/path toggle can't leave two
+ * watchers active simultaneously (which would duplicate events).
  */
-export function startKnowledgeMirrorWatcher(): void {
+export async function startKnowledgeMirrorWatcher(): Promise<void> {
   if (mirrorWatcher) {
-    void mirrorWatcher.close()
+    try {
+      await mirrorWatcher.close()
+    } catch {
+      /* if close throws, still proceed — leaking one watcher is
+         better than refusing to start the new one */
+    }
     mirrorWatcher = null
   }
   const cfg = readConfig()
   if (!cfg.enabled) return
-  if (!isAllowedMirrorPath(cfg.path)) {
-    lastError = `Spotlight mirror path is not under ~/Documents or ~/Desktop: ${cfg.path}`
+  const resolvedMirror = normalizedMirrorPath(cfg.path)
+  if (!resolvedMirror) {
+    lastError = `Spotlight mirror path must be a subdirectory under ~/Documents or ~/Desktop: ${cfg.path}`
     return
   }
   lastError = null
@@ -87,7 +95,7 @@ export function startKnowledgeMirrorWatcher(): void {
   for (const event of ['add', 'change', 'unlink'] as const) {
     w.on(event, (filePath: string) => {
       try {
-        applyMirrorChange(event, KNOWLEDGE_DIR, cfg.path, filePath)
+        applyMirrorChange(event, KNOWLEDGE_DIR, resolvedMirror, filePath)
       } catch (err) {
         lastError = (err as Error).message
         console.warn('[spotlight-mirror] apply failed:', lastError)
@@ -100,12 +108,15 @@ export function startKnowledgeMirrorWatcher(): void {
 export function registerSpotlightHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('spotlight:get-status', () => {
     const cfg = readConfig()
+    const resolved = normalizedMirrorPath(cfg.path)
     return {
       enabled: cfg.enabled,
       path: cfg.path,
       defaultPath: defaultMirrorPath(),
       pathAllowed: isAllowedMirrorPath(cfg.path),
-      mirrorExists: existsSync(cfg.path),
+      // Use the resolved absolute path so a stored `~/...` value
+      // doesn't make this say "missing" when the dir actually exists.
+      mirrorExists: resolved ? existsSync(resolved) : false,
       lastError,
       lastBackfillAt
     }
@@ -142,12 +153,15 @@ export function registerSpotlightHandlers(ipcMain: IpcMain): void {
         }
         const result = reconcileMirror(KNOWLEDGE_DIR, cfg.path)
         lastBackfillAt = Date.now()
-        startKnowledgeMirrorWatcher()
+        await startKnowledgeMirrorWatcher()
         return { success: true, result }
       }
       // Disable — keep existing mirrored files in place (the user may
       // still want to read them in Finder / Spotlight), just stop syncing.
-      startKnowledgeMirrorWatcher() // restart, observes new disabled state
+      // restart observes the new disabled state and tears down the
+      // watcher cleanly. Awaited so we don't return before the
+      // existing watcher's close completes.
+      await startKnowledgeMirrorWatcher()
       return { success: true }
     } catch (err) {
       return { success: false, error: (err as Error).message }
@@ -179,7 +193,7 @@ export function registerSpotlightHandlers(ipcMain: IpcMain): void {
       if (cfg.enabled) {
         const result = reconcileMirror(KNOWLEDGE_DIR, cfg.path)
         lastBackfillAt = Date.now()
-        startKnowledgeMirrorWatcher()
+        await startKnowledgeMirrorWatcher()
         return { success: true, result }
       }
       return { success: true }

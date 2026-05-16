@@ -18,6 +18,7 @@ import {
   defaultMirrorPath,
   isAllowedMirrorPath,
   mirrorTargetFor,
+  normalizedMirrorPath,
   reconcileMirror
 } from './spotlight-mirror'
 
@@ -44,12 +45,21 @@ describe('isAllowedMirrorPath', () => {
   it('accepts paths inside ~/Documents', () => {
     expect(isAllowedMirrorPath(join(TMP_HOME, 'Documents', 'Compass Notes'))).toBe(true)
   })
-  it('accepts ~/Documents itself', () => {
-    expect(isAllowedMirrorPath(join(TMP_HOME, 'Documents'))).toBe(true)
-  })
   it('accepts paths inside ~/Desktop', () => {
     expect(isAllowedMirrorPath(join(TMP_HOME, 'Desktop', 'Notes'))).toBe(true)
   })
+
+  // Catastrophic-delete defense: if we accepted the bare folder, the
+  // prune pass would treat the whole Documents/Desktop tree as
+  // Compass-owned and recursively delete every .md not in the KB.
+  // Must be a dedicated subdirectory.
+  it('rejects bare ~/Documents itself', () => {
+    expect(isAllowedMirrorPath(join(TMP_HOME, 'Documents'))).toBe(false)
+  })
+  it('rejects bare ~/Desktop itself', () => {
+    expect(isAllowedMirrorPath(join(TMP_HOME, 'Desktop'))).toBe(false)
+  })
+
   it('rejects Library Application Support paths', () => {
     expect(isAllowedMirrorPath(join(TMP_HOME, 'Library', 'Application Support', 'Compass'))).toBe(
       false
@@ -64,6 +74,37 @@ describe('isAllowedMirrorPath', () => {
   })
   it('expands ~ in the path', () => {
     expect(isAllowedMirrorPath('~/Documents/Compass Notes')).toBe(true)
+  })
+
+  // Path-traversal defense: a raw-string prefix check would happily
+  // pass `~/Documents/../Library/...` even though it escapes the
+  // allowlist. We resolve `..` segments before comparing.
+  it('rejects path traversal that escapes ~/Documents', () => {
+    expect(
+      isAllowedMirrorPath(`${TMP_HOME}/Documents/../Library/Application Support/Compass Mirror`)
+    ).toBe(false)
+  })
+  it('rejects path traversal that escapes ~/Desktop', () => {
+    expect(isAllowedMirrorPath(`${TMP_HOME}/Desktop/../private/notes`)).toBe(false)
+  })
+
+  it('rejects empty / non-string input', () => {
+    expect(isAllowedMirrorPath('')).toBe(false)
+    expect(isAllowedMirrorPath(undefined as unknown as string)).toBe(false)
+  })
+})
+
+describe('normalizedMirrorPath', () => {
+  it('returns the resolved absolute path for an allowed input', () => {
+    expect(normalizedMirrorPath('~/Documents/Compass Notes')).toBe(
+      join(TMP_HOME, 'Documents', 'Compass Notes')
+    )
+  })
+  it('collapses `..` segments BEFORE allowlist check (returns null for escapes)', () => {
+    expect(normalizedMirrorPath(`${TMP_HOME}/Documents/../Library/Compass Mirror`)).toBeNull()
+  })
+  it('returns null for the bare root', () => {
+    expect(normalizedMirrorPath(`${TMP_HOME}/Documents`)).toBeNull()
   })
 })
 
@@ -140,7 +181,34 @@ describe('reconcileMirror', () => {
     writeKb('a.md', 'x')
     expect(() =>
       reconcileMirror(kbRoot, join(TMP_HOME, 'Library', 'Application Support', 'NotAllowed'))
-    ).toThrow(/~\/Documents or ~\/Desktop/)
+    ).toThrow(/dedicated subdirectory/)
+  })
+
+  it('rejects path traversal in the mirror path', () => {
+    writeKb('a.md', 'x')
+    expect(() =>
+      reconcileMirror(kbRoot, `${TMP_HOME}/Documents/../Library/Application Support/Sneaky`)
+    ).toThrow(/dedicated subdirectory/)
+  })
+
+  it('rejects the bare ~/Documents folder (would delete unrelated .md files)', () => {
+    writeKb('a.md', 'x')
+    expect(() => reconcileMirror(kbRoot, join(TMP_HOME, 'Documents'))).toThrow(
+      /dedicated subdirectory/
+    )
+  })
+
+  it('preserves source mtime so a second reconcile actually skips', () => {
+    writeKb('a.md', 'unchanged content')
+    const first = reconcileMirror(kbRoot, mirrorRoot)
+    expect(first.copied).toBe(1)
+    expect(first.skipped).toBe(0)
+    // Re-run without touching source; the mirror file's mtime should
+    // have been stamped to match the source so the second pass
+    // recognises it as unchanged.
+    const second = reconcileMirror(kbRoot, mirrorRoot)
+    expect(second.copied).toBe(0)
+    expect(second.skipped).toBe(1)
   })
 
   it('creates nested parent dirs on the mirror side', () => {
@@ -211,5 +279,40 @@ describe('applyMirrorChange', () => {
     writeFileSync(evil, 'x', 'utf8')
     const r = applyMirrorChange('add', kbRoot, mirrorRoot, evil)
     expect(r.kind).toBe('noop')
+  })
+
+  it('refuses a sibling whose name shares a prefix with kbRoot (`kb-X-evil`)', () => {
+    // Previously `sourceAbsPath.startsWith(kbRoot)` would admit
+    // `${kbRoot}-evil/x.md` and produce a traversing relative path.
+    // The fixed check uses path.relative + ".."-rejection.
+    const evilBase = `${kbRoot}-evil`
+    mkdirSync(evilBase, { recursive: true })
+    const evil = join(evilBase, 'x.md')
+    writeFileSync(evil, 'x', 'utf8')
+    try {
+      const r = applyMirrorChange('add', kbRoot, mirrorRoot, evil)
+      expect(r.kind).toBe('noop')
+      expect(existsSync(join(mirrorRoot, '..', 'x.md'))).toBe(false)
+    } finally {
+      rmSync(evilBase, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects an unnormalized mirror root with `..` segments', () => {
+    const src = join(kbRoot, 'a.md')
+    writeFileSync(src, 'x', 'utf8')
+    const evil = `${TMP_HOME}/Documents/../Library/Sneaky`
+    const r = applyMirrorChange('add', kbRoot, evil, src)
+    expect(r.kind).toBe('noop')
+  })
+
+  it('accepts a tilde-prefixed mirror root (resolves at the boundary)', () => {
+    const src = join(kbRoot, 'a.md')
+    writeFileSync(src, 'hello', 'utf8')
+    // Pass `~/Documents/Compass Notes` — should resolve and write
+    // under the real TMP_HOME path, not create a literal `~` directory.
+    const r = applyMirrorChange('add', kbRoot, '~/Documents/Compass Notes', src)
+    expect(r.kind).toBe('copied')
+    expect(existsSync(join(TMP_HOME, 'Documents', 'Compass Notes', 'a.md'))).toBe(true)
   })
 })

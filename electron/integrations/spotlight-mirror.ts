@@ -22,9 +22,13 @@
  *     `~/Documents/Compass Notes`). We never write OUTSIDE
  *     `~/Documents/` or `~/Desktop/` — anywhere else and Spotlight
  *     wouldn't index it, defeating the purpose.
- *   - The chokidar watcher on `knowledge-base/` already exists for the
- *     KB editor's live-update path. We hook a second listener onto the
- *     same events instead of standing up a parallel watcher.
+ *   - The mirror runs its own chokidar watcher (started by
+ *     `electron/ipc/spotlight.ts`). We don't piggy-back on the
+ *     existing KB editor watcher — that one's lifecycle is tied to a
+ *     specific BrowserWindow and we need the mirror to keep working
+ *     while the renderer is mid-reload. Two watchers on the same dir
+ *     is fine: chokidar dedupes nothing for us but the OS-level
+ *     FSEvents subscription is shared.
  *   - The implementation here is the pure planner + IO primitives.
  *     The IPC wiring lives in `electron/ipc/spotlight.ts`.
  */
@@ -36,40 +40,71 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { sep as PATH_SEP, dirname, join, relative } from 'node:path'
+import { sep as PATH_SEP, dirname, join, resolve as pathResolve, relative } from 'node:path'
 
 const DEFAULT_DIR_NAME = 'Compass Notes'
 const README_FILENAME = 'README.txt'
+
+/**
+ * Resolve a user-provided path string to an absolute path WITHOUT
+ * touching the filesystem (target may not exist yet). Handles `~`
+ * expansion and `..` segments — the latter is the security-critical
+ * part: a raw-string prefix check on `~/Documents/../Library/...`
+ * would happily pass even though the filesystem call resolves the
+ * `..` and escapes the allowlist. `path.resolve` collapses those.
+ */
+function resolveTarget(target: string): string {
+  const home = homedir()
+  const expanded = target.startsWith('~') ? join(home, target.slice(1)) : target
+  return pathResolve(expanded)
+}
 
 /**
  * Spotlight only indexes a handful of standard user folders out of the
  * box. We restrict the mirror target to those to ensure the feature
  * actually does what it says — mirroring to `~/Library/...` would be a
  * silent no-op for the user.
+ *
+ * Two additional safety constraints beyond "must be Spotlight-indexed":
+ *
+ *   1. **No bare roots.** `~/Documents` and `~/Desktop` themselves are
+ *      rejected. If we accepted them, the prune pass would treat the
+ *      entire folder as Compass-owned and recursively delete every
+ *      `.md` not in the knowledge base — wiping the user's other
+ *      Markdown notes. Must be a dedicated SUB-directory.
+ *
+ *   2. **Normalize before compare.** `~/Documents/../Library/...`
+ *      passes a raw-string prefix check but the filesystem call would
+ *      escape the allowlist. We `path.resolve` first so `..` collapses
+ *      before the prefix match.
  */
 export function isAllowedMirrorPath(target: string): boolean {
+  if (typeof target !== 'string' || target.length === 0) return false
   const home = homedir()
-  // Resolve `~` / leading slash conventions to absolute. We don't fully
-  // canonicalize (no realpathSync) because the target may not exist
-  // yet; we only care about prefix shape.
-  const abs = target.startsWith('~') ? join(home, target.slice(1)) : target
+  const abs = resolveTarget(target)
   if (!abs.startsWith('/')) return false
-  // Tighten: only allow ~/Documents/* and ~/Desktop/*. iCloud Drive,
-  // Dropbox-style sync folders work fine too but the canonical
-  // Spotlight-indexed paths are these two; keeps the surface
-  // predictable.
-  const documents = join(home, 'Documents')
-  const desktop = join(home, 'Desktop')
-  // Equal or under (with separator to avoid /Documents-evil matching /Documents).
-  return (
-    abs === documents ||
-    abs === desktop ||
-    abs.startsWith(`${documents}${PATH_SEP}`) ||
-    abs.startsWith(`${desktop}${PATH_SEP}`)
-  )
+  const documents = pathResolve(join(home, 'Documents'))
+  const desktop = pathResolve(join(home, 'Desktop'))
+  // Reject the bare root — must be a dedicated subdirectory so the
+  // prune pass can't reach the user's unrelated files.
+  if (abs === documents || abs === desktop) return false
+  // Equal-or-under with separator boundary so `~/Documents-evil`
+  // can't match `~/Documents`.
+  return abs.startsWith(`${documents}${PATH_SEP}`) || abs.startsWith(`${desktop}${PATH_SEP}`)
+}
+
+/**
+ * Returns the normalized absolute path for a user-supplied target,
+ * iff it passes `isAllowedMirrorPath`. Centralised here so the IPC
+ * layer and the reconcile/apply paths all agree on the same shape.
+ */
+export function normalizedMirrorPath(target: string): string | null {
+  if (!isAllowedMirrorPath(target)) return null
+  return resolveTarget(target)
 }
 
 /** Default mirror path. Caller can override. */
@@ -118,9 +153,9 @@ at:
 
     ~/Library/Application Support/Compass/knowledge-base/
 
-Disable the mirror in Compass → Settings → Knowledge → Spotlight
-indexing to stop the sync (the existing files stay in place; nothing
-is deleted).
+Disable the mirror in Compass → Settings → Data → Spotlight indexing
+to stop the sync (the existing files stay in place; nothing is
+deleted).
 `
 
 /**
@@ -130,13 +165,22 @@ is deleted).
  *
  * `mtime`-skip avoids unnecessary copies: if the mirrored file has the
  * same mtime as the source (modulo 1s precision), we leave it alone.
+ * After every copy we propagate the source's mtime onto the
+ * destination via `utimesSync`, so the second reconcile sees a match
+ * and skips. Without that, every reconcile would recopy every file.
  *
  * Returns counts so the UI can show the user what happened.
  */
-export function reconcileMirror(kbRoot: string, mirrorRoot: string): BackfillResult {
-  if (!isAllowedMirrorPath(mirrorRoot)) {
+export function reconcileMirror(kbRoot: string, mirrorRootInput: string): BackfillResult {
+  // Canonicalize at the boundary. The allowlist check operates on the
+  // resolved absolute path so `~/Documents/../Library` is rejected,
+  // and the subsequent fs calls all use the resolved path so a
+  // user-stored `~/...` value doesn't end up creating a literal `~`
+  // directory in the CWD.
+  const mirrorRoot = normalizedMirrorPath(mirrorRootInput)
+  if (!mirrorRoot) {
     throw new Error(
-      `Spotlight mirror path must be under ~/Documents or ~/Desktop. Got: ${mirrorRoot}`
+      `Spotlight mirror path must be a dedicated subdirectory under ~/Documents or ~/Desktop. Got: ${mirrorRootInput}`
     )
   }
   const result: BackfillResult = { copied: 0, skipped: 0, removed: 0, errors: [] }
@@ -165,8 +209,8 @@ export function reconcileMirror(kbRoot: string, mirrorRoot: string): BackfillRes
       const dstDir = dirname(dst)
       if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true })
 
+      const srcStat = statSync(src)
       if (existsSync(dst)) {
-        const srcStat = statSync(src)
         const dstStat = statSync(dst)
         // mtime compared to whole seconds — the chokidar
         // `awaitWriteFinish` upstream gives us sub-second jitter that
@@ -177,6 +221,16 @@ export function reconcileMirror(kbRoot: string, mirrorRoot: string): BackfillRes
         }
       }
       copyFileSync(src, dst)
+      // Stamp the destination with the source's mtime so the next
+      // reconcile sees a match and skips. Without this, the first
+      // backfill leaves every mirrored file with mtime=now, then the
+      // second reconcile recopies every file — `result.skipped`
+      // counts would be permanently misleading.
+      try {
+        utimesSync(dst, srcStat.atime, srcStat.mtime)
+      } catch {
+        /* best-effort; the next reconcile will just recopy */
+      }
       result.copied++
     } catch (err) {
       result.errors.push({ path: rel, message: (err as Error).message })
@@ -226,24 +280,38 @@ export function reconcileMirror(kbRoot: string, mirrorRoot: string): BackfillRes
  */
 export function applyMirrorChange(
   event: 'add' | 'change' | 'unlink',
-  kbRoot: string,
-  mirrorRoot: string,
+  kbRootInput: string,
+  mirrorRootInput: string,
   sourceAbsPath: string
 ): { kind: 'copied' | 'removed' | 'noop'; target: string | null } {
-  if (!isAllowedMirrorPath(mirrorRoot)) {
+  // Resolve both roots once. The mirror root is rejected unless it's a
+  // dedicated subdirectory under ~/Documents or ~/Desktop; the kb root
+  // is resolved so the containment check works even if the caller
+  // passed `~/...` or an unnormalized path.
+  const mirrorRoot = normalizedMirrorPath(mirrorRootInput)
+  if (!mirrorRoot) {
     return { kind: 'noop', target: null }
   }
   if (!sourceAbsPath.endsWith('.md')) {
     return { kind: 'noop', target: null }
   }
-  if (!sourceAbsPath.startsWith(kbRoot)) {
-    // Defensive: chokidar can occasionally emit paths outside the
-    // watched root if symlinks are followed. Refuse rather than write
-    // arbitrary paths under mirrorRoot.
+  const kbRoot = pathResolve(kbRootInput)
+  const src = pathResolve(sourceAbsPath)
+
+  // Separator-boundary containment check. The previous
+  // `startsWith(kbRoot)` would have admitted `${kbRoot}-evil/x.md`.
+  // Computing `relative(kbRoot, src)` and rejecting any result that
+  // starts with `..` or is absolute is the canonical form — it
+  // tolerates trailing-separator differences AND blocks traversal.
+  const rel = relative(kbRoot, src)
+  if (
+    rel === '' ||
+    rel.startsWith('..') ||
+    rel.includes(`${PATH_SEP}..${PATH_SEP}`) ||
+    rel.startsWith('/')
+  ) {
     return { kind: 'noop', target: null }
   }
-
-  const rel = relative(kbRoot, sourceAbsPath)
   const dst = mirrorTargetFor(mirrorRoot, rel)
 
   if (event === 'unlink') {
@@ -254,12 +322,20 @@ export function applyMirrorChange(
     return { kind: 'noop', target: dst }
   }
 
-  if (!existsSync(sourceAbsPath)) {
+  if (!existsSync(src)) {
     return { kind: 'noop', target: dst }
   }
   const dstDir = dirname(dst)
   if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true })
-  copyFileSync(sourceAbsPath, dst)
+  copyFileSync(src, dst)
+  // Mirror the source mtime so the next reconcile's mtime-skip path
+  // works. See the long-form rationale in `reconcileMirror`.
+  try {
+    const srcStat = statSync(src)
+    utimesSync(dst, srcStat.atime, srcStat.mtime)
+  } catch {
+    /* best-effort */
+  }
   return { kind: 'copied', target: dst }
 }
 

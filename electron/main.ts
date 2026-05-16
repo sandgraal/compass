@@ -166,7 +166,9 @@ app.whenReady().then(async () => {
   await startOrRefreshFinanceWatcher()
   // Spotlight mirror — no-op when the setting is disabled. Safe to call
   // unconditionally; it reads its own enabled flag from app_settings.
-  startKnowledgeMirrorWatcher()
+  // Fire-and-forget at startup; the resolve happens in the background
+  // and any error is captured in the IPC's `lastError`.
+  void startKnowledgeMirrorWatcher()
   initMenuBar(__dirname)
   // Drain any compass:// URLs that arrived before the window existed.
   urlScheme.pump()
