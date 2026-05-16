@@ -13,7 +13,8 @@
 import { describe, expect, it } from 'vitest'
 import { expandRrule, parseIcsDate, parseRrule } from './apple-rrule'
 
-const D = (y: number, m: number, d: number, h = 0, mi = 0): Date => new Date(y, m - 1, d, h, mi)
+const D = (y: number, m: number, d: number, h = 0, mi = 0): Date =>
+  new Date(Date.UTC(y, m - 1, d, h, mi))
 
 const WINDOW_START = D(2026, 1, 1)
 const WINDOW_END = D(2026, 12, 31, 23, 59)
