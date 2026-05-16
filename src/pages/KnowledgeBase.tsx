@@ -59,7 +59,7 @@ export default function KnowledgeBase(): JSX.Element {
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [showDiff, setShowDiff] = useState(false)
   // Distraction-free reading mode (Phase 5 backlog): hides the file
-  // sidebar + header so the editor pane occupies the full content area.
+  // sidebar so the editor pane has more space.
   // Esc exits.
   const [readingMode, setReadingMode] = useState(false)
   const [diffOld, setDiffOld] = useState<string | null>(null) // content before last sync
