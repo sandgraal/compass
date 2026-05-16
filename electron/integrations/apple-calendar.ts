@@ -348,10 +348,15 @@ export function readAppleCalendars(options: AppleCalendarReadOptions = {}): Appl
           }
           for (const occStart of expansion.occurrences) {
             const occEnd = new Date(occStart.getTime() + durationMs)
+            const occurrenceUid =
+              occStart.getTime() === ev.startAt.getTime()
+                ? ev.uid
+                : `${ev.uid}::${occStart.toISOString()}`
             events.push({
-              // Per-occurrence external id keeps the DB upsert unique
-              // across occurrences of the same base event.
-              uid: `${ev.uid}::${occStart.toISOString()}`,
+              // Preserve the legacy base uid for the base occurrence so
+              // existing synced rows continue to upsert in place. Use a
+              // per-occurrence id for all other instances.
+              uid: occurrenceUid,
               calendarName: title,
               title: ev.title,
               startAt: occStart,
