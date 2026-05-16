@@ -359,6 +359,9 @@ export default function Settings(): JSX.Element {
            from the suggestion-extraction one above. Visible whenever
            Ollama is running. */}
         {ollamaStatus?.available && <SemanticSearchSettings />}
+
+        {/* Ask Compass — BYO Claude/OpenAI API key (Tier 2 #7) */}
+        <AskCompassSettings />
       </SettingsSection>
 
       <SettingsSection icon={<RefreshCw size={16} />} title="Updates">
@@ -754,6 +757,184 @@ function SemanticSearchSettings(): JSX.Element {
           {building ? 'Building…' : status?.builtAt ? 'Rebuild index' : 'Build index'}
         </button>
       </SettingsRow>
+    </>
+  )
+}
+
+// ─── Ask Compass — BYO LLM key (Tier 2 #7) ────────────────────────────────────
+//
+// Two providers (Anthropic, OpenAI). Both store their keys encrypted via the
+// existing crypto-vault primitives; the renderer only ever sees a masked
+// tail. Active-provider toggle and per-provider model field round out the
+// surface so the user can switch without re-pasting keys.
+
+type AskStatus = Awaited<ReturnType<Window['api']['assistant']['getStatus']>>
+type AskProvider = 'anthropic' | 'openai'
+
+const ASK_PROVIDER_LABEL: Record<AskProvider, string> = {
+  anthropic: 'Anthropic (Claude)',
+  openai: 'OpenAI (GPT)'
+}
+
+const ASK_DEFAULT_MODEL: Record<AskProvider, string> = {
+  anthropic: 'claude-3-5-haiku-latest',
+  openai: 'gpt-4o-mini'
+}
+
+function AskCompassSettings(): JSX.Element {
+  const { toast } = useToast()
+  const [askStatus, setAskStatus] = useState<AskStatus | null>(null)
+  const [pendingKey, setPendingKey] = useState<Partial<Record<AskProvider, string>>>({})
+  const [busy, setBusy] = useState<AskProvider | null>(null)
+
+  async function refresh(): Promise<void> {
+    if (typeof window === 'undefined' || !window.api) return
+    const s = await window.api.assistant.getStatus()
+    setAskStatus(s)
+  }
+
+  useEffect(() => {
+    void refresh()
+  }, [])
+
+  async function saveKey(provider: AskProvider): Promise<void> {
+    const raw = (pendingKey[provider] ?? '').trim()
+    if (raw.length < 16) {
+      toast('Key looks too short — check you copied the whole thing.', 'error')
+      return
+    }
+    setBusy(provider)
+    try {
+      const r = await window.api.assistant.setKey(provider, raw)
+      if (r.success) {
+        toast(`${ASK_PROVIDER_LABEL[provider]} key saved.`, 'success')
+        setPendingKey((prev) => ({ ...prev, [provider]: '' }))
+        await refresh()
+      } else {
+        toast(r.error ?? 'Failed to save key', 'error')
+      }
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function clearKey(provider: AskProvider): Promise<void> {
+    setBusy(provider)
+    try {
+      await window.api.assistant.clearKey(provider)
+      toast(`${ASK_PROVIDER_LABEL[provider]} key removed.`, 'success')
+      await refresh()
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function switchActive(provider: AskProvider): Promise<void> {
+    const r = await window.api.assistant.setActiveProvider(provider)
+    if (r.success) {
+      await refresh()
+    } else {
+      toast(r.error ?? 'Failed to switch provider', 'error')
+    }
+  }
+
+  async function saveModel(provider: AskProvider, model: string): Promise<void> {
+    const r = await window.api.assistant.setModel(provider, model)
+    if (r.success) await refresh()
+    else toast(r.error ?? 'Failed to save model', 'error')
+  }
+
+  return (
+    <>
+      <SettingsRow
+        label="Ask Compass — in-app assistant"
+        description="Bring your own Claude or OpenAI key. Compass sends only your question + the top matching knowledge snippets — never vault, tasks, or transactions."
+      >
+        <span
+          className={cn(
+            'text-xs px-2 py-1 rounded-full',
+            askStatus && askStatus.configuredProviders.length > 0
+              ? 'text-emerald-400 bg-emerald-400/10'
+              : 'text-muted-foreground bg-secondary'
+          )}
+        >
+          {askStatus
+            ? askStatus.configuredProviders.length === 0
+              ? 'No key set'
+              : `${askStatus.configuredProviders.length} provider${askStatus.configuredProviders.length === 1 ? '' : 's'} · active: ${askStatus.activeProvider ?? '—'}`
+            : '…'}
+        </span>
+      </SettingsRow>
+
+      {(['anthropic', 'openai'] as AskProvider[]).map((provider) => {
+        const mask = askStatus?.masks[provider]
+        const isActive = askStatus?.activeProvider === provider
+        const model = askStatus?.models[provider] ?? ASK_DEFAULT_MODEL[provider]
+        return (
+          <SettingsRow
+            key={provider}
+            label={ASK_PROVIDER_LABEL[provider]}
+            description={
+              mask
+                ? `Saved: ${mask}${isActive ? ' · active' : ''}`
+                : 'Not configured. Paste your API key to enable.'
+            }
+          >
+            <div className="flex flex-col items-end gap-1.5 min-w-[260px]">
+              <input
+                type="password"
+                autoComplete="new-password"
+                placeholder={
+                  mask
+                    ? '(saved) replace with new key…'
+                    : `${provider === 'anthropic' ? 'sk-ant-…' : 'sk-…'}`
+                }
+                value={pendingKey[provider] ?? ''}
+                onChange={(e) => setPendingKey((prev) => ({ ...prev, [provider]: e.target.value }))}
+                className="bg-secondary border border-border rounded-lg px-3 py-1.5 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary w-full"
+              />
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={model}
+                  onChange={(e) => saveModel(provider, e.target.value)}
+                  aria-label={`${ASK_PROVIDER_LABEL[provider]} model`}
+                  className="bg-secondary border border-border rounded-lg px-2 py-1 text-[11px] text-foreground outline-none focus:ring-1 focus:ring-primary w-40"
+                />
+                <button
+                  type="button"
+                  onClick={() => saveKey(provider)}
+                  disabled={busy === provider || !(pendingKey[provider] ?? '').trim()}
+                  className="text-xs px-3 py-1 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-40"
+                >
+                  {busy === provider ? 'Saving…' : 'Save'}
+                </button>
+                {mask && (
+                  <>
+                    {!isActive && (
+                      <button
+                        type="button"
+                        onClick={() => switchActive(provider)}
+                        className="text-xs px-3 py-1 border border-border hover:border-primary/50 text-foreground rounded-lg transition-colors"
+                      >
+                        Use
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => clearKey(provider)}
+                      disabled={busy === provider}
+                      className="text-xs px-3 py-1 border border-border hover:border-destructive/60 text-muted-foreground hover:text-destructive rounded-lg transition-colors disabled:opacity-40"
+                    >
+                      Clear
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </SettingsRow>
+        )
+      })}
     </>
   )
 }

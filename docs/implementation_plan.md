@@ -237,6 +237,7 @@ Net Worth view has live balances waiting.
 
 - [x] **5.10 Vault auto-lock** — `Vault.tsx` tracks idle activity (mouse, keyboard, scroll, touch) and locks the entries panel behind an "Unlock" CTA after `vaultAutoLockMinutes` (default 5; `0` disables). Also locks immediately on `window.blur` so unattended Macs stop showing secrets when another app takes focus. Setting lives in `app_settings` under `vaultAutoLockMinutes`; Settings → Security & Privacy adds a dropdown.
 - [x] **5.11 Habit streaks badges** — `src/lib/habit-streaks.ts` adds pure `computeHabitStreak()` (current + longest) over the existing `habits:get-entries` map. "Today unchecked but yesterday checked" doesn't break a streak until end-of-yesterday. Monthly habits view shows a `🔥 N` badge next to each habit with `current >= 2`; tooltip includes longest-ever. 10 unit tests cover boundaries.
+- [x] **5.12 Ask Compass — in-app RAG assistant** (Tier 2 #7). New `/ask` page with single-pane chat against the user's knowledge base; answers cite `[N]` source notes inline. BYO Anthropic + OpenAI keys (encrypted via crypto-vault primitives at `.vault/assistant.enc`; only masked tails cross IPC). Retrieval composes with Phase 5.9 semantic search; falls back to keyword-scan when no embedding index. Cancellation via `assistant:cancel`. Settings → AI assist gets a BYO-key panel with per-provider key/model/active controls. 21 new unit tests.
 
 ## Backlog (deferred, considered but out of scope this round)
 
