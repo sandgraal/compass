@@ -48,6 +48,7 @@ export type AppleCalendarEvent = {
 type ParsedVEvent = AppleCalendarEvent & {
   _rrule?: string
   _exDates?: Date[]
+  _rDates?: Date[]
   _durationMs?: number
 }
 
@@ -178,6 +179,7 @@ function parseIcsFileInternal(content: string, calendarName: string): ParsedVEve
           recurring: current.recurring ?? false,
           _rrule: current._rrule,
           _exDates: current._exDates,
+          _rDates: current._rDates,
           _durationMs: durationMs
         })
       }
@@ -230,12 +232,21 @@ function parseIcsFileInternal(content: string, calendarName: string): ParsedVEve
         }
         break
       }
-      case 'RDATE':
-        // RDATE is a VEVENT property, not an RRULE token. We do not
-        // currently materialize these additional occurrences here, but
-        // handle the property explicitly so it is not silently dropped.
-        console.warn(`[apple-calendar] Unsupported RDATE in event ${current.uid ?? '(unknown uid)'}`)
+      case 'RDATE': {
+        // RDATE is a VEVENT-level property that adds extra occurrences
+        // alongside any RRULE expansion. May be a comma-separated list
+        // of dates or date-times. Period values (DTSTART/DURATION)
+        // aren't supported — those rows fall through as unparseable.
+        const isDate = prop.params.VALUE === 'DATE'
+        const stamps = prop.value
+          .split(',')
+          .map((s) => parseDateValue(s.trim(), isDate))
+          .filter((d): d is Date => d instanceof Date)
+        if (stamps.length > 0) {
+          current._rDates = [...(current._rDates ?? []), ...stamps]
+        }
         break
+      }
     }
   }
 
@@ -339,20 +350,61 @@ export function readAppleCalendars(options: AppleCalendarReadOptions = {}): Appl
         if (!ev.startAt) continue
         const durationMs = ev._durationMs ?? (ev.allDay ? 24 * 60 * 60 * 1000 : 60 * 60 * 1000)
 
-        if (ev._rrule) {
+        if (ev._rrule || (ev._rDates && ev._rDates.length > 0)) {
           // Materialize each occurrence in the window. The expander
-          // returns the base occurrence too (when it falls in range),
-          // so we don't separately push the parsed event.
-          const rule = parseRrule(ev._rrule)
-          const expansion = expandRrule(ev.startAt, rule, {
-            windowStart: options.windowStart ?? new Date(start),
-            windowEnd: options.windowEnd ?? new Date(end),
-            exDates: ev._exDates
-          })
+          // returns the base occurrence too (when in range), so we
+          // don't separately push the parsed event. RDATE values are
+          // merged in alongside the RRULE expansion — they're
+          // additional occurrences regardless of the RRULE.
+          const rule = ev._rrule
+            ? parseRrule(ev._rrule)
+            : {
+                freq: 'UNSUPPORTED' as const,
+                interval: 1,
+                count: null,
+                until: null,
+                byDay: null,
+                unsupportedTokens: []
+              }
+          const expansion = ev._rrule
+            ? expandRrule(ev.startAt, rule, {
+                windowStart: options.windowStart ?? new Date(start),
+                windowEnd: options.windowEnd ?? new Date(end),
+                exDates: ev._exDates
+              })
+            : { occurrences: [] as Date[], truncated: false }
           if (expansion.truncated) {
             console.warn(`[apple-calendar] RRULE expansion truncated at hard cap for ${ev.uid}`)
           }
-          for (const occStart of expansion.occurrences) {
+          if (rule.unsupportedTokens.length > 0) {
+            console.warn(
+              `[apple-calendar] RRULE tokens not implemented (${rule.unsupportedTokens.join(', ')}) for ${ev.uid} — falling back to base instance only`
+            )
+          }
+
+          // RDATE: additional explicit occurrences, filtered to window
+          // and EXDATE-aware.
+          const exSet = new Set((ev._exDates ?? []).map((d) => d.getTime()))
+          const rDateOccs = (ev._rDates ?? []).filter((d) => {
+            const t = d.getTime()
+            if (exSet.has(t)) return false
+            if (t < start) return false
+            if (t >= end) return false
+            return true
+          })
+
+          // De-dupe a date that appears in BOTH RRULE expansion AND
+          // RDATE (rare but legal) by keying on exact ms.
+          const seen = new Set<number>()
+          const allOccs: Date[] = []
+          for (const occ of [...expansion.occurrences, ...rDateOccs]) {
+            const t = occ.getTime()
+            if (seen.has(t)) continue
+            seen.add(t)
+            allOccs.push(occ)
+          }
+
+          for (const occStart of allOccs) {
             const occEnd = new Date(occStart.getTime() + durationMs)
             const occurrenceUid =
               occStart.getTime() === ev.startAt.getTime()
@@ -373,13 +425,16 @@ export function readAppleCalendars(options: AppleCalendarReadOptions = {}): Appl
               recurring: true
             })
           }
-          if (expansion.occurrences.length === 0 && rule.freq === 'UNSUPPORTED') {
-            // Surface base instance so the user still sees something —
-            // and so the existing "this event recurs" UX shows up.
+
+          // Fallback: if expansion produced nothing AND no RDATEs, but
+          // the rule had recognised content, still surface the base so
+          // the user sees "this event exists" (with a warning log via
+          // unsupportedTokens above).
+          if (allOccs.length === 0 && ev._rrule) {
             const evStart = ev.startAt.getTime()
             const evEnd = evStart + durationMs
             if (evEnd > start && evStart < end) {
-              const { _rrule, _exDates, _durationMs, ...rest } = ev
+              const { _rrule, _exDates, _rDates, _durationMs, ...rest } = ev
               events.push(rest)
             }
           }
@@ -390,7 +445,7 @@ export function readAppleCalendars(options: AppleCalendarReadOptions = {}): Appl
         const evStart = ev.startAt.getTime()
         const evEnd = ev.endAt ? ev.endAt.getTime() : evStart + durationMs
         if (evEnd <= start || evStart >= end) continue
-        const { _rrule, _exDates, _durationMs, ...rest } = ev
+        const { _rrule, _exDates, _rDates, _durationMs, ...rest } = ev
         events.push(rest)
       }
     }

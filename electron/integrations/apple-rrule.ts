@@ -5,31 +5,49 @@
  * Why we built our own (vs. `rrule.js`):
  *   - The Apple Calendar sync's only real recurring patterns are
  *     daily/weekly/monthly/yearly with INTERVAL, COUNT, UNTIL, and
- *     BYDAY. Apple stores BYMONTHDAY/BYSETPOS rarely. A 200-line
- *     subset implementation is faster to audit than a ~3000-line
- *     library, and gives us a clean abort point for the truly
- *     pathological recurrences (RDATE-only, BYWEEKNO, etc.).
- *   - We materialize a bounded window (default 14 days), so even if
- *     a rule says "every day forever" we stop at the window edge.
- *   - Easy to extend later: each unsupported token logs and falls
- *     through, so layering `rrule.js` for the long tail stays an
- *     option without rewriting callers.
+ *     BYDAY. A focused implementation is faster to audit than a
+ *     ~3000-line library, and gives us a clean abort point for the
+ *     truly pathological recurrences (BYSETPOS, RDATE-only, etc.).
+ *   - We materialize a bounded window (default 14 days). Anything that
+ *     would emit beyond the window or beyond `hardCap` short-circuits.
+ *
+ * Correctness notes (addressing PR #80 review):
+ *   - Daily / weekly advance via calendar-day arithmetic, not fixed-ms,
+ *     so DST transitions don't drift the wall-clock time of floating /
+ *     TZID-as-local events. We rebuild Dates from Y/M/D + the source's
+ *     time-of-day fields, which is what Apple Calendar.app does for
+ *     floating recurrences.
+ *   - Monthly / yearly skip occurrences where `setMonth`/`setFullYear`
+ *     would roll over (Jan 31 → Mar 3, Feb 29 → Mar 1). The skipped
+ *     occurrences DO consume a COUNT slot, matching RFC 5545 §3.3.10
+ *     ("if no occurrence exists … skip"). EXDATE handling lives in the
+ *     caller side.
+ *   - BYDAY is honoured for DAILY (as a weekday filter) AND WEEKLY.
+ *     On MONTHLY/YEARLY it's positional (1MO = "first Monday of the
+ *     month") — we explicitly reject and surface as UNSUPPORTED so the
+ *     reader falls back to base-instance-only instead of emitting
+ *     wrong dates.
+ *   - Loop bounds key on windowEnd / UNTIL / COUNT, not a fixed
+ *     iteration cap. A daily rule with a DTSTART years before the
+ *     window still emits the in-window occurrences (previous code
+ *     truncated at idx > cap * 10).
  *
  * Supported:
- *   - FREQ=DAILY|WEEKLY|MONTHLY|YEARLY (others → empty expansion)
- *   - INTERVAL=N  (default 1)
- *   - COUNT=N  (cap on materialized occurrences)
- *   - UNTIL=YYYYMMDDTHHMMSSZ | YYYYMMDD  (inclusive upper bound)
- *   - BYDAY=MO,TU,WE,TH,FR,SA,SU  (for WEEKLY)
- *   - EXDATE list (excluded specific occurrences)
+ *   - FREQ=DAILY|WEEKLY|MONTHLY|YEARLY (others → UNSUPPORTED)
+ *   - INTERVAL=N (default 1)
+ *   - COUNT=N (cap on TOTAL generated occurrences, before window clip)
+ *   - UNTIL=YYYYMMDDTHHMMSSZ | YYYYMMDD (inclusive upper bound)
+ *   - BYDAY=MO,TU,WE,TH,FR,SA,SU on DAILY + WEEKLY
  *
- * Not yet supported (returns the base instance only + logs):
- *   - BYMONTHDAY / BYMONTH / BYSETPOS / BYWEEKNO / BYHOUR / etc.
- *   - WKST (we always assume Monday for the BYDAY positioning math)
- *   - RDATE / additional RRULEs
+ * Marked UNSUPPORTED (reader falls back to base-only + warns):
+ *   - BYSETPOS / BYMONTHDAY / BYMONTH / BYWEEKNO / BYHOUR / BYMINUTE /
+ *     BYSECOND / WKST / RDATE (RDATE isn't even an RRULE key but
+ *     surfaces here defensively)
+ *   - BYDAY with positional prefix (`1MO`) — we strip the prefix only
+ *     when FREQ=WEEKLY (where it's redundant); on MONTHLY/YEARLY the
+ *     prefix is meaningful and we mark unsupported.
+ *   - BYDAY on FREQ=MONTHLY or FREQ=YEARLY (positional regardless)
  */
-
-const MS_PER_DAY = 86_400_000
 
 export interface ParsedRrule {
   freq: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY' | 'UNSUPPORTED'
@@ -37,7 +55,7 @@ export interface ParsedRrule {
   count: number | null
   until: Date | null
   byDay: WeekDay[] | null
-  /** Anything we recognised the key of but couldn't act on — surfaces in logs. */
+  /** Anything we recognised the key of but couldn't act on — caller logs. */
   unsupportedTokens: string[]
 }
 
@@ -47,6 +65,7 @@ const WEEKDAYS: WeekDay[] = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']
 const JS_DAY_TO_RRULE: WeekDay[] = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']
 
 const SUPPORTED_FREQS = new Set(['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'])
+const POSITIONAL_BYDAY_FREQS = new Set(['MONTHLY', 'YEARLY'])
 
 /**
  * Parse an RRULE value (the part AFTER `RRULE:`). Unknown FREQ values
@@ -63,63 +82,84 @@ export function parseRrule(value: string): ParsedRrule {
     unsupportedTokens: []
   }
   if (!value) return out
+
+  // First pass: collect each token so we can resolve cross-token
+  // semantics (e.g. BYDAY-on-MONTHLY is unsupported, BYDAY-on-WEEKLY
+  // accepts a numeric prefix as redundant).
+  const tokens = new Map<string, string>()
   for (const part of value.split(';')) {
     const eq = part.indexOf('=')
     if (eq < 0) continue
-    const key = part.slice(0, eq).trim().toUpperCase()
-    const raw = part.slice(eq + 1).trim()
-    switch (key) {
-      case 'FREQ':
-        out.freq = SUPPORTED_FREQS.has(raw.toUpperCase())
-          ? (raw.toUpperCase() as ParsedRrule['freq'])
-          : 'UNSUPPORTED'
-        break
-      case 'INTERVAL': {
-        const n = Number.parseInt(raw, 10)
-        if (Number.isFinite(n) && n > 0) out.interval = n
-        break
+    tokens.set(part.slice(0, eq).trim().toUpperCase(), part.slice(eq + 1).trim())
+  }
+
+  const rawFreq = (tokens.get('FREQ') ?? '').toUpperCase()
+  out.freq = SUPPORTED_FREQS.has(rawFreq) ? (rawFreq as ParsedRrule['freq']) : 'UNSUPPORTED'
+
+  const intervalRaw = tokens.get('INTERVAL')
+  if (intervalRaw !== undefined) {
+    const n = Number.parseInt(intervalRaw, 10)
+    if (Number.isFinite(n) && n > 0) out.interval = n
+  }
+
+  const countRaw = tokens.get('COUNT')
+  if (countRaw !== undefined) {
+    const n = Number.parseInt(countRaw, 10)
+    if (Number.isFinite(n) && n > 0) out.count = n
+  }
+
+  const untilRaw = tokens.get('UNTIL')
+  if (untilRaw !== undefined) {
+    out.until = parseIcsDate(untilRaw)
+  }
+
+  const byDayRaw = tokens.get('BYDAY')
+  if (byDayRaw !== undefined) {
+    // Positional prefixes (`1MO`, `-1TU`) only have meaning on MONTHLY /
+    // YEARLY — and that's the variant we explicitly DON'T support. On
+    // WEEKLY a numeric prefix is non-standard but we accept and ignore
+    // it (Apple sometimes writes it). On DAILY any prefix is meaningless.
+    if (POSITIONAL_BYDAY_FREQS.has(out.freq)) {
+      out.unsupportedTokens.push('BYDAY')
+    } else {
+      const parts = byDayRaw.split(',').map((s) => s.trim().toUpperCase())
+      const days: WeekDay[] = []
+      let sawPrefix = false
+      for (const p of parts) {
+        const prefixMatch = p.match(/^([+-]?\d+)?(MO|TU|WE|TH|FR|SA|SU)$/)
+        if (!prefixMatch) continue
+        if (prefixMatch[1]) sawPrefix = true
+        const dayCode = prefixMatch[2] as WeekDay
+        if (WEEKDAYS.includes(dayCode)) days.push(dayCode)
       }
-      case 'COUNT': {
-        const n = Number.parseInt(raw, 10)
-        if (Number.isFinite(n) && n > 0) out.count = n
-        break
+      // A positional BYDAY on WEEKLY is technically the same set of
+      // days, so we keep them. On DAILY we also accept (a "MWF" daily
+      // rule means: every day, but only on M/W/F). Flag the rare
+      // prefix-on-WEEKLY for awareness.
+      if (sawPrefix && out.freq === 'WEEKLY') {
+        // Don't mark unsupported — the prefix was redundant.
       }
-      case 'UNTIL':
-        out.until = parseIcsDate(raw)
-        break
-      case 'BYDAY': {
-        // Apple writes the plain `MO,TU,WE`. RFC also allows `1MO`
-        // (first Monday) etc. — we drop the numeric prefix for the
-        // weekly case (positional BYDAY in monthly/yearly is in the
-        // unsupported set below).
-        const days = raw
-          .split(',')
-          .map(
-            (d) =>
-              d
-                .trim()
-                .toUpperCase()
-                .replace(/^[+-]?\d+/, '') as WeekDay
-          )
-          .filter((d) => WEEKDAYS.includes(d))
-        if (days.length > 0) out.byDay = days
-        break
-      }
-      // Recognised-but-not-implemented tokens — log so the user gets
-      // a hint when their fortnightly-third-Tuesday event misses.
-      case 'BYMONTHDAY':
-      case 'BYMONTH':
-      case 'BYSETPOS':
-      case 'BYWEEKNO':
-      case 'BYHOUR':
-      case 'BYMINUTE':
-      case 'BYSECOND':
-      case 'WKST':
-      case 'RDATE':
-        out.unsupportedTokens.push(key)
-        break
+      if (days.length > 0) out.byDay = days
     }
   }
+
+  // Recognised-but-not-implemented tokens — each forces a base-only
+  // fallback in the reader to avoid emitting wrong dates.
+  for (const key of [
+    'BYMONTHDAY',
+    'BYMONTH',
+    'BYSETPOS',
+    'BYWEEKNO',
+    'BYYEARDAY',
+    'BYHOUR',
+    'BYMINUTE',
+    'BYSECOND',
+    'WKST',
+    'RDATE'
+  ]) {
+    if (tokens.has(key)) out.unsupportedTokens.push(key)
+  }
+
   return out
 }
 
@@ -130,12 +170,10 @@ export function parseRrule(value: string): ParsedRrule {
  * "floating local time" trade-off.
  */
 export function parseIcsDate(raw: string): Date | null {
-  // Strip optional Z + handle the 8-char date-only form (YYYYMMDD).
   const m = raw.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/)
   if (!m) return null
   const [, y, mo, d, h, mi, s, z] = m
   if (h === undefined) {
-    // Date-only — treat as start-of-day local.
     return new Date(Number(y), Number(mo) - 1, Number(d))
   }
   const yy = Number(y)
@@ -157,8 +195,7 @@ export interface ExpandOptions {
   windowEnd: Date
   /** EXDATE occurrences to skip. Compared by exact millisecond. */
   exDates?: Date[]
-  /** Safety cap on materialized occurrences. Default 366 — enough for
-   *  a daily recurrence over a one-year window. */
+  /** Safety cap on EMITTED occurrences in the window. Default 366. */
   hardCap?: number
 }
 
@@ -169,119 +206,177 @@ export interface Expansion {
 }
 
 /**
- * Materialize the occurrences of an RRULE relative to `start` (the
+ * Materialize occurrences of an RRULE relative to `start` (the
  * event's DTSTART) that fall within `[windowStart, windowEnd)`.
  *
- * Includes the base instance when it's in range. EXDATE values strip
- * specific occurrences (matched by exact ms).
+ * The base instance is included when it lands in range. EXDATE values
+ * strip specific occurrences by exact-ms match. UNSUPPORTED FREQ
+ * returns an empty list — the caller falls back to base-only.
  */
 export function expandRrule(start: Date, rule: ParsedRrule, options: ExpandOptions): Expansion {
-  const result: Date[] = []
-  const cap = options.hardCap ?? 366
-  const exSet = new Set((options.exDates ?? []).map((d) => d.getTime()))
   if (rule.freq === 'UNSUPPORTED') {
-    // Caller still gets the base instance via the parser path; this
-    // function returns nothing extra so we don't materialize phantom
-    // dates.
+    return { occurrences: [], truncated: false }
+  }
+  // Any recognised-but-unimplemented modifier means the rule's actual
+  // semantics differ from "FREQ alone" — return empty so the caller
+  // emits only the base instance instead of wrong occurrences.
+  if (rule.unsupportedTokens.length > 0) {
     return { occurrences: [], truncated: false }
   }
 
+  const cap = options.hardCap ?? 366
+  const exSet = new Set((options.exDates ?? []).map((d) => d.getTime()))
   const windowStartMs = options.windowStart.getTime()
   const windowEndMs = options.windowEnd.getTime()
+  const untilMs = rule.until ? rule.until.getTime() : Number.POSITIVE_INFINITY
 
-  let emitted = 0
-  // For DAILY/WEEKLY we step by N days. For MONTHLY/YEARLY we increment
-  // the calendar field directly so leap days + month-end land correctly.
-  // The base instance (idx 0) is always considered.
-  for (let idx = 0; ; idx++) {
-    let occ: Date
-    if (rule.freq === 'DAILY') {
-      occ = new Date(start.getTime() + idx * rule.interval * MS_PER_DAY)
-    } else if (rule.freq === 'WEEKLY') {
-      // For WEEKLY without BYDAY we just step by N weeks from start.
-      // With BYDAY we walk day by day and admit only the listed
-      // weekdays, but still advance the WEEK counter by INTERVAL each
-      // 7-day block.
-      if (!rule.byDay) {
-        occ = new Date(start.getTime() + idx * rule.interval * 7 * MS_PER_DAY)
-      } else {
-        // Day-by-day walk path — handled outside this for-loop. We
-        // populate `result` directly and break.
-        emitted = expandWeeklyByDay(start, rule, options, result, exSet, cap)
-        break
+  // Time-of-day components from start. Calendar-day arithmetic
+  // rebuilds Dates with these values so wall-clock time is preserved
+  // across DST transitions (a 09:00 meeting stays 09:00 in local).
+  const tod = {
+    h: start.getHours(),
+    mi: start.getMinutes(),
+    s: start.getSeconds(),
+    ms: start.getMilliseconds()
+  }
+
+  const result: Date[] = []
+  let generated = 0
+
+  function shouldKeep(occ: Date): boolean {
+    if (occ.getTime() > untilMs) return false
+    if (occ.getTime() >= windowEndMs) return false
+    if (occ.getTime() < windowStartMs) return false
+    if (exSet.has(occ.getTime())) return false
+    return true
+  }
+
+  function dayByOffset(daysFromStart: number): Date {
+    // Calendar-day step from start.{Y,M,D}, with the source's local
+    // time-of-day. JS Date constructor with overflow days handles
+    // month-end correctly (Jan 32 → Feb 1).
+    return new Date(
+      start.getFullYear(),
+      start.getMonth(),
+      start.getDate() + daysFromStart,
+      tod.h,
+      tod.mi,
+      tod.s,
+      tod.ms
+    )
+  }
+
+  if (rule.freq === 'DAILY') {
+    const byDaySet = rule.byDay ? new Set(rule.byDay) : null
+    // Step by 1 day, count only days that match the optional weekday
+    // filter. INTERVAL groups successive matched days: every INTERVAL-th
+    // matching day is emitted (RFC 5545 §3.3.10 "FREQ=DAILY;BYDAY=MO,TU…
+    // means every Nth matching day").
+    let matchIdx = 0
+    for (let dayOffset = 0; ; dayOffset++) {
+      const occ = dayByOffset(dayOffset)
+      if (occ.getTime() > untilMs) break
+      if (occ.getTime() >= windowEndMs) break
+      if (rule.count !== null && generated >= rule.count) break
+
+      if (byDaySet) {
+        const dayCode = JS_DAY_TO_RRULE[occ.getDay()]
+        if (!byDaySet.has(dayCode)) continue
       }
-    } else if (rule.freq === 'MONTHLY') {
-      occ = new Date(start)
-      occ.setMonth(start.getMonth() + idx * rule.interval)
-    } else {
-      occ = new Date(start)
-      occ.setFullYear(start.getFullYear() + idx * rule.interval)
+      // matchIdx ticks once per BYDAY-matched candidate; INTERVAL
+      // controls which matches are emitted (matchIdx % INTERVAL === 0).
+      if (matchIdx % rule.interval === 0) {
+        generated++
+        if (shouldKeep(occ)) {
+          result.push(occ)
+          if (result.length >= cap) return { occurrences: result, truncated: true }
+        }
+      }
+      matchIdx++
     }
+    return { occurrences: result, truncated: false }
+  }
 
-    if (rule.until && occ.getTime() > rule.until.getTime()) break
-    if (rule.count !== null && emitted >= rule.count) break
+  if (rule.freq === 'WEEKLY') {
+    if (!rule.byDay) {
+      // Plain weekly — step by INTERVAL weeks.
+      for (let i = 0; ; i++) {
+        const occ = dayByOffset(i * rule.interval * 7)
+        if (occ.getTime() > untilMs) break
+        if (occ.getTime() >= windowEndMs) break
+        if (rule.count !== null && generated >= rule.count) break
+        generated++
+        if (shouldKeep(occ)) {
+          result.push(occ)
+          if (result.length >= cap) return { occurrences: result, truncated: true }
+        }
+      }
+      return { occurrences: result, truncated: false }
+    }
+    // WEEKLY + BYDAY — walk day by day, restricted to matched weekdays,
+    // grouped into INTERVAL-week blocks.
+    const byDaySet = new Set(rule.byDay)
+    const startWeek = weekIndex(start)
+    for (let dayOffset = 0; ; dayOffset++) {
+      const occ = dayByOffset(dayOffset)
+      if (occ.getTime() > untilMs) break
+      if (occ.getTime() >= windowEndMs) break
+      if (rule.count !== null && generated >= rule.count) break
+
+      const candWeek = weekIndex(occ)
+      if ((candWeek - startWeek) % rule.interval !== 0) continue
+      const dayCode = JS_DAY_TO_RRULE[occ.getDay()]
+      if (!byDaySet.has(dayCode)) continue
+
+      generated++
+      if (shouldKeep(occ)) {
+        result.push(occ)
+        if (result.length >= cap) return { occurrences: result, truncated: true }
+      }
+    }
+    return { occurrences: result, truncated: false }
+  }
+
+  // MONTHLY / YEARLY — increment the relevant calendar field, then
+  // verify the result lands on the same day-of-month as the start.
+  // If it didn't, the date rolled (e.g. Jan 31 → Mar 3 because Feb 31
+  // doesn't exist). Skip that occurrence — RFC 5545 §3.3.10 says
+  // "non-existent dates are skipped". COUNT still ticks for skipped
+  // occurrences to match standard behaviour.
+  const startDay = start.getDate()
+  const startMonth = start.getMonth()
+  for (let i = 0; ; i++) {
+    const occ = new Date(
+      rule.freq === 'YEARLY' ? start.getFullYear() + i * rule.interval : start.getFullYear(),
+      rule.freq === 'YEARLY' ? startMonth : startMonth + i * rule.interval,
+      startDay,
+      tod.h,
+      tod.mi,
+      tod.s,
+      tod.ms
+    )
+    if (occ.getTime() > untilMs) break
     if (occ.getTime() >= windowEndMs) break
+    if (rule.count !== null && generated >= rule.count) break
 
-    if (occ.getTime() >= windowStartMs && !exSet.has(occ.getTime())) {
+    // Did the date roll? `Date` overflows silently; check the field we
+    // expected to keep stable.
+    const rolled =
+      occ.getDate() !== startDay || (rule.freq === 'YEARLY' && occ.getMonth() !== startMonth)
+    generated++
+    if (!rolled && shouldKeep(occ)) {
       result.push(occ)
-    }
-    emitted++
-
-    if (result.length >= cap) {
-      return { occurrences: result, truncated: true }
-    }
-    // Safety: regardless of cap, don't loop more than 10 * cap candidates.
-    // Protects against pathological window+interval combos.
-    if (idx > cap * 10) {
-      return { occurrences: result, truncated: true }
+      if (result.length >= cap) return { occurrences: result, truncated: true }
     }
   }
-
-  return { occurrences: result, truncated: result.length >= cap }
-}
-
-function expandWeeklyByDay(
-  start: Date,
-  rule: ParsedRrule,
-  options: ExpandOptions,
-  out: Date[],
-  exSet: Set<number>,
-  cap: number
-): number {
-  const byDay = new Set(rule.byDay ?? [])
-  const windowEndMs = options.windowEnd.getTime()
-  const windowStartMs = options.windowStart.getTime()
-  let emitted = 0
-  // Walk one day at a time. Skip days that aren't in the BYDAY set or
-  // that fall in a "skipped week" (interval > 1).
-  const startWeek = weekIndex(start)
-  for (let dayOffset = 0; ; dayOffset++) {
-    const cand = new Date(start.getTime() + dayOffset * MS_PER_DAY)
-    if (rule.until && cand.getTime() > rule.until.getTime()) break
-    if (cand.getTime() >= windowEndMs) break
-    if (rule.count !== null && emitted >= rule.count) break
-
-    const candWeek = weekIndex(cand)
-    if ((candWeek - startWeek) % rule.interval !== 0) continue
-    const dayCode = JS_DAY_TO_RRULE[cand.getDay()]
-    if (!byDay.has(dayCode)) continue
-
-    if (cand.getTime() >= windowStartMs && !exSet.has(cand.getTime())) {
-      out.push(cand)
-    }
-    emitted++
-    if (out.length >= cap) return emitted
-    if (dayOffset > cap * 10) return emitted
-  }
-  return emitted
+  return { occurrences: result, truncated: false }
 }
 
 /** Monday-start week index — counts whole weeks since the epoch. */
 function weekIndex(d: Date): number {
-  // Shift so Monday is day 0, then divide.
-  // JS getDay(): 0=Sun, 1=Mon ... → (day + 6) % 7 makes Mon = 0.
-  const dayCount = Math.floor(d.getTime() / MS_PER_DAY)
-  return Math.floor((dayCount + 3) / 7) // Jan 1 1970 was Thursday → +3 aligns Mon to start
+  // Jan 1 1970 was Thursday → +3 aligns Mon to start.
+  const dayCount = Math.floor(d.getTime() / 86_400_000)
+  return Math.floor((dayCount + 3) / 7)
 }
 
 // Exported for unit tests.
