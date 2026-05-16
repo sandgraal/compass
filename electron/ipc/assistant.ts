@@ -149,7 +149,7 @@ Format your reply as Markdown.`
 
 function buildContextBlock(chunks: ContextChunk[]): string {
   if (chunks.length === 0) {
-    return "No context blocks available — answer only if you can do so without citing the user's notes."
+    return "No numbered context blocks are available for this question. Do not answer from general knowledge. Instead, say plainly that you cannot answer from the provided context and that no citations are available."
   }
   return chunks
     .map((c, i) => `[${i + 1}] (${c.path} — ${c.title})\n${c.snippet}`)
