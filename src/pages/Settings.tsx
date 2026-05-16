@@ -821,9 +821,13 @@ function AskCompassSettings(): JSX.Element {
   async function clearKey(provider: AskProvider): Promise<void> {
     setBusy(provider)
     try {
-      await window.api.assistant.clearKey(provider)
-      toast(`${ASK_PROVIDER_LABEL[provider]} key removed.`, 'success')
-      await refresh()
+      const r = await window.api.assistant.clearKey(provider)
+      if (r.success) {
+        toast(`${ASK_PROVIDER_LABEL[provider]} key removed.`, 'success')
+        await refresh()
+      } else {
+        toast(r.error ?? 'Failed to remove key', 'error')
+      }
     } finally {
       setBusy(null)
     }
