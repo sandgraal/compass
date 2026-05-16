@@ -132,7 +132,16 @@ export function setActiveProvider(provider: LlmProvider): void {
 export function setProviderModel(provider: LlmProvider, model: string): void {
   const trimmed = model.trim()
   const blob = load()
-  blob.models = { ...(blob.models ?? {}), [provider]: trimmed }
+  if (trimmed.length === 0) {
+    if (blob.models) {
+      delete blob.models[provider]
+      if (Object.keys(blob.models).length === 0) {
+        delete blob.models
+      }
+    }
+  } else {
+    blob.models = { ...(blob.models ?? {}), [provider]: trimmed }
+  }
   persist(blob)
 }
 
