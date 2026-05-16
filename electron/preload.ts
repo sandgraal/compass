@@ -86,6 +86,24 @@ const api = {
     global: (query: string) => ipcRenderer.invoke('search:global', query)
   },
 
+  // --- Ask Compass (May 2026 Tier 2 #7 — BYO LLM key) ---
+  assistant: {
+    getStatus: () => ipcRenderer.invoke('assistant:get-status'),
+    setKey: (provider: 'anthropic' | 'openai', key: string) =>
+      ipcRenderer.invoke('assistant:set-key', provider, key),
+    clearKey: (provider?: 'anthropic' | 'openai') =>
+      ipcRenderer.invoke('assistant:clear-key', provider),
+    setActiveProvider: (provider: 'anthropic' | 'openai') =>
+      ipcRenderer.invoke('assistant:set-active-provider', provider),
+    setModel: (provider: 'anthropic' | 'openai', model: string) =>
+      ipcRenderer.invoke('assistant:set-model', provider, model),
+    ask: (payload: {
+      question: string
+      history?: Array<{ role: 'user' | 'assistant'; content: string }>
+    }) => ipcRenderer.invoke('assistant:ask', payload),
+    cancel: () => ipcRenderer.invoke('assistant:cancel')
+  },
+
   // --- Encrypted backup / restore (May 2026 Tier 1 #2) ---
   backup: {
     create: (passphrase: string) => ipcRenderer.invoke('backup:create', passphrase),

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import CommandPalette from './components/CommandPalette'
 import { AppLayout } from './components/layout/AppLayout'
+import Ask from './pages/Ask'
 import Daily from './pages/Daily'
 import Dashboard from './pages/Dashboard'
 import Finance from './pages/Finance'
@@ -65,6 +66,7 @@ export default function App(): JSX.Element {
           <Route path="finance" element={<Finance />} />
           <Route path="integrations" element={<Integrations />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="ask" element={<Ask />} />
         </Route>
       </Routes>
     </HashRouter>

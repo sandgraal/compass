@@ -5,6 +5,7 @@ import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { BrowserWindow, app, ipcMain, nativeTheme, shell } from 'electron'
 import { startCronJobs } from './cron'
 import { initDb } from './db/client'
+import { registerAssistantHandlers } from './ipc/assistant'
 import { registerAuthHandlers } from './ipc/auth'
 import { registerBackupHandlers } from './ipc/backup'
 import { registerFinanceHandlers } from './ipc/finance'
@@ -121,6 +122,7 @@ app.whenReady().then(async () => {
     console.error('[main] startup error:', err)
   }
 
+  registerAssistantHandlers(ipcMain)
   registerAuthHandlers(ipcMain)
   registerSyncHandlers(ipcMain)
   registerKnowledgeHandlers(ipcMain)

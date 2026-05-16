@@ -16,6 +16,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  Sparkles,
   TrendingUp,
   Wallet
 } from 'lucide-react'
@@ -148,6 +149,19 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
         }
       },
       keywords: ['find', 'search', 'notes', 'knowledge', 'lookup']
+    },
+    {
+      id: 'ask-compass',
+      label: 'Ask Compass',
+      description: 'In-app RAG assistant grounded in your knowledge base',
+      icon: <Sparkles size={15} />,
+      action: () => {
+        // If the user has typed a query, pre-fill the chat input with it.
+        const q = query.trim()
+        if (q.length > 0) sessionStorage.setItem('compass:ask:prefill', q)
+        nav('/ask')
+      },
+      keywords: ['ask', 'assistant', 'chat', 'ai', 'llm', 'claude', 'gpt', 'rag']
     },
     {
       id: 'vault',

@@ -247,6 +247,49 @@ declare global {
           counts?: { knowledge: number; vault: number; tasks: number; transactions: number }
         }>
       }
+      assistant: {
+        getStatus(): Promise<{
+          configuredProviders: Array<'anthropic' | 'openai'>
+          activeProvider: 'anthropic' | 'openai' | null
+          masks: Partial<Record<'anthropic' | 'openai', string>>
+          models: Partial<Record<'anthropic' | 'openai', string>>
+          lastClearedAt: number | null
+        }>
+        setKey(
+          provider: 'anthropic' | 'openai',
+          key: string
+        ): Promise<{ success: boolean; error?: string }>
+        clearKey(provider?: 'anthropic' | 'openai'): Promise<{ success: boolean; error?: string }>
+        setActiveProvider(
+          provider: 'anthropic' | 'openai'
+        ): Promise<{ success: boolean; error?: string }>
+        setModel(
+          provider: 'anthropic' | 'openai',
+          model: string
+        ): Promise<{ success: boolean; error?: string }>
+        ask(payload: {
+          question: string
+          history?: Array<{ role: 'user' | 'assistant'; content: string }>
+        }): Promise<
+          | {
+              success: true
+              answer: string
+              model: string
+              provider: 'anthropic' | 'openai'
+              inputTokens?: number
+              outputTokens?: number
+              citations: Array<{
+                n: number
+                path: string
+                title: string
+                snippet: string
+                score: number
+              }>
+            }
+          | { success: false; error?: string; cancelled?: boolean }
+        >
+        cancel(): Promise<{ success: boolean; error?: string }>
+      }
       backup: {
         create(passphrase: string): Promise<{
           success: boolean

@@ -8,6 +8,7 @@ import {
   Plug2,
   Settings,
   ShieldCheck,
+  Sparkles,
   TrendingUp
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -73,6 +74,7 @@ export function Sidebar(): JSX.Element {
     { label: 'Weekly', to: '/weekly', icon: <CalendarRange size={18} /> },
     { label: 'Monthly', to: '/monthly', icon: <CalendarCheck size={18} /> },
     { label: 'Knowledge Base', to: '/knowledge', icon: <BookOpen size={18} /> },
+    { label: 'Ask Compass', to: '/ask', icon: <Sparkles size={18} /> },
     { label: 'Vault', to: '/vault', icon: <ShieldCheck size={18} /> },
     { label: 'Finance', to: '/finance', icon: <TrendingUp size={18} /> },
     {
