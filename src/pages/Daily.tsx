@@ -434,7 +434,11 @@ export default function Daily(): JSX.Element {
 
       {/* Bulk-select toolbar */}
       {selectionMode && (
-        <div className="sticky top-14 z-10 mb-4 flex items-center gap-2 rounded-lg border border-primary/20 bg-background/95 px-3 py-2 text-xs backdrop-blur supports-[backdrop-filter]:bg-background/75">
+        <div
+          role="toolbar"
+          aria-label="Bulk checklist actions"
+          className="sticky top-14 z-10 mb-4 flex items-center gap-2 rounded-lg border border-primary/20 bg-background/95 px-3 py-2 text-xs backdrop-blur supports-[backdrop-filter]:bg-background/75"
+        >
           <span className="font-medium text-primary">{selectedIds.size} selected</span>
           <span className="text-muted-foreground">·</span>
           <button
