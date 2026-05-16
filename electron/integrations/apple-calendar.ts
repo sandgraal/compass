@@ -230,6 +230,12 @@ function parseIcsFileInternal(content: string, calendarName: string): ParsedVEve
         }
         break
       }
+      case 'RDATE':
+        // RDATE is a VEVENT property, not an RRULE token. We do not
+        // currently materialize these additional occurrences here, but
+        // handle the property explicitly so it is not silently dropped.
+        console.warn(`[apple-calendar] Unsupported RDATE in event ${current.uid ?? '(unknown uid)'}`)
+        break
     }
   }
 
