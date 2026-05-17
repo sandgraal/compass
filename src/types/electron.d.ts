@@ -309,6 +309,49 @@ declare global {
           error?: string
         }>
       }
+      spotlight: {
+        getStatus(): Promise<{
+          enabled: boolean
+          path: string
+          defaultPath: string
+          pathAllowed: boolean
+          mirrorExists: boolean
+          lastError: string | null
+          lastBackfillAt: number | null
+        }>
+        setEnabled(enabled: boolean): Promise<{
+          success: boolean
+          error?: string
+          result?: {
+            copied: number
+            skipped: number
+            removed: number
+            errors: Array<{ path: string; message: string }>
+          }
+        }>
+        setPath(path: string): Promise<{
+          success: boolean
+          error?: string
+          result?: {
+            copied: number
+            skipped: number
+            removed: number
+            errors: Array<{ path: string; message: string }>
+          }
+        }>
+        backfillNow(): Promise<
+          | {
+              success: true
+              result: {
+                copied: number
+                skipped: number
+                removed: number
+                errors: Array<{ path: string; message: string }>
+              }
+            }
+          | { success: false; error: string }
+        >
+      }
       vault: {
         getCategories(): Promise<VaultCategory[]>
         getEntries(category: string): Promise<VaultEntry[]>
