@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-- **Phase 4.6 (Plaid) is the active critical path** — 3 of 6 PRs merged (#82 client wrapper, #83 Link flow, plus PR 1 schema + PR 2a vault layer). PR 4 (sync loop), PR 5 (Integrations UI), PR 6 (daily cron) remain.
+- **Phase 4.6 (Plaid) is the active critical path** — 4 of 7 PRs merged (PR 1 schema, PR 2a vault layer, PR 2b client wrapper / #82, PR 3 Link flow / #83). PR 4 (sync loop), PR 5 (Integrations UI), PR 6 (daily cron) remain. (Original plan estimated "5–6 PRs"; the actual decomposition came in at 7.)
 - **Phase 4.7 legacy Excel cutover is 23 days out** (target **2026-06-10**). Reconciliation log at [`docs/finance/cutover-reconciliation.md`](finance/cutover-reconciliation.md) exists; it needs daily entries from now through cutover day.
 - **Accumulated code-health debt** — 9 of 13 IPC modules lack `.test.ts`, 10+ silent `catch {}` blocks, 78 standing biome warnings, 8 type-safety escapes in production files. None individually critical; together they're a Phase 6 of their own.
 - **Claude Code platform has moved** since Phase 0+ landed. Three features (SessionStart hooks, UserPromptSubmit guardrails, subagent memory) move the agent-success needle and are worth a Phase 0++ refresh.

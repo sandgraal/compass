@@ -15,7 +15,7 @@
 | **Phase 1** — Critical bug fixes | 5 items | 100% (all shipped prior to this branch) |
 | **Phase 2** — Remaining PRD features | 7 items | 100% (2.1–2.7 all shipped prior to this branch) |
 | **Phase 3** — Beyond-PRD polish | 2 selected items | 100% (onboarding wizard + tray/notifications shipped) |
-| **Phase 4** — Finance forward roadmap | 8 items | 4.0–4.5 shipped; **4.6 = 50%** (3/6 PRs); 4.7 active (cutover 2026-06-10) |
+| **Phase 4** — Finance forward roadmap | 8 items | 4.0–4.5 shipped; **4.6 = 57%** (4/7 PRs — 1, 2a, 2b, 3 merged; 4, 5, 6 pending); 4.7 active (cutover 2026-06-10) |
 | **Phase 5 (cont.)** — Bounded UX wins | 5 items | 100% (5.10–5.14 shipped) |
 | **Phase 6** — Code-health debt (May 2026) | 5 items | 0% — NEW |
 
