@@ -11,6 +11,7 @@ import { registerBackupHandlers } from './ipc/backup'
 import { registerFinanceHandlers } from './ipc/finance'
 import { registerHabitsHandlers } from './ipc/habits'
 import { registerKnowledgeHandlers } from './ipc/knowledge'
+import { registerPlaidHandlers } from './ipc/plaid'
 import { registerSearchHandlers } from './ipc/search'
 import { registerSettingsHandlers } from './ipc/settings'
 import { registerSpotlightHandlers, startKnowledgeMirrorWatcher } from './ipc/spotlight'
@@ -135,6 +136,7 @@ app.whenReady().then(async () => {
   registerBackupHandlers(ipcMain)
   registerSearchHandlers(ipcMain)
   registerSpotlightHandlers(ipcMain)
+  registerPlaidHandlers(ipcMain)
 
   // Toggle content protection when navigating to/from vault
   ipcMain.on('vault:set-content-protection', (_event, enabled: boolean) => {
