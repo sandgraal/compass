@@ -165,16 +165,36 @@ export async function exchangePublicToken(publicToken: string): Promise<Exchange
  * That keeps the Link window free of preload scripts and context
  * bridges — Plaid Link runs in a sealed environment.
  *
+ * CSP is embedded as `<meta http-equiv="Content-Security-Policy">`
+ * inside the document. This is the only reliable place to set it for
+ * the page: the document is loaded from a `data:` URL, which never
+ * generates an HTTP response, so a session-level `onHeadersReceived`
+ * handler does NOT fire for the document load and a header-based CSP
+ * is never enforced on the navigation. The meta tag is read by the
+ * HTML parser and enforced from the moment the body starts executing
+ * scripts — strictly tighter than the main window's CSP.
+ *
  * `linkToken` is interpolated into a "..." string literal; we escape
  * defensively even though Plaid tokens are URL-safe by construction.
  * Cheap defense against a future token-format change.
  */
+export const LINK_CSP =
+  "default-src 'self' data: https://cdn.plaid.com https://*.plaid.com; " +
+  "script-src 'self' 'unsafe-inline' https://cdn.plaid.com https://*.plaid.com; " +
+  "style-src 'self' 'unsafe-inline' https://cdn.plaid.com https://*.plaid.com; " +
+  "img-src 'self' data: blob: https://cdn.plaid.com https://*.plaid.com; " +
+  "font-src 'self' data: https://cdn.plaid.com https://*.plaid.com; " +
+  "connect-src 'self' https://*.plaid.com; " +
+  'frame-src https://*.plaid.com; ' +
+  "object-src 'none'"
+
 export function buildLinkHtml(linkToken: string): string {
   const safeToken = escapeForJsString(linkToken)
   return `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="${LINK_CSP}">
     <title>Connect a bank</title>
     <style>
       html, body { margin: 0; padding: 0; height: 100%; background: #fafafa; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }

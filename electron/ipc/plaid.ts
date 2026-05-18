@@ -31,6 +31,7 @@ import {
 import { PlaidNotConfiguredError, isPlaidConfigured } from '../integrations/plaid/client'
 import {
   type ExchangeResult,
+  LINK_CSP,
   buildLinkHtml,
   createLinkToken,
   exchangePublicToken
@@ -134,22 +135,22 @@ export async function runLinkFlow(linkToken: string): Promise<StartLinkResult> {
     }
   })
 
-  // Tighten CSP for the Link window only: allow Plaid's CDN + API
-  // hosts, deny everything else. The main window's CSP is unchanged.
+  // CSP enforcement lives in the HTML itself, via
+  // `<meta http-equiv="Content-Security-Policy">` (see buildLinkHtml).
+  // We CANNOT enforce it via session.webRequest.onHeadersReceived on
+  // this window: the document is loaded from a `data:` URL, which
+  // produces no HTTP response, so onHeadersReceived never fires for
+  // the navigation and any header-based CSP would be silently
+  // unenforced. The meta-tag form is read by the parser and applied
+  // from the first script execution onward — strictly tighter than
+  // the main window's CSP. As a belt for subresource requests (the
+  // cdn.plaid.com script load, fonts, images), we still set the
+  // header here so it covers anything the parser later fetches.
   win.webContents.session.webRequest.onHeadersReceived((details, cb) => {
     cb({
       responseHeaders: {
         ...details.responseHeaders,
-        'Content-Security-Policy': [
-          "default-src 'self' data: https://cdn.plaid.com https://*.plaid.com; " +
-            "script-src 'self' 'unsafe-inline' https://cdn.plaid.com https://*.plaid.com; " +
-            "style-src 'self' 'unsafe-inline' https://cdn.plaid.com https://*.plaid.com; " +
-            "img-src 'self' data: blob: https://cdn.plaid.com https://*.plaid.com; " +
-            "font-src 'self' data: https://cdn.plaid.com https://*.plaid.com; " +
-            "connect-src 'self' https://*.plaid.com; " +
-            'frame-src https://*.plaid.com; ' +
-            "object-src 'none'"
-        ]
+        'Content-Security-Policy': [LINK_CSP]
       }
     })
   })

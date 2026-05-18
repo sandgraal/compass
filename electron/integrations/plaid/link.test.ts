@@ -224,6 +224,35 @@ describe('buildLinkHtml', () => {
     expect(html).toContain('token: "link-sandbox-abc123"')
   })
 
+  it('embeds CSP via <meta http-equiv> inside the document head', () => {
+    // The Link window is loaded from a `data:` URL, so
+    // session.webRequest.onHeadersReceived never fires for the
+    // document load. The meta-tag form is the ONLY thing that
+    // actually constrains script-src / connect-src etc. for the
+    // page. If this regresses, the per-window CSP becomes a no-op.
+    const html = buildLinkHtml('t')
+    expect(html).toMatch(/<meta http-equiv="Content-Security-Policy" content="[^"]+">/)
+    // Confirm the policy actually whitelists Plaid + denies object-src.
+    const match = html.match(/content="([^"]+)"/)
+    expect(match).not.toBeNull()
+    const policy = match![1]
+    expect(policy).toContain('https://cdn.plaid.com')
+    expect(policy).toContain('https://*.plaid.com')
+    expect(policy).toContain("object-src 'none'")
+    // Defense in depth — must not silently widen to wildcard.
+    expect(policy).not.toMatch(/default-src \*/)
+    expect(policy).not.toMatch(/script-src \*/)
+  })
+
+  it('places the CSP meta tag BEFORE the first <script> so it is in effect when scripts run', () => {
+    const html = buildLinkHtml('t')
+    const cspIdx = html.indexOf('Content-Security-Policy')
+    const scriptIdx = html.indexOf('<script')
+    expect(cspIdx).toBeGreaterThan(-1)
+    expect(scriptIdx).toBeGreaterThan(-1)
+    expect(cspIdx).toBeLessThan(scriptIdx)
+  })
+
   it('loads the official Plaid Link script', () => {
     const html = buildLinkHtml('t')
     expect(html).toContain('https://cdn.plaid.com/link/v2/stable/link-initialize.js')
