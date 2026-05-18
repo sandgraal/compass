@@ -2,17 +2,22 @@
 
 > **Living document.** Updated whenever a feature ships or scope changes.
 > The `docs-keeper` subagent (`.claude/agents/docs-keeper.md`) is responsible for keeping this in sync with reality after each merge.
+>
+> See [`strategic-review-2026-05.md`](strategic-review-2026-05.md) for the latest snapshot of where we stand and why.
 
 ## Status snapshot
 
 | Bucket | Items | % done |
 |---|---|---|
 | **Phase 0** — Agent infrastructure | 7 sub-areas | 100% |
-| **Phase 0+** — Leading-edge agent infra | 10 items | 90% (0+.6, 0+.9 deferred; 0+.10 shipped) |
+| **Phase 0+** — Leading-edge agent infra | 10 items | 90% (0+.6, 0+.9 superseded — see Phase 0++) |
+| **Phase 0++** — Claude Code platform refresh (May 2026) | 6 items | 0% — NEW |
 | **Phase 1** — Critical bug fixes | 5 items | 100% (all shipped prior to this branch) |
 | **Phase 2** — Remaining PRD features | 7 items | 100% (2.1–2.7 all shipped prior to this branch) |
 | **Phase 3** — Beyond-PRD polish | 2 selected items | 100% (onboarding wizard + tray/notifications shipped) |
-| **Phase 4** — Finance forward roadmap | 7 items | partial (4.0–4.5 shipped backend+UI; 4.6 + 4.7 outstanding) |
+| **Phase 4** — Finance forward roadmap | 8 items | 4.0–4.5 shipped; **4.6 = 57%** (4/7 PRs — 1, 2a, 2b, 3 merged; 4, 5, 6 pending); 4.7 active (cutover 2026-06-10) |
+| **Phase 5 (cont.)** — Bounded UX wins | 5 items | 100% (5.10–5.14 shipped) |
+| **Phase 6** — Code-health debt (May 2026) | 5 items | 0% — NEW |
 
 PRD-completion of the running app: **~99%** (all Phases 1–3 + Phase 4.0–4.5 merged with UIs).
 
@@ -103,6 +108,19 @@ Modern (Nov 2025+) Claude Code best practice splits guidance into 4 layers. This
 - [x] **0+.8 Worktree workflow** — `scripts/worktree.sh` + `docs/agent-orchestration.md`
 - [ ] **0+.9 Background scheduled-task agents** — nightly bug-triager, weekly docs-keeper, monthly security-auditor
 - [x] **0+.10 Project status JSON** (`.claude/project-status.json`) — `scripts/project-status.ts` regenerates it; `npm run status` is wired. Captures table list, IPC count by domain, test files, phase status (parsed from this doc), and the last 8 merge commits. Manual regen for now; the 0+.6 living-docs hook can wire auto-update later.
+
+---
+
+## Phase 0++ — Claude Code platform refresh (May 2026)
+
+The Claude Code platform shipped meaningful features since Phase 0+ landed. Adopt the ones that move the agent-success needle. See [`strategic-review-2026-05.md`](strategic-review-2026-05.md) for the rationale.
+
+- [ ] **0++.1 SessionStart hook** — `.claude/hooks/session-start.sh` invokes `scripts/project-status.ts` and emits a compact summary (current branch, last commit, sync queue, test status) into every new session. Wire in `.claude/settings.json` under `hooks.SessionStart`.
+- [ ] **0++.2 UserPromptSubmit guardrails** — `.claude/hooks/guardrails.sh` pattern-matches risky prompts: warn on "push" / "force push" + branch=main; suggest `/safe-commit` when "commit" appears without staged files; mirror data-dir blocks at the prompt level.
+- [ ] **0++.3 Living-docs PostToolUse hook** (supersedes 0+.6) — fire the `docs-keeper` subagent after edits to `electron/db/schema.ts`, `electron/preload.ts`, or `src/types/electron.d.ts`. These three files own the API surface and the docs always drift first when they change.
+- [ ] **0++.4 Background scheduled agents** (supersedes 0+.9) — `CronCreate` registers: **nightly** bug-triager, **weekly** docs-keeper, **monthly** security-auditor (diff-focused on `electron/ipc/vault.ts`, `auth.ts`, `main.ts`, `preload.ts`).
+- [ ] **0++.5 Subagent memory** — add `.claude/agents/<name>/memory/MEMORY.md` for `security-auditor` and `bug-triager`. Instruct each in its system prompt to consult before starting and update on completion. Lets them accumulate project-specific tribal knowledge across runs.
+- [ ] **0++.6 MCP server self-knowledge expansion** — extend `mcp/compass-mcp/index.ts` with `compass_recent_commits`, `compass_test_status`, `compass_integration_health`. Lets agents introspect without shelling out.
 
 ---
 
@@ -241,6 +259,43 @@ Net Worth view has live balances waiting.
 - [x] **5.13 Apple Calendar RRULE + RDATE expansion** — promised follow-up from #74. New `electron/integrations/apple-rrule.ts` materializes occurrences within the lookahead window for DAILY/WEEKLY/MONTHLY/YEARLY + INTERVAL/COUNT/UNTIL/BYDAY/EXDATE/RDATE. DST-safe calendar-day arithmetic (wall-clock preserved across spring-forward). MONTHLY/YEARLY skip non-existent dates (Jan 31 → no Feb, Feb 29 → non-leap years skipped). BYDAY is honoured as a weekday filter on DAILY + WEEKLY; positional BYDAY on MONTHLY/YEARLY + other unsupported modifiers (BYSETPOS, BYMONTHDAY, etc.) short-circuit to base-only with a console.warn. Base occurrence reuses the bare uid so pre-PR rows upsert in place; subsequent occurrences get `${baseUid}::${occISO}`. 45 unit tests (37 expander + 8 end-to-end iCal).
 - [x] **5.14 Spotlight-friendly knowledge mirror** — opt-in one-way mirror of `knowledge-base/*.md` to a user-chosen path under `~/Documents` or `~/Desktop` (Spotlight-indexed locations) via `electron/integrations/spotlight-mirror.ts`. Path validated against allowlist; reconcile uses mtime-skip backfill + stale-file prune + empty-dir cleanup. Watcher piggybacks on chokidar against `KNOWLEDGE_DIR` (`awaitWriteFinish: 500ms`). README in the mirror dir documents one-way semantics. Settings → Data adds the toggle, path field, and manual "Reconcile" button. 22 new unit tests.
 
+---
+
+## Phase 6 — Code-health debt (May 2026)
+
+Backfill that's accumulated as the project shipped fast. None individually critical; together they're worth a dedicated phase. See [`strategic-review-2026-05.md`](strategic-review-2026-05.md) §"Phase 6" for the full audit.
+
+### 6.1 IPC test coverage backfill
+Nine of thirteen `electron/ipc/*.ts` modules lack a `.test.ts`. Land one small PR per file, P0 first.
+- [ ] **P0** — `electron/ipc/vault.ts` (security-critical, no test)
+- [ ] **P0** — `electron/ipc/auth.ts` (OAuth flow, no test)
+- [ ] **P1** — `electron/ipc/finance.ts` (largest handler)
+- [ ] **P1** — `electron/ipc/sync.ts`
+- [ ] **P1** — `electron/ipc/knowledge.ts`
+- [ ] **P2** — `electron/ipc/settings.ts`
+- [ ] **P2** — `electron/ipc/spotlight.ts` (integration coverage exists; backfill at handler seam)
+- [ ] **P3** — `electron/ipc/habits.ts`
+- [ ] **P3** — `electron/ipc/updater.ts`
+
+### 6.2 Knowledge module test backfill
+- [ ] `electron/knowledge/extractor.ts` — auto-update pipeline entrypoint
+- [ ] `electron/knowledge/finance-extractor.ts`
+- [ ] `electron/knowledge/writer.ts`
+
+### 6.3 Empty-catch sweep
+Convert 10 silent `catch {}` to `catch (err) { console.warn('[area]', err) }` in: `electron/menu-bar.ts:206,251,268`, `electron/url-scheme.ts:65`, `electron/cron.ts:48,125`, `electron/integrations/finance-watcher.ts:133,244`, `electron/integrations/apple-calendar.ts:263,271`.
+
+### 6.4 Biome warning cleanup
+- [ ] Fix the 78 standing warnings — concentrated in `electron/integrations/finance.ts:64-66` (noAssignInExpressions ×3) and `src/pages/Weekly.tsx` (a11y + exhaustive-deps + button-type)
+- [ ] Add `--max-diagnostics=0` to the CI Biome step so future PRs can't re-introduce them
+
+### 6.5 Type-safety escape audit
+Walk through the 8 `as any` / `@ts-ignore` / `@ts-expect-error` occurrences in `electron/preload-quick-capture.ts`, `electron/preload.ts`, `electron/ipc/finance.ts`, `src/pages/Ask.tsx`, `src/pages/Finance.tsx`. Replace with proper typing where the schema now allows it.
+
+Also worth tracking under this phase: narrow `PlaidEnv` in `electron/integrations/plaid/vault.ts` from `'sandbox' | 'development' | 'production'` to just `'sandbox' | 'production'` (`development` was retired by Plaid in 2024 and `client.ts` already rejects it).
+
+---
+
 ## Backlog (deferred, considered but out of scope this round)
 
 ## Phase 5 — Strategic-review follow-ups (May 2026)
@@ -257,18 +312,14 @@ Driven by the May 2026 strategic review (`/Users/christopherennis/.claude/plans/
 - [x] **5.8 `compass://` URL scheme** — `electron/url-scheme.ts` registers Compass as the default handler and routes a small command vocabulary (`capture`, `open/<page>`, `search`) into the running process via `open-url` (macOS) or single-instance argv (Win/Linux). `electron-builder.protocols` advertises the scheme on packaged installs. Renderer-side bridge inside `<HashRouter>` handles navigation + palette pre-fill.
 - [x] **5.9 Semantic search via local Ollama embeddings** — `electron/knowledge/embeddings.ts` adds a paragraph-aware chunker (~700-char target), an `/api/embeddings` round-trip against the user's local Ollama, a JSON-on-disk index at `.data/knowledge-embeddings.json`, and cosine-similarity ranking with per-path dedup. Incremental builds reuse chunks whose `(path, mtime)` still matches; a model-version change invalidates the whole index. Three IPC handlers (`knowledge:get-embedding-status`, `knowledge:rebuild-embeddings`, `knowledge:semantic-search`) feed the Settings UI (rebuild button + status) and a "By meaning" section in the Knowledge Base sidebar that runs alongside the existing keyword search. Defaults off; same opt-in trust posture as the existing Ollama-backed suggestions.
 
-### Deferred to Phase 5+ (next round)
+### Deferred (revisit Q3 2026)
 
-- Habit streaks badges
-- Privacy auto-lock (Vault re-auth after N min idle)
-- Distraction-free reading mode
-- Bulk operations in Daily checklist
-- Apple Spotlight integration
 - Apple Contacts import
 - PWA / web companion
-- RRULE expansion for Apple Calendar
-- In-app AI assistant panel (BYO Claude/OpenAI key)
-- RRULE expansion for Apple Calendar (currently only base instance is emitted)
+- Plaid Investments (holdings + securities) — only if retirement net-worth tracking goes beyond manual edits
+- Vault entry sharing (encrypted export for a trusted partner)
+
+> Prior entries (habit streaks, privacy auto-lock, distraction-free reading, bulk ops, Apple Spotlight, Apple RRULE, in-app AI assistant) were promoted into Phase 5 and shipped — see §5.10–5.14.
 
 ---
 
