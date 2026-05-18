@@ -115,6 +115,22 @@ export function registerPlaidHandlers(ipcMain: IpcMain): void {
  *    first. The `settled` guard keeps `closed` from re-resolving
  *    after success.
  */
+/**
+ * Non-persistent partition name for the Link window. Two reasons it
+ * must NOT live on the default session:
+ *
+ *  1. Electron's `session.webRequest.onHeadersReceived` allows only
+ *     ONE listener per session — installing ours on the default
+ *     session would overwrite `electron/main.ts`'s main-window CSP
+ *     hook and leak Plaid's allowlist into every other window for
+ *     the rest of the process lifetime.
+ *  2. Cookies / cache / storage from Plaid's CDN have no business
+ *     surviving past the auth flow. A bare partition string (no
+ *     `persist:` prefix) is in-memory only, so it is wiped when the
+ *     last window using it closes.
+ */
+const LINK_PARTITION = 'plaid-link'
+
 export async function runLinkFlow(linkToken: string): Promise<StartLinkResult> {
   const html = buildLinkHtml(linkToken)
   const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
@@ -131,21 +147,25 @@ export async function runLinkFlow(linkToken: string): Promise<StartLinkResult> {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true
+      sandbox: true,
+      partition: LINK_PARTITION
     }
   })
 
-  // CSP enforcement lives in the HTML itself, via
+  // CSP enforcement for the document lives in the HTML itself, via
   // `<meta http-equiv="Content-Security-Policy">` (see buildLinkHtml).
   // We CANNOT enforce it via session.webRequest.onHeadersReceived on
-  // this window: the document is loaded from a `data:` URL, which
-  // produces no HTTP response, so onHeadersReceived never fires for
-  // the navigation and any header-based CSP would be silently
+  // the document load: the document is loaded from a `data:` URL,
+  // which produces no HTTP response, so onHeadersReceived never fires
+  // for the navigation and any header-based CSP would be silently
   // unenforced. The meta-tag form is read by the parser and applied
-  // from the first script execution onward — strictly tighter than
-  // the main window's CSP. As a belt for subresource requests (the
-  // cdn.plaid.com script load, fonts, images), we still set the
-  // header here so it covers anything the parser later fetches.
+  // from the first script execution onward.
+  //
+  // We still install the header hook here as a belt for subresources
+  // (the cdn.plaid.com script load, fonts, images). It's safe to do
+  // unconditionally because the hook is scoped to the isolated Link
+  // partition session — it cannot clobber the default-session hook
+  // that `electron/main.ts` installed for the main window's CSP.
   win.webContents.session.webRequest.onHeadersReceived((details, cb) => {
     cb({
       responseHeaders: {
