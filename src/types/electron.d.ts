@@ -352,6 +352,34 @@ declare global {
           | { success: false; error: string }
         >
       }
+      plaid: {
+        getStatus(): Promise<{
+          configured: boolean
+          env: 'sandbox' | 'production' | null
+          hasSecret: boolean
+          linkedItemIds: string[]
+        }>
+        setSecret(env: 'sandbox' | 'production', secret: string): Promise<{ ok: true }>
+        startLink(): Promise<
+          | {
+              ok: true
+              result: {
+                itemId: string
+                institutionId: string | null
+                institutionName: string | null
+                accounts: {
+                  id: string
+                  name: string
+                  mask: string | null
+                  subtype: string | null
+                }[]
+              }
+            }
+          | { ok: false; cancelled: true }
+          | { ok: false; cancelled: false; errorCode: string | null; errorMessage: string | null }
+        >
+        disconnect(itemId: string): Promise<{ ok: true }>
+      }
       vault: {
         getCategories(): Promise<VaultCategory[]>
         getEntries(category: string): Promise<VaultEntry[]>

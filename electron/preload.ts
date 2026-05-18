@@ -118,6 +118,15 @@ const api = {
     backfillNow: () => ipcRenderer.invoke('spotlight:backfill-now')
   },
 
+  // --- Plaid (Phase 4.6 — bank Link flow) ---
+  plaid: {
+    getStatus: () => ipcRenderer.invoke('plaid:get-status'),
+    setSecret: (env: 'sandbox' | 'production', secret: string) =>
+      ipcRenderer.invoke('plaid:set-secret', env, secret),
+    startLink: () => ipcRenderer.invoke('plaid:start-link'),
+    disconnect: (itemId: string) => ipcRenderer.invoke('plaid:disconnect', itemId)
+  },
+
   // --- Vault (Sensitive Data) ---
   vault: {
     getCategories: () => ipcRenderer.invoke('vault:get-categories'),
