@@ -276,6 +276,7 @@ declare global {
           provider: 'anthropic' | 'openai',
           model: string
         ): Promise<{ success: boolean; error?: string }>
+        testKey(provider: 'anthropic' | 'openai'): Promise<{ success: boolean; error?: string }>
         ask(payload: {
           question: string
           history?: Array<{ role: 'user' | 'assistant'; content: string }>

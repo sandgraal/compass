@@ -780,8 +780,16 @@ const ASK_PROVIDER_LABEL: Record<AskProvider, string> = {
 }
 
 const ASK_DEFAULT_MODEL: Record<AskProvider, string> = {
-  anthropic: 'claude-3-5-haiku-latest',
+  anthropic: 'claude-haiku-4-5-20251001',
   openai: 'gpt-4o-mini'
+}
+
+// Lightweight shape check — surfaces "wrong key for this field" without
+// hard-blocking the save. The user remains the source of truth on their
+// own credentials in case Anthropic/OpenAI change prefix schemes later.
+function keyPrefixLooksWrong(provider: AskProvider, raw: string): boolean {
+  if (provider === 'anthropic') return !raw.startsWith('sk-ant-')
+  return !raw.startsWith('sk-')
 }
 
 function AskCompassSettings(): JSX.Element {
@@ -806,6 +814,13 @@ function AskCompassSettings(): JSX.Element {
       toast('Key looks too short — check you copied the whole thing.', 'error')
       return
     }
+    if (keyPrefixLooksWrong(provider, raw)) {
+      const hint =
+        provider === 'anthropic'
+          ? 'This doesn\'t look like an Anthropic key — they start with "sk-ant-". Get one at console.anthropic.com. Saving anyway.'
+          : 'This doesn\'t look like an OpenAI key — they start with "sk-". Get one at platform.openai.com. Saving anyway.'
+      toast(hint, 'info')
+    }
     setBusy(provider)
     try {
       const r = await window.api.assistant.setKey(provider, raw)
@@ -815,6 +830,20 @@ function AskCompassSettings(): JSX.Element {
         await refresh()
       } else {
         toast(r.error ?? 'Failed to save key', 'error')
+      }
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function testKey(provider: AskProvider): Promise<void> {
+    setBusy(provider)
+    try {
+      const r = await window.api.assistant.testKey(provider)
+      if (r.success) {
+        toast(`${ASK_PROVIDER_LABEL[provider]} key works ✓`, 'success')
+      } else {
+        toast(r.error ?? 'Test failed', 'error')
       }
     } finally {
       setBusy(null)
@@ -924,6 +953,14 @@ function AskCompassSettings(): JSX.Element {
                 </button>
                 {mask && (
                   <>
+                    <button
+                      type="button"
+                      onClick={() => testKey(provider)}
+                      disabled={busy === provider}
+                      className="text-xs px-3 py-1 border border-border hover:border-primary/50 text-foreground rounded-lg transition-colors disabled:opacity-40"
+                    >
+                      {busy === provider ? 'Testing…' : 'Test'}
+                    </button>
                     {!isActive && (
                       <button
                         type="button"

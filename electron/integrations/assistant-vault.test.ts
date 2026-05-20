@@ -129,15 +129,30 @@ describe('assistant key vault round-trip', () => {
     expect(vault.readActiveKeyInternal()).toBeNull()
   })
 
+  it('readKeyInternal returns a non-active provider when configured', () => {
+    vault.setAssistantKey('anthropic', `sk-ant-${'a'.repeat(32)}`)
+    vault.setAssistantKey('openai', `sk-${'b'.repeat(32)}`)
+    // anthropic was first, so it's active; we still want to read openai for Test.
+    const openai = vault.readKeyInternal('openai')
+    expect(openai).not.toBeNull()
+    expect(openai!.provider).toBe('openai')
+    expect(openai!.key.startsWith('sk-')).toBe(true)
+  })
+
+  it('readKeyInternal returns null for an unconfigured provider', () => {
+    vault.setAssistantKey('anthropic', `sk-ant-${'a'.repeat(32)}`)
+    expect(vault.readKeyInternal('openai')).toBeNull()
+  })
+
   it('round-trips through the on-disk blob (re-import works)', async () => {
     vault.setAssistantKey('anthropic', `sk-ant-${'a'.repeat(32)}`)
-    vault.setProviderModel('anthropic', 'claude-3-5-haiku-latest')
+    vault.setProviderModel('anthropic', 'claude-haiku-4-5-20251001')
     // Second import to simulate a process restart.
     vi.resetModules()
     const fresh = await import('./assistant-vault')
     const s = fresh.getAssistantStatus()
     expect(s.configuredProviders).toEqual(['anthropic'])
-    expect(s.models.anthropic).toBe('claude-3-5-haiku-latest')
+    expect(s.models.anthropic).toBe('claude-haiku-4-5-20251001')
   })
 })
 

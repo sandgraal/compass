@@ -148,6 +148,21 @@ export function setProviderModel(provider: LlmProvider, model: string): void {
 }
 
 /**
+ * Internal-only — never crosses an IPC boundary unmasked. Reads the
+ * stored key for any specific provider, regardless of which one is
+ * currently active. Used by the `assistant:test-key` handler so the
+ * user can validate a provider they haven't switched to yet.
+ */
+export function readKeyInternal(
+  provider: LlmProvider
+): { provider: LlmProvider; key: string; model: string | undefined } | null {
+  const blob = load()
+  const key = blob.keys[provider]
+  if (!key) return null
+  return { provider, key, model: blob.models?.[provider] }
+}
+
+/**
  * Internal-only — never crosses an IPC boundary unmasked. Used by the
  * `assistant:ask` handler to make the actual LLM call.
  */
@@ -159,9 +174,7 @@ export function readActiveKeyInternal(): {
   const blob = load()
   const provider = blob.activeProvider
   if (!provider) return null
-  const key = blob.keys[provider]
-  if (!key) return null
-  return { provider, key, model: blob.models?.[provider] }
+  return readKeyInternal(provider)
 }
 
 // Exported for unit tests.

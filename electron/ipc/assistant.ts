@@ -33,6 +33,7 @@ import {
   clearAssistantKey,
   getAssistantStatus,
   readActiveKeyInternal,
+  readKeyInternal,
   setActiveProvider,
   setAssistantKey,
   setProviderModel
@@ -219,6 +220,33 @@ export function registerAssistantHandlers(ipcMain: IpcMain): void {
       setProviderModel(provider, model)
       return { success: true }
     } catch (err) {
+      return { success: false, error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle('assistant:test-key', async (_event, provider: unknown) => {
+    if (provider !== 'anthropic' && provider !== 'openai') {
+      return { success: false, error: `Unknown provider: ${String(provider)}` }
+    }
+    const auth = readKeyInternal(provider)
+    if (!auth) {
+      return { success: false, error: `No ${provider} key configured.` }
+    }
+    // Independent AbortController so a Test never cancels an in-flight ask.
+    const controller = new AbortController()
+    try {
+      await callLlm({
+        provider: auth.provider,
+        apiKey: auth.key,
+        model: auth.model,
+        system: 'Reply with the single character: ok',
+        messages: [{ role: 'user', content: 'ping' }],
+        maxTokens: 1,
+        signal: controller.signal
+      })
+      return { success: true }
+    } catch (err) {
+      if (err instanceof LlmAbortError) return { success: false, error: 'Test cancelled' }
       return { success: false, error: (err as Error).message }
     }
   })

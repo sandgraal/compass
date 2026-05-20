@@ -102,6 +102,8 @@ const api = {
       ipcRenderer.invoke('assistant:set-active-provider', provider),
     setModel: (provider: 'anthropic' | 'openai', model: string) =>
       ipcRenderer.invoke('assistant:set-model', provider, model),
+    testKey: (provider: 'anthropic' | 'openai') =>
+      ipcRenderer.invoke('assistant:test-key', provider),
     ask: (payload: {
       question: string
       history?: Array<{ role: 'user' | 'assistant'; content: string }>
