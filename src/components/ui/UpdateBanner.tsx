@@ -1,11 +1,25 @@
 import { Download, ExternalLink, RefreshCw } from 'lucide-react'
 import { useUpdateStatus } from '../../hooks/useUpdateStatus'
 import { cn } from '../../lib/utils'
+import { useToast } from './Toast'
 
 export function UpdateBanner(): JSX.Element | null {
   const status = useUpdateStatus()
+  const { toast } = useToast()
 
   if (!status.phase || status.phase === 'not-available') return null
+
+  const handleOpenRelease = (version: string): void => {
+    // Fire-and-forget, but surface failures (shell.openExternal can reject
+    // when no default browser is wired up, or when the validation regex in
+    // the main process throws).
+    window.api.updater.openReleasePage(version).catch((err: unknown) => {
+      toast(
+        `Couldn't open release page: ${err instanceof Error ? err.message : String(err)}`,
+        'error'
+      )
+    })
+  }
 
   return (
     <output
@@ -41,7 +55,7 @@ export function UpdateBanner(): JSX.Element | null {
           </span>
           <button
             type="button"
-            onClick={() => status.version && window.api.updater.openReleasePage(status.version)}
+            onClick={() => status.version && handleOpenRelease(status.version)}
             className="ml-auto shrink-0 px-3 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-200 font-medium transition-colors inline-flex items-center gap-1.5"
           >
             View on GitHub
