@@ -507,7 +507,13 @@ export async function ingestCsvFolder(
     // (CR ATM regex, Rocket Money rm:* mapping) inside it are how most rows
     // get a category. The earlier `rules.length ? … : parsed` gate silently
     // dropped 100% of RM rows into Uncategorized.
-    const categorized = categorize(parsed, rules)
+    const categorized = categorize(parsed, rules).map((t, i) => {
+      const originalCategory = parsed[i]?.category?.trim()
+      if ((t.category == null || t.category === 'Uncategorized') && originalCategory) {
+        return { ...t, category: originalCategory }
+      }
+      return t
+    })
     // Tag every categorized txn with geo (CR/US/etc.) + purpose (capex/household/…
     // for CR rows). Written to indexed `geo` / `purpose` columns. Idempotent on re-ingest.
     // Tax disposition (Phase 4.3) is added after geo/purpose so the classifier
