@@ -3,7 +3,10 @@
   "version": "0.3.0",
   "description": "A local-first personal life planning OS",
   "main": "out/main/main.js",
-  "author": "sandgraal",
+  "author": {
+    "name": "sandgraal",
+    "email": "92229510+sandgraal@users.noreply.github.com"
+  },
   "license": "UNLICENSED",
   "private": true,
   "workspaces": ["mcp/compass-mcp"],
