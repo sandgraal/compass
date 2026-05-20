@@ -29,8 +29,7 @@ In which case, you research Linear's API, propose a spec, and ask for approval b
 8. **Frontend** — add card to `src/pages/Integrations.tsx INTEGRATIONS` array + setup guide section
 9. **Tests** — Vitest for the sync transformer (mock the API response); Playwright smoke for the connect flow
 10. **Verify** — `npm run typecheck && npm run check && npm test`
-11. **Changeset** — write `.changeset/feat-<service>-integration.md`
-12. **PR** — open with the standard template
+11. **PR** — open with the standard template
 
 # Hard rules
 
@@ -56,4 +55,3 @@ A PR description with:
 - API endpoints called
 - New CSP entries (if any)
 - Screenshots of the integration card
-- Changeset bump type (usually `minor`)

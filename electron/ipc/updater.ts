@@ -1,4 +1,4 @@
-import { BrowserWindow, type IpcMain, app } from 'electron'
+import { BrowserWindow, type IpcMain, app, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 
 export type UpdaterStatusPayload =
@@ -35,8 +35,14 @@ let listenersRegistered = false
  */
 export function initAutoUpdater(): void {
   autoUpdater.logger = null // suppress file-based log noise
-  autoUpdater.autoDownload = true // silent background download once an update is found
-  autoUpdater.autoInstallOnAppQuit = false // user must click "Restart to Install"
+  // macOS only: disable auto-download. CI publishes unsigned mac builds (no
+  // Apple Developer certs in CSC_LINK / CSC_KEY_PASSWORD), and Squirrel.Mac
+  // silently refuses to install unsigned updates — `quitAndInstall()` returns
+  // without doing anything, leaving the app in a download-loop. Windows builds
+  // are signed via signtool.exe in CI and Linux AppImage updates work fine,
+  // so those platforms keep the silent-download flow.
+  autoUpdater.autoDownload = process.platform !== 'darwin'
+  autoUpdater.autoInstallOnAppQuit = false
 
   if (listenersRegistered) return
   listenersRegistered = true
@@ -104,7 +110,25 @@ export function registerUpdaterHandlers(ipcMain: IpcMain): void {
     }
   })
 
+  // Open the GitHub release page for a given tag in the user's default browser.
+  // Used by the UpdateBanner now that auto-install is disabled (see
+  // initAutoUpdater for the unsigned-builds rationale). Validates the tag
+  // shape so a compromised renderer can't aim shell.openExternal at arbitrary URLs.
+  ipcMain.handle('updater:open-release-page', async (_event, tag: string) => {
+    if (typeof tag !== 'string' || !/^v?\d+\.\d+\.\d+(?:-[a-z0-9.]{1,20})?$/.test(tag)) {
+      throw new Error(`Invalid release tag: ${String(tag)}`)
+    }
+    const normalized = tag.startsWith('v') ? tag : `v${tag}`
+    // Await so the renderer's Promise resolves only after the open attempt
+    // completes (and rejects with the underlying shell error on failure).
+    await shell.openExternal(`https://github.com/sandgraal/compass/releases/tag/${normalized}`)
+  })
+
   // Fire-and-forget: quitAndInstall never returns, so use send not invoke.
+  // Kept for compatibility with installed older builds that still call it,
+  // and in case CI starts signing macOS builds in the future. With
+  // autoDownload disabled on macOS, this only fires there if a user manually
+  // triggers the legacy "Restart to Install" button on an old build.
   ipcMain.on('updater:install-and-restart', () => {
     autoUpdater.quitAndInstall(false, true)
   })

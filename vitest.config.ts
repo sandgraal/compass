@@ -7,7 +7,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['electron/**/*.test.ts', 'src/**/*.test.{ts,tsx}', 'mcp/**/*.test.ts'],
-    exclude: ['node_modules', 'dist', 'dist-electron', 'out', 'release', 'e2e/**', '.changeset'],
+    exclude: ['node_modules', 'dist', 'dist-electron', 'out', 'release', 'e2e/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],

@@ -315,6 +315,7 @@ const api = {
     check: () => ipcRenderer.invoke('updater:check'),
     // send (not invoke) — quitAndInstall never returns, so there's no reply to await
     installAndRestart: () => ipcRenderer.send('updater:install-and-restart'),
+    openReleasePage: (tag: string) => ipcRenderer.invoke('updater:open-release-page', tag),
     onStatus: (cb: (data: UpdaterStatusPayload) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, data: unknown) => {
         if (isUpdaterStatusPayload(data)) cb(data)

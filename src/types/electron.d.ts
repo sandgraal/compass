@@ -455,6 +455,7 @@ declare global {
         getVersion(): Promise<string>
         check(): Promise<{ success: boolean; error?: string }>
         installAndRestart(): void // fire-and-forget (send, not invoke)
+        openReleasePage(tag: string): Promise<void>
         onStatus(cb: (data: UpdaterStatusPayload) => void): () => void
       }
       theme: {

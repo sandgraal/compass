@@ -15,7 +15,6 @@
       "knowledge-base",
       ".vault",
       ".data",
-      ".changeset",
       "*.tsbuildinfo"
     ]
   },
