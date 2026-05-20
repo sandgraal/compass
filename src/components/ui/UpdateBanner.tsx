@@ -1,6 +1,7 @@
-import { Download, RefreshCw, RotateCcw } from 'lucide-react'
+import { Download, ExternalLink, RefreshCw, RotateCcw } from 'lucide-react'
 import { useUpdateStatus } from '../../hooks/useUpdateStatus'
 import { cn } from '../../lib/utils'
+import { useToast } from './Toast'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B/s`
@@ -10,8 +11,22 @@ function formatBytes(bytes: number): string {
 
 export function UpdateBanner(): JSX.Element | null {
   const status = useUpdateStatus()
+  const { toast } = useToast()
+  const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
 
   if (!status.phase || status.phase === 'not-available') return null
+
+  const handleOpenRelease = (version: string): void => {
+    // Fire-and-forget, but surface failures (shell.openExternal can reject
+    // when no default browser is wired up, or when the validation regex in
+    // the main process throws).
+    window.api.updater.openReleasePage(version).catch((err: unknown) => {
+      toast(
+        `Couldn't open release page: ${err instanceof Error ? err.message : String(err)}`,
+        'error'
+      )
+    })
+  }
 
   return (
     <output
@@ -19,7 +34,7 @@ export function UpdateBanner(): JSX.Element | null {
       aria-atomic="true"
       className={cn(
         'flex items-center gap-2.5 shrink-0 h-9 px-4 text-xs border-b',
-        status.phase === 'downloaded'
+        status.phase === 'downloaded' || (status.phase === 'available' && isMac)
           ? 'bg-amber-500/10 border-amber-500/20 text-amber-200'
           : status.phase === 'error'
             ? 'bg-destructive/10 border-destructive/20 text-destructive-foreground'
@@ -33,14 +48,36 @@ export function UpdateBanner(): JSX.Element | null {
         </>
       )}
 
-      {status.phase === 'available' && (
-        <>
-          <Download size={12} className="shrink-0 opacity-60" />
-          <span>
-            Update <span className="font-semibold">v{status.version}</span> available — downloading…
-          </span>
-        </>
-      )}
+      {status.phase === 'available' &&
+        status.version &&
+        (isMac ? (
+          <>
+            <Download size={12} className="shrink-0 opacity-70" />
+            <span>
+              Update <span className="font-semibold">v{status.version}</span> available
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                const version = status.version
+                if (!version) return
+                handleOpenRelease(version)
+              }}
+              className="ml-auto shrink-0 px-3 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-200 font-medium transition-colors inline-flex items-center gap-1.5"
+            >
+              View on GitHub
+              <ExternalLink size={11} className="opacity-70" />
+            </button>
+          </>
+        ) : (
+          <>
+            <Download size={12} className="shrink-0 opacity-60" />
+            <span>
+              Update <span className="font-semibold">v{status.version}</span> available —
+              downloading…
+            </span>
+          </>
+        ))}
 
       {status.phase === 'downloading' && (
         <>
