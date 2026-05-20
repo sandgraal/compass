@@ -389,6 +389,16 @@ declare global {
           | { ok: false; cancelled: false; errorCode: string | null; errorMessage: string | null }
         >
         disconnect(itemId: string): Promise<{ ok: true }>
+        listItems(): Promise<
+          Array<{
+            id: number
+            itemId: string
+            institutionId: string
+            institutionName: string
+            lastSyncedAt: number | null
+            errorCode: string | null
+          }>
+        >
       }
       vault: {
         getCategories(): Promise<VaultCategory[]>
@@ -523,6 +533,12 @@ declare global {
             institution?: string
             paymentDueDate?: string | null
             lastStatementSyncedAt?: number | Date | null
+            // Phase 4.6 Plaid linkage. Populated for accounts created via
+            // Plaid Link; null for manual / CSV-only accounts. Surfaces the
+            // "linked · <institution>" badge in the Accounts tab.
+            plaidItemId?: number | null
+            plaidAccountId?: string | null
+            mask?: string | null
           }>
         >
         upsertAccount(account: {

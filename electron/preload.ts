@@ -131,7 +131,8 @@ const api = {
     setSecret: (env: 'sandbox' | 'production', secret: string) =>
       ipcRenderer.invoke('plaid:set-secret', env, secret),
     startLink: () => ipcRenderer.invoke('plaid:start-link'),
-    disconnect: (itemId: string) => ipcRenderer.invoke('plaid:disconnect', itemId)
+    disconnect: (itemId: string) => ipcRenderer.invoke('plaid:disconnect', itemId),
+    listItems: () => ipcRenderer.invoke('plaid:list-items')
   },
 
   // --- Vault (Sensitive Data) ---
