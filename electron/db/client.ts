@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { backfillGeoFromNotes } from '../integrations/finance-geo'
 import { backfillTaxTags } from '../integrations/finance-tax'
 import { DATA_DIR } from '../paths'
 import { reconcileMigrationState } from './reconcile'
@@ -274,6 +275,15 @@ function ensureNewTables(sqlite: Database.Database): void {
     } catch {
       /* app_settings might not exist on a pristine DB — ignore */
     }
+  }
+  // Re-run migration 0004's geo/purpose backfill against any rows whose
+  // `notes` column carries the historical `geo:X` / `purpose:X` tokens
+  // but whose indexed columns never got updated. Idempotent; cheap when
+  // there's nothing to do.
+  try {
+    backfillGeoFromNotes(sqlite)
+  } catch {
+    /* finance_transactions might not exist on a pristine DB — ignore */
   }
 }
 
