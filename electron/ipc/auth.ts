@@ -319,12 +319,20 @@ export async function refreshGoogleToken(): Promise<string> {
     throw new Error('No refresh token stored — please reconnect Google.')
   }
 
-  const clientId = process.env.GOOGLE_CLIENT_ID || ''
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET || ''
+  // Reuse the same credential lookup as the initial OAuth dance so packaged-
+  // app users who pasted creds via the inline form can refresh their access
+  // token. Without this, refresh quietly fell back to process.env (empty on
+  // packaged builds) and every refresh failed with an opaque 400.
+  const creds = getOAuthCredentials('google')
+  if (!creds) {
+    throw new Error(
+      'Google credentials not configured — open Integrations, click Connect on the Google card, and re-enter your Client ID + Secret.'
+    )
+  }
 
   const params = new URLSearchParams({
-    client_id: clientId,
-    client_secret: clientSecret,
+    client_id: creds.clientId,
+    client_secret: creds.clientSecret,
     refresh_token: tokens.refresh_token,
     grant_type: 'refresh_token'
   })
@@ -384,7 +392,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     if (!creds) {
       return {
         error:
-          'Google credentials not configured. Click Configure on the Google card to paste your Client ID + Secret.'
+          'Google credentials not configured. Click Connect on the Google card to paste your Client ID + Secret.'
       }
     }
     const { clientId, clientSecret } = creds
@@ -597,6 +605,16 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     async (_event, clientId: string, clientSecret: string) => {
       if (typeof clientId !== 'string' || typeof clientSecret !== 'string') {
         return { error: 'Client ID and Client Secret must be strings.' }
+      }
+      // Cap input length before we trim. The renderer is an untrusted boundary
+      // in Electron; without this, a compromised renderer could send 100MB
+      // strings and OOM the main process during safeStorage encryption. Real
+      // Google Client IDs are ~70-80 chars; real Secrets are ~24-40. Pick a
+      // bound that's generous enough for future format changes but rejects
+      // anything obviously pathological.
+      const MAX_INPUT = 512
+      if (clientId.length > MAX_INPUT || clientSecret.length > MAX_INPUT) {
+        return { error: `Client ID and Client Secret must each be ≤ ${MAX_INPUT} characters.` }
       }
       const id = clientId.trim()
       const secret = clientSecret.trim()

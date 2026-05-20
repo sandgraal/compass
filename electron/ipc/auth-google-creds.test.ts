@@ -66,6 +66,15 @@ const fakeIpcMain: Pick<IpcMain, 'handle' | 'on'> = {
   }) as IpcMain['on']
 }
 
+// Capture initial env values so tests that mutate them can restore reliably.
+// Without this, the "configured=false" case below would leak any pre-existing
+// GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET into later tests when Vitest reuses
+// the worker.
+const originalEnv = {
+  clientId: process.env.GOOGLE_CLIENT_ID,
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET
+}
+
 beforeEach(() => {
   for (const k of Object.keys(handlers)) delete handlers[k]
   for (const k of Object.keys(fakeFs)) delete fakeFs[k]
@@ -73,6 +82,17 @@ beforeEach(() => {
   writeFileSyncMock.mockClear()
 })
 afterEach(() => {
+  // Restore env to its pre-test state — see comment on originalEnv above.
+  if (originalEnv.clientId === undefined) {
+    process.env.GOOGLE_CLIENT_ID = ''
+  } else {
+    process.env.GOOGLE_CLIENT_ID = originalEnv.clientId
+  }
+  if (originalEnv.clientSecret === undefined) {
+    process.env.GOOGLE_CLIENT_SECRET = ''
+  } else {
+    process.env.GOOGLE_CLIENT_SECRET = originalEnv.clientSecret
+  }
   vi.unstubAllGlobals()
 })
 
@@ -151,16 +171,12 @@ describe('auth:has-google-credentials', () => {
   })
 
   it('returns configured=true when env-var fallback is set', async () => {
+    // afterEach restores both env vars, so no inline cleanup needed.
     process.env.GOOGLE_CLIENT_ID = validId
     process.env.GOOGLE_CLIENT_SECRET = validSecret
-    try {
-      const h = await registerAndGet('auth:has-google-credentials')
-      const res = (await h({})) as { configured: boolean }
-      expect(res.configured).toBe(true)
-    } finally {
-      process.env.GOOGLE_CLIENT_ID = ''
-      process.env.GOOGLE_CLIENT_SECRET = ''
-    }
+    const h = await registerAndGet('auth:has-google-credentials')
+    const res = (await h({})) as { configured: boolean }
+    expect(res.configured).toBe(true)
   })
 })
 

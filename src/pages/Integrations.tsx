@@ -228,6 +228,23 @@ export default function Integrations(): JSX.Element {
     }
   }
 
+  // Clear stored Google credentials and reopen the inline form. Used for
+  // rotating a leaked secret or correcting a typo without disconnecting +
+  // reconnecting the OAuth tokens themselves.
+  async function editGoogleCredentials() {
+    const ok = await confirm({
+      title: 'Replace stored Google credentials?',
+      description:
+        'The current Client ID + Secret will be cleared so you can paste new ones. Your OAuth tokens stay until you Disconnect.',
+      confirmLabel: 'Replace',
+      destructive: false
+    })
+    if (!ok) return
+    await window.api.auth.clearGoogleCredentials()
+    setGoogleCredsConfigured(false)
+    setGoogleCredsInput({ clientId: '', clientSecret: '' })
+  }
+
   // Save Google credentials, then immediately kick off the OAuth dance so
   // the user sees a single "Connect" action rather than two-step ceremony.
   async function submitGoogleCredentials() {
@@ -766,6 +783,21 @@ export default function Integrations(): JSX.Element {
                     {connecting === integration.id ? 'Connecting…' : 'Connect'}
                   </button>
                 )}
+                {/* Edit credentials — visible whenever Google creds are stored
+                    and the form isn't already open. Without this, a user who
+                    pastes the wrong secret (or rotates it on Google's side)
+                    has no in-app way to fix it. */}
+                {integration.id === 'google' &&
+                  googleCredsConfigured &&
+                  googleCredsInput === null && (
+                    <button
+                      type="button"
+                      onClick={() => editGoogleCredentials()}
+                      className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Edit credentials
+                    </button>
+                  )}
               </div>
             </div>
           )
