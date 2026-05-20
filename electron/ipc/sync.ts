@@ -12,6 +12,7 @@ import {
   syncEvents
 } from '../db/schema'
 import { readAppleCalendars } from '../integrations/apple-calendar'
+import { syncAllPlaid } from '../integrations/plaid/sync'
 import {
   updateCalendarKnowledge,
   updateDriveKnowledge,
@@ -714,6 +715,22 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     if (service === 'google') return syncGoogle(win)
     if (service === 'github') return toPublicSyncResult(await syncGitHub(win))
     if (service === 'apple-calendar') return syncAppleCalendar(win)
+    if (service === 'plaid') {
+      const results = await syncAllPlaid()
+      // Aggregate across every connected Item: success means at least one
+      // Item synced without an error. Errors are concatenated so the
+      // toast surfaces them even when most Items succeeded.
+      const totalRecords = results.reduce((n, r) => n + r.added + r.modified + r.removed, 0)
+      const errors = results
+        .filter((r) => r.errorMessage)
+        .map((r) => `${r.itemId}: ${r.errorMessage}`)
+      return {
+        service: 'plaid',
+        success: errors.length === 0,
+        recordsUpdated: totalRecords,
+        error: errors.length > 0 ? errors.join('; ') : undefined
+      }
+    }
     return { error: 'Unknown service' }
   })
 
