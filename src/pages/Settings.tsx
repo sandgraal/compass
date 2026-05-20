@@ -787,16 +787,30 @@ const ASK_DEFAULT_MODEL: Record<AskProvider, string> = {
 // Lightweight shape check — surfaces "wrong key for this field" without
 // hard-blocking the save. The user remains the source of truth on their
 // own credentials in case Anthropic/OpenAI change prefix schemes later.
+//
+// Crucially the OpenAI side must reject `sk-ant-` (an Anthropic key
+// pasted into the wrong field), since OpenAI keys are also `sk-`
+// prefixed — a plain `startsWith('sk-')` would silently pass it.
 function keyPrefixLooksWrong(provider: AskProvider, raw: string): boolean {
   if (provider === 'anthropic') return !raw.startsWith('sk-ant-')
-  return !raw.startsWith('sk-') || raw.startsWith('sk-ant-')
+  // openai
+  if (raw.startsWith('sk-ant-')) return true
+  return !raw.startsWith('sk-')
 }
+
+type BusyAction = 'save' | 'test' | 'clear'
 
 function AskCompassSettings(): JSX.Element {
   const { toast } = useToast()
   const [askStatus, setAskStatus] = useState<AskStatus | null>(null)
   const [pendingKey, setPendingKey] = useState<Partial<Record<AskProvider, string>>>({})
-  const [busy, setBusy] = useState<AskProvider | null>(null)
+  // Track both which provider is busy AND which action so Save doesn't
+  // render "Saving…" while a Test is in flight (and vice versa).
+  const [busy, setBusy] = useState<{ provider: AskProvider; action: BusyAction } | null>(null)
+
+  const isBusy = (p: AskProvider): boolean => busy?.provider === p
+  const isBusyWith = (p: AskProvider, action: BusyAction): boolean =>
+    busy?.provider === p && busy.action === action
 
   async function refresh(): Promise<void> {
     if (typeof window === 'undefined' || !window.api) return
@@ -818,10 +832,10 @@ function AskCompassSettings(): JSX.Element {
       const hint =
         provider === 'anthropic'
           ? 'This doesn\'t look like an Anthropic key — they start with "sk-ant-". Get one at console.anthropic.com. Saving anyway.'
-          : 'This doesn\'t look like an OpenAI key — they start with "sk-". Get one at platform.openai.com. Saving anyway.'
+          : 'This doesn\'t look like an OpenAI key — they start with "sk-" (and not "sk-ant-"). Get one at platform.openai.com. Saving anyway.'
       toast(hint, 'info')
     }
-    setBusy(provider)
+    setBusy({ provider, action: 'save' })
     try {
       const r = await window.api.assistant.setKey(provider, raw)
       if (r.success) {
@@ -837,7 +851,7 @@ function AskCompassSettings(): JSX.Element {
   }
 
   async function testKey(provider: AskProvider): Promise<void> {
-    setBusy(provider)
+    setBusy({ provider, action: 'test' })
     try {
       const r = await window.api.assistant.testKey(provider)
       if (r.success) {
@@ -851,7 +865,7 @@ function AskCompassSettings(): JSX.Element {
   }
 
   async function clearKey(provider: AskProvider): Promise<void> {
-    setBusy(provider)
+    setBusy({ provider, action: 'clear' })
     try {
       const r = await window.api.assistant.clearKey(provider)
       if (r.success) {
@@ -946,20 +960,20 @@ function AskCompassSettings(): JSX.Element {
                 <button
                   type="button"
                   onClick={() => saveKey(provider)}
-                  disabled={busy === provider || !(pendingKey[provider] ?? '').trim()}
+                  disabled={isBusy(provider) || !(pendingKey[provider] ?? '').trim()}
                   className="text-xs px-3 py-1 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-40"
                 >
-                  {busy === provider ? 'Saving…' : 'Save'}
+                  {isBusyWith(provider, 'save') ? 'Saving…' : 'Save'}
                 </button>
                 {mask && (
                   <>
                     <button
                       type="button"
                       onClick={() => testKey(provider)}
-                      disabled={busy === provider}
+                      disabled={isBusy(provider)}
                       className="text-xs px-3 py-1 border border-border hover:border-primary/50 text-foreground rounded-lg transition-colors disabled:opacity-40"
                     >
-                      {busy === provider ? 'Testing…' : 'Test'}
+                      {isBusyWith(provider, 'test') ? 'Testing…' : 'Test'}
                     </button>
                     {!isActive && (
                       <button
@@ -973,7 +987,7 @@ function AskCompassSettings(): JSX.Element {
                     <button
                       type="button"
                       onClick={() => clearKey(provider)}
-                      disabled={busy === provider}
+                      disabled={isBusy(provider)}
                       className="text-xs px-3 py-1 border border-border hover:border-destructive/60 text-muted-foreground hover:text-destructive rounded-lg transition-colors disabled:opacity-40"
                     >
                       Clear
