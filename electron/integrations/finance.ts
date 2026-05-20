@@ -503,7 +503,11 @@ export async function ingestCsvFolder(
         .replace(/[_-]+/g, ' ')
         .trim()
     const parsed = parser.parse(headers, rows, f, hint)
-    const categorized = rules.length ? categorize(parsed, rules) : parsed
+    // Always run categorize() — even with zero user rules, the smart fallbacks
+    // (CR ATM regex, Rocket Money rm:* mapping) inside it are how most rows
+    // get a category. The earlier `rules.length ? … : parsed` gate silently
+    // dropped 100% of RM rows into Uncategorized.
+    const categorized = categorize(parsed, rules)
     // Tag every categorized txn with geo (CR/US/etc.) + purpose (capex/household/…
     // for CR rows). Written to indexed `geo` / `purpose` columns. Idempotent on re-ingest.
     // Tax disposition (Phase 4.3) is added after geo/purpose so the classifier
@@ -1239,7 +1243,9 @@ export async function ingestFinanceFiles(
       accountDbId = id ?? null
     }
 
-    const categorized = rules.length ? categorize(txns, rules) : txns
+    // Same fix as `ingestCsvFolder` — smart fallbacks live inside categorize(),
+    // so never skip the call.
+    const categorized = categorize(txns, rules)
     const tagged = tagTax(tagGeoAndPurpose(categorized))
 
     // Scope hash lookup to only this batch's candidates — avoids full-table scan

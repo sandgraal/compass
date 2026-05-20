@@ -1,5 +1,7 @@
+import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 import {
+  backfillGeoFromNotes,
   classifyGeo,
   classifyPurpose,
   parseNotesTags,
@@ -117,5 +119,88 @@ describe('tagGeoAndPurpose', () => {
     expect(out[0].purpose).toBe('capex')
     // notes should be unmodified — geo/purpose are now separate fields
     expect(out[0].notes).toBe('rm:Home & Garden')
+  })
+})
+
+describe('backfillGeoFromNotes', () => {
+  function setup(): Database.Database {
+    const db = new Database(':memory:')
+    db.exec(`
+      CREATE TABLE finance_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        notes TEXT,
+        geo TEXT NOT NULL DEFAULT 'US',
+        purpose TEXT
+      );
+    `)
+    return db
+  }
+
+  it('updates rows whose notes carry geo:X but column is still default US', () => {
+    const db = setup()
+    db.prepare(
+      "INSERT INTO finance_transactions (notes) VALUES ('rm:Home & Garden | geo:CR | purpose:capex')"
+    ).run()
+    db.prepare("INSERT INTO finance_transactions (notes) VALUES ('rm:Shopping | geo:SPAIN')").run()
+    db.prepare(
+      "INSERT INTO finance_transactions (notes) VALUES ('rm:Auto & Transport | geo:US')"
+    ).run()
+
+    const counts = backfillGeoFromNotes(db)
+
+    expect(counts['geo:CR']).toBe(1)
+    expect(counts['geo:SPAIN']).toBe(1)
+    expect(counts['purpose:capex']).toBe(1)
+    // US row already at US — no change to count for it
+    expect(counts['geo:US']).toBeUndefined()
+
+    const rows = db
+      .prepare('SELECT geo, purpose FROM finance_transactions ORDER BY id')
+      .all() as Array<{
+      geo: string
+      purpose: string | null
+    }>
+    expect(rows).toEqual([
+      { geo: 'CR', purpose: 'capex' },
+      { geo: 'SPAIN', purpose: null },
+      { geo: 'US', purpose: null }
+    ])
+  })
+
+  it('is idempotent — second run reports no changes', () => {
+    const db = setup()
+    db.prepare(
+      "INSERT INTO finance_transactions (notes) VALUES ('rm:Foo | geo:CR | purpose:capex')"
+    ).run()
+
+    backfillGeoFromNotes(db)
+    const second = backfillGeoFromNotes(db)
+
+    expect(second).toEqual({})
+  })
+
+  it('does not touch a user-set geo that disagrees with notes', () => {
+    // Edge case: row's notes say geo:CR but the column was manually set to
+    // OTHER (e.g. user override). The backfill should still overwrite it —
+    // notes are the historical truth and the user has the geo dropdown in
+    // the UI to correct that downstream. The point of this test is just to
+    // document the chosen direction.
+    const db = setup()
+    db.prepare(
+      "INSERT INTO finance_transactions (notes, geo) VALUES ('rm:Foo | geo:CR', 'OTHER')"
+    ).run()
+
+    backfillGeoFromNotes(db)
+
+    const row = db.prepare('SELECT geo FROM finance_transactions').get() as { geo: string }
+    expect(row.geo).toBe('CR')
+  })
+
+  it('returns empty object when nothing to backfill', () => {
+    const db = setup()
+    // Plain US row with no geo tag in notes
+    db.prepare("INSERT INTO finance_transactions (notes, geo) VALUES ('plain note', 'US')").run()
+
+    expect(backfillGeoFromNotes(db)).toEqual({})
   })
 })

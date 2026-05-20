@@ -208,3 +208,47 @@ export function tagGeoAndPurpose(txns: RawTxn[]): RawTxn[] {
     return { ...t, geo, purpose: purpose || undefined }
   })
 }
+
+/**
+ * Re-run the migration 0004 backfill against existing rows whose `notes`
+ * still carry `geo:X` / `purpose:X` tokens (from the pre-Phase-4.2 writer)
+ * but whose indexed `geo` / `purpose` columns never got updated.
+ *
+ * The migration's UPDATEs only ran once at migration time; if rows were
+ * re-ingested or imported after, or if `classifyGeo` couldn't infer the
+ * country from `description` alone (e.g. "FERRETERIA SANTA ROSJIMENEZ CA"),
+ * the column stayed at the schema default 'US' while notes carried the
+ * historical truth. This helper closes that gap idempotently — safe to
+ * call on every init.
+ *
+ * Returns the number of rows updated, broken down by tag.
+ */
+export function backfillGeoFromNotes(
+  db: import('better-sqlite3').Database
+): Record<string, number> {
+  const sets: Array<{ kind: 'geo' | 'purpose'; value: string }> = [
+    { kind: 'geo', value: 'CR' },
+    { kind: 'geo', value: 'SPAIN' },
+    { kind: 'geo', value: 'COLOMBIA' },
+    { kind: 'geo', value: 'PANAMA' },
+    { kind: 'geo', value: 'OTHER' },
+    { kind: 'purpose', value: 'capex' },
+    { kind: 'purpose', value: 'household' },
+    { kind: 'purpose', value: 'operating' },
+    { kind: 'purpose', value: 'travel' },
+    { kind: 'purpose', value: 'other' }
+  ]
+  const counts: Record<string, number> = {}
+  for (const { kind, value } of sets) {
+    // `purpose` is nullable so `purpose != 'capex'` is UNKNOWN (not true) when
+    // the column is NULL — three-valued SQL would skip those rows. Wrap with
+    // `IS NULL OR …` so the WHERE matches initial-state rows too. `geo` is
+    // NOT NULL but applying the same shape keeps both branches consistent.
+    const stmt = db.prepare(
+      `UPDATE finance_transactions SET ${kind} = ? WHERE notes LIKE ? AND (${kind} IS NULL OR ${kind} != ?)`
+    )
+    const res = stmt.run(value, `%${kind}:${value}%`, value)
+    if (res.changes > 0) counts[`${kind}:${value}`] = res.changes
+  }
+  return counts
+}
