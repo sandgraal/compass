@@ -1250,8 +1250,14 @@ export async function ingestFinanceFiles(
     }
 
     // Same fix as `ingestCsvFolder` — smart fallbacks live inside categorize(),
-    // so never skip the call.
-    const categorized = categorize(txns, rules)
+    // so never skip the call. Preserve any parser-provided category as the
+    // last-resort fallback when categorize() does not find a better match.
+    const categorized = categorize(txns, rules).map((t, i) => {
+      const parserCategory = txns[i]?.category
+      return (t.category == null || t.category === 'Uncategorized') && parserCategory
+        ? { ...t, category: parserCategory }
+        : t
+    })
     const tagged = tagTax(tagGeoAndPurpose(categorized))
 
     // Scope hash lookup to only this batch's candidates — avoids full-table scan
