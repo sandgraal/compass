@@ -126,7 +126,7 @@ describe('auth:connect-github-pat', () => {
       })
     )
     const h = await registerAndGetHandler()
-    const token = `ghp_${'b'.repeat(40)}`
+    const token = `ghp_${'b'.repeat(36)}`
     const res = (await h({}, token)) as { success?: boolean; login?: string; error?: string }
 
     expect(res.error).toBeUndefined()
