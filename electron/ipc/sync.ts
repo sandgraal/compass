@@ -274,7 +274,37 @@ export async function runSuggestionExtractors(
   }
 }
 
-function maybeSendNotification(service: string, recordsUpdated: number, error?: string): void {
+/** Human-readable name for the notification title. Exported indirectly via
+ * `maybeSendNotification` — kept private here. */
+function serviceLabelFor(service: string): string {
+  switch (service) {
+    case 'google':
+      return 'Google'
+    case 'github':
+      return 'GitHub'
+    case 'apple-calendar':
+      return 'Apple Calendar'
+    case 'plaid':
+      return 'Plaid'
+    default:
+      return service
+  }
+}
+
+/**
+ * Fire a native macOS notification summarizing a sync result. Best-effort:
+ * never let notification failures affect sync semantics. Respects the
+ * `notificationsEnabled` setting (default true).
+ *
+ * Exported so the cron module can reuse the same UX layer for the daily
+ * Plaid sync without duplicating the read-settings + show-Notification
+ * dance.
+ */
+export function maybeSendNotification(
+  service: string,
+  recordsUpdated: number,
+  error?: string
+): void {
   // Skip if nothing happened and no error
   if (recordsUpdated === 0 && !error) return
 
@@ -290,8 +320,7 @@ function maybeSendNotification(service: string, recordsUpdated: number, error?: 
     const enabled = row ? row.value !== 'false' : true // default is 'true' per DEFAULTS
     if (!enabled) return
 
-    const serviceLabel = service === 'google' ? 'Google' : 'GitHub'
-    const title = `Compass — ${serviceLabel} synced`
+    const title = `Compass — ${serviceLabelFor(service)} synced`
     const body = error ? `Sync failed: ${error.slice(0, 80)}` : `${recordsUpdated} records updated`
 
     new Notification({ title, body }).show()
