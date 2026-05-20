@@ -415,11 +415,9 @@ export default function Integrations(): JSX.Element {
                 <li>
                   Copy the token (starts with{' '}
                   <code className="bg-secondary px-1 py-0.5 rounded font-mono">ghp_</code> or{' '}
-                  <code className="bg-secondary px-1 py-0.5 rounded font-mono">
-                    github_pat_
-                  </code>
-                  ) and paste it into Compass. The token is encrypted with the OS Keychain and
-                  never leaves your machine.
+                  <code className="bg-secondary px-1 py-0.5 rounded font-mono">github_pat_</code>)
+                  and paste it into Compass. The token is encrypted with the OS Keychain and never
+                  leaves your machine.
                 </li>
               </ol>
             </div>
@@ -571,7 +569,11 @@ export default function Integrations(): JSX.Element {
                     </a>{' '}
                     (the scopes are pre-selected; just click <em>Generate</em>).
                   </div>
+                  <label htmlFor="github-pat-input" className="block text-xs text-muted-foreground">
+                    GitHub Personal Access Token
+                  </label>
                   <input
+                    id="github-pat-input"
                     type="password"
                     placeholder="ghp_… or github_pat_…"
                     value={githubPatInput}

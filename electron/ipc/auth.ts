@@ -459,7 +459,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
   // non-developer through registering an OAuth App.
   //
   // Token shape accepted:
-  //   - Classic PATs: `ghp_...` (40 chars, mixed alphanumeric)
+  //   - Classic PATs: `ghp_...` (typically 36+ chars, mixed alphanumeric)
   //   - Fine-grained PATs: `github_pat_...` (longer, two-segment)
   // Anything else fails the regex below before we even hit the network.
   ipcMain.handle('auth:connect-github-pat', async (_event, token: string) => {
@@ -501,9 +501,8 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
         ?.split(',')
         .map((s) => s.trim())
         .filter(Boolean)
-      const grantedScopes = parsedScopes && parsedScopes.length > 0
-        ? parsedScopes
-        : ['fine-grained']
+      const grantedScopes =
+        parsedScopes && parsedScopes.length > 0 ? parsedScopes : ['fine-grained']
 
       saveToken('github', { access_token: trimmed, auth_method: 'pat', login: user.login })
 
