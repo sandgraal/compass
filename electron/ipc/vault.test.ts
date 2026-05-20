@@ -14,9 +14,10 @@
  *   - Round-trip add/get/update/delete.
  *   - Update history: snapshot of prior values, capped at 5.
  *   - `seedVaultFromDetectedAccounts` idempotency.
- *
- * The 1Password import handler is intentionally NOT tested here — it's
- * dialog-driven and the parser path is exercised separately.
+ *   - 1Password CSV import routing (canceled, empty, credit→financial,
+ *     login→credentials). The internal CSV parser has its own coverage
+ *     elsewhere, so the cases here focus on the handler's branching
+ *     rather than parser edge cases.
  */
 
 import type { IpcMain } from 'electron'
@@ -28,10 +29,13 @@ const fakeFs: Record<string, Buffer> = {}
 const writeFileSyncMock = vi.fn<(p: string, data: Buffer) => void>((p, data) => {
   fakeFs[p] = Buffer.isBuffer(data) ? data : Buffer.from(data as string)
 })
-const readFileSyncMock = vi.fn<(p: string) => Buffer>((p) => {
+// Encoding-aware: vault.ts reads encrypted blobs with no encoding (Buffer)
+// AND the 1Password CSV with 'utf-8' (string). Mirror both shapes here so
+// every test path can use the same fakeFs.
+const readFileSyncMock = vi.fn<(p: string, enc?: BufferEncoding) => Buffer | string>((p, enc) => {
   const v = fakeFs[p]
   if (!v) throw new Error(`ENOENT ${p}`)
-  return v
+  return enc ? v.toString(enc) : v
 })
 const existsSyncMock = vi.fn<(p: string) => boolean>((p) => p in fakeFs)
 
@@ -41,10 +45,15 @@ vi.mock('node:fs', () => ({
   writeFileSync: writeFileSyncMock
 }))
 
+// Per-test-controllable dialog mock. Default is "canceled" so any test
+// that hits a 1Password import path without setting it up gets the
+// safe-by-default cancellation behavior.
+const showOpenDialogMock = vi
+  .fn<() => Promise<{ canceled: boolean; filePaths: string[] }>>()
+  .mockResolvedValue({ canceled: true, filePaths: [] })
+
 vi.mock('electron', () => ({
-  dialog: {
-    showOpenDialog: vi.fn().mockResolvedValue({ canceled: true, filePaths: [] })
-  }
+  dialog: { showOpenDialog: showOpenDialogMock }
 }))
 
 // Deterministic stub crypto layer. The real one uses safeStorage + AES;
@@ -76,6 +85,7 @@ beforeEach(() => {
   writeFileSyncMock.mockClear()
   readFileSyncMock.mockClear()
   existsSyncMock.mockClear()
+  showOpenDialogMock.mockClear().mockResolvedValue({ canceled: true, filePaths: [] })
 })
 
 afterEach(() => {
@@ -371,5 +381,111 @@ describe('seedVaultFromDetectedAccounts', () => {
       }
     ])
     expect(added).toBe(0)
+  })
+})
+
+// ─── vault:import-1password-csv ──────────────────────────────────────────────
+
+describe('vault:import-1password-csv', () => {
+  it('returns { canceled: true } when the user cancels the dialog', async () => {
+    // Default dialog mock is already canceled; just verify the early-return.
+    const h = await registerAndGet('vault:import-1password-csv')
+    const out = (await invoke(h)) as { success: boolean; canceled?: boolean }
+    expect(out).toEqual({ success: false, canceled: true })
+    expect(writeFileSyncMock).not.toHaveBeenCalled()
+  })
+
+  it('returns an error for an empty CSV', async () => {
+    showOpenDialogMock.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ['/import/empty.csv']
+    })
+    fakeFs['/import/empty.csv'] = Buffer.from('', 'utf8')
+    const h = await registerAndGet('vault:import-1password-csv')
+    const out = (await invoke(h)) as { success: boolean; error?: string }
+    expect(out.success).toBe(false)
+    expect(out.error).toMatch(/empty/i)
+    expect(writeFileSyncMock).not.toHaveBeenCalled()
+  })
+
+  it('routes credit-card rows to financial and login rows to credentials', async () => {
+    showOpenDialogMock.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ['/import/1p.csv']
+    })
+    // Two rows of distinct types — the handler's branching is the
+    // contract this test pins down. The internal parser is tested
+    // elsewhere; we hand it the exact field shape it produces.
+    fakeFs['/import/1p.csv'] = Buffer.from(
+      [
+        'Type,Title,Username,Password,Url,Notes',
+        'Login,GitHub,me@example.com,hunter2,https://github.com,my login',
+        'Credit Card,Amex Platinum,,,,ending 1003'
+      ].join('\n'),
+      'utf8'
+    )
+
+    const h = await registerAndGet('vault:import-1password-csv')
+    const out = (await invoke(h)) as { success: boolean; imported: number }
+
+    expect(out).toEqual({ success: true, imported: 2 })
+
+    // The handler writes BOTH category files (even if one ends up empty,
+    // because it does the write unconditionally). Inspect both blobs.
+    const writes = writeFileSyncMock.mock.calls
+    const byPath = new Map<string, unknown[]>()
+    for (const [p, data] of writes) {
+      const decoded = (data as Buffer).toString('utf8').replace(/^enc:/, '')
+      byPath.set(p as string, JSON.parse(decoded))
+    }
+    const credentials = byPath.get(VAULT_FILE('credentials')) as Array<{
+      service: string
+      username: string
+      password: string
+    }>
+    const financial = byPath.get(VAULT_FILE('financial')) as Array<{
+      institution: string
+      accountType: string
+    }>
+
+    expect(credentials).toHaveLength(1)
+    expect(credentials[0]).toMatchObject({
+      service: 'GitHub',
+      username: 'me@example.com',
+      password: 'hunter2'
+    })
+    expect(financial).toHaveLength(1)
+    expect(financial[0]).toMatchObject({
+      institution: 'Amex Platinum',
+      accountType: 'Credit Card'
+    })
+  })
+
+  it('appends imported entries to existing vault contents (does not clobber)', async () => {
+    // Pre-seed the user's existing credentials. After the import, the
+    // pre-existing entry must still be there alongside the new one.
+    seedFile('credentials', [{ id: 'pre', service: 'Existing' }])
+    showOpenDialogMock.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ['/import/1p.csv']
+    })
+    fakeFs['/import/1p.csv'] = Buffer.from(
+      ['Type,Title,Username,Password', 'Login,NewSite,u,p'].join('\n'),
+      'utf8'
+    )
+
+    const h = await registerAndGet('vault:import-1password-csv')
+    await invoke(h)
+
+    const credentialsWrite = writeFileSyncMock.mock.calls.find(
+      ([p]) => p === VAULT_FILE('credentials')
+    )
+    expect(credentialsWrite).toBeDefined()
+    const credentials = JSON.parse(
+      (credentialsWrite![1] as Buffer).toString('utf8').replace(/^enc:/, '')
+    ) as Array<{ id?: string; service?: string }>
+    expect(credentials).toHaveLength(2)
+    expect(credentials.find((e) => e.id === 'pre')).toBeDefined()
+    expect(credentials.find((e) => e.service === 'NewSite')).toBeDefined()
   })
 })
