@@ -8,6 +8,7 @@ import {
   Inbox,
   Info,
   Pencil,
+  Plug2,
   Plus,
   RefreshCw,
   Target,
@@ -58,6 +59,11 @@ type Account = {
   apr: number | null
   minPayment: number | null
   creditLimit: number | null
+  // Phase 4.6 Plaid linkage. Null on accounts that were manually created
+  // or CSV-only; populated when the Item was connected via Plaid Link.
+  plaidItemId?: number | null
+  plaidAccountId?: string | null
+  mask?: string | null
 }
 type BudgetLine = {
   category: string
@@ -2454,6 +2460,23 @@ function AccountsTab({
   const [form, setForm] = useState<AccountFormState>(emptyAccountForm())
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  // Plaid items, used purely to render the "linked · <institution>" badge
+  // next to Plaid-connected accounts. Fetched once on mount; the badge is
+  // cosmetic so we don't keep this in sync with disconnect events — a stale
+  // badge for a few seconds is fine, and the parent re-mounts AccountsTab
+  // when the user switches tabs.
+  const [plaidInstitutionById, setPlaidInstitutionById] = useState<Map<number, string>>(
+    () => new Map()
+  )
+  useEffect(() => {
+    const api = typeof window !== 'undefined' ? window.api : undefined
+    if (!api?.plaid?.listItems) return
+    void api.plaid.listItems().then((rows) => {
+      const map = new Map<number, string>()
+      for (const r of rows) map.set(r.id, r.institutionName)
+      setPlaidInstitutionById(map)
+    })
+  }, [])
 
   function startAdd() {
     setAdding(true)
@@ -2668,48 +2691,71 @@ function AccountsTab({
               </tr>
             </thead>
             <tbody>
-              {accounts.map((a) => (
-                <tr key={a.id} className="border-t border-border group">
-                  <td className="py-2">
-                    {a.name}
-                    {a.isDebt ? (
-                      <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">
-                        debt
-                      </span>
-                    ) : null}
-                  </td>
-                  <td className="text-muted-foreground capitalize">
-                    {ACCOUNT_TYPES.find((t) => t.value === a.type)?.label ?? a.type}
-                  </td>
-                  <td className="text-right">{fmtMoney(a.balance ?? 0)}</td>
-                  <td className="text-right">
-                    {a.apr != null ? `${(a.apr * 100).toFixed(2)}%` : '—'}
-                  </td>
-                  <td className="text-right">
-                    {a.creditLimit != null ? fmtMoney(a.creditLimit) : '—'}
-                  </td>
-                  <td className="text-right pr-1">
-                    <div className="inline-flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                      <button
-                        type="button"
-                        onClick={() => startEdit(a)}
-                        aria-label="Edit account"
-                        className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
-                      >
-                        <Pencil size={13} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onDelete(a.id)}
-                        aria-label="Delete account"
-                        className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {accounts.map((a) => {
+                const plaidInstitution = a.plaidItemId
+                  ? plaidInstitutionById.get(a.plaidItemId)
+                  : null
+                const isPlaidLinked = !!plaidInstitution
+                return (
+                  <tr key={a.id} className="border-t border-border group">
+                    <td className="py-2">
+                      {a.name}
+                      {a.isDebt ? (
+                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">
+                          debt
+                        </span>
+                      ) : null}
+                      {/* Plaid linkage badge — only shown when the account
+                          actually has a plaidItemId pointing at a known Item.
+                          Shows institution + last-4 mask if Plaid returned one. */}
+                      {isPlaidLinked ? (
+                        <span
+                          title="Linked via Plaid — balance is owned by the institution"
+                          className="ml-2 text-xs px-1.5 py-0.5 rounded bg-primary/15 text-primary inline-flex items-center gap-1"
+                        >
+                          <Plug2 size={10} className="opacity-70" />
+                          {plaidInstitution}
+                          {a.mask ? ` ··${a.mask}` : ''}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="text-muted-foreground capitalize">
+                      {ACCOUNT_TYPES.find((t) => t.value === a.type)?.label ?? a.type}
+                    </td>
+                    <td className="text-right">{fmtMoney(a.balance ?? 0)}</td>
+                    <td className="text-right">
+                      {a.apr != null ? `${(a.apr * 100).toFixed(2)}%` : '—'}
+                    </td>
+                    <td className="text-right">
+                      {a.creditLimit != null ? fmtMoney(a.creditLimit) : '—'}
+                    </td>
+                    <td className="text-right pr-1">
+                      <div className="inline-flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                        <button
+                          type="button"
+                          onClick={() => startEdit(a)}
+                          aria-label={
+                            isPlaidLinked
+                              ? 'Edit account (balance is owned by Plaid)'
+                              : 'Edit account'
+                          }
+                          className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDelete(a.id)}
+                          aria-label="Delete account"
+                          className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}

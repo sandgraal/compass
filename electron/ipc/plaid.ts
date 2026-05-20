@@ -22,12 +22,15 @@
  * spinner it was showing.
  */
 
+import { eq } from 'drizzle-orm'
 import {
   BrowserWindow,
   type Event,
   type IpcMain,
   type WebContentsWillNavigateEventParams
 } from 'electron'
+import { getDb } from '../db/client'
+import { plaidItems } from '../db/schema'
 import { PlaidNotConfiguredError, isPlaidConfigured } from '../integrations/plaid/client'
 import {
   type ExchangeResult,
@@ -56,6 +59,19 @@ export type PlaidStatus = {
   env: PlaidEnv | null
   hasSecret: boolean
   linkedItemIds: string[]
+}
+
+/**
+ * Per-Item summary returned to the renderer. Surfaces just the fields the
+ * Integrations card needs to render — no cursors, no tokens, no secrets.
+ */
+export type PlaidItemSummary = {
+  id: number
+  itemId: string
+  institutionId: string
+  institutionName: string
+  lastSyncedAt: number | null
+  errorCode: string | null
 }
 
 export function registerPlaidHandlers(ipcMain: IpcMain): void {
@@ -98,7 +114,38 @@ export function registerPlaidHandlers(ipcMain: IpcMain): void {
       throw new Error('plaid:disconnect: itemId must be a non-empty string')
     }
     removeAccessToken(itemId)
+    // Also delete the plaid_items row so the Integrations card stops
+    // showing the institution. Access tokens (vault) and rows (SQLite)
+    // are paired — removing one and leaving the other is a bug magnet.
+    try {
+      getDb().delete(plaidItems).where(eq(plaidItems.itemId, itemId)).run()
+    } catch {
+      /* row might not exist yet (set-secret + start-link races); ignore */
+    }
     return { ok: true }
+  })
+
+  // List connected Items for the Integrations card. Returns DB metadata
+  // only — no tokens, no secrets, no cursors. The renderer joins this
+  // against `financeAccounts.plaidItemId` to render the "linked" badge.
+  ipcMain.handle('plaid:list-items', (): PlaidItemSummary[] => {
+    const rows = getDb()
+      .select({
+        id: plaidItems.id,
+        itemId: plaidItems.itemId,
+        institutionId: plaidItems.institutionId,
+        institutionName: plaidItems.institutionName,
+        lastSyncedAt: plaidItems.lastSyncedAt,
+        errorCode: plaidItems.errorCode
+      })
+      .from(plaidItems)
+      .all()
+    return rows.map((r) => ({
+      ...r,
+      // Serialize Date → epoch ms for the renderer; the preload bridge
+      // can't ship live Date objects across the IPC boundary.
+      lastSyncedAt: r.lastSyncedAt ? r.lastSyncedAt.getTime() : null
+    }))
   })
 }
 

@@ -42,6 +42,36 @@ vi.mock('../integrations/plaid/vault', () => ({
   listItemIds: listItemIdsMock
 }))
 
+// Lightweight DB mock — the new `plaid:list-items` handler reads
+// `plaid_items` rows, and `plaid:disconnect` deletes from `plaid_items`
+// after removing the vault entry. We capture the operations rather
+// than spin up a real in-memory SQLite — these are routing/contract
+// tests, not query tests.
+const dbDeleteSpy = vi.fn()
+type FakeRow = {
+  id: number
+  itemId: string
+  institutionId: string
+  institutionName: string
+  lastSyncedAt: Date | null
+  errorCode: string | null
+}
+let plaidItemsRows: FakeRow[] = []
+vi.mock('../db/client', () => ({
+  getDb: () => ({
+    select: () => ({
+      from: () => ({
+        all: () => plaidItemsRows
+      })
+    }),
+    delete: () => ({
+      where: () => ({
+        run: () => dbDeleteSpy()
+      })
+    })
+  })
+}))
+
 vi.mock('../integrations/plaid/client', async () => {
   // PlaidNotConfiguredError is a real class we need to instantiate in
   // some tests; everything else routes through the mocks.
@@ -68,6 +98,8 @@ beforeEach(() => {
   listItemIdsMock.mockReset().mockReturnValue([])
   isPlaidConfiguredMock.mockReset().mockReturnValue({ configured: false, env: null })
   createLinkTokenMock.mockReset()
+  dbDeleteSpy.mockReset()
+  plaidItemsRows = []
 })
 
 afterEach(() => {
@@ -284,5 +316,90 @@ describe('registerPlaidHandlers — plaid:start-link (error paths)', () => {
       errorCode: 'LINK_START_FAILED',
       errorMessage: 'socket hang up'
     })
+  })
+})
+
+// ─── plaid:list-items (Phase 4.6 PR 5) ───────────────────────────────────────
+
+describe('registerPlaidHandlers — plaid:list-items', () => {
+  it('returns an empty array when no Items are connected', async () => {
+    const { ipc, handlers } = makeFakeIpc()
+    registerPlaidHandlers(ipc)
+    const out = await invoke(handlers.get('plaid:list-items')!)
+    expect(out).toEqual([])
+  })
+
+  it('serializes lastSyncedAt Date → epoch ms across the IPC boundary', async () => {
+    // The renderer can't receive live Date instances via structured clone
+    // through contextBridge; the handler must hand back a plain number.
+    const ts = new Date('2026-05-20T15:00:00Z')
+    plaidItemsRows = [
+      {
+        id: 1,
+        itemId: 'item-chase',
+        institutionId: 'ins_3',
+        institutionName: 'Chase',
+        lastSyncedAt: ts,
+        errorCode: null
+      }
+    ]
+    const { ipc, handlers } = makeFakeIpc()
+    registerPlaidHandlers(ipc)
+    const out = (await invoke(handlers.get('plaid:list-items')!)) as Array<{
+      lastSyncedAt: number | null
+    }>
+    expect(out).toHaveLength(1)
+    expect(out[0].lastSyncedAt).toBe(ts.getTime())
+    expect(typeof out[0].lastSyncedAt).toBe('number')
+  })
+
+  it('passes null lastSyncedAt straight through', async () => {
+    plaidItemsRows = [
+      {
+        id: 2,
+        itemId: 'item-new',
+        institutionId: 'ins_3',
+        institutionName: 'Chase',
+        lastSyncedAt: null,
+        errorCode: null
+      }
+    ]
+    const { ipc, handlers } = makeFakeIpc()
+    registerPlaidHandlers(ipc)
+    const out = (await invoke(handlers.get('plaid:list-items')!)) as Array<{
+      lastSyncedAt: number | null
+    }>
+    expect(out[0].lastSyncedAt).toBeNull()
+  })
+
+  it('surfaces errorCode so the UI can render a re-auth CTA', async () => {
+    plaidItemsRows = [
+      {
+        id: 3,
+        itemId: 'item-broken',
+        institutionId: 'ins_3',
+        institutionName: 'Chase',
+        lastSyncedAt: null,
+        errorCode: 'ITEM_LOGIN_REQUIRED'
+      }
+    ]
+    const { ipc, handlers } = makeFakeIpc()
+    registerPlaidHandlers(ipc)
+    const out = (await invoke(handlers.get('plaid:list-items')!)) as Array<{
+      errorCode: string | null
+    }>
+    expect(out[0].errorCode).toBe('ITEM_LOGIN_REQUIRED')
+  })
+})
+
+// ─── plaid:disconnect — also deletes the SQLite row (Phase 4.6 PR 5) ─────────
+
+describe('registerPlaidHandlers — plaid:disconnect row deletion', () => {
+  it('deletes the plaid_items row in addition to removing the vault token', async () => {
+    const { ipc, handlers } = makeFakeIpc()
+    registerPlaidHandlers(ipc)
+    await invoke(handlers.get('plaid:disconnect')!, 'item-a')
+    expect(removeAccessTokenMock).toHaveBeenCalledWith('item-a')
+    expect(dbDeleteSpy).toHaveBeenCalledOnce()
   })
 })

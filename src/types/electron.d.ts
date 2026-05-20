@@ -388,6 +388,16 @@ declare global {
           | { ok: false; cancelled: false; errorCode: string | null; errorMessage: string | null }
         >
         disconnect(itemId: string): Promise<{ ok: true }>
+        listItems(): Promise<
+          Array<{
+            id: number
+            itemId: string
+            institutionId: string
+            institutionName: string
+            lastSyncedAt: number | null
+            errorCode: string | null
+          }>
+        >
       }
       vault: {
         getCategories(): Promise<VaultCategory[]>

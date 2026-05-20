@@ -50,6 +50,14 @@ const INTEGRATIONS: IntegrationConfig[] = [
     scopes: ['local:ics'],
     color: 'from-zinc-400/20 to-zinc-600/20',
     logo: ''
+  },
+  {
+    id: 'plaid',
+    name: 'Plaid',
+    description: 'Bank balances + transactions via Plaid Link. Tokens encrypted on disk.',
+    scopes: ['transactions:read', 'accounts:read'],
+    color: 'from-blue-500/20 to-indigo-500/20',
+    logo: '$'
   }
 ]
 
@@ -85,14 +93,6 @@ const UPCOMING_INTEGRATIONS: IntegrationConfig[] = [
     scopes: ['messages:read'],
     color: 'from-green-500/20 to-teal-500/20',
     logo: '#'
-  },
-  {
-    id: 'plaid',
-    name: 'Plaid',
-    description: 'Read-only bank & investment balance aggregation.',
-    scopes: ['transactions:read'],
-    color: 'from-blue-500/20 to-indigo-500/20',
-    logo: '$'
   }
 ]
 
@@ -117,6 +117,28 @@ export default function Integrations(): JSX.Element {
     clientSecret: string
   } | null>(null)
   const [googleCredsConfigured, setGoogleCredsConfigured] = useState(false)
+  // Plaid state. `status` mirrors `window.api.plaid.getStatus()` (SDK config
+  // + per-env secret presence); `items` is the list of connected Items
+  // (renders each as a sub-row inside the Plaid card). Null = not yet
+  // loaded; we render a loading placeholder for one tick.
+  const [plaidStatus, setPlaidStatus] = useState<{
+    configured: boolean
+    env: 'sandbox' | 'production' | null
+    hasSecret: boolean
+  } | null>(null)
+  const [plaidItems, setPlaidItems] = useState<
+    Array<{
+      id: number
+      itemId: string
+      institutionId: string
+      institutionName: string
+      lastSyncedAt: number | null
+      errorCode: string | null
+    }>
+  >([])
+  // Inline "set secret" form for Plaid. Mirrors the GitHub PAT / Google
+  // credentials pattern from earlier PRs.
+  const [plaidSecretInput, setPlaidSecretInput] = useState<string | null>(null)
   const { toast } = useToast()
   const confirm = useConfirm()
 
@@ -143,6 +165,8 @@ export default function Integrations(): JSX.Element {
       .catch(() => {
         /* leave at default false */
       })
+
+    void loadPlaid()
 
     // Load persisted sync log from DB on mount
     window.api.sync
@@ -204,6 +228,24 @@ export default function Integrations(): JSX.Element {
       setGoogleCredsInput({ clientId: '', clientSecret: '' })
       return
     }
+    // Plaid:
+    //   - SDK not configured (~/.config/compass/plaid.env missing) → noop
+    //     with a toast pointing at docs; the file is currently dev-only,
+    //     a UI for it is a future PR (parallel to the Google credentials work).
+    //   - Secret missing → open the inline secret form.
+    //   - Otherwise → start Plaid Link (the child window flow from PR 3).
+    if (service === 'plaid') {
+      if (!plaidStatus?.configured) {
+        toast('Plaid SDK not configured. See docs/finance/plaid-integration.md.', 'error')
+        return
+      }
+      if (!plaidStatus.hasSecret) {
+        setPlaidSecretInput('')
+        return
+      }
+      void connectPlaidBank()
+      return
+    }
     setConnecting(service)
     try {
       // Apple Calendar is local-file based — no OAuth, just kick off a
@@ -226,6 +268,82 @@ export default function Integrations(): JSX.Element {
     } finally {
       setConnecting(null)
     }
+  }
+
+  // Refresh Plaid status + items list. Called on mount, after any Plaid
+  // action (set-secret, start-link, disconnect, sync), and after any sync
+  // event. Cheap: two small IPC round-trips against in-process DB.
+  async function loadPlaid(): Promise<void> {
+    const api = typeof window !== 'undefined' ? window.api : undefined
+    if (!api?.plaid) return
+    try {
+      const [status, items] = await Promise.all([api.plaid.getStatus(), api.plaid.listItems()])
+      setPlaidStatus({
+        configured: status.configured,
+        env: status.env,
+        hasSecret: status.hasSecret
+      })
+      setPlaidItems(items)
+    } catch {
+      /* IPC may not be wired in non-electron contexts (Storybook etc.); ignore */
+    }
+  }
+
+  async function submitPlaidSecret() {
+    if (typeof plaidSecretInput !== 'string') return
+    const secret = plaidSecretInput.trim()
+    if (!secret) {
+      toast('Paste your Plaid secret first.', 'error')
+      return
+    }
+    if (!plaidStatus?.env) {
+      toast('Plaid env not configured (~/.config/compass/plaid.env missing).', 'error')
+      return
+    }
+    setConnecting('plaid')
+    try {
+      await window.api.plaid.setSecret(plaidStatus.env, secret)
+      toast('Plaid secret saved.', 'success')
+      setPlaidSecretInput(null)
+      await loadPlaid()
+    } catch (err) {
+      toast(`Couldn't save secret: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      setConnecting(null)
+    }
+  }
+
+  async function connectPlaidBank() {
+    setConnecting('plaid')
+    try {
+      const r = await window.api.plaid.startLink()
+      if (r.ok) {
+        toast(`Connected ${r.result.institutionName ?? 'institution'}.`, 'success')
+        await loadPlaid()
+        await loadStatuses()
+        triggerSync('plaid')
+      } else if (r.cancelled) {
+        // User backed out — silent, this is a state not an error.
+      } else {
+        toast(`Plaid Link failed: ${r.errorMessage ?? r.errorCode ?? 'unknown'}`, 'error')
+      }
+    } finally {
+      setConnecting(null)
+    }
+  }
+
+  async function disconnectPlaidItem(itemId: string, institutionName: string) {
+    const ok = await confirm({
+      title: `Disconnect ${institutionName}?`,
+      description:
+        'Plaid will stop syncing this institution. Existing transactions stay in Compass. You can reconnect later.',
+      confirmLabel: 'Disconnect',
+      destructive: false
+    })
+    if (!ok) return
+    await window.api.plaid.disconnect(itemId)
+    toast(`Disconnected ${institutionName}.`, 'success')
+    await loadPlaid()
   }
 
   // Clear stored Google credentials and reopen the inline form. Used for
@@ -519,8 +637,14 @@ export default function Integrations(): JSX.Element {
       <div className="grid grid-cols-2 gap-4 mb-8">
         {INTEGRATIONS.map((integration) => {
           const status = statuses[integration.id]
-          const isConnected = status?.status === 'connected'
-          const hasError = status?.status === 'error'
+          const baseIsConnected = status?.status === 'connected'
+          const baseHasError = status?.status === 'error'
+          // Plaid's "connected" + "error" come from the per-Item state, not
+          // from the singleton `integrations` row — there can be 0 or many
+          // Items, and one bad Item shouldn't poison the whole card.
+          const isConnected = integration.id === 'plaid' ? plaidItems.length > 0 : baseIsConnected
+          const hasError =
+            integration.id === 'plaid' ? plaidItems.some((i) => i.errorCode) : baseHasError
           const isSyncing = syncing.has(integration.id)
 
           return (
@@ -614,6 +738,117 @@ export default function Integrations(): JSX.Element {
                 <p className="text-xs text-red-400 mb-3 bg-red-500/10 px-2 py-1 rounded">
                   {status.errorMessage}
                 </p>
+              )}
+
+              {/* ─── Plaid card body ───────────────────────────────────────
+                  Custom subsection that renders inside the standard card
+                  shell. Two states:
+                    1. No secret stored → inline secret form (sandbox vs
+                       production picked up from the SDK config).
+                    2. Has secret → list of connected Items as sub-rows
+                       with last-synced timestamp, error CTA if applicable,
+                       and a "Connect new bank" anchor.
+                  Both branches assume the Plaid SDK is configured — the
+                  outer Connect button noop+toasts if it isn't. */}
+              {integration.id === 'plaid' && plaidStatus && (
+                <div className="mb-3 space-y-2">
+                  {!plaidStatus.configured && (
+                    <div className="text-xs text-muted-foreground p-3 bg-background/40 border border-border rounded-lg leading-relaxed">
+                      Plaid SDK not configured. Create{' '}
+                      <code className="bg-secondary px-1 py-0.5 rounded font-mono">
+                        ~/.config/compass/plaid.env
+                      </code>{' '}
+                      with <code className="font-mono">PLAID_CLIENT_ID</code> +{' '}
+                      <code className="font-mono">PLAID_ENV</code> (
+                      <code className="font-mono">sandbox</code> or{' '}
+                      <code className="font-mono">production</code>) and relaunch.
+                    </div>
+                  )}
+                  {plaidStatus.configured && plaidSecretInput !== null && (
+                    <div className="p-3 bg-background/40 border border-border rounded-lg space-y-2">
+                      <label
+                        htmlFor="plaid-secret-input"
+                        className="block text-xs text-muted-foreground"
+                      >
+                        Plaid secret ({plaidStatus.env})
+                      </label>
+                      <input
+                        id="plaid-secret-input"
+                        type="password"
+                        placeholder="Paste your Plaid Sandbox Secret here"
+                        aria-label="Plaid API secret"
+                        value={plaidSecretInput}
+                        onChange={(e) => setPlaidSecretInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') void submitPlaidSecret()
+                          else if (e.key === 'Escape') setPlaidSecretInput(null)
+                        }}
+                        className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void submitPlaidSecret()}
+                          disabled={connecting === 'plaid' || !plaidSecretInput.trim()}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
+                        >
+                          <Plug2 size={11} />
+                          {connecting === 'plaid' ? 'Saving…' : 'Save secret'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPlaidSecretInput(null)}
+                          className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {/* Connected Items list. Always shown when the secret is
+                      configured AND the secret form isn't open. */}
+                  {plaidStatus.configured && plaidStatus.hasSecret && plaidSecretInput === null && (
+                    <div className="space-y-1.5">
+                      {plaidItems.length === 0 && (
+                        <p className="text-xs text-muted-foreground">No banks connected yet.</p>
+                      )}
+                      {plaidItems.map((item) => (
+                        <div
+                          key={item.itemId}
+                          className="flex items-center justify-between gap-2 px-2 py-1.5 bg-background/40 border border-border rounded text-xs"
+                        >
+                          <div className="min-w-0">
+                            <div className="font-medium text-foreground truncate">
+                              {item.institutionName}
+                            </div>
+                            <div className="text-muted-foreground">
+                              {item.errorCode ? (
+                                <span className="text-red-400">
+                                  {item.errorCode === 'ITEM_LOGIN_REQUIRED'
+                                    ? 'Re-authentication required'
+                                    : item.errorCode}
+                                </span>
+                              ) : item.lastSyncedAt ? (
+                                `Last synced ${formatRelative(new Date(item.lastSyncedAt))}`
+                              ) : (
+                                'Never synced'
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void disconnectPlaidItem(item.itemId, item.institutionName)
+                            }
+                            className="shrink-0 text-xs px-2 py-1 text-muted-foreground hover:text-destructive transition-colors"
+                          >
+                            Disconnect
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Inline Google credentials form. Replaces the .env workflow
@@ -763,7 +998,11 @@ export default function Integrations(): JSX.Element {
               )}
 
               <div className="flex gap-2">
-                {isConnected ? (
+                {/* Plaid is multi-Item: Disconnect is a per-row button inside
+                    the card body, NOT this card-level Disconnect. The
+                    card-level button is always "Connect bank" so the user
+                    can add additional institutions. */}
+                {isConnected && integration.id !== 'plaid' ? (
                   <button
                     type="button"
                     onClick={() => disconnect(integration.id)}
@@ -772,7 +1011,8 @@ export default function Integrations(): JSX.Element {
                     Disconnect
                   </button>
                 ) : (integration.id === 'github' && githubPatInput !== null) ||
-                  (integration.id === 'google' && googleCredsInput !== null) ? null : (
+                  (integration.id === 'google' && googleCredsInput !== null) ||
+                  (integration.id === 'plaid' && plaidSecretInput !== null) ? null : (
                   <button
                     type="button"
                     onClick={() => connect(integration.id)}
@@ -780,7 +1020,11 @@ export default function Integrations(): JSX.Element {
                     className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
                   >
                     <Plug2 size={11} />
-                    {connecting === integration.id ? 'Connecting…' : 'Connect'}
+                    {connecting === integration.id
+                      ? 'Connecting…'
+                      : integration.id === 'plaid' && plaidItems.length > 0
+                        ? 'Connect bank'
+                        : 'Connect'}
                   </button>
                 )}
                 {/* Edit credentials — visible whenever Google creds are stored
