@@ -25,9 +25,7 @@ is the canonical status tracker; this folder holds the per-feature briefs.
 3. **Follow the agent-orchestration conventions** in
    [`../agent-orchestration.md`](../agent-orchestration.md). Use the
    `add-ipc-handler` / `add-page` / `safe-commit` skills where they apply.
-4. **Open the PR with a Changeset** (see `.changeset/`) describing the user-
-   visible change.
-5. **`security-auditor` is a merge gate** for anything that touches token
+4. **`security-auditor` is a merge gate** for anything that touches token
    storage, vault, CSP, or IPC sanitization (notably 4.6 Plaid).
 
 ## Cross-cutting concerns

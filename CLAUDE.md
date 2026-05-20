@@ -28,7 +28,6 @@ All user data stays on disk; only OAuth tokens leave the machine (and only to Go
 ## Commit / PR convention
 - Branch: `feat/<short-slug>` or `fix/<short-slug>` or `chore/<short-slug>`
 - Before commit: `npm run typecheck && npm run check && npm test`
-- One Changeset per PR (`.changeset/*.md` describing user-visible change + bump type)
 - Co-author Claude on every commit Claude touched
 
 ## Release flow (shipping a new version to the installed app)

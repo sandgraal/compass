@@ -26,6 +26,5 @@ Compass is a local-first personal life OS built with Electron 41, React 18, Type
 
 - Fresh clones need `npm install` before validation.
 - For code or config changes, prefer `npm run typecheck`, `npm run check`, `npm test`, and `npm run build` unless the diff is docs-only.
-- User-facing changes should include a `.changeset/*.md` entry.
 - PR descriptions should include a test plan with manual or automated verification steps.
 - UI changes should include a screenshot or recording.

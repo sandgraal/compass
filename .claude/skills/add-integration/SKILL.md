@@ -139,13 +139,7 @@ In `electron/main.ts`, add the API hostname to `connect-src`. Don't forget the O
 npm run typecheck && npm run check && npm test && npm run build
 ```
 
-### 10. Changeset
-```bash
-npx changeset
-# minor bump, "Add <Service> integration with calendar/<thing> sync"
-```
-
-### 11. PR
+### 10. PR
 Use the standard template. Include:
 - Screenshots of the integration card
 - Setup steps the user needs to follow

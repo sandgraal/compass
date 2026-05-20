@@ -21,10 +21,6 @@ Subject ≤ 72 chars, lowercase after the type, imperative mood.
 
 <!-- Required for any UI change. Drop a GIF or PNG. -->
 
-## Changeset
-
-- [ ] I included a `.changeset/*.md` describing the user-visible change
-
 ## Security & data
 
 - [ ] No new `alert()`, `confirm()`, or `prompt()` calls (use the unified primitives)
