@@ -414,9 +414,12 @@ export default function Integrations(): JSX.Element {
                 </li>
                 <li>
                   Copy the token (starts with{' '}
-                  <code className="bg-secondary px-1 py-0.5 rounded font-mono">ghp_</code>) and
-                  paste it into Compass. The token is encrypted with the OS Keychain and never
-                  leaves your machine.
+                  <code className="bg-secondary px-1 py-0.5 rounded font-mono">ghp_</code> or{' '}
+                  <code className="bg-secondary px-1 py-0.5 rounded font-mono">
+                    github_pat_
+                  </code>
+                  ) and paste it into Compass. The token is encrypted with the OS Keychain and
+                  never leaves your machine.
                 </li>
               </ol>
             </div>
