@@ -403,3 +403,101 @@ describe('syncPlaid — unknown Item', () => {
     expect(res.cursorAdvanced).toBe(false)
   })
 })
+
+describe('syncPlaid — page-cap protection', () => {
+  it('treats hitting the MAX_PAGES cap as a partial sync, not a clean finish', async () => {
+    // Defensive against a Plaid response that returns has_more=true forever
+    // (or with a stuck cursor). The cap is 50; we simulate by always
+    // returning has_more=true. After the loop exits we must:
+    //   - NOT clear `plaid_items.error_code`
+    //   - NOT update `plaid_items.last_synced_at`
+    //   - return an errorMessage describing the partial state
+    //   - still write a sync_events row so the user sees what happened
+    seedItem('item-chase')
+    seedAccount('Chase Checking', 'ACC-001')
+    seedIntegration()
+    // Pre-set an error code so we can verify it's NOT cleared on partial.
+    sqlite
+      .prepare("UPDATE plaid_items SET error_code = 'ITEM_LOGIN_REQUIRED' WHERE item_id = ?")
+      .run('item-chase')
+
+    let pageNum = 0
+    const { syncPlaid } = await import('./sync')
+    const res = await syncPlaid('item-chase', {
+      fetchPage: async () => {
+        pageNum++
+        return {
+          added: [],
+          modified: [],
+          removed: [],
+          next_cursor: `cursor-${pageNum}`,
+          has_more: true // never satisfies the loop exit
+        }
+      }
+    })
+
+    expect(res.errorMessage).toMatch(/page cap/i)
+    expect(getItem('item-chase').error_code).toBe('ITEM_LOGIN_REQUIRED') // untouched
+    expect(getItem('item-chase').last_synced_at).toBeNull() // untouched
+    expect(pageNum).toBeLessThanOrEqual(50) // capped, not infinite
+
+    const evt = sqlite.prepare('SELECT errors FROM sync_events ORDER BY id DESC LIMIT 1').get() as {
+      errors: string | null
+    }
+    expect(evt.errors).toMatch(/page cap/i)
+  })
+})
+
+describe('syncPlaid — sync_events FK correctness', () => {
+  it('writes sync_events.integration_id pointing at integrations.id, not plaid_items.id', async () => {
+    // Regression: a prior implementation passed plaid_items.id as the
+    // fallback for integration_id when the integrations row was missing,
+    // which would create an invalid FK. Now: the lookup happens once at
+    // the top of syncPlaid and null is passed if no integrations row
+    // exists. Cover both branches.
+    seedItem('item-chase')
+    seedAccount('Chase Checking', 'ACC-001')
+    // Insert the integrations row with a known id different from plaid_items.id.
+    sqlite
+      .prepare("INSERT INTO integrations (id, service, status) VALUES (42, 'plaid', 'connected')")
+      .run()
+
+    const { syncPlaid } = await import('./sync')
+    await syncPlaid('item-chase', {
+      fetchPage: async () => ({
+        added: [makeTxn({ transaction_id: 'TX-A', merchant_name: 'A' })],
+        modified: [],
+        removed: [],
+        next_cursor: 'cursor-end',
+        has_more: false
+      })
+    })
+
+    const evt = sqlite
+      .prepare('SELECT integration_id FROM sync_events ORDER BY id DESC LIMIT 1')
+      .get() as { integration_id: number | null }
+    expect(evt.integration_id).toBe(42) // matches integrations.id, NOT plaid_items.id (which is 1)
+  })
+
+  it('writes null integration_id when no integrations row exists', async () => {
+    // No seedIntegration() — verifies the null path doesn't crash.
+    seedItem('item-chase')
+    seedAccount('Chase Checking', 'ACC-001')
+
+    const { syncPlaid } = await import('./sync')
+    await syncPlaid('item-chase', {
+      fetchPage: async () => ({
+        added: [],
+        modified: [],
+        removed: [],
+        next_cursor: 'cursor-end',
+        has_more: false
+      })
+    })
+
+    const evt = sqlite
+      .prepare('SELECT integration_id FROM sync_events ORDER BY id DESC LIMIT 1')
+      .get() as { integration_id: number | null }
+    expect(evt.integration_id).toBeNull()
+  })
+})

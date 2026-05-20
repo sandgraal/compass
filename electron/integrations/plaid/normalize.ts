@@ -43,9 +43,10 @@ export type PlaidItemContext = {
 
 /**
  * Build the `sourceFile` token Compass uses to identify a Plaid-origin row.
- * The format is contractual — the `removed` branch of `syncPlaid` does a
- * suffix match against `transaction_id` to find rows to delete, and the
- * `accounts/` UI surfaces the institution name from the same string.
+ * The format is contractual — the `removed` branch of `syncPlaid` matches
+ * rows by EQUALITY on the full `sourceFile` string (built from the same
+ * helper, ensuring round-trip stability), and the `accounts/` UI surfaces
+ * the institution name from the same string.
  *
  * Exported so the sync loop can build the same token without re-implementing
  * the format.

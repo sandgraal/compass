@@ -140,6 +140,13 @@ function buildAccountLookup(institutionName: string): (plaidAccountId: string) =
 }
 
 /**
+ * Categorization rules passed into `applyPage`. Read once at the top of
+ * `syncPlaid` and reused across every page so we don't re-query
+ * `categorization_rules` on each Plaid response.
+ */
+type CategorizeRule = { pattern: string; category: string; subcategory: string | null }
+
+/**
  * Apply one page of Plaid sync results to the DB. Pure-ish — it reads the
  * existing hash set up-front and uses `ON CONFLICT DO NOTHING` for the
  * insert path, so concurrent syncs across multiple Items can't trip over
@@ -148,7 +155,8 @@ function buildAccountLookup(institutionName: string): (plaidAccountId: string) =
 function applyPage(
   page: SyncPage,
   itemContext: { institutionName: string },
-  accountNameFor: (plaidAccountId: string) => string
+  accountNameFor: (plaidAccountId: string) => string,
+  rules: CategorizeRule[]
 ): {
   added: number
   modified: number
@@ -181,19 +189,9 @@ function applyPage(
     accountNameFor
   )
   const all = [...addedRaw, ...modifiedRaw]
-  // Read user rules in the same shape `categorize()` expects. Empty array
-  // is fine — the smart fallbacks inside categorize() still fire (CR ATM
-  // regex, Rocket Money rm:* mapping).
-  const ruleRows = db
-    .select({
-      pattern: categorizationRules.pattern,
-      category: categorizationRules.category,
-      subcategory: categorizationRules.subcategory
-    })
-    .from(categorizationRules)
-    .orderBy(categorizationRules.priority)
-    .all()
-  const tagged = tagTax(tagGeoAndPurpose(categorize(all, ruleRows)))
+  // Rules were loaded once by syncPlaid and passed in — avoids a DB round-trip
+  // per page on multi-page syncs.
+  const tagged = tagTax(tagGeoAndPurpose(categorize(all, rules)))
 
   // 3. Apply — added uses insert-ignore-on-conflict, modified uses upsert
   //    (Plaid's `modified` array means "I had this txn before but a field
@@ -321,15 +319,43 @@ export async function syncPlaid(
   }
 
   const accountNameFor = buildAccountLookup(item.institutionName)
+  // Read categorization rules ONCE for the whole sync, not per page. Empty
+  // array is fine — the smart fallbacks inside categorize() still fire
+  // (CR ATM regex, Rocket Money rm:* mapping).
+  const rules = db
+    .select({
+      pattern: categorizationRules.pattern,
+      category: categorizationRules.category,
+      subcategory: categorizationRules.subcategory
+    })
+    .from(categorizationRules)
+    .orderBy(categorizationRules.priority)
+    .all()
+  // Look up the integrations.id ONCE for sync_events writes. sync_events.
+  // integration_id is a FK to integrations.id (NOT plaid_items.id); passing
+  // a plaid_items PK here would create an invalid FK and the Sync Log UI
+  // would render "unknown" service.
+  const integrationsRow = db
+    .select({ id: integrations.id })
+    .from(integrations)
+    .where(eq(integrations.service, 'plaid'))
+    .get()
+  const integrationId = integrationsRow?.id ?? null
+
   const totals = { added: 0, modified: 0, removed: 0, duplicates: 0 }
   const allErrors: Array<{ transactionId: string; message: string }> = []
   let cursor = getCursor(plaidItemId)
   let cursorAdvanced = false
 
-  // 3. Page loop. Bounded at 50 to avoid an infinite loop if Plaid ever
-  //    returns has_more=true with the same cursor (we've never seen this
-  //    happen, but the bound is cheap insurance).
-  for (let i = 0; i < 50; i++) {
+  // 3. Page loop. Bounded at MAX_PAGES to defend against a Plaid response
+  //    that returns has_more=true forever with the same cursor (we've never
+  //    seen this happen, but the bound is cheap insurance). Track whether
+  //    we exited because Plaid said `has_more === false` (real completion)
+  //    or because we hit the cap (partial sync — leave error_code intact
+  //    and don't pretend the Item is fully synced).
+  const MAX_PAGES = 50
+  let completed = false
+  for (let i = 0; i < MAX_PAGES; i++) {
     let page: SyncPage
     try {
       page = await fetchPage(cursor)
@@ -342,7 +368,7 @@ export async function syncPlaid(
       if (errorCode) {
         db.update(plaidItems).set({ errorCode }).where(eq(plaidItems.itemId, plaidItemId)).run()
       }
-      writeSyncEvent(item.id, totals.added + totals.modified, message)
+      writeSyncEvent(integrationId, totals.added + totals.modified, message)
       return {
         itemId: plaidItemId,
         ...totals,
@@ -352,7 +378,12 @@ export async function syncPlaid(
       }
     }
 
-    const pageResult = applyPage(page, { institutionName: item.institutionName }, accountNameFor)
+    const pageResult = applyPage(
+      page,
+      { institutionName: item.institutionName },
+      accountNameFor,
+      rules
+    )
     totals.added += pageResult.added
     totals.modified += pageResult.modified
     totals.removed += pageResult.removed
@@ -364,30 +395,46 @@ export async function syncPlaid(
     cursor = page.next_cursor
     cursorAdvanced = true
 
-    if (!page.has_more) break
+    if (!page.has_more) {
+      completed = true
+      break
+    }
   }
 
-  // 4. Clear any prior error_code on success, run the CR ATM split if we
-  //    added rows, update integrations.lastSyncedAt, write sync_events.
-  db.update(plaidItems)
-    .set({ errorCode: null, lastSyncedAt: new Date() })
-    .where(eq(plaidItems.itemId, plaidItemId))
-    .run()
-
+  // 4. Always: run the CR ATM split if we added rows, write sync_events.
+  //    On real completion: clear any prior error_code + stamp lastSyncedAt
+  //    on both plaid_items and integrations.
+  //    On cap-hit: leave error_code untouched, record a partial-sync error
+  //    so the next sync resumes from the persisted cursor.
   if (totals.added > 0) applyAtmSplit(db)
 
-  db.update(integrations)
-    .set({ lastSyncedAt: new Date(), status: 'connected', errorMessage: null })
-    .where(eq(integrations.service, 'plaid'))
-    .run()
+  if (completed) {
+    db.update(plaidItems)
+      .set({ errorCode: null, lastSyncedAt: new Date() })
+      .where(eq(plaidItems.itemId, plaidItemId))
+      .run()
+    db.update(integrations)
+      .set({ lastSyncedAt: new Date(), status: 'connected', errorMessage: null })
+      .where(eq(integrations.service, 'plaid'))
+      .run()
+    writeSyncEvent(
+      integrationId,
+      totals.added + totals.modified,
+      allErrors.length > 0 ? JSON.stringify(allErrors) : null
+    )
+    return { itemId: plaidItemId, ...totals, cursorAdvanced }
+  }
 
-  writeSyncEvent(
-    item.id,
-    totals.added + totals.modified,
-    allErrors.length > 0 ? JSON.stringify(allErrors) : null
-  )
-
-  return { itemId: plaidItemId, ...totals, cursorAdvanced }
+  // Partial sync (hit MAX_PAGES cap). Cursor is persisted at the last
+  // applied page, so the next run resumes correctly.
+  const partialMessage = `Plaid sync hit ${MAX_PAGES}-page cap; partial — next sync will resume from cursor.`
+  writeSyncEvent(integrationId, totals.added + totals.modified, partialMessage)
+  return {
+    itemId: plaidItemId,
+    ...totals,
+    cursorAdvanced,
+    errorMessage: partialMessage
+  }
 }
 
 /**
@@ -430,24 +477,21 @@ function extractPlaidErrorCode(err: unknown): string | null {
   return PERSISTENT.has(code) ? code : null
 }
 
+/**
+ * Insert a `sync_events` row. `integrationId` MUST be a value from
+ * `integrations.id` (the schema FK), or null if no integrations row exists
+ * yet for Plaid. Callers must NOT pass `plaid_items.id` here — that would
+ * create an invalid FK + show "unknown" in the Sync Log UI.
+ */
 function writeSyncEvent(
-  integrationDbId: number | null,
+  integrationId: number | null,
   recordsUpdated: number,
   errors: string | null
 ): void {
   const db = getDb()
-  // sync_events.integrationId references integrations.id, not plaid_items.id.
-  // Pass the integrations row id (looked up by service='plaid'); if Plaid
-  // isn't yet rowed in integrations, write null and let the row land
-  // without a foreign-key value.
-  const integrationsRow = db
-    .select({ id: integrations.id })
-    .from(integrations)
-    .where(eq(integrations.service, 'plaid'))
-    .get()
   db.insert(syncEvents)
     .values({
-      integrationId: integrationsRow?.id ?? integrationDbId,
+      integrationId,
       syncedAt: new Date(),
       recordsUpdated,
       errors
