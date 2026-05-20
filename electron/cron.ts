@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { BrowserWindow } from 'electron'
 import cron from 'node-cron'
+import { schedulePlaidDailySync, stopPlaidDailySync } from './cron-plaid'
 import { getDb, getRawSqlite } from './db/client'
 import { appSettings, integrations } from './db/schema'
 import { captureSnapshots } from './integrations/finance-snapshot'
@@ -68,6 +69,9 @@ function stopAllJobs(): void {
   scheduledTasks.clear()
   snapshotTask?.stop()
   snapshotTask = null
+  // Plaid daily task is scheduled separately (see cron-plaid.ts for the
+  // rationale on why it's not driven by the per-integration interval).
+  stopPlaidDailySync()
 }
 
 function cronExpressionForIntervalMinutes(intervalMinutes: number): string | null {
@@ -119,6 +123,10 @@ export function startCronJobs(): void {
     const rows = db.select().from(integrations).all()
     const fallback = getDefaultIntervalMinutes()
     for (const row of rows) {
+      // Plaid uses its own daily-at-06:00 schedule rather than the
+      // per-integration interval mechanism (the 15min default is wrong
+      // for Plaid; see cron-plaid.ts for rationale).
+      if (row.service === 'plaid') continue
       const interval = row.syncIntervalMinutes ?? fallback
       scheduleForService(row.service, interval)
     }
@@ -126,6 +134,7 @@ export function startCronJobs(): void {
     // DB not ready yet — caller will likely call restartCronJobs() once init completes.
   }
   scheduleFinanceSnapshot()
+  schedulePlaidDailySync()
 }
 
 export function restartCronJobs(): void {
