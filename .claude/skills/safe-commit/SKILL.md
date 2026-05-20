@@ -64,13 +64,7 @@ EOF
 )"
 ```
 
-### 6. Optional: Changeset
-If the change is user-facing (not just docs/infra), suggest:
-```bash
-npx changeset
-```
-
-### 7. Report
+### 6. Report
 ```
 ✅ Committed <hash>: <subject>
    - <N> files changed
