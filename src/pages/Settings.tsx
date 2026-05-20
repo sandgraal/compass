@@ -789,7 +789,7 @@ const ASK_DEFAULT_MODEL: Record<AskProvider, string> = {
 // own credentials in case Anthropic/OpenAI change prefix schemes later.
 function keyPrefixLooksWrong(provider: AskProvider, raw: string): boolean {
   if (provider === 'anthropic') return !raw.startsWith('sk-ant-')
-  return !raw.startsWith('sk-')
+  return !raw.startsWith('sk-') || raw.startsWith('sk-ant-')
 }
 
 function AskCompassSettings(): JSX.Element {
