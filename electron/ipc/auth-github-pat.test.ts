@@ -167,6 +167,28 @@ describe('auth:connect-github-pat', () => {
     expect(JSON.parse(inserted.row.scopes)).toEqual(['fine-grained'])
   })
 
+  it('fine-grained PAT (empty x-oauth-scopes header) also resolves to the sentinel', async () => {
+    // GitHub sometimes sends `x-oauth-scopes: ` (empty value) for fine-grained
+    // tokens instead of omitting the header. Naïve `?? sentinel` chaining
+    // misses this because `.split(',').filter(Boolean)` returns `[]`, which
+    // is truthy. Regression coverage for that path.
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ login: 'fg-empty' }), {
+        status: 200,
+        headers: { 'x-oauth-scopes': '' }
+      })
+    )
+    const h = await registerAndGetHandler()
+    const token = `github_pat_${'e'.repeat(60)}`
+    const res = (await h({}, token)) as { success?: boolean }
+    expect(res.success).toBe(true)
+
+    const inserted = dbInsertSpy.mock.calls[0][0] as {
+      row: { scopes: string }
+    }
+    expect(JSON.parse(inserted.row.scopes)).toEqual(['fine-grained'])
+  })
+
   it('trims whitespace and accepts tokens with surrounding spaces', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ login: 'spacy' }), { status: 200 })
