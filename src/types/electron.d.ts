@@ -175,6 +175,9 @@ declare global {
       auth: {
         connectGoogle(): Promise<{ success?: boolean; error?: string }>
         connectGitHub(): Promise<{ success?: boolean; error?: string }>
+        connectGitHubWithPAT(
+          token: string
+        ): Promise<{ success?: boolean; login?: string; error?: string }>
         disconnect(service: string): Promise<{ success: boolean }>
         getStatus(): Promise<IntegrationStatus[]>
         getRedirectUris(): Promise<RedirectUris>

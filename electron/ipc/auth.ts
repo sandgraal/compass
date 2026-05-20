@@ -452,6 +452,84 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     }
   })
 
+  // PAT-based GitHub connect. Skips the OAuth dance entirely: user pastes a
+  // Personal Access Token, we validate it against /user, and store it in the
+  // same encrypted shape as an OAuth access_token (so syncGitHub doesn't care
+  // which way the credential was acquired). Much friendlier than walking a
+  // non-developer through registering an OAuth App.
+  //
+  // Token shape accepted:
+  //   - Classic PATs: `ghp_...` (typically 36+ chars, mixed alphanumeric)
+  //   - Fine-grained PATs: `github_pat_...` (longer, two-segment)
+  // Anything else fails the regex below before we even hit the network.
+  ipcMain.handle('auth:connect-github-pat', async (_event, token: string) => {
+    if (typeof token !== 'string') {
+      return { error: 'Token must be a string.' }
+    }
+    const trimmed = token.trim()
+    if (!/^(ghp_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{50,255})$/.test(trimmed)) {
+      return {
+        error:
+          "That doesn't look like a GitHub Personal Access Token. Expected a string starting with `ghp_` (classic) or `github_pat_` (fine-grained)."
+      }
+    }
+    try {
+      const userResp = await fetch('https://api.github.com/user', {
+        headers: {
+          Authorization: `Bearer ${trimmed}`,
+          Accept: 'application/vnd.github.v3+json',
+          'User-Agent': 'Compass'
+        }
+      })
+      if (userResp.status === 401) {
+        return { error: 'Token rejected by GitHub (401). It may be expired or revoked.' }
+      }
+      if (!userResp.ok) {
+        return { error: `GitHub responded with HTTP ${userResp.status}.` }
+      }
+      const user = (await userResp.json()) as { login?: string }
+      if (!user.login) {
+        return { error: 'GitHub returned a 200 with no `login` field — unexpected.' }
+      }
+
+      // Surface the granted scopes so the user can see at a glance what
+      // Compass can do with this token. Fine-grained PATs may omit this
+      // header or return it empty (their permissions live in a different
+      // format); fall back to the `fine-grained` sentinel in that case.
+      const rawScopes = userResp.headers.get('x-oauth-scopes')
+      const parsedScopes = rawScopes
+        ?.split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+      const grantedScopes =
+        parsedScopes && parsedScopes.length > 0 ? parsedScopes : ['fine-grained']
+
+      saveToken('github', { access_token: trimmed, auth_method: 'pat', login: user.login })
+
+      const db = getDb()
+      db.insert(integrations)
+        .values({
+          service: 'github',
+          connectedAt: new Date(),
+          status: 'connected',
+          scopes: JSON.stringify(grantedScopes)
+        })
+        .onConflictDoUpdate({
+          target: integrations.service,
+          set: {
+            connectedAt: new Date(),
+            status: 'connected',
+            scopes: JSON.stringify(grantedScopes)
+          }
+        })
+        .run()
+
+      return { success: true, login: user.login }
+    } catch (err) {
+      return { error: (err as Error).message }
+    }
+  })
+
   ipcMain.handle('auth:disconnect', async (_event, service: string) => {
     deleteToken(service)
     const db = getDb()

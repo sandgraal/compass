@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ExternalLink,
   Plug2,
   RefreshCw,
   XCircle
@@ -104,6 +105,10 @@ export default function Integrations(): JSX.Element {
   >([])
   const [setupOpen, setSetupOpen] = useState(false)
   const [redirectUris, setRedirectUris] = useState<{ google: string; github: string } | null>(null)
+  // Null = the inline PAT form is collapsed. String = it's open, with the
+  // current input value. Single-instance because the only PAT-connectable
+  // integration today is GitHub (Google's still OAuth).
+  const [githubPatInput, setGithubPatInput] = useState<string | null>(null)
   const { toast } = useToast()
   const confirm = useConfirm()
 
@@ -168,6 +173,13 @@ export default function Integrations(): JSX.Element {
   async function connect(service: string) {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
+    // GitHub now uses Personal Access Tokens by default — much friendlier
+    // than walking a non-developer through registering an OAuth App. Open
+    // the inline PAT form instead of starting the OAuth dance.
+    if (service === 'github') {
+      setGithubPatInput('')
+      return
+    }
     setConnecting(service)
     try {
       // Apple Calendar is local-file based — no OAuth, just kick off a
@@ -180,16 +192,36 @@ export default function Integrations(): JSX.Element {
         await loadStatuses()
         return
       }
-      const result =
-        service === 'google'
-          ? await window.api.auth.connectGoogle()
-          : await window.api.auth.connectGitHub()
+      const result = await window.api.auth.connectGoogle()
       if (result.error) {
         toast(`Connection failed: ${result.error}`, 'error')
       } else {
         await loadStatuses()
         triggerSync(service)
       }
+    } finally {
+      setConnecting(null)
+    }
+  }
+
+  async function submitGitHubPat() {
+    if (typeof githubPatInput !== 'string') return
+    const trimmed = githubPatInput.trim()
+    if (!trimmed) {
+      toast('Paste a Personal Access Token first.', 'error')
+      return
+    }
+    setConnecting('github')
+    try {
+      const r = await window.api.auth.connectGitHubWithPAT(trimmed)
+      if (r.error) {
+        toast(`Connection failed: ${r.error}`, 'error')
+        return
+      }
+      toast(`Connected as @${r.login ?? 'github user'}`, 'success')
+      setGithubPatInput(null)
+      await loadStatuses()
+      triggerSync('github')
     } finally {
       setConnecting(null)
     }
@@ -270,10 +302,17 @@ export default function Integrations(): JSX.Element {
             className="px-5 py-4 border-t border-border bg-card/50 space-y-5 text-sm text-muted-foreground"
           >
             <p>
-              Compass uses OAuth to connect to Google and GitHub. You need to create your own OAuth
-              app credentials — they stay in your local{' '}
+              <strong className="text-foreground">Google</strong> uses OAuth, which means
+              registering your own OAuth app once (steps below). Credentials live in your local{' '}
+              <code className="text-xs bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code> and
+              never leave your machine.
+            </p>
+            <p>
+              <strong className="text-foreground">GitHub</strong> uses a Personal Access Token —
+              just click <strong className="text-foreground">Connect</strong> on the card above and
+              paste a token. No OAuth app, no callback URL, no{' '}
               <code className="text-xs bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code>{' '}
-              file and never leave your machine.
+              edits.
             </p>
 
             {/* Google */}
@@ -348,47 +387,37 @@ export default function Integrations(): JSX.Element {
               <h3 className="text-foreground font-semibold mb-2">
                 GitHub (Issues · PRs · Projects)
               </h3>
+              <p className="text-xs leading-relaxed mb-2">
+                GitHub uses a Personal Access Token — no OAuth App registration, no{' '}
+                <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code> edits.
+                Click <strong className="text-foreground">Connect</strong> on the card above to
+                start; Compass walks you through the rest. Under the hood the click takes you to:
+              </p>
               <ol className="list-decimal list-inside space-y-1.5 text-xs leading-relaxed">
                 <li>
-                  Go to{' '}
                   <a
-                    href="https://github.com/settings/developers"
+                    href="https://github.com/settings/tokens/new?scopes=repo,read:project,read:user&description=Compass"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-primary underline underline-offset-2"
                   >
-                    github.com/settings/developers
+                    github.com/settings/tokens/new
                   </a>{' '}
-                  → <strong className="text-foreground">OAuth Apps → New OAuth App</strong>.
+                  with the right scopes pre-selected (
+                  <code className="bg-secondary px-1 py-0.5 rounded font-mono">repo</code>,{' '}
+                  <code className="bg-secondary px-1 py-0.5 rounded font-mono">read:project</code>,{' '}
+                  <code className="bg-secondary px-1 py-0.5 rounded font-mono">read:user</code>).
                 </li>
                 <li>
-                  Set <strong className="text-foreground">Application name</strong> to "Compass".
+                  Click <strong className="text-foreground">Generate token</strong> at the bottom —
+                  optionally tighten the expiration window.
                 </li>
                 <li>
-                  Set <strong className="text-foreground">Homepage URL</strong> to{' '}
-                  <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">
-                    http://localhost
-                  </code>
-                  .
-                </li>
-                <li>
-                  Set <strong className="text-foreground">Authorization callback URL</strong> to{' '}
-                  {redirectUris ? (
-                    <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">
-                      {redirectUris.github}
-                    </code>
-                  ) : (
-                    <em>loading…</em>
-                  )}
-                  .
-                </li>
-                <li>
-                  Click <strong className="text-foreground">Register application</strong>, then
-                  generate a <strong className="text-foreground">Client secret</strong>.
-                </li>
-                <li>
-                  Copy both values into your{' '}
-                  <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code> file.
+                  Copy the token (starts with{' '}
+                  <code className="bg-secondary px-1 py-0.5 rounded font-mono">ghp_</code> or{' '}
+                  <code className="bg-secondary px-1 py-0.5 rounded font-mono">github_pat_</code>)
+                  and paste it into Compass. The token is encrypted with the OS Keychain and never
+                  leaves your machine.
                 </li>
               </ol>
             </div>
@@ -396,19 +425,13 @@ export default function Integrations(): JSX.Element {
             {/* .env location */}
             <div className="bg-secondary/50 rounded-lg px-4 py-3 font-mono text-xs space-y-1">
               <p className="text-foreground font-semibold text-xs mb-2 font-sans">
-                .env (in project root)
+                .env (in project root) — Google only
               </p>
               <p>
                 GOOGLE_CLIENT_ID=<span className="text-amber-400">your_client_id</span>
               </p>
               <p>
                 GOOGLE_CLIENT_SECRET=<span className="text-amber-400">your_client_secret</span>
-              </p>
-              <p>
-                GITHUB_CLIENT_ID=<span className="text-amber-400">your_client_id</span>
-              </p>
-              <p>
-                GITHUB_CLIENT_SECRET=<span className="text-amber-400">your_client_secret</span>
               </p>
             </div>
 
@@ -527,6 +550,61 @@ export default function Integrations(): JSX.Element {
                 </p>
               )}
 
+              {/* Inline PAT form — only for GitHub, only when the user has
+                  clicked Connect. Replaces the OAuth-App dance with a 3-click
+                  flow: open the GitHub tokens page, generate, paste back. */}
+              {integration.id === 'github' && !isConnected && githubPatInput !== null && (
+                <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
+                  <div className="text-xs text-muted-foreground leading-relaxed">
+                    Paste a GitHub Personal Access Token. Compass stores it encrypted on disk — no
+                    OAuth App needed.{' '}
+                    <a
+                      href="https://github.com/settings/tokens/new?scopes=repo,read:project,read:user&description=Compass"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary underline underline-offset-2 inline-flex items-center gap-0.5"
+                    >
+                      Open GitHub
+                      <ExternalLink size={10} className="opacity-70" />
+                    </a>{' '}
+                    (the scopes are pre-selected; just click <em>Generate</em>).
+                  </div>
+                  <label htmlFor="github-pat-input" className="block text-xs text-muted-foreground">
+                    GitHub Personal Access Token
+                  </label>
+                  <input
+                    id="github-pat-input"
+                    type="password"
+                    placeholder="ghp_… or github_pat_…"
+                    value={githubPatInput}
+                    onChange={(e) => setGithubPatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void submitGitHubPat()
+                      else if (e.key === 'Escape') setGithubPatInput(null)
+                    }}
+                    className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void submitGitHubPat()}
+                      disabled={connecting === 'github' || !githubPatInput.trim()}
+                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
+                    >
+                      <Plug2 size={11} />
+                      {connecting === 'github' ? 'Connecting…' : 'Connect'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGithubPatInput(null)}
+                      className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="flex gap-2">
                 {isConnected ? (
                   <button
@@ -536,7 +614,7 @@ export default function Integrations(): JSX.Element {
                   >
                     Disconnect
                   </button>
-                ) : (
+                ) : integration.id === 'github' && githubPatInput !== null ? null : (
                   <button
                     type="button"
                     onClick={() => connect(integration.id)}
