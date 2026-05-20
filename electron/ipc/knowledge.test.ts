@@ -444,3 +444,60 @@ describe('knowledge:get-backlinks', () => {
     expect(await invoke(h, 'profile/ghost.md')).toEqual([])
   })
 })
+
+// ─── Path traversal: prefix-bypass regression (Phase 6.1 — Copilot review) ───
+//
+// `KNOWLEDGE_DIR === '/tmp/compass-kb-test'`. A path like
+// `../compass-kb-test-evil/x.md` resolves to
+// `/tmp/compass-kb-test-evil/x.md` — which `startsWith('/tmp/compass-kb-test')`
+// returns `true` for if you use a string-prefix check. That used to be the
+// production check pattern across read/write/create/delete; switching to
+// `relative(base, resolved)` containment closes the hole.
+
+describe('path traversal — prefix-bypass (sibling-with-shared-prefix)', () => {
+  const SIBLING = '../compass-kb-test-evil/secret.md'
+
+  it('knowledge:read-file rejects sibling-prefix paths', async () => {
+    const h = await registerAndGet('knowledge:read-file')
+    await expect(invoke(h, SIBLING)).rejects.toThrow(/Path traversal/)
+  })
+
+  it('knowledge:write-file rejects sibling-prefix paths', async () => {
+    const h = await registerAndGet('knowledge:write-file')
+    await expect(invoke(h, SIBLING, 'attacker payload')).rejects.toThrow(/Path traversal/)
+    expect(writeFileSyncMock).not.toHaveBeenCalled()
+  })
+
+  it('knowledge:create-file rejects sibling-prefix paths', async () => {
+    const h = await registerAndGet('knowledge:create-file')
+    await expect(invoke(h, SIBLING, 'Evil')).rejects.toThrow(/Path traversal/)
+    expect(writeFileSyncMock).not.toHaveBeenCalled()
+  })
+
+  it('knowledge:delete-file rejects sibling-prefix paths', async () => {
+    const h = await registerAndGet('knowledge:delete-file')
+    await expect(invoke(h, SIBLING)).rejects.toThrow(/Path traversal/)
+    expect(unlinkSyncMock).not.toHaveBeenCalled()
+  })
+
+  it('knowledge:get-prev returns null (fails soft) on sibling-prefix paths', async () => {
+    const h = await registerAndGet('knowledge:get-prev')
+    expect(await invoke(h, SIBLING)).toBeNull()
+  })
+
+  it('knowledge:get-backlinks returns [] (fails soft) on sibling-prefix paths', async () => {
+    const h = await registerAndGet('knowledge:get-backlinks')
+    expect(await invoke(h, SIBLING)).toEqual([])
+  })
+
+  it('also rejects absolute paths that escape KNOWLEDGE_DIR', async () => {
+    // Belt-and-suspenders: a renderer passing an absolute path that
+    // doesn't even share the prefix must also be rejected. With raw
+    // join + startsWith, an absolute path would overwrite the join
+    // result entirely (path.join discards the prefix when the second
+    // arg is absolute) and then fail the startsWith. The safeJoin
+    // helper rejects via the relative-check path; verify.
+    const h = await registerAndGet('knowledge:read-file')
+    await expect(invoke(h, '/etc/passwd')).rejects.toThrow(/Path traversal/)
+  })
+})
