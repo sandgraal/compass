@@ -174,6 +174,12 @@ declare global {
     api: {
       auth: {
         connectGoogle(): Promise<{ success?: boolean; error?: string }>
+        setGoogleCredentials(
+          clientId: string,
+          clientSecret: string
+        ): Promise<{ success?: boolean; error?: string }>
+        hasGoogleCredentials(): Promise<{ configured: boolean }>
+        clearGoogleCredentials(): Promise<{ success: boolean }>
         connectGitHub(): Promise<{ success?: boolean; error?: string }>
         connectGitHubWithPAT(
           token: string
