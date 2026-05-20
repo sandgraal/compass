@@ -119,7 +119,7 @@ export function registerUpdaterHandlers(ipcMain: IpcMain): void {
       throw new Error(`Invalid release tag: ${String(tag)}`)
     }
     const normalized = tag.startsWith('v') ? tag : `v${tag}`
-    void shell.openExternal(`https://github.com/sandgraal/compass/releases/tag/${normalized}`)
+    return shell.openExternal(`https://github.com/sandgraal/compass/releases/tag/${normalized}`)
   })
 
   // Fire-and-forget: quitAndInstall never returns, so use send not invoke.
