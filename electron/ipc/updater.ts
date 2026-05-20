@@ -127,8 +127,8 @@ export function registerUpdaterHandlers(ipcMain: IpcMain): void {
   // Fire-and-forget: quitAndInstall never returns, so use send not invoke.
   // Kept for compatibility with installed older builds that still call it,
   // and in case CI starts signing macOS builds in the future. With
-  // autoDownload=false this only fires if a user manually triggers the
-  // legacy "Restart to Install" button on an old build.
+  // autoDownload disabled on macOS, this only fires there if a user manually
+  // triggers the legacy "Restart to Install" button on an old build.
   ipcMain.on('updater:install-and-restart', () => {
     autoUpdater.quitAndInstall(false, true)
   })
