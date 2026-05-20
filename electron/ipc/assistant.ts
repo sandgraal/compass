@@ -33,6 +33,7 @@ import {
   clearAssistantKey,
   getAssistantStatus,
   readActiveKeyInternal,
+  readKeyInternal,
   setActiveProvider,
   setAssistantKey,
   setProviderModel
@@ -220,6 +221,44 @@ export function registerAssistantHandlers(ipcMain: IpcMain): void {
       return { success: true }
     } catch (err) {
       return { success: false, error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle('assistant:test-key', async (_event, provider: unknown) => {
+    if (provider !== 'anthropic' && provider !== 'openai') {
+      return { success: false, error: `Unknown provider: ${String(provider)}` }
+    }
+    const auth = readKeyInternal(provider)
+    if (!auth) {
+      return { success: false, error: `No ${provider} key configured.` }
+    }
+    // Independent AbortController so a Test never cancels an in-flight ask.
+    // Hard 15s timeout so a stalled provider can't pin the Settings UI
+    // in a perpetual "Testing…" state.
+    const controller = new AbortController()
+    const TEST_TIMEOUT_MS = 15000
+    const timeoutId = setTimeout(() => controller.abort(), TEST_TIMEOUT_MS)
+    try {
+      await callLlm({
+        provider: auth.provider,
+        apiKey: auth.key,
+        model: auth.model,
+        system: 'Reply with the single character: ok',
+        messages: [{ role: 'user', content: 'ping' }],
+        maxTokens: 1,
+        signal: controller.signal
+      })
+      return { success: true }
+    } catch (err) {
+      if (err instanceof LlmAbortError) {
+        return {
+          success: false,
+          error: `Test timed out after ${TEST_TIMEOUT_MS / 1000}s — check your network or the provider's status page.`
+        }
+      }
+      return { success: false, error: (err as Error).message }
+    } finally {
+      clearTimeout(timeoutId)
     }
   })
 

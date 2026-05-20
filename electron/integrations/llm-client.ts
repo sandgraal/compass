@@ -52,9 +52,11 @@ export class LlmAbortError extends Error {
 }
 
 const DEFAULT_MODELS: Record<LlmProvider, string> = {
-  // Anthropic — claude-3.5-haiku is the cheapest current Claude model
-  // that handles citation-style answers well at low latency.
-  anthropic: 'claude-3-5-haiku-latest',
+  // Anthropic — claude-haiku-4-5 is the cheapest current Claude model
+  // that handles citation-style answers well at low latency. Pinned
+  // (not -latest) so a silent Anthropic alias deprecation doesn't
+  // surface as a 401/404 inside Ask Compass.
+  anthropic: 'claude-haiku-4-5-20251001',
   // OpenAI — gpt-4o-mini is the equivalent cost/quality tier.
   openai: 'gpt-4o-mini'
 }
@@ -101,6 +103,21 @@ async function callAnthropic(
   }
   if (!resp.ok) {
     const text = await resp.text().catch(() => '')
+    if (resp.status === 401) {
+      // Extract Anthropic's own error.message when present — it's the
+      // most useful signal for the legitimate-but-still-failing case
+      // (revoked key, wrong workspace, no billing, etc.).
+      let upstream = ''
+      try {
+        const parsed = JSON.parse(text) as { error?: { message?: string } }
+        if (typeof parsed.error?.message === 'string') upstream = ` (${parsed.error.message})`
+      } catch {
+        /* not JSON, leave upstream empty */
+      }
+      throw new Error(
+        `Anthropic rejected the API key${upstream}. Confirm the key is from console.anthropic.com (starts with "sk-ant-") and that the workspace has billing set up. Third-party Claude proxies (e.g. claudeapi.com) won't authenticate here.`
+      )
+    }
     // Strip any echoed auth headers from the error string defensively.
     throw new Error(
       `Anthropic ${resp.status} ${resp.statusText}: ${text.slice(0, 300).replace(/sk-[A-Za-z0-9_-]+/g, '<redacted>')}`
@@ -153,6 +170,11 @@ async function callOpenAI(
     throw new Error(`OpenAI request failed: ${(err as Error).message}`)
   }
   if (!resp.ok) {
+    if (resp.status === 401) {
+      throw new Error(
+        'OpenAI rejected the API key. Get a key from platform.openai.com — it should start with "sk-".'
+      )
+    }
     const text = await resp.text().catch(() => '')
     throw new Error(
       `OpenAI ${resp.status} ${resp.statusText}: ${text.slice(0, 300).replace(/sk-[A-Za-z0-9_-]+/g, '<redacted>')}`
