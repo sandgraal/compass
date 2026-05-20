@@ -7,7 +7,7 @@ import {
   unlinkSync,
   writeFileSync
 } from 'node:fs'
-import { basename, dirname, extname, join, relative } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import chokidar from 'chokidar'
 import { and, eq } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
@@ -39,6 +39,31 @@ export interface KnowledgeFile {
 
 function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length
+}
+
+/**
+ * Resolve `relativePath` against `KNOWLEDGE_DIR` and throw if it escapes
+ * the base. Replaces the old `startsWith(KNOWLEDGE_DIR)` check, which was
+ * vulnerable to a prefix-substring bypass: a path like
+ * `../compass-kb-2/evil.md` would resolve to `/parent/compass-kb-2/evil.md`,
+ * which `startsWith('/parent/compass-kb')` returned `true` for even though
+ * the resolved path lives outside the base.
+ *
+ * The fix uses `path.relative` semantics: if the resolved path is truly
+ * inside the base, the relative path between the two doesn't start with
+ * `..` and isn't absolute. Same idiom recommended by Node's path docs
+ * and used by every well-known path-containment helper.
+ *
+ * Returns the absolute resolved path so callers can read/write directly.
+ */
+function safeJoin(base: string, relativePath: string): string {
+  const resolvedBase = resolve(base)
+  const resolvedTarget = resolve(resolvedBase, relativePath)
+  const rel = relative(resolvedBase, resolvedTarget)
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error('Path traversal blocked')
+  }
+  return resolvedTarget
 }
 
 function extractTitle(content: string, filename: string): string {
@@ -108,29 +133,29 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
   })
 
   ipcMain.handle('knowledge:read-file', (_event, relativePath: string) => {
-    const fullPath = join(KNOWLEDGE_DIR, relativePath)
-    if (!fullPath.startsWith(KNOWLEDGE_DIR)) throw new Error('Path traversal blocked')
+    const fullPath = safeJoin(KNOWLEDGE_DIR, relativePath)
     if (!existsSync(fullPath)) return null
     return readFileSync(fullPath, 'utf8')
   })
 
   ipcMain.handle('knowledge:write-file', (_event, relativePath: string, content: string) => {
-    const fullPath = join(KNOWLEDGE_DIR, relativePath)
-    if (!fullPath.startsWith(KNOWLEDGE_DIR)) throw new Error('Path traversal blocked')
+    const fullPath = safeJoin(KNOWLEDGE_DIR, relativePath)
     writeFileSync(fullPath, content, 'utf8')
     return { success: true }
   })
 
   ipcMain.handle('knowledge:create-file', (_event, relativePath: string, title: string) => {
-    const fullPath = join(KNOWLEDGE_DIR, relativePath)
-    if (!fullPath.startsWith(KNOWLEDGE_DIR)) throw new Error('Path traversal blocked')
+    const fullPath = safeJoin(KNOWLEDGE_DIR, relativePath)
     if (existsSync(fullPath)) throw new Error('File already exists')
     // The unresolved-wikilink path drops files under `general/<slug>.md`,
     // but `general/` isn't one of the dirs `ensureDirectories()` seeds.
     // Create the parent so the first wikilink on a fresh profile works
-    // instead of failing silently with ENOENT.
+    // instead of failing silently with ENOENT. `safeJoin` above already
+    // guaranteed `fullPath` lives inside KNOWLEDGE_DIR, so the parent
+    // is necessarily a descendant of KNOWLEDGE_DIR too — no need for
+    // a second containment check here.
     const parent = dirname(fullPath)
-    if (parent.startsWith(KNOWLEDGE_DIR) && !existsSync(parent)) {
+    if (!existsSync(parent)) {
       mkdirSync(parent, { recursive: true })
     }
     writeFileSync(fullPath, `# ${title}\n\n`, 'utf8')
@@ -138,8 +163,7 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
   })
 
   ipcMain.handle('knowledge:delete-file', (_event, relativePath: string) => {
-    const fullPath = join(KNOWLEDGE_DIR, relativePath)
-    if (!fullPath.startsWith(KNOWLEDGE_DIR)) throw new Error('Path traversal blocked')
+    const fullPath = safeJoin(KNOWLEDGE_DIR, relativePath)
     if (existsSync(fullPath)) unlinkSync(fullPath)
     // Remove any stale .prev backup so it doesn't appear on a future re-creation
     const prevPath = `${fullPath}.prev`
@@ -148,9 +172,15 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
   })
 
   ipcMain.handle('knowledge:get-prev', (_event, relativePath: string) => {
-    // Sanitize path
-    if (relativePath.includes('..')) return null
-    const prevPath = join(KNOWLEDGE_DIR, `${relativePath}.prev`)
+    // Read-only sibling lookup: returns null instead of throwing on
+    // bad input so the renderer's "show me the previous version" UI
+    // can fail soft when the user navigates to anything weird.
+    let prevPath: string
+    try {
+      prevPath = safeJoin(KNOWLEDGE_DIR, `${relativePath}.prev`)
+    } catch {
+      return null
+    }
     if (!existsSync(prevPath)) return null
     return readFileSync(prevPath, 'utf8')
   })
@@ -183,11 +213,17 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
   // the matched `[[...]]` token. Heavy file ops live in the main process so
   // the renderer can render the panel synchronously off the result.
   ipcMain.handle('knowledge:get-backlinks', (_event, relativePath: string) => {
-    if (typeof relativePath !== 'string' || relativePath.includes('..')) {
+    if (typeof relativePath !== 'string') {
       return [] as Array<{ path: string; title: string; snippet: string }>
     }
-    const targetFull = join(KNOWLEDGE_DIR, relativePath)
-    if (!targetFull.startsWith(KNOWLEDGE_DIR) || !existsSync(targetFull)) {
+    // Read-only: fail soft (return []) instead of throwing on a bad target.
+    let targetFull: string
+    try {
+      targetFull = safeJoin(KNOWLEDGE_DIR, relativePath)
+    } catch {
+      return [] as Array<{ path: string; title: string; snippet: string }>
+    }
+    if (!existsSync(targetFull)) {
       return [] as Array<{ path: string; title: string; snippet: string }>
     }
     const targetContent = readFileSync(targetFull, 'utf8')
