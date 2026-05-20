@@ -208,3 +208,94 @@ export function tagGeoAndPurpose(txns: RawTxn[]): RawTxn[] {
     return { ...t, geo, purpose: purpose || undefined }
   })
 }
+
+/**
+ * Re-run the migration 0004 backfill against existing rows whose `notes`
+ * still carry `geo:X` / `purpose:X` tokens (from the pre-Phase-4.2 writer)
+ * but whose indexed `geo` / `purpose` columns never got updated.
+ *
+ * The migration's UPDATEs only ran once at migration time; if rows were
+ * re-ingested or imported after, or if `classifyGeo` couldn't infer the
+ * country from `description` alone (e.g. "FERRETERIA SANTA ROSJIMENEZ CA"),
+ * the column stayed at the schema default 'US' while notes carried the
+ * historical truth. This helper closes that gap idempotently — safe to
+ * call on every init.
+ *
+ * Returns the number of rows updated, broken down by tag.
+ */
+export function backfillGeoFromNotes(
+  db: import('better-sqlite3').Database
+): Record<string, number> {
+  const geoValues = ['CR', 'SPAIN', 'COLOMBIA', 'PANAMA', 'OTHER'] as const
+  const purposeValues = ['capex', 'household', 'operating', 'travel', 'other'] as const
+  const counts: Record<string, number> = {}
+
+  const hasTaggedNotes = db
+    .prepare(
+      `SELECT 1 AS found
+         FROM finance_transactions
+        WHERE notes LIKE '%geo:%' OR notes LIKE '%purpose:%'
+        LIMIT 1`
+    )
+    .get() as { found: number } | undefined
+
+  if (!hasTaggedNotes) return counts
+
+  const collectCounts = (kind: 'geo' | 'purpose', values: readonly string[]) => {
+    const selectSql = `SELECT
+${values
+  .map(
+    (value) =>
+      `  SUM(CASE WHEN notes LIKE '%${kind}:${value}%' AND (${kind} IS NULL OR ${kind} != '${value}') THEN 1 ELSE 0 END) AS "${kind}:${value}"`
+  )
+  .join(',\n')}
+FROM finance_transactions
+WHERE notes LIKE '%${kind}:%'`
+
+    const row = db.prepare(selectSql).get() as Record<string, number | null> | undefined
+    if (!row) return
+
+    for (const value of values) {
+      const key = `${kind}:${value}`
+      const count = Number(row[key] ?? 0)
+      if (count > 0) counts[key] = count
+    }
+  }
+
+  const applyBackfill = (kind: 'geo' | 'purpose', values: readonly string[]) => {
+    // `purpose` is nullable so `purpose != 'capex'` is UNKNOWN (not true) when
+    // the column is NULL — three-valued SQL would skip those rows. Wrap with
+    // `IS NULL OR …` so the WHERE matches initial-state rows too. `geo` is
+    // NOT NULL but applying the same shape keeps both branches consistent.
+    //
+    // The original implementation applied tags sequentially, so later entries
+    // won when a note happened to contain multiple tokens. Reverse the CASE
+    // order to preserve that "last matching tag wins" behavior.
+    const updateSql = `UPDATE finance_transactions
+SET ${kind} = CASE
+${[...values]
+  .reverse()
+  .map((value) => `  WHEN notes LIKE '%${kind}:${value}%' THEN '${value}'`)
+  .join('\n')}
+  ELSE ${kind}
+END
+WHERE notes LIKE '%${kind}:%'
+  AND (
+${values
+  .map(
+    (value) =>
+      `    (notes LIKE '%${kind}:${value}%' AND (${kind} IS NULL OR ${kind} != '${value}'))`
+  )
+  .join('\n    OR\n')}
+  )`
+
+    db.prepare(updateSql).run()
+  }
+
+  collectCounts('geo', geoValues)
+  collectCounts('purpose', purposeValues)
+  applyBackfill('geo', geoValues)
+  applyBackfill('purpose', purposeValues)
+
+  return counts
+}
