@@ -2471,11 +2471,25 @@ function AccountsTab({
   useEffect(() => {
     const api = typeof window !== 'undefined' ? window.api : undefined
     if (!api?.plaid?.listItems) return
-    void api.plaid.listItems().then((rows) => {
-      const map = new Map<number, string>()
-      for (const r of rows) map.set(r.id, r.institutionName)
-      setPlaidInstitutionById(map)
-    })
+    // Guard against unmount-during-fetch (rare but possible when the user
+    // switches tabs fast) AND swallow rejections — the badge is cosmetic,
+    // so an IPC failure shouldn't surface to the user or generate an
+    // unhandled-promise warning.
+    let cancelled = false
+    api.plaid
+      .listItems()
+      .then((rows) => {
+        if (cancelled) return
+        const map = new Map<number, string>()
+        for (const r of rows) map.set(r.id, r.institutionName)
+        setPlaidInstitutionById(map)
+      })
+      .catch(() => {
+        /* listItems IPC failed — leave the badge map empty, no toast */
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   function startAdd() {

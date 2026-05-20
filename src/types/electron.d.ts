@@ -532,6 +532,12 @@ declare global {
             institution?: string
             paymentDueDate?: string | null
             lastStatementSyncedAt?: number | Date | null
+            // Phase 4.6 Plaid linkage. Populated for accounts created via
+            // Plaid Link; null for manual / CSV-only accounts. Surfaces the
+            // "linked · <institution>" badge in the Accounts tab.
+            plaidItemId?: number | null
+            plaidAccountId?: string | null
+            mask?: string | null
           }>
         >
         upsertAccount(account: {

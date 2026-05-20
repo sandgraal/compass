@@ -117,11 +117,12 @@ export function registerPlaidHandlers(ipcMain: IpcMain): void {
     // Also delete the plaid_items row so the Integrations card stops
     // showing the institution. Access tokens (vault) and rows (SQLite)
     // are paired — removing one and leaving the other is a bug magnet.
-    try {
-      getDb().delete(plaidItems).where(eq(plaidItems.itemId, itemId)).run()
-    } catch {
-      /* row might not exist yet (set-secret + start-link races); ignore */
-    }
+    //
+    // No try/catch around the DELETE: a missing row is not an error
+    // (better-sqlite3 returns changes=0, doesn't throw), and a real DB
+    // failure SHOULD propagate so the renderer can surface it instead of
+    // showing a ghost institution from a half-applied disconnect.
+    getDb().delete(plaidItems).where(eq(plaidItems.itemId, itemId)).run()
     return { ok: true }
   })
 

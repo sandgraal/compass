@@ -197,6 +197,11 @@ export default function Integrations(): JSX.Element {
         ...prev.slice(0, 19)
       ])
       loadStatuses()
+      // Plaid card needs an extra refresh because lastSyncedAt + errorCode
+      // live on the per-Item rows (plaid_items), not on `integrations`.
+      // Without this, the "Last synced" timestamp on each bank wouldn't
+      // update until the user navigated away and back.
+      if (d.service === 'plaid') void loadPlaid()
     })
     return unsub
   }, [])
@@ -229,13 +234,21 @@ export default function Integrations(): JSX.Element {
       return
     }
     // Plaid:
+    //   - Status not yet loaded → kick off the load + bail. Without this
+    //     guard, an early click reads `plaidStatus?.configured` as
+    //     undefined and falsely toasts "SDK not configured".
     //   - SDK not configured (~/.config/compass/plaid.env missing) → noop
     //     with a toast pointing at docs; the file is currently dev-only,
     //     a UI for it is a future PR (parallel to the Google credentials work).
     //   - Secret missing → open the inline secret form.
     //   - Otherwise → start Plaid Link (the child window flow from PR 3).
     if (service === 'plaid') {
-      if (!plaidStatus?.configured) {
+      if (plaidStatus === null) {
+        toast('Loading Plaid status — try again in a moment.', 'info')
+        void loadPlaid()
+        return
+      }
+      if (!plaidStatus.configured) {
         toast('Plaid SDK not configured. See docs/finance/plaid-integration.md.', 'error')
         return
       }
@@ -327,6 +340,11 @@ export default function Integrations(): JSX.Element {
       } else {
         toast(`Plaid Link failed: ${r.errorMessage ?? r.errorCode ?? 'unknown'}`, 'error')
       }
+    } catch (err) {
+      // The IPC promise itself rejected — handler crashed, contextBridge
+      // threw, etc. Surface as a toast so the user isn't left staring at
+      // a stopped spinner with no explanation.
+      toast(`Plaid Link error: ${err instanceof Error ? err.message : String(err)}`, 'error')
     } finally {
       setConnecting(null)
     }
@@ -663,21 +681,44 @@ export default function Integrations(): JSX.Element {
                   <div>
                     <h3 className="font-semibold text-foreground">{integration.name}</h3>
                     <div className="flex items-center gap-1.5 mt-0.5">
-                      {isConnected && <CheckCircle2 size={11} className="text-emerald-400" />}
-                      {hasError && <AlertCircle size={11} className="text-red-400" />}
-                      {!status && <XCircle size={11} className="text-muted-foreground/40" />}
-                      <span
-                        className={cn(
-                          'text-xs',
-                          isConnected
-                            ? 'text-emerald-400'
-                            : hasError
-                              ? 'text-red-400'
-                              : 'text-muted-foreground'
-                        )}
-                      >
-                        {isConnected ? 'Connected' : hasError ? 'Error' : 'Not connected'}
-                      </span>
+                      {/* Plaid is multi-Item: an Item can need re-auth while
+                          others are healthy. When that's the case, surface
+                          the error state at the card level (a single bad
+                          institution shouldn't read as a quiet green
+                          "Connected"). For non-Plaid integrations the
+                          original isConnected-wins logic is unchanged. */}
+                      {(() => {
+                        const errorWins = hasError && (integration.id === 'plaid' || !isConnected)
+                        return (
+                          <>
+                            {!errorWins && isConnected && (
+                              <CheckCircle2 size={11} className="text-emerald-400" />
+                            )}
+                            {errorWins && <AlertCircle size={11} className="text-red-400" />}
+                            {!status && integration.id !== 'plaid' && (
+                              <XCircle size={11} className="text-muted-foreground/40" />
+                            )}
+                            <span
+                              className={cn(
+                                'text-xs',
+                                errorWins
+                                  ? 'text-red-400'
+                                  : isConnected
+                                    ? 'text-emerald-400'
+                                    : 'text-muted-foreground'
+                              )}
+                            >
+                              {errorWins
+                                ? integration.id === 'plaid' && isConnected
+                                  ? 'Needs attention'
+                                  : 'Error'
+                                : isConnected
+                                  ? 'Connected'
+                                  : 'Not connected'}
+                            </span>
+                          </>
+                        )
+                      })()}
                     </div>
                   </div>
                 </div>
