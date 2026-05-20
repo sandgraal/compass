@@ -179,12 +179,12 @@ describe('backfillGeoFromNotes', () => {
     expect(second).toEqual({})
   })
 
-  it('does not touch a user-set geo that disagrees with notes', () => {
+  it('overwrites a conflicting user-set geo when notes specify a geo', () => {
     // Edge case: row's notes say geo:CR but the column was manually set to
-    // OTHER (e.g. user override). The backfill should still overwrite it —
-    // notes are the historical truth and the user has the geo dropdown in
-    // the UI to correct that downstream. The point of this test is just to
-    // document the chosen direction.
+    // OTHER (e.g. user override). The backfill intentionally overwrites it:
+    // notes are treated as the historical truth, and the user still has the
+    // geo dropdown in the UI to correct that downstream. This test documents
+    // that chosen behavior.
     const db = setup()
     db.prepare(
       "INSERT INTO finance_transactions (notes, geo) VALUES ('rm:Foo | geo:CR', 'OTHER')"
