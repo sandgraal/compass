@@ -33,6 +33,10 @@ const api = {
   // --- Auth ---
   auth: {
     connectGoogle: () => ipcRenderer.invoke('auth:connect-google'),
+    setGoogleCredentials: (clientId: string, clientSecret: string) =>
+      ipcRenderer.invoke('auth:set-google-credentials', clientId, clientSecret),
+    hasGoogleCredentials: () => ipcRenderer.invoke('auth:has-google-credentials'),
+    clearGoogleCredentials: () => ipcRenderer.invoke('auth:clear-google-credentials'),
     connectGitHub: () => ipcRenderer.invoke('auth:connect-github'),
     connectGitHubWithPAT: (token: string) => ipcRenderer.invoke('auth:connect-github-pat', token),
     disconnect: (service: string) => ipcRenderer.invoke('auth:disconnect', service),

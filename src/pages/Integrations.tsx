@@ -107,8 +107,16 @@ export default function Integrations(): JSX.Element {
   const [redirectUris, setRedirectUris] = useState<{ google: string; github: string } | null>(null)
   // Null = the inline PAT form is collapsed. String = it's open, with the
   // current input value. Single-instance because the only PAT-connectable
-  // integration today is GitHub (Google's still OAuth).
+  // integration today is GitHub.
   const [githubPatInput, setGithubPatInput] = useState<string | null>(null)
+  // Null = Google credentials form is collapsed. Object = form is open
+  // with the current Client ID + Secret values. Stays open until either
+  // (a) the user successfully submits, or (b) they click Cancel.
+  const [googleCredsInput, setGoogleCredsInput] = useState<{
+    clientId: string
+    clientSecret: string
+  } | null>(null)
+  const [googleCredsConfigured, setGoogleCredsConfigured] = useState(false)
   const { toast } = useToast()
   const confirm = useConfirm()
 
@@ -125,6 +133,15 @@ export default function Integrations(): JSX.Element {
       })
       .catch(() => {
         /* use fallback */
+      })
+
+    window.api.auth
+      .hasGoogleCredentials()
+      .then(({ configured }) => {
+        setGoogleCredsConfigured(configured)
+      })
+      .catch(() => {
+        /* leave at default false */
       })
 
     // Load persisted sync log from DB on mount
@@ -180,6 +197,13 @@ export default function Integrations(): JSX.Element {
       setGithubPatInput('')
       return
     }
+    // Google: if credentials aren't stored yet, open the credentials form
+    // first. Once stored, subsequent Connect clicks proceed to the OAuth
+    // dance directly.
+    if (service === 'google' && !googleCredsConfigured) {
+      setGoogleCredsInput({ clientId: '', clientSecret: '' })
+      return
+    }
     setConnecting(service)
     try {
       // Apple Calendar is local-file based — no OAuth, just kick off a
@@ -199,6 +223,39 @@ export default function Integrations(): JSX.Element {
         await loadStatuses()
         triggerSync(service)
       }
+    } finally {
+      setConnecting(null)
+    }
+  }
+
+  // Save Google credentials, then immediately kick off the OAuth dance so
+  // the user sees a single "Connect" action rather than two-step ceremony.
+  async function submitGoogleCredentials() {
+    if (!googleCredsInput) return
+    const id = googleCredsInput.clientId.trim()
+    const secret = googleCredsInput.clientSecret.trim()
+    if (!id || !secret) {
+      toast('Both Client ID and Client Secret are required.', 'error')
+      return
+    }
+    setConnecting('google')
+    try {
+      const save = await window.api.auth.setGoogleCredentials(id, secret)
+      if (save.error) {
+        toast(save.error, 'error')
+        return
+      }
+      setGoogleCredsConfigured(true)
+      setGoogleCredsInput(null)
+      // Immediately start the OAuth flow with the just-stored creds.
+      const oauth = await window.api.auth.connectGoogle()
+      if (oauth.error) {
+        toast(`OAuth failed: ${oauth.error}`, 'error')
+        return
+      }
+      toast('Connected to Google.', 'success')
+      await loadStatuses()
+      triggerSync('google')
     } finally {
       setConnecting(null)
     }
@@ -302,17 +359,15 @@ export default function Integrations(): JSX.Element {
             className="px-5 py-4 border-t border-border bg-card/50 space-y-5 text-sm text-muted-foreground"
           >
             <p>
-              <strong className="text-foreground">Google</strong> uses OAuth, which means
-              registering your own OAuth app once (steps below). Credentials live in your local{' '}
-              <code className="text-xs bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code> and
-              never leave your machine.
+              <strong className="text-foreground">Google</strong> uses OAuth — register your own
+              OAuth app once (steps below), then paste the Client ID + Secret into the inline form
+              when you click <strong className="text-foreground">Connect</strong>. The credentials
+              are encrypted via OS Keychain; no file editing required.
             </p>
             <p>
               <strong className="text-foreground">GitHub</strong> uses a Personal Access Token —
-              just click <strong className="text-foreground">Connect</strong> on the card above and
-              paste a token. No OAuth app, no callback URL, no{' '}
-              <code className="text-xs bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code>{' '}
-              edits.
+              just click <strong className="text-foreground">Connect</strong> on the card and paste
+              a token. No OAuth app, no callback URL.
             </p>
 
             {/* Google */}
@@ -364,11 +419,6 @@ export default function Integrations(): JSX.Element {
                   as an <strong className="text-foreground">Authorized redirect URI</strong>.
                 </li>
                 <li>
-                  Copy the <strong className="text-foreground">Client ID</strong> and{' '}
-                  <strong className="text-foreground">Client secret</strong> into your{' '}
-                  <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code> file.
-                </li>
-                <li>
                   Enable the required APIs:{' '}
                   <strong className="text-foreground">Google Calendar API</strong>,{' '}
                   <strong className="text-foreground">Gmail API</strong>, and{' '}
@@ -378,6 +428,14 @@ export default function Integrations(): JSX.Element {
                 <li>
                   While in test mode, add your Google account under{' '}
                   <strong className="text-foreground">OAuth consent screen → Test users</strong>.
+                </li>
+                <li>
+                  Click <strong className="text-foreground">Connect</strong> on the Google card
+                  above and paste your <strong className="text-foreground">Client ID</strong> +{' '}
+                  <strong className="text-foreground">Client secret</strong>. Compass encrypts them
+                  via the OS Keychain — no{' '}
+                  <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code>{' '}
+                  editing.
                 </li>
               </ol>
             </div>
@@ -422,25 +480,16 @@ export default function Integrations(): JSX.Element {
               </ol>
             </div>
 
-            {/* .env location */}
-            <div className="bg-secondary/50 rounded-lg px-4 py-3 font-mono text-xs space-y-1">
-              <p className="text-foreground font-semibold text-xs mb-2 font-sans">
-                .env (in project root) — Google only
-              </p>
-              <p>
-                GOOGLE_CLIENT_ID=<span className="text-amber-400">your_client_id</span>
-              </p>
-              <p>
-                GOOGLE_CLIENT_SECRET=<span className="text-amber-400">your_client_secret</span>
-              </p>
-            </div>
-
             <p className="text-xs">
-              After editing{' '}
-              <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code>, restart
-              the app (
-              <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">npm run dev</code>) for
-              the credentials to take effect.
+              Dev workflows can still set{' '}
+              <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">GOOGLE_CLIENT_ID</code>{' '}
+              +{' '}
+              <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">
+                GOOGLE_CLIENT_SECRET
+              </code>{' '}
+              in a <code className="bg-secondary px-1.5 py-0.5 rounded font-mono">.env</code> file
+              at the repo root — they're read as a fallback when no in-app credentials are stored.
+              Packaged-app users should use the inline form instead.
             </p>
           </div>
         )}
@@ -550,6 +599,97 @@ export default function Integrations(): JSX.Element {
                 </p>
               )}
 
+              {/* Inline Google credentials form. Replaces the .env workflow
+                  with paste-once UX. Saved values are encrypted via safeStorage
+                  and never cross the IPC boundary again. */}
+              {integration.id === 'google' && !isConnected && googleCredsInput !== null && (
+                <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
+                  <div className="text-xs text-muted-foreground leading-relaxed">
+                    Paste your Google OAuth Client ID + Secret from{' '}
+                    <a
+                      href="https://console.cloud.google.com/apis/credentials"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary underline underline-offset-2 inline-flex items-center gap-0.5"
+                    >
+                      Google Cloud Console
+                      <ExternalLink size={10} className="opacity-70" />
+                    </a>
+                    . Compass stores them encrypted on disk and reuses them on every{' '}
+                    <em>Connect</em>; no{' '}
+                    <code className="bg-secondary px-1 py-0.5 rounded font-mono">.env</code>{' '}
+                    editing.
+                  </div>
+                  <label
+                    htmlFor="google-client-id-input"
+                    className="block text-xs text-muted-foreground"
+                  >
+                    Client ID
+                  </label>
+                  <input
+                    id="google-client-id-input"
+                    type="text"
+                    placeholder="123456789012-abc...apps.googleusercontent.com"
+                    aria-label="Google OAuth Client ID"
+                    value={googleCredsInput.clientId}
+                    onChange={(e) =>
+                      setGoogleCredsInput((prev) =>
+                        prev ? { ...prev, clientId: e.target.value } : prev
+                      )
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') setGoogleCredsInput(null)
+                    }}
+                    className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+                  />
+                  <label
+                    htmlFor="google-client-secret-input"
+                    className="block text-xs text-muted-foreground"
+                  >
+                    Client Secret
+                  </label>
+                  <input
+                    id="google-client-secret-input"
+                    type="password"
+                    placeholder="GOCSPX-..."
+                    aria-label="Google OAuth Client Secret"
+                    value={googleCredsInput.clientSecret}
+                    onChange={(e) =>
+                      setGoogleCredsInput((prev) =>
+                        prev ? { ...prev, clientSecret: e.target.value } : prev
+                      )
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void submitGoogleCredentials()
+                      else if (e.key === 'Escape') setGoogleCredsInput(null)
+                    }}
+                    className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void submitGoogleCredentials()}
+                      disabled={
+                        connecting === 'google' ||
+                        !googleCredsInput.clientId.trim() ||
+                        !googleCredsInput.clientSecret.trim()
+                      }
+                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
+                    >
+                      <Plug2 size={11} />
+                      {connecting === 'google' ? 'Connecting…' : 'Save & Connect'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGoogleCredsInput(null)}
+                      className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Inline PAT form — only for GitHub, only when the user has
                   clicked Connect. Replaces the OAuth-App dance with a 3-click
                   flow: open the GitHub tokens page, generate, paste back. */}
@@ -614,7 +754,8 @@ export default function Integrations(): JSX.Element {
                   >
                     Disconnect
                   </button>
-                ) : integration.id === 'github' && githubPatInput !== null ? null : (
+                ) : (integration.id === 'github' && githubPatInput !== null) ||
+                  (integration.id === 'google' && googleCredsInput !== null) ? null : (
                   <button
                     type="button"
                     onClick={() => connect(integration.id)}

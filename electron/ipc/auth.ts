@@ -41,6 +41,68 @@ export function deleteToken(service: string): void {
   }
 }
 
+// =====================================================================
+// OAuth client credentials (separate from access/refresh tokens)
+// =====================================================================
+// Pre-PR #N, Google OAuth client_id / client_secret had to live in a
+// `.env` file at the repo root — fine for dev workflows, impossible for
+// packaged-app users. These helpers move that storage into the same
+// encrypted-on-disk pattern we use for access tokens, so the renderer
+// can paste credentials into a form and never see them again.
+//
+// `getOAuthCredentials` reads the encrypted store first and falls back
+// to `process.env` so existing dev workflows ("export GOOGLE_CLIENT_ID
+// before `npm run dev`") still work.
+
+const CREDS_KEY_PREFIX = 'compass_oauth_creds_'
+
+export type OAuthCredentials = { clientId: string; clientSecret: string }
+
+export function setOAuthCredentials(service: string, creds: OAuthCredentials): void {
+  const json = JSON.stringify(creds)
+  const encrypted = safeStorage.encryptString(json)
+  mkdirSync(DATA_DIR, { recursive: true })
+  writeFileSync(join(DATA_DIR, `${CREDS_KEY_PREFIX}${service}.enc`), encrypted)
+}
+
+export function getOAuthCredentials(service: string): OAuthCredentials | null {
+  // 1. Encrypted store (preferred).
+  try {
+    const path = join(DATA_DIR, `${CREDS_KEY_PREFIX}${service}.enc`)
+    if (existsSync(path)) {
+      const encrypted = readFileSync(path)
+      const json = safeStorage.decryptString(encrypted)
+      const parsed = JSON.parse(json) as Partial<OAuthCredentials>
+      if (parsed.clientId && parsed.clientSecret) {
+        return { clientId: parsed.clientId, clientSecret: parsed.clientSecret }
+      }
+    }
+  } catch {
+    /* fall through to env */
+  }
+  // 2. `.env` fallback for dev workflows.
+  const upper = service.toUpperCase()
+  const envId = process.env[`${upper}_CLIENT_ID`] || ''
+  const envSecret = process.env[`${upper}_CLIENT_SECRET`] || ''
+  if (envId && envId !== `your_${service.toLowerCase()}_client_id_here` && envSecret) {
+    return { clientId: envId, clientSecret: envSecret }
+  }
+  return null
+}
+
+export function hasOAuthCredentials(service: string): boolean {
+  return getOAuthCredentials(service) !== null
+}
+
+export function deleteOAuthCredentials(service: string): void {
+  try {
+    const path = join(DATA_DIR, `${CREDS_KEY_PREFIX}${service}.enc`)
+    if (existsSync(path)) unlinkSync(path)
+  } catch {
+    /* ignore */
+  }
+}
+
 const SUCCESS_HTML = `<!DOCTYPE html><html><head><title>Compass — Connected</title>
 <style>body{font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;
 height:100vh;margin:0;background:#0f1117;color:#e2e8f0;}
@@ -318,18 +380,14 @@ export async function getValidGoogleToken(): Promise<string> {
 
 export function registerAuthHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('auth:connect-google', async () => {
-    const clientId = process.env.GOOGLE_CLIENT_ID || ''
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET || ''
-
-    if (!clientId || clientId === 'your_google_client_id_here') {
+    const creds = getOAuthCredentials('google')
+    if (!creds) {
       return {
         error:
-          'GOOGLE_CLIENT_ID not configured. Add it to your .env file — see the Setup Guide on the Integrations page.'
+          'Google credentials not configured. Click Configure on the Google card to paste your Client ID + Secret.'
       }
     }
-    if (!clientSecret || clientSecret === 'your_google_client_secret_here') {
-      return { error: 'GOOGLE_CLIENT_SECRET not configured. Add it to your .env file.' }
-    }
+    const { clientId, clientSecret } = creds
 
     const redirectUri = `http://localhost:${OAUTH_PORT}${GOOGLE_CALLBACK_PATH}`
     const scopes = [
@@ -528,6 +586,49 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     } catch (err) {
       return { error: (err as Error).message }
     }
+  })
+
+  // Validate + store Google OAuth client credentials. Replaces the `.env`
+  // workflow with an in-app form: paste once, encrypted to disk, never
+  // crosses the IPC boundary again. The OAuth dance (`auth:connect-google`)
+  // then reads from the encrypted store transparently.
+  ipcMain.handle(
+    'auth:set-google-credentials',
+    async (_event, clientId: string, clientSecret: string) => {
+      if (typeof clientId !== 'string' || typeof clientSecret !== 'string') {
+        return { error: 'Client ID and Client Secret must be strings.' }
+      }
+      const id = clientId.trim()
+      const secret = clientSecret.trim()
+      // Google web/desktop OAuth Client IDs look like
+      // `<digits>-<random>.apps.googleusercontent.com`. We don't reject on
+      // edge cases — anything else is left for the OAuth dance to reject
+      // with a meaningful error from Google.
+      if (!/^[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(id)) {
+        return {
+          error:
+            'Client ID looks wrong — expected the form `<digits>-<random>.apps.googleusercontent.com`.'
+        }
+      }
+      if (secret.length < 8) {
+        return { error: 'Client Secret looks too short.' }
+      }
+      try {
+        setOAuthCredentials('google', { clientId: id, clientSecret: secret })
+        return { success: true }
+      } catch (err) {
+        return { error: (err as Error).message }
+      }
+    }
+  )
+
+  ipcMain.handle('auth:has-google-credentials', () => ({
+    configured: hasOAuthCredentials('google')
+  }))
+
+  ipcMain.handle('auth:clear-google-credentials', () => {
+    deleteOAuthCredentials('google')
+    return { success: true }
   })
 
   ipcMain.handle('auth:disconnect', async (_event, service: string) => {
