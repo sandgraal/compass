@@ -118,8 +118,7 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 ## PR checklist
 
 Every PR includes:
-1. A `.changeset/<random-name>.md` describing the user-visible change
-2. Passing `npm run typecheck && npm run check && npm test`
-3. Test plan in PR description (manual steps to verify)
-4. Screenshot/recording for any UI change
-5. No new `alert()` or `confirm()` calls (use the unified primitives)
+1. Passing `npm run typecheck && npm run check && npm test`
+2. Test plan in PR description (manual steps to verify)
+3. Screenshot/recording for any UI change
+4. No new `alert()` or `confirm()` calls (use the unified primitives)
