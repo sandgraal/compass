@@ -493,14 +493,17 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
       }
 
       // Surface the granted scopes so the user can see at a glance what
-      // Compass can do with this token. Fine-grained PATs don't return this
-      // header (their permissions live in a different format); fall back to
-      // an empty list in that case.
-      const grantedScopes = userResp.headers
-        .get('x-oauth-scopes')
+      // Compass can do with this token. Fine-grained PATs may omit this
+      // header or return it empty (their permissions live in a different
+      // format); fall back to the `fine-grained` sentinel in that case.
+      const rawScopes = userResp.headers.get('x-oauth-scopes')
+      const parsedScopes = rawScopes
         ?.split(',')
         .map((s) => s.trim())
-        .filter(Boolean) ?? ['fine-grained']
+        .filter(Boolean)
+      const grantedScopes = parsedScopes && parsedScopes.length > 0
+        ? parsedScopes
+        : ['fine-grained']
 
       saveToken('github', { access_token: trimmed, auth_method: 'pat', login: user.login })
 
