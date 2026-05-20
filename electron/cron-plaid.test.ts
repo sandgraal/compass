@@ -54,10 +54,12 @@ describe('runDailyPlaidSync', () => {
   it('is silent when all items succeeded with zero records', async () => {
     const notify = vi.fn()
     await runDailyPlaidSync(async () => [result({ itemId: 'item-a' })], notify)
-    // maybeSendNotification itself short-circuits on 0+no-error, but the
-    // contract here is that runDailyPlaidSync still CALLS it (so the
-    // settings-respecting layer runs). The "silent" comes from the
-    // notification helper, not from skipping the call.
+    // Contract: runDailyPlaidSync delegates the "do we actually show a
+    // notification?" decision to `maybeSendNotification` rather than
+    // gatekeeping locally. The helper's first line is `if (records === 0
+    // && !error) return`, so the user sees nothing in this case — but
+    // from the cron's perspective the call still happened, which is
+    // what we assert here.
     expect(notify).toHaveBeenCalledWith('plaid', 0)
   })
 
@@ -122,10 +124,15 @@ describe('runDailyPlaidSync', () => {
     expect(notify).toHaveBeenCalledWith('plaid', 0, 'DB locked')
   })
 
-  it('still surfaces records updated even when some items errored', async () => {
-    // Partial success: 5 records came through, but one Item failed. We
-    // want the user to know both — currently the error notification wins
-    // (so they take action), but the record count is part of the body.
+  it('passes both the success record count AND the error message to notify', async () => {
+    // Partial success: 5 records came through, but one Item failed. The
+    // current rendered notification body just says "Sync failed: <msg>"
+    // (the helper's error branch ignores recordsUpdated entirely), so
+    // the user sees the action item, not the count. We still pass both
+    // values into `notify` though — keeps the test honest about the
+    // contract between cron-plaid and the helper, and leaves room to
+    // render a richer "Synced 5 records but 1 institution failed" body
+    // in a future iteration without changing the call site.
     const notify = vi.fn()
     await runDailyPlaidSync(
       async () => [

@@ -292,9 +292,11 @@ function serviceLabelFor(service: string): string {
 }
 
 /**
- * Fire a native macOS notification summarizing a sync result. Best-effort:
- * never let notification failures affect sync semantics. Respects the
- * `notificationsEnabled` setting (default true).
+ * Fire a native OS notification summarizing a sync result. Backed by
+ * `electron.Notification` which is cross-platform — same call path on
+ * macOS, Windows, and Linux. Best-effort: never let notification
+ * failures affect sync semantics. Respects the `notificationsEnabled`
+ * setting (default true).
  *
  * Exported so the cron module can reuse the same UX layer for the daily
  * Plaid sync without duplicating the read-settings + show-Notification
