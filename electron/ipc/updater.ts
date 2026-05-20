@@ -115,7 +115,7 @@ export function registerUpdaterHandlers(ipcMain: IpcMain): void {
   // initAutoUpdater for the unsigned-builds rationale). Validates the tag
   // shape so a compromised renderer can't aim shell.openExternal at arbitrary URLs.
   ipcMain.handle('updater:open-release-page', async (_event, tag: string) => {
-    if (typeof tag !== 'string' || !/^v?\d+\.\d+\.\d+(?:-[a-z0-9.]+)?$/.test(tag)) {
+    if (typeof tag !== 'string' || !/^v?\d+\.\d+\.\d+(?:-[a-z0-9.]{1,20})?$/.test(tag)) {
       throw new Error(`Invalid release tag: ${String(tag)}`)
     }
     const normalized = tag.startsWith('v') ? tag : `v${tag}`
