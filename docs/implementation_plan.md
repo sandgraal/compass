@@ -15,9 +15,9 @@
 | **Phase 1** — Critical bug fixes | 5 items | 100% (all shipped prior to this branch) |
 | **Phase 2** — Remaining PRD features | 7 items | 100% (2.1–2.7 all shipped prior to this branch) |
 | **Phase 3** — Beyond-PRD polish | 2 selected items | 100% (onboarding wizard + tray/notifications shipped) |
-| **Phase 4** — Finance forward roadmap | 8 items | 4.0–4.5 shipped; **4.6 = 57%** (4/7 PRs — 1, 2a, 2b, 3 merged; 4, 5, 6 pending); 4.7 active (cutover 2026-06-10) |
+| **Phase 4** — Finance forward roadmap | 8 items | 4.0–4.6 shipped; 4.7 closed early (Plaid is source of truth as of 2026-05-21; Excel pipeline retired) |
 | **Phase 5 (cont.)** — Bounded UX wins | 5 items | 100% (5.10–5.14 shipped) |
-| **Phase 6** — Code-health debt (May 2026) | 5 items | 0% — NEW |
+| **Phase 6** — Code-health debt (May 2026) | 5 items | 6.1 = 78% (7/9 IPC tests shipped — `auth.ts`/`sync.ts` remain); 6.2–6.5 = 0% |
 
 PRD-completion of the running app: **~99%** (all Phases 1–3 + Phase 4.0–4.5 merged with UIs).
 
@@ -216,13 +216,12 @@ Plaid Link in a child BrowserWindow, encrypted tokens in Vault, `transactions/sy
 - [x] **PR 2a — Vault layer** — extracted shared crypto primitives to `electron/lib/crypto-vault.ts` (the existing vault now imports from there; no behaviour change); new `electron/integrations/plaid/vault.ts` encrypts both per-env Plaid API secrets AND per-Item access tokens into a single `.vault/plaid.enc` blob via AES-256-GCM; 32 unit tests with mocked safeStorage covering round-trip, tamper detection, wrong-key, unicode, isolation per env / per Item, sorted ID listing without token leakage, and the "wipe leaves an encrypted empty blob on disk" invariant
 - [x] **PR 2b — Plaid SDK wrapper** — `electron/integrations/plaid/config.ts` parses `~/.config/compass/plaid.env` (non-secret `PLAID_CLIENT_ID` + `PLAID_ENV`; rejects the retired `development` env). `electron/integrations/plaid/client.ts` exposes `getPlaidClient(env?)` that re-reads config + secret on every call (stateless, matching the vault's no-cache invariant) and returns `{ api, env, clientId }`. Typed `PlaidNotConfiguredError` with `reason: 'missing-config' | 'missing-secret' | 'env-mismatch'` lets the upcoming Integrations card branch cleanly on setup state. `plaid@^42.2.0` added. 27 unit tests (15 config + 12 client) covering header wiring, base-path routing, stateless re-reads, env-mismatch rejection
 - [x] **PR 3 — Plaid Link flow** — `electron/integrations/plaid/link.ts` adds `createLinkToken()` (pinned to `Products.Transactions` + `CountryCode.Us` for the narrowest consent prompt; stable per-process `client_user_id` UUID), `exchangePublicToken(publicToken)` (vault-write FIRST so a mid-flow crash can't strand an Item we can't reach; `accountsGet` + `institutionsGetById` failures are non-fatal; access token never appears in the return shape), and `buildLinkHtml(linkToken)` (self-contained HTML that loads `cdn.plaid.com/link/v2/stable/link-initialize.js` and posts back via `compass-plaid://success` / `exit`; token escaped against `<`, `"`, `\`, U+2028/U+2029 before interpolation). New `electron/ipc/plaid.ts` registers `plaid:get-status`, `plaid:set-secret`, `plaid:start-link`, `plaid:disconnect`. The Link child BrowserWindow runs with `nodeIntegration:false`, `contextIsolation:true`, `sandbox:true`, and a per-window CSP that whitelists `cdn.plaid.com` + `*.plaid.com` only — main window's CSP untouched. User-cancellation resolves with `{ ok: false, cancelled: true }`; only programmer errors reject. 36 unit tests (21 link helpers + 15 IPC)
-- [ ] PR 4 — Sync loop (`/transactions/sync` cursor pagination, normalize → `RawTxn`, hash dedupe, idempotent)
-- [ ] PR 5 — Integrations card UI + Accounts-tab "linked" badge
-- [ ] PR 6 — Daily 06:00 cron + error-surface UX
+- [x] **PR 4 — Sync loop** — `electron/integrations/plaid/normalize.ts` maps Plaid `Transaction` → `RawTxn` (sign flip, `merchant_name ?? name`, natural-field hash so CSV→Plaid migration doesn't double-count); `electron/integrations/plaid/cursor.ts` r/w of `plaidItems.cursor`; `electron/integrations/plaid/sync.ts` exporting `syncPlaid(itemId)` + `syncAllPlaid()` (cursor loop on `has_more`, `removed` deletes by `'plaid:<institution>:<txnId>'` `sourceFile` match, `sync_events` + `integrations.lastSyncedAt` written); wired into `electron/ipc/sync.ts`. Reuses existing `categorize()` + `tagGeoAndPurpose()` + hash-dedupe upsert. Tests: `normalize.test.ts`, `cursor.test.ts`, `sync.test.ts`
+- [x] **PR 5 — Integrations card UI + Accounts-tab "linked" badge** — Plaid card in `src/pages/Integrations.tsx` with set-secret form, start-link CTA branching on `configured`/`hasSecret`, per-Item disconnect; `plaid:list-items` IPC + preload + types added; `src/pages/Finance.tsx` Accounts tab renders "linked · <institution>" badge on rows whose `plaidItemId` resolves
+- [x] **PR 6 — Daily 06:00 cron + error-surface UX** — `electron/cron-plaid.ts` schedules `syncAllPlaid()` at 06:00 local time (separate from generic `cron.ts` rotation so per-Item error codes can surface on the Item card); `cron-plaid.test.ts` covers scheduling + error surface; `cron.ts` skips `service === 'plaid'` rows in the generic loop
 
 ### 4.7 [`legacy-cutover.md`](finance/legacy-cutover.md) — retire the Excel pipeline (2026-06-10)
-Operational doc. Transition rules for the parallel-run window, cutover-day checklist, rollback plan. Not a PR — `docs-keeper` maintains the reconciliation log here during the window.
-*Owner: `docs-keeper` + `director` · operational, no code*
+- [x] **Closed early (2026-05-21)** — Plaid is the source of truth as of this date; Excel parallel-run retired ahead of the original cutover date. Reconciliation log discontinued.
 
 ### Recommended sequence
 
@@ -266,16 +265,16 @@ Net Worth view has live balances waiting.
 Backfill that's accumulated as the project shipped fast. None individually critical; together they're worth a dedicated phase. See [`strategic-review-2026-05.md`](strategic-review-2026-05.md) §"Phase 6" for the full audit.
 
 ### 6.1 IPC test coverage backfill
-Nine of thirteen `electron/ipc/*.ts` modules lack a `.test.ts`. Land one small PR per file, P0 first.
-- [ ] **P0** — `electron/ipc/vault.ts` (security-critical, no test)
-- [ ] **P0** — `electron/ipc/auth.ts` (OAuth flow, no test)
-- [ ] **P1** — `electron/ipc/finance.ts` (largest handler)
+Originally nine of thirteen `electron/ipc/*.ts` modules lacked a `.test.ts`. Seven shipped between PR #96 and #102 in May 2026; **`auth.ts` and `sync.ts` remain**.
+- [x] **P0** — `electron/ipc/vault.ts` (security-critical) — shipped via #96
+- [ ] **P0** — `electron/ipc/auth.ts` (OAuth flow)
+- [x] **P1** — `electron/ipc/finance.ts` (largest handler) — shipped via #102 (chunk 1/3 of 3)
 - [ ] **P1** — `electron/ipc/sync.ts`
-- [ ] **P1** — `electron/ipc/knowledge.ts`
-- [ ] **P2** — `electron/ipc/settings.ts`
-- [ ] **P2** — `electron/ipc/spotlight.ts` (integration coverage exists; backfill at handler seam)
-- [ ] **P3** — `electron/ipc/habits.ts`
-- [ ] **P3** — `electron/ipc/updater.ts`
+- [x] **P1** — `electron/ipc/knowledge.ts` — shipped via #97
+- [x] **P2** — `electron/ipc/settings.ts` — shipped via #98
+- [x] **P2** — `electron/ipc/spotlight.ts` (integration coverage exists; handler seam backfill) — shipped via #101
+- [x] **P3** — `electron/ipc/habits.ts` — shipped via #99
+- [x] **P3** — `electron/ipc/updater.ts` — shipped via #100
 
 ### 6.2 Knowledge module test backfill
 - [ ] `electron/knowledge/extractor.ts` — auto-update pipeline entrypoint
@@ -283,14 +282,14 @@ Nine of thirteen `electron/ipc/*.ts` modules lack a `.test.ts`. Land one small P
 - [ ] `electron/knowledge/writer.ts`
 
 ### 6.3 Empty-catch sweep
-Convert 10 silent `catch {}` to `catch (err) { console.warn('[area]', err) }` in: `electron/menu-bar.ts:206,251,268`, `electron/url-scheme.ts:65`, `electron/cron.ts:48,125`, `electron/integrations/finance-watcher.ts:133,244`, `electron/integrations/apple-calendar.ts:263,271`.
+Convert 13 silent `catch {}` to `catch (err) { console.warn('[area]', err) }` in: `electron/menu-bar.ts:206,251,268`, `electron/url-scheme.ts:65`, `electron/cron.ts:49,133`, `electron/integrations/finance-watcher.ts:133,244`, `electron/integrations/apple-calendar.ts:263,271,299,333,345`. (Recount 2026-05-21: original plan listed 10; `apple-calendar.ts` has 3 more than first audited; `cron.ts` line numbers shifted.)
 
 ### 6.4 Biome warning cleanup
 - [ ] Fix the 78 standing warnings — concentrated in `electron/integrations/finance.ts:64-66` (noAssignInExpressions ×3) and `src/pages/Weekly.tsx` (a11y + exhaustive-deps + button-type)
 - [ ] Add `--max-diagnostics=0` to the CI Biome step so future PRs can't re-introduce them
 
 ### 6.5 Type-safety escape audit
-Walk through the 8 `as any` / `@ts-ignore` / `@ts-expect-error` occurrences in `electron/preload-quick-capture.ts`, `electron/preload.ts`, `electron/ipc/finance.ts`, `src/pages/Ask.tsx`, `src/pages/Finance.tsx`. Replace with proper typing where the schema now allows it.
+Walk through the remaining type escapes (recount 2026-05-21: 4 sites; the original claim of 8 was high — the Phase 6.1 test PRs cleaned several incidentally): `electron/preload-quick-capture.ts:23` (`@ts-ignore`), `electron/preload.ts:378,380` (`@ts-ignore` ×2), `electron/ipc/finance.ts:106` (`db as any`). `src/pages/Ask.tsx` and `src/pages/Finance.tsx` are now clean. Replace with proper typing where the schema now allows it.
 
 Also worth tracking under this phase: narrow `PlaidEnv` in `electron/integrations/plaid/vault.ts` from `'sandbox' | 'development' | 'production'` to just `'sandbox' | 'production'` (`development` was retired by Plaid in 2024 and `client.ts` already rejects it).
 
