@@ -318,11 +318,7 @@ describe('finance:delete-account', () => {
     const id = seedAccount('one-txn')
     seedTxn({ hash: 'only', accountId: id })
     const h = await registerAndGet('finance:delete-account')
-    // NOTE: prod code currently produces "1 transaction still reference it"
-    // — only the noun is pluralized, not the verb. Grammatically that
-    // should be "1 transaction still references it", but the test locks
-    // current behavior; a separate grammar-fix task is filed.
-    await expect(invoke(h, id)).rejects.toThrow(/1 transaction still reference it/)
+    await expect(invoke(h, id)).rejects.toThrow(/1 transaction still references it/)
   })
 })
 
