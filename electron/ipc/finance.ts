@@ -273,7 +273,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     const transactionCount = Number(transactionCountResult?.count ?? 0)
     if (transactionCount > 0) {
       throw new Error(
-        `Can't delete this account while ${transactionCount} transaction${transactionCount === 1 ? '' : 's'} still reference it.`
+        `Can't delete this account while ${transactionCount} transaction${transactionCount === 1 ? ' still references' : 's still reference'} it.`
       )
     }
     db.delete(financeAccounts).where(eq(financeAccounts.id, id)).run()
