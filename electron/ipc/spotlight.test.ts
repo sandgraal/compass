@@ -20,68 +20,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ── DB layer mock ────────────────────────────────────────────────────────────
 // Simple key-value store backed by a Map. Mirrors the appSettings table
-// shape (the only table this module reads/writes).
+// shape (the only table this module reads/writes). The handler reads
+// individual rows by `eq(appSettings.key, '<key>')`; drizzle's builder
+// chain is opaque, so we use a `lastEqKey` side-channel populated by a
+// thin wrapper around `eq` to give the mocked `get()` something to key
+// off of.
 
 const settings = new Map<string, string>()
 const dbInsertSpy = vi.fn()
-
-vi.mock('../db/client', () => ({
-  getDb: () => ({
-    select: () => ({
-      from: () => ({
-        where: (_pred: unknown) => ({
-          get: () => {
-            // Caller passes eq(appSettings.key, '<key>'); we infer the key
-            // from the last select() chain by inspecting the cached
-            // `currentKey` set by the where mock indirectly. Since drizzle's
-            // builder is opaque from outside, we use a side channel: each
-            // test sets up settings by key, and our `get()` here returns
-            // the row matching the most-recently-asked-for key (set via
-            // the lastKey variable below). Simpler approach: handler reads
-            // both keys in order, so we return them in matching order.
-            return undefined // overridden below per-call via mockImplementation
-          }
-        })
-      })
-    }),
-    insert: () => ({
-      values: (row: { key: string; value: string }) => ({
-        onConflictDoUpdate: () => ({
-          run: () => {
-            settings.set(row.key, row.value)
-            dbInsertSpy(row)
-          }
-        })
-      })
-    })
-  })
-}))
-
-// The mock's `get()` above is too generic to know which key is being
-// asked for. Instead, intercept at a higher level: wrap getDb so each
-// SELECT chain reads from `settings` by key. We need the key — drizzle's
-// where(eq(col, val)) produces an opaque object. The handler reads two
-// specific keys; capture them by spying on `eq` from drizzle-orm.
-
 const lastEqKey: { value: string | null } = { value: null }
+
 vi.mock('drizzle-orm', async () => {
   const actual = await vi.importActual<typeof import('drizzle-orm')>('drizzle-orm')
   return {
     ...actual,
-    // Side-channel: capture the string value of the most recent
-    // `eq(col, 'some-key')` call so the mocked getDb().get() can know
-    // which appSettings row the caller wanted. Real drizzle `eq` types
-    // are strict; the test mock just forwards through, so any-cast is
-    // acceptable here.
     eq: (col: unknown, val: unknown) => {
       if (typeof val === 'string') lastEqKey.value = val
       return (actual.eq as (a: unknown, b: unknown) => unknown)(col, val)
     }
   }
 })
-
-// Patch the inner `.get()` to read from `settings` keyed by lastEqKey.
-// Easier: replace the whole vi.mock above with one that uses lastEqKey.
 
 vi.mock('../db/client', () => ({
   getDb: () => ({
@@ -250,7 +208,12 @@ describe('spotlight:set-enabled', () => {
     expect(dbInsertSpy).not.toHaveBeenCalled()
   })
 
-  it('persists enabled=true, runs backfill, then starts the watcher', async () => {
+  it('persists enabled=true, runs backfill, then starts the watcher (in that order)', async () => {
+    // Order matters: the user should never see a watcher firing
+    // against an empty mirror dir. Backfill must complete BEFORE the
+    // watcher starts emitting events. `mock.invocationCallOrder`
+    // gives us a monotonically-increasing number across all vitest
+    // mocks; comparing the two locks the order.
     const h = await registerAndGet('spotlight:set-enabled')
     const out = (await invoke(h, true)) as {
       success: boolean
@@ -258,15 +221,23 @@ describe('spotlight:set-enabled', () => {
     }
     expect(out.success).toBe(true)
     expect(out.result?.added).toBe(3)
-    // The persisted value
     expect(settings.get('spotlightMirrorEnabled')).toBe('true')
-    // Backfill ran
     expect(reconcileMirrorMock).toHaveBeenCalledOnce()
-    // Watcher started (chokidar.watch called)
     expect(chokidarWatchMock).toHaveBeenCalledOnce()
+
+    const backfillOrder = reconcileMirrorMock.mock.invocationCallOrder[0]
+    const watcherOrder = chokidarWatchMock.mock.invocationCallOrder[0]
+    expect(backfillOrder).toBeLessThan(watcherOrder)
   })
 
-  it('refuses to enable when the stored path is outside ~/Documents or ~/Desktop', async () => {
+  it('refuses to enable when the stored path is outside ~/Documents or ~/Desktop (no half-enabled state)', async () => {
+    // Regression for a real bug found via Copilot review: the handler
+    // used to INSERT `spotlightMirrorEnabled=true` BEFORE validating
+    // the stored path, then return an error. Next launch read the
+    // stored value, tried to start the watcher against the disallowed
+    // path, and ended up in a stuck `lastError` state. The fix
+    // validates first; this test locks in that no DB mutation
+    // happens on the rejected path.
     settings.set('spotlightMirrorPath', '/tmp/escape/notes')
     isAllowedMirrorPathMock.mockReturnValue(false)
     const h = await registerAndGet('spotlight:set-enabled')
@@ -276,6 +247,9 @@ describe('spotlight:set-enabled', () => {
     // No backfill, no watcher start
     expect(reconcileMirrorMock).not.toHaveBeenCalled()
     expect(chokidarWatchMock).not.toHaveBeenCalled()
+    // CRITICAL: the DB was NOT mutated. The toggle is a true no-op.
+    expect(dbInsertSpy).not.toHaveBeenCalled()
+    expect(settings.has('spotlightMirrorEnabled')).toBe(false)
   })
 
   it('disabling does NOT delete mirrored files (only stops syncing)', async () => {
