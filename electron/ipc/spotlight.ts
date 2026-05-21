@@ -127,6 +127,23 @@ export function registerSpotlightHandlers(ipcMain: IpcMain): void {
       return { success: false, error: 'enabled must be a boolean' }
     }
     try {
+      // When enabling, validate the stored path BEFORE persisting. The
+      // prior order (insert → validate) left a half-enabled state in the
+      // DB when the stored path was disallowed: the toggle returned an
+      // error, but the next launch would read enabled=true and try to
+      // start the watcher with the same bad path. Validate-first means
+      // a rejected toggle is a true no-op for the user.
+      let cfg: MirrorConfig | null = null
+      if (enabled) {
+        cfg = readConfig()
+        if (!isAllowedMirrorPath(cfg.path)) {
+          return {
+            success: false,
+            error: 'Mirror path must be under ~/Documents or ~/Desktop'
+          }
+        }
+      }
+
       const db = getDb()
       db.insert(appSettings)
         .values({
@@ -140,17 +157,10 @@ export function registerSpotlightHandlers(ipcMain: IpcMain): void {
         })
         .run()
 
-      if (enabled) {
+      if (enabled && cfg) {
         // Backfill before starting the watcher so the user has a fully
         // populated mirror as soon as the toggle flips. Otherwise
         // they'd only see new edits.
-        const cfg = readConfig()
-        if (!isAllowedMirrorPath(cfg.path)) {
-          return {
-            success: false,
-            error: 'Mirror path must be under ~/Documents or ~/Desktop'
-          }
-        }
         const result = reconcileMirror(KNOWLEDGE_DIR, cfg.path)
         lastBackfillAt = Date.now()
         await startKnowledgeMirrorWatcher()
