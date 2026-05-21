@@ -179,7 +179,7 @@ describe('habits:update', () => {
     expect(row.color).toBe('#ff0000')
   })
 
-  it('can flip active=false (reactivation path for a soft-deleted habit)', async () => {
+  it('can flip active=true (reactivation path for a soft-deleted habit)', async () => {
     const id = seedHabit('archived', false)
     const h = await registerAndGet('habits:update')
     await invoke(h, id, { active: true })
