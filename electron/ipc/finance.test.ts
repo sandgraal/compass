@@ -141,6 +141,7 @@ async function registerAndGet(channel: string): Promise<Handler> {
 
 beforeEach(() => {
   sqlite = new Database(':memory:')
+  sqlite.pragma('foreign_keys = ON')
   createSchema()
   for (const k of Object.keys(handlers)) delete handlers[k]
 })
