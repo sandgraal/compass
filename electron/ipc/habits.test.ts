@@ -12,8 +12,7 @@
  *   - habits:create (id assignment, defaults, returned shape)
  *   - habits:update (partial update)
  *   - habits:delete (soft delete — sets active=false, does NOT remove row)
- *   - habits:get-entries (month-window filter, missing habitId handling,
- *     grouped-by-habitId shape)
+ *   - habits:get-entries (month-window filter, grouped-by-habitId shape)
  *   - habits:get-all-entries (returns ALL entries grouped the same way)
  *   - habits:toggle (insert when absent, flip when present, returns the
  *     resulting completed state)
