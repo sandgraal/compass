@@ -12,7 +12,8 @@
  *   - habits:create (id assignment, defaults, returned shape)
  *   - habits:update (partial update)
  *   - habits:delete (soft delete — sets active=false, does NOT remove row)
- *   - habits:get-entries (month-window filter, grouped-by-habitId shape)
+ *   - habits:get-entries (month-window filter, NULL habit_id skip,
+ *     grouped-by-habitId shape)
  *   - habits:get-all-entries (returns ALL entries grouped the same way)
  *   - habits:toggle (insert when absent, flip when present, returns the
  *     resulting completed state)
@@ -178,7 +179,7 @@ describe('habits:update', () => {
     expect(row.color).toBe('#ff0000')
   })
 
-  it('can flip active=true (reactivation path for a soft-deleted habit)', async () => {
+  it('can flip active=true to reactivate a soft-deleted habit', async () => {
     const id = seedHabit('archived', false)
     const h = await registerAndGet('habits:update')
     await invoke(h, id, { active: true })
@@ -249,6 +250,27 @@ describe('habits:get-entries', () => {
   it('returns an empty object when no entries match the window', async () => {
     const h = await registerAndGet('habits:get-entries')
     expect(await invoke(h, '2026-05')).toEqual({})
+  })
+
+  it('skips entries with a NULL habit_id (orphaned rows are not bucketed)', async () => {
+    // habit_entries.habit_id is nullable per the schema. The handler
+    // explicitly guards with `if (!e.habitId) continue` so an orphan
+    // doesn't end up in `map[null]` or crash the grouping. Lock that
+    // path — without the guard, a stray NULL-habit row would either
+    // pollute the response or trigger an "object key 'null'" surprise
+    // for callers iterating with Number()-based keys.
+    const id = seedHabit('valid')
+    seedEntry(id, '2026-05-10', true)
+    // Insert an orphan directly (bypass seedEntry's habitId arg).
+    sqlite
+      .prepare('INSERT INTO habit_entries (habit_id, date, completed) VALUES (NULL, ?, ?)')
+      .run('2026-05-11', 1)
+
+    const h = await registerAndGet('habits:get-entries')
+    const out = (await invoke(h, '2026-05')) as Record<number, Record<string, boolean>>
+    expect(out[id]).toEqual({ '2026-05-10': true })
+    // No `null` bucket and no extra entries
+    expect(Object.keys(out)).toEqual([String(id)])
   })
 })
 
