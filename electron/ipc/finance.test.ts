@@ -141,6 +141,10 @@ async function registerAndGet(channel: string): Promise<Handler> {
 
 beforeEach(() => {
   sqlite = new Database(':memory:')
+  // Match production: `electron/db/client.ts` enables `foreign_keys = ON`
+  // so these handler tests run under the same SQLite constraint behavior
+  // as the app. Catches future regressions where deletes/updates might
+  // start relying on FK enforcement.
   sqlite.pragma('foreign_keys = ON')
   createSchema()
   for (const k of Object.keys(handlers)) delete handlers[k]
