@@ -20,7 +20,22 @@
  */
 
 import type { IpcMain } from 'electron'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// Capture the host's `process.platform` descriptor before any test mutates
+// it. The `initAutoUpdater` cases below redefine the property to exercise
+// the darwin / win32 / linux branches; without this restore in afterAll,
+// the mutation would leak into other test files running in the same
+// Vitest worker — most painfully for devs on macOS, where a stuck
+// `platform === 'linux'` would silently break tests for Squirrel-gated
+// behavior elsewhere.
+const ORIGINAL_PLATFORM_DESC = Object.getOwnPropertyDescriptor(process, 'platform')
+
+afterAll(() => {
+  if (ORIGINAL_PLATFORM_DESC) {
+    Object.defineProperty(process, 'platform', ORIGINAL_PLATFORM_DESC)
+  }
+})
 
 // ── Mock electron + electron-updater ─────────────────────────────────────────
 
