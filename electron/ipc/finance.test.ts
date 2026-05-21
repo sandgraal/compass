@@ -421,7 +421,7 @@ describe('finance:get-rules', () => {
     expect(await invoke(h)).toEqual([])
   })
 
-  it('returns rules ordered by priority', async () => {
+  it('returns rules ordered by ascending priority (lower number first)', async () => {
     // Lower priority number = higher precedence in the categorizer.
     // The handler relies on this order so the categorizer can take
     // the first matching pattern. Lock it.
@@ -436,6 +436,7 @@ describe('finance:get-rules', () => {
       .run('mmm', 'M', 5)
     const h = await registerAndGet('finance:get-rules')
     const out = (await invoke(h)) as Array<{ pattern: string; priority: number }>
+    expect(out.map((r) => r.priority)).toEqual([1, 5, 10])
     expect(out.map((r) => r.pattern)).toEqual(['aaa', 'mmm', 'zzz'])
   })
 })
