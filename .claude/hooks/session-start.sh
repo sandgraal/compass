@@ -42,10 +42,46 @@ if [ -f "$status_json" ]; then
   test_files_line="${test_files} test files tracked"
 fi
 
-# Open PR count (best-effort; doesn't run if gh isn't logged in)
+# Open PR count (best-effort; bounded + non-interactive so session start
+# can't hang on auth prompts or network stalls).
+gh_pr_count() {
+  local tmp pid result i
+
+  tmp="$(mktemp 2>/dev/null)" || {
+    echo '?'
+    return 0
+  }
+
+  (
+    GH_PROMPT_DISABLED=1 gh pr list --state open --json number --jq 'length' \
+      </dev/null >"$tmp" 2>/dev/null
+  ) &
+  pid=$!
+
+  for i in 1 2 3 4 5 6; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid" 2>/dev/null || true
+      result="$(cat "$tmp" 2>/dev/null)"
+      rm -f "$tmp"
+      if [ -n "$result" ]; then
+        printf '%s\n' "$result"
+      else
+        echo '?'
+      fi
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  rm -f "$tmp"
+  echo '?'
+}
+
 open_prs=""
 if command -v gh >/dev/null 2>&1; then
-  pr_count="$(gh pr list --state open --json number --jq 'length' 2>/dev/null || echo '?')"
+  pr_count="$(gh_pr_count)"
   open_prs="${pr_count} open PR(s)"
 fi
 
