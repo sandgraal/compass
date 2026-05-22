@@ -290,9 +290,8 @@ Originally most `electron/ipc/*.ts` modules lacked test coverage. The bulk shipp
 - [ ] Add `--max-diagnostics=0` to the CI Biome step so future PRs can't re-introduce them
 
 ### 6.5 Type-safety escape audit
-Walk through the remaining type escapes (recount 2026-05-21: 4 sites; the original claim of 8 was high — the Phase 6.1 test PRs cleaned several incidentally): `electron/preload-quick-capture.ts:23` (`@ts-ignore`), `electron/preload.ts:378,380` (`@ts-ignore` ×2), `electron/ipc/finance.ts:106` (`db as any`). `src/pages/Ask.tsx` and `src/pages/Finance.tsx` are now clean. Replace with proper typing where the schema now allows it.
-
-Also worth tracking under this phase: narrow `PlaidEnv` in `electron/integrations/plaid/vault.ts` from `'sandbox' | 'development' | 'production'` to just `'sandbox' | 'production'` (`development` was retired by Plaid in 2024 and `client.ts` already rejects it).
+- [x] **Shipped** — removed all 4 remaining escapes: `electron/preload-quick-capture.ts` + `electron/preload.ts` (×3 `@ts-ignore` on the non-isolated `window.*` fallback assignments) now use a localized widened-`window` cast instead of suppression; `electron/ipc/finance.ts:106` dropped `db as any` (the `getDb()` return type already matches `ingestCsvFolder`'s `BetterSQLite3Database<typeof schema>` param, so the cast was dead). typecheck stays green.
+- [ ] **Deferred (deliberate non-change):** narrowing `PlaidEnv` in `electron/integrations/plaid/vault.ts` from `'sandbox' | 'development' | 'production'` to `'sandbox' | 'production'`. The vault layer is an intentionally env-agnostic keyed store (config.ts is the validation gate that rejects the retired `development` env); `vault.test.ts` exercises `'development'` precisely to prove the store is env-key-generic. Narrowing here would break those isolation tests and over-couple the store to the gate. Leaving as-is.
 
 ---
 
