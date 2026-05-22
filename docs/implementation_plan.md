@@ -11,7 +11,7 @@
 |---|---|---|
 | **Phase 0** — Agent infrastructure | 7 sub-areas | 100% |
 | **Phase 0+** — Leading-edge agent infra | 10 items | 90% (0+.6, 0+.9 superseded — see Phase 0++) |
-| **Phase 0++** — Claude Code platform refresh (May 2026) | 6 items | 0% — NEW |
+| **Phase 0++** — Claude Code platform refresh (May 2026) | 6 items | in progress — 0++.1/.2/.3/.5 shipped; 0++.4 + 0++.6 in review |
 | **Phase 1** — Critical bug fixes | 5 items | 100% (all shipped prior to this branch) |
 | **Phase 2** — Remaining PRD features | 7 items | 100% (2.1–2.7 all shipped prior to this branch) |
 | **Phase 3** — Beyond-PRD polish | 2 selected items | 100% (onboarding wizard + tray/notifications shipped) |
@@ -115,11 +115,11 @@ Modern (Nov 2025+) Claude Code best practice splits guidance into 4 layers. This
 
 The Claude Code platform shipped meaningful features since Phase 0+ landed. Adopt the ones that move the agent-success needle. See [`strategic-review-2026-05.md`](strategic-review-2026-05.md) for the rationale.
 
-- [ ] **0++.1 SessionStart hook** — `.claude/hooks/session-start.sh` invokes `scripts/project-status.ts` and emits a compact summary (current branch, last commit, sync queue, test status) into every new session. Wire in `.claude/settings.json` under `hooks.SessionStart`.
-- [ ] **0++.2 UserPromptSubmit guardrails** — `.claude/hooks/guardrails.sh` pattern-matches risky prompts: warn on "push" / "force push" + branch=main; suggest `/safe-commit` when "commit" appears without staged files; mirror data-dir blocks at the prompt level.
+- [x] **0++.1 SessionStart hook** — shipped. `.claude/hooks/session-start.sh` emits a compact orientation snapshot (branch, last commit, drift from origin/main, dirty count, open PRs) into every new session; wired under `hooks.SessionStart`. (Uses git/gh directly rather than regenerating project-status.json, to keep session start fast.)
+- [x] **0++.2 UserPromptSubmit guardrails** — shipped. `.claude/hooks/guardrails.sh` warns on push-to-main / force-push, nudges to `/safe-commit` when "commit" appears with nothing staged, and flags protected-path mentions. Advisory only (never blocks); real enforcement stays at the tool-call layer.
 - [x] **0++.3 Living-docs PostToolUse hook** (supersedes 0+.6) — `.claude/hooks/living-docs.sh` fires on Edit/Write to `electron/db/schema.ts`, `electron/db/schema.finance.ts`, `electron/preload.ts`, or `src/types/electron.d.ts` and emits an `additionalContext` nudge instructing the agent to run the `docs-keeper` subagent (a shell hook can't spawn a subagent directly). Advisory only — never blocks. Wired as a 2nd PostToolUse command alongside `post-schema-edit.sh`.
 - [ ] **0++.4 Background scheduled agents** (supersedes 0+.9) — `CronCreate` registers: **nightly** bug-triager, **weekly** docs-keeper, **monthly** security-auditor (diff-focused on `electron/ipc/vault.ts`, `auth.ts`, `main.ts`, `preload.ts`).
-- [ ] **0++.5 Subagent memory** — add `.claude/agents/<name>/memory/MEMORY.md` for `security-auditor` and `bug-triager`. Instruct each in its system prompt to consult before starting and update on completion. Lets them accumulate project-specific tribal knowledge across runs.
+- [x] **0++.5 Subagent memory** — shipped. `.claude/agents/memory/{security-auditor,bug-triager}/MEMORY.md` scaffolds (accepted risks / known-safe patterns / run log, with a per-year retention/archival rule); each agent's prompt consults memory at start and appends a run-log entry on completion, with an ephemeral-CI fallback that reports when persistence isn't possible. `Edit` granted, scoped to the memory file only.
 - [ ] **0++.6 MCP server self-knowledge expansion** — extend `mcp/compass-mcp/index.ts` with `compass_recent_commits`, `compass_test_status`, `compass_integration_health`. Lets agents introspect without shelling out.
 
 ---

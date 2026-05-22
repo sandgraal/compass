@@ -3,8 +3,9 @@
 # run the docs-keeper subagent so docs/ don't drift. Phase 0++.3
 # (supersedes the 0+.6 placeholder).
 #
-# The three files below own Compass's API surface: the DB schema, the
-# IPC bridge, and the renderer-facing type definitions. When any of them
+# The paths below own Compass's API surface across three areas: the DB
+# schema (schema.ts + schema.finance.ts), the IPC bridge (preload.ts), and
+# the renderer-facing type definitions (electron.d.ts). When any of them
 # changes, docs/architecture.md (IPC map + schema overview) and
 # docs/implementation_plan.md almost always need a follow-up edit — and
 # they're the docs that rot first.
@@ -38,15 +39,24 @@ fi
 
 context="📚 Living-docs check: you edited the ${surface}. This is part of Compass's API surface — docs/architecture.md (IPC map + schema overview) and docs/implementation_plan.md commonly drift when it changes. Before you wrap up this task, run the \`docs-keeper\` subagent to reconcile the docs with the new surface. If the edit was cosmetic (rename, comment, formatting) and the documented API is unchanged, you may skip it — say so explicitly."
 
+# Prefer a JSON additionalContext block via jq. If jq is missing OR the jq
+# invocation fails for any reason, fall back to stderr so the nudge is never
+# silently lost. We capture jq's output and check its exit code rather than
+# letting a mid-pipeline failure swallow the message.
+emitted=""
 if command -v jq >/dev/null 2>&1; then
-  jq -n --arg ctx "$context" '{
+  emitted=$(jq -n --arg ctx "$context" '{
     hookSpecificOutput: {
       hookEventName: "PostToolUse",
       additionalContext: $ctx
     }
-  }'
+  }' 2>/dev/null) || emitted=""
+fi
+
+if [ -n "$emitted" ]; then
+  printf '%s\n' "$emitted"
 else
-  # Fallback: emit to stderr so the nudge is never silently lost.
+  # Fallback: emit to stderr so the nudge always surfaces somewhere.
   echo "$context" >&2
 fi
 
