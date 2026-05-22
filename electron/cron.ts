@@ -46,7 +46,8 @@ function getDefaultIntervalMinutes(): number {
     const row = db.select().from(appSettings).where(eq(appSettings.key, 'syncInterval')).get()
     const parsed = Number.parseInt(row?.value ?? '15', 10)
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 15
-  } catch {
+  } catch (err) {
+    console.warn('[cron] read syncInterval failed; defaulting to 15', err)
     return 15
   }
 }
@@ -130,8 +131,9 @@ export function startCronJobs(): void {
       const interval = row.syncIntervalMinutes ?? fallback
       scheduleForService(row.service, interval)
     }
-  } catch {
+  } catch (err) {
     // DB not ready yet — caller will likely call restartCronJobs() once init completes.
+    console.warn('[cron] scheduling from integrations failed (DB not ready?)', err)
   }
   scheduleFinanceSnapshot()
   schedulePlaidDailySync()

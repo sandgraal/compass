@@ -62,7 +62,8 @@ export function parseCompassUrl(input: string): CompassCommand {
   let url: URL
   try {
     url = new URL(input)
-  } catch {
+  } catch (err) {
+    console.warn('[url-scheme] failed to parse URL', input, err)
     return { kind: 'unknown' }
   }
   if (url.protocol.replace(/:$/, '') !== SCHEME) return { kind: 'unknown' }

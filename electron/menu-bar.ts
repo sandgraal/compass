@@ -203,7 +203,8 @@ function loadShortcut(): string {
       .where(eq(appSettings.key, 'quickCaptureShortcut'))
       .get()
     return (row?.value as string | undefined) ?? DEFAULT_SHORTCUT
-  } catch {
+  } catch (err) {
+    console.warn('[menu-bar] read quickCaptureShortcut failed; using default', err)
     return DEFAULT_SHORTCUT
   }
 }
@@ -248,7 +249,8 @@ function tryRegisterShortcut(chord: string): boolean {
     return globalShortcut.register(chord, () => {
       if (tray) toggleCaptureWindow(tray)
     })
-  } catch {
+  } catch (err) {
+    console.warn('[menu-bar] globalShortcut.register failed', err)
     return false
   }
 }
@@ -265,8 +267,8 @@ export function restartQuickCaptureShortcut(newChord: string): RestartQuickCaptu
   // Unregister whatever is currently active
   try {
     globalShortcut.unregisterAll()
-  } catch {
-    // ignore
+  } catch (err) {
+    console.warn('[menu-bar] globalShortcut.unregisterAll failed', err)
   }
 
   if (tryRegisterShortcut(newChord)) {
