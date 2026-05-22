@@ -279,21 +279,25 @@ function extractEmailsFromText(text: string): Array<{ name: string; email: strin
   const namedRe = /([A-Za-z][^<]*?)\s*<([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})>/g
   let m: RegExpExecArray | null
   const namedEmails = new Set<string>()
-  while ((m = namedRe.exec(text)) !== null) {
+  m = namedRe.exec(text)
+  while (m !== null) {
     const name = m[1].trim().replace(/^"|"$/g, '')
     const email = m[2].trim().toLowerCase()
     results.push({ name, email })
     namedEmails.add(email)
+    m = namedRe.exec(text)
   }
 
   // Then bare email addresses that weren't captured above
   const bareRe = /\b([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\b/g
-  while ((m = bareRe.exec(text)) !== null) {
+  m = bareRe.exec(text)
+  while (m !== null) {
     const email = m[1].trim().toLowerCase()
     if (!namedEmails.has(email)) {
       results.push({ name: '', email })
       namedEmails.add(email)
     }
+    m = bareRe.exec(text)
   }
 
   return results

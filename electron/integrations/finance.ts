@@ -61,14 +61,18 @@ export const parseDate = (s: string): string => {
     /^(\d{4})\/(\d{2})\/(\d{2})$/ // YYYY/MM/DD
   ]
   let m: RegExpMatchArray | null
-  if ((m = t.match(fmts[0]))) return `${m[1]}-${m[2]}-${m[3]}`
-  if ((m = t.match(fmts[1]))) return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`
-  if ((m = t.match(fmts[2]))) {
+  m = t.match(fmts[0])
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`
+  m = t.match(fmts[1])
+  if (m) return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`
+  m = t.match(fmts[2])
+  if (m) {
     const yr = Number.parseInt(m[3], 10)
     const fullYr = yr < 50 ? 2000 + yr : 1900 + yr
     return `${fullYr}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`
   }
-  if ((m = t.match(fmts[3]))) return `${m[1]}-${m[2]}-${m[3]}`
+  m = t.match(fmts[3])
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`
   throw new Error(`Unrecognized date: ${s}`)
 }
 
