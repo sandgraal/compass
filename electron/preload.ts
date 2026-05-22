@@ -375,8 +375,9 @@ if (process.contextIsolated) {
     console.error(error)
   }
 } else {
-  // @ts-ignore
-  window.electron = electronAPI
-  // @ts-ignore
-  window.api = api
+  // Non-isolated fallback (dev only). `window` (DOM lib) has no typing for our
+  // injected globals, so widen it locally rather than suppressing the errors.
+  const w = window as typeof window & { electron: typeof electronAPI; api: typeof api }
+  w.electron = electronAPI
+  w.api = api
 }

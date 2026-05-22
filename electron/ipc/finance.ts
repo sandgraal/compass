@@ -103,7 +103,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     const db = getDb()
     const rules = db.select().from(categorizationRules).orderBy(categorizationRules.priority).all()
 
-    const result = await ingestCsvFolder(db as any, inbox, ARCHIVE_DIR, undefined, rules)
+    const result = await ingestCsvFolder(db, inbox, ARCHIVE_DIR, undefined, rules)
 
     // Refresh knowledge markdown after ingest
     try {

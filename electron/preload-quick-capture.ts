@@ -20,6 +20,8 @@ if (process.contextIsolated) {
     console.error('[quick-capture preload]', error)
   }
 } else {
-  // @ts-ignore
-  window.quickCaptureApi = quickCaptureApi
+  // Non-isolated fallback (dev only). `window` (DOM lib) has no typing for our
+  // custom global, so widen it locally rather than suppressing the error.
+  ;(window as typeof window & { quickCaptureApi: typeof quickCaptureApi }).quickCaptureApi =
+    quickCaptureApi
 }
