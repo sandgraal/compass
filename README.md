@@ -63,7 +63,7 @@ It's a *daily driver*: open it in the morning for your brief (calendar + tasks +
 
 ## Architecture
 
-Compass is an Electron app with a hard security boundary: the React renderer is sandboxed and can **only** talk to the Node main process through a typed IPC bridge. All data — SQLite DB, encrypted vault, markdown knowledge base — lives in `~/Library/Application Support/Compass/`.
+Compass is an Electron app with a hard security boundary: the React renderer is sandboxed and can **only** talk to the Node main process through a typed IPC bridge. All data — SQLite DB, encrypted vault, markdown knowledge base — lives in your OS application-data directory (on macOS, the primary target: `~/Library/Application Support/Compass/`).
 
 ```mermaid
 flowchart LR
@@ -138,7 +138,7 @@ The images above are produced from **synthetic** demo data, never your real stor
 npm run screenshots
 ```
 
-This seeds a throwaway data dir (via the `COMPASS_HOME` override in `electron/paths.ts`), builds the app, drives it with Playwright, and writes PNGs to `docs/images/`. Your real `~/Library/Application Support/Compass` is never touched.
+This seeds a throwaway data dir (via the `COMPASS_HOME` override in `electron/paths.ts`), builds the app, drives it with Playwright, and writes PNGs to `docs/images/`. Your real app-data store (on macOS, `~/Library/Application Support/Compass`) is never touched.
 
 ## Roadmap
 
