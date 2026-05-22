@@ -162,6 +162,7 @@ export default function Dashboard(): JSX.Element {
           <p className="text-muted-foreground mt-1">{format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
         </div>
         <button
+          type="button"
           onClick={handleSync}
           disabled={isSyncing}
           className="flex items-center gap-2 px-3 py-2 text-sm bg-secondary hover:bg-secondary/80 rounded-lg transition-colors disabled:opacity-50"
@@ -247,6 +248,7 @@ export default function Dashboard(): JSX.Element {
             <h2 className="text-sm font-semibold text-foreground">Today's Tasks</h2>
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 onClick={openQuickAdd}
                 className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
                 title="Quick-add task (or use ⌘K → New task)"
@@ -313,6 +315,7 @@ export default function Dashboard(): JSX.Element {
               </form>
             ) : (
               <button
+                type="button"
                 onClick={openQuickAdd}
                 className="w-full flex items-center gap-2 px-5 py-3 text-xs text-muted-foreground/50 hover:text-primary hover:bg-secondary/40 transition-colors"
               >

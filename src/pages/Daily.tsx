@@ -366,6 +366,7 @@ export default function Daily(): JSX.Element {
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <button
+            type="button"
             onClick={() => setDate(subDays(date, 1))}
             className="p-1.5 rounded hover:bg-secondary transition-colors"
           >
@@ -378,6 +379,7 @@ export default function Daily(): JSX.Element {
             <p className="text-sm text-muted-foreground">{format(date, 'MMMM d, yyyy')}</p>
           </div>
           <button
+            type="button"
             onClick={() => setDate(addDays(date, 1))}
             className="p-1.5 rounded hover:bg-secondary transition-colors"
           >
@@ -385,6 +387,7 @@ export default function Daily(): JSX.Element {
           </button>
           {!isToday && (
             <button
+              type="button"
               onClick={() => setDate(new Date())}
               className="text-xs text-primary hover:underline"
             >
@@ -411,6 +414,7 @@ export default function Daily(): JSX.Element {
           )}
           {isToday && (
             <button
+              type="button"
               onClick={rollOver}
               className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors"
             >
@@ -418,12 +422,14 @@ export default function Daily(): JSX.Element {
             </button>
           )}
           <button
+            type="button"
             onClick={openTemplateEditor}
             className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors"
           >
             <FileText size={12} /> Template
           </button>
           <button
+            type="button"
             onClick={exportAsMarkdown}
             className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors"
           >
@@ -573,6 +579,7 @@ export default function Daily(): JSX.Element {
               </p>
               {window.api && (
                 <button
+                  type="button"
                   onClick={seedFromTemplate}
                   className="mt-3 flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg transition-colors mx-auto"
                 >
@@ -617,6 +624,7 @@ export default function Daily(): JSX.Element {
                   <p className="text-xs text-muted-foreground truncate">{msg.fromAddress}</p>
                 </div>
                 <button
+                  type="button"
                   onClick={async () => {
                     try {
                       await window.api?.gmail.markDone(msg.id)
@@ -658,6 +666,7 @@ export default function Daily(): JSX.Element {
             className="flex-1 bg-secondary border border-border rounded-lg px-4 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary"
           />
           <button
+            type="button"
             onClick={addItem}
             className="px-3 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors"
           >
@@ -686,6 +695,7 @@ export default function Daily(): JSX.Element {
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => setTemplateOpen(false)}
                 className="p-1.5 rounded hover:bg-secondary text-muted-foreground"
               >
@@ -702,12 +712,14 @@ export default function Daily(): JSX.Element {
             </div>
             <div className="flex justify-end gap-2 px-5 py-4 border-t border-border">
               <button
+                type="button"
                 onClick={() => setTemplateOpen(false)}
                 className="text-sm px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={saveTemplate}
                 className="text-sm px-4 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
               >
@@ -907,6 +919,7 @@ function ChecklistRow({
           />
         </span>
         <button
+          type="button"
           onClick={() => onToggle(!item.checked)}
           className={cn(
             'w-4 h-4 rounded border shrink-0 flex items-center justify-center transition-colors',
@@ -928,6 +941,7 @@ function ChecklistRow({
 
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
+            type="button"
             onClick={onToggleExpand}
             className="p-1 rounded hover:bg-secondary text-muted-foreground"
           >
@@ -937,6 +951,7 @@ function ChecklistRow({
             />
           </button>
           <button
+            type="button"
             onClick={onDelete}
             className="p-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive"
           >

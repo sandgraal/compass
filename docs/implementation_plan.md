@@ -17,7 +17,7 @@
 | **Phase 3** — Beyond-PRD polish | 2 selected items | 100% (onboarding wizard + tray/notifications shipped) |
 | **Phase 4** — Finance forward roadmap | 8 items | 4.0–4.6 shipped; 4.7 closed early (Plaid is source of truth as of 2026-05-21; Excel pipeline retired) |
 | **Phase 5 (cont.)** — Bounded UX wins | 5 items | 100% (5.10–5.14 shipped) |
-| **Phase 6** — Code-health debt (May 2026) | 5 items | 6.1 + 6.2 + 6.3 + 6.5 done; 6.4 (Biome warnings) = 0% |
+| **Phase 6** — Code-health debt (May 2026) | 5 items | 6.1 + 6.2 + 6.3 + 6.5 done; 6.4 in progress (button-type cleared; 30 warnings + CI gate remain) |
 
 PRD-completion of the running app: **~99%** (all Phases 1–3 + Phase 4.0–4.5 merged with UIs).
 
@@ -286,8 +286,10 @@ Originally most `electron/ipc/*.ts` modules lacked test coverage. The bulk shipp
 - [x] **Shipped** — converted all 13 silent `catch {}` to `catch (err) { console.warn('[area]', err) }` in `electron/menu-bar.ts` (x3), `electron/url-scheme.ts` (x1), `electron/cron.ts` (x2), `electron/integrations/finance-watcher.ts` (x2), `electron/integrations/apple-calendar.ts` (x5). Each warn carries an area tag + the relevant path/value for context; existing fall-through comments and return values preserved. Behaviour unchanged - affected suites still green (`url-scheme` 12, `cron-plaid` 9, `apple-calendar` 27, `apple-rrule` 37).
 
 ### 6.4 Biome warning cleanup
-- [ ] Fix the 78 standing warnings — concentrated in `electron/integrations/finance.ts:64-66` (noAssignInExpressions ×3) and `src/pages/Weekly.tsx` (a11y + exhaustive-deps + button-type)
-- [ ] Add `--max-diagnostics=0` to the CI Biome step so future PRs can't re-introduce them
+Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77. Tackled in slices (the behaviour-affecting rules kept separate from the mechanical churn).
+- [x] **`useButtonType` (47)** — added explicit `type="button"` to every action `<button>` across 8 files (`Daily`, `KnowledgeBase`, `Settings`, `Weekly`, `Dashboard`, `Finance`, `ContextDrawer`, `Sidebar`). Genuine submit buttons (already `type="submit"`, e.g. the Dashboard quick-add form) were left untouched. 77 → 30 warnings.
+- [ ] Remaining 30: `useExhaustiveDependencies` (15), `noLabelWithoutControl` (8), `noAssignInExpressions` (7). These can change runtime behaviour, so they land in a separate, more careful PR.
+- [ ] Add `--max-diagnostics=0` (or equivalent error-on-warning) to the CI Biome step so future PRs can't re-introduce them — flip this LAST, once the count is 0.
 
 ### 6.5 Type-safety escape audit
 - [x] **Shipped** — removed all 4 remaining escapes: `electron/preload-quick-capture.ts` + `electron/preload.ts` (×3 `@ts-ignore` on the non-isolated `window.*` fallback assignments) now use a localized widened-`window` cast instead of suppression; `electron/ipc/finance.ts:106` dropped `db as any` (the `getDb()` return type already matches `ingestCsvFolder`'s `BetterSQLite3Database<typeof schema>` param, so the cast was dead). typecheck stays green.
