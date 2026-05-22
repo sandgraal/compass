@@ -1,6 +1,8 @@
+import { execFileSync } from 'node:child_process'
 import { readFileSync, readdirSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { extname, join, relative, sep } from 'node:path'
+import { dirname, extname, join, relative, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
@@ -23,6 +25,11 @@ import Database from 'better-sqlite3'
 const APP_DATA_DIR = join(homedir(), 'Library', 'Application Support', 'Compass')
 const DB_PATH = join(APP_DATA_DIR, '.data', 'compass.db')
 const KNOWLEDGE_DIR = join(APP_DATA_DIR, 'knowledge-base')
+
+// Repo root, derived from this file's location (mcp/compass-mcp/index.ts).
+// Used by the self-knowledge tools that introspect the source tree (git log,
+// test inventory) rather than the user's app data.
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 function openDb(): Database.Database | null {
   try {
@@ -96,6 +103,47 @@ const TOOLS = [
         path: { type: 'string' }
       },
       required: ['path'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'compass_recent_commits',
+    description:
+      'Returns the most recent git commits on the current branch (sha, subject, author, relative date). Lets an agent learn what shipped recently without shelling out. Read-only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'integer', minimum: 1, maximum: 50, default: 10 }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'compass_test_status',
+    description:
+      'Reports the test-suite state. By default returns a static inventory (test file count + names) for a fast answer. Pass run=true to execute `npm run test:run` and return the pass/fail summary — but that has filesystem side effects, so it is disabled unless the server was started with COMPASS_MCP_ALLOW_TEST_RUN=1 (otherwise run=true returns an error explaining how to enable it). Inventory mode is always read-only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        run: {
+          type: 'boolean',
+          default: false,
+          description:
+            'If true, execute the suite and return pass/fail counts (requires COMPASS_MCP_ALLOW_TEST_RUN=1). If false, return inventory only.'
+        }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'compass_integration_health',
+    description:
+      'Returns a per-integration health view: connection status, last sync time, last error, and recent sync-event counts (records updated + error count over the last N events). Richer than compass_sync_status. Read-only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        recentEvents: { type: 'integer', minimum: 1, maximum: 100, default: 20 }
+      },
       additionalProperties: false
     }
   }
@@ -183,6 +231,124 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return textResult(content)
     }
 
+    if (name === 'compass_recent_commits') {
+      const parsedLimit = Number(args?.limit)
+      const requestedLimit = Number.isFinite(parsedLimit) ? parsedLimit : 10
+      const limit = Math.min(50, Math.max(1, requestedLimit))
+      // execFileSync (not execSync) so the limit can't be shell-injected.
+      let out: string
+      try {
+        out = execFileSync('git', ['log', `-${limit}`, '--pretty=format:%h%x1f%s%x1f%an%x1f%cr'], {
+          cwd: REPO_ROOT,
+          encoding: 'utf8',
+          timeout: 10_000
+        })
+      } catch (err) {
+        return errorResult(`git log failed: ${(err as Error).message}`)
+      }
+      const commits = out
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => {
+          const [sha, subject, author, date] = line.split('\u001f')
+          return { sha, subject, author, date }
+        })
+      return textResult(JSON.stringify(commits, null, 2))
+    }
+
+    if (name === 'compass_test_status') {
+      const run = Boolean(args?.run ?? false)
+      const testFiles = walkTestFiles()
+      if (!run) {
+        return textResult(
+          JSON.stringify(
+            {
+              mode: 'inventory',
+              testFileCount: testFiles.length,
+              testFiles,
+              note: 'Static inventory only. Pass run=true to execute the suite and get pass/fail counts.'
+            },
+            null,
+            2
+          )
+        )
+      }
+      // run=true executes `npm run test:run`, which spawns local scripts and
+      // can write caches/artifacts to disk — a side effect at odds with this
+      // server's read-only posture. Gate it behind an explicit opt-in env var
+      // so a model can't trigger local command execution unprompted.
+      if (process.env.COMPASS_MCP_ALLOW_TEST_RUN !== '1') {
+        return errorResult(
+          'compass_test_status run=true executes `npm run test:run`, which runs local scripts and may write to disk. This is disabled by default. To allow it, start the server with COMPASS_MCP_ALLOW_TEST_RUN=1. (Inventory mode — run omitted/false — needs no opt-in.)'
+        )
+      }
+      // Vitest exits non-zero on failure, so we capture stdout from the thrown
+      // error too.
+      let raw: string
+      let passed = true
+      try {
+        raw = execFileSync('npm', ['run', 'test:run'], {
+          cwd: REPO_ROOT,
+          encoding: 'utf8',
+          timeout: 180_000,
+          stdio: ['ignore', 'pipe', 'pipe']
+        })
+      } catch (err) {
+        passed = false
+        const e = err as { stdout?: string | Buffer; stderr?: string | Buffer; message: string }
+        const stdout = Buffer.isBuffer(e.stdout) ? e.stdout.toString('utf8') : (e.stdout ?? '')
+        const stderr = Buffer.isBuffer(e.stderr) ? e.stderr.toString('utf8') : (e.stderr ?? '')
+        raw = `${stdout}\n${stderr}` || e.message
+      }
+      // Pull the Vitest summary lines (Test Files / Tests). Strip ANSI color
+      // codes via a constructed RegExp — the ESC byte cannot appear in a regex
+      // literal without tripping Biome's noControlCharactersInRegex rule.
+      const ansi = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g')
+      const summary = raw
+        .split('\n')
+        .filter((l) => /Test Files|Tests\s+\d|Duration/.test(l))
+        .map((l) => l.replace(ansi, '').trim())
+      return textResult(
+        JSON.stringify({ mode: 'run', passed, summary, testFileCount: testFiles.length }, null, 2)
+      )
+    }
+
+    if (name === 'compass_integration_health') {
+      const db = openDb()
+      if (!db) return errorResult('Compass DB not found')
+      const parsedRecentEvents = Number(args?.recentEvents)
+      const recentEvents = Number.isFinite(parsedRecentEvents)
+        ? Math.min(100, Math.max(1, parsedRecentEvents))
+        : 20
+      const integrations = db
+        .prepare(
+          'SELECT id, service, status, connected_at, last_synced_at, error_message, sync_interval_minutes FROM integrations'
+        )
+        .all() as Array<{
+        id: number
+        service: string
+        status: string | null
+        connected_at: number | null
+        last_synced_at: number | null
+        error_message: string | null
+        sync_interval_minutes: number | null
+      }>
+      const eventStmt = db.prepare(
+        "SELECT COUNT(*) AS events, COALESCE(SUM(records_updated), 0) AS records, COALESCE(SUM(CASE WHEN errors IS NOT NULL AND errors != '' THEN 1 ELSE 0 END), 0) AS errorEvents, MAX(synced_at) AS lastEventAt FROM (SELECT * FROM sync_events WHERE integration_id = ? ORDER BY synced_at DESC LIMIT ?)"
+      )
+      const health = integrations.map((row) => {
+        const agg = eventStmt.get(row.id, recentEvents) as {
+          events: number
+          records: number
+          errorEvents: number
+          lastEventAt: number | null
+        }
+        return { ...row, recentWindow: recentEvents, ...agg }
+      })
+      db.close()
+      return textResult(JSON.stringify(health, null, 2))
+    }
+
     return errorResult(`Unknown tool: ${name}`)
   } catch (err) {
     return errorResult(`Error: ${(err as Error).message}`)
@@ -213,6 +379,30 @@ function walkKnowledge(): Array<{ path: string; title: string; content: string }
   } catch {
     return []
   }
+}
+
+function walkTestFiles(): string[] {
+  const roots = ['electron', 'src', 'mcp']
+  const skip = new Set(['node_modules', '.git', 'out', 'dist', '.vite', '.turbo'])
+  const found: string[] = []
+  const walk = (dir: string): void => {
+    let entries: ReturnType<typeof readdirSync>
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (skip.has(entry.name)) continue
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) walk(full)
+      else if (entry.isFile() && /\.test\.tsx?$/.test(entry.name)) {
+        found.push(relative(REPO_ROOT, full))
+      }
+    }
+  }
+  for (const r of roots) walk(join(REPO_ROOT, r))
+  return found.sort()
 }
 
 function textResult(text: string) {

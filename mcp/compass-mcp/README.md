@@ -11,6 +11,15 @@ Read-only MCP server exposing the Compass app's local SQLite database and knowle
 | `compass_recent_calendar` | Calendar events in next N days |
 | `compass_sync_status` | Last sync time + status per integration |
 | `compass_read_knowledge_file` | Full contents of a specific markdown file |
+| `compass_recent_commits` | Recent git commits on the current branch (sha, subject, author, date) |
+| `compass_test_status` | Test inventory (file count + names); `run=true` executes the suite and returns pass/fail summary (opt-in — see below) |
+| `compass_integration_health` | Per-integration health: status, last sync, last error, recent sync-event counts |
+
+The last three are **self-knowledge** tools (Phase 0++.6): they let an agent introspect the repo (recent commits, test state) and the app's integration health without shelling out. `compass_recent_commits` + `compass_test_status` read the repo source tree (rooted at the repo, derived from the `index.ts` module location via `import.meta.url`); `compass_integration_health` reads the app DB.
+
+### `compass_test_status` and command execution
+
+Inventory mode (default) is read-only — it just walks the source tree for `*.test.ts(x)` files. Passing `run=true` executes `npm run test:run`, which spawns local scripts and may write caches/artifacts to disk. To prevent a model from triggering local command execution unprompted, that path is **disabled unless** the server is started with `COMPASS_MCP_ALLOW_TEST_RUN=1`; otherwise `run=true` returns an error explaining how to enable it.
 
 ## What's deliberately NOT exposed
 
