@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   triage:
-    if: ${{ vars.CLAUDE_SCHEDULED_AGENTS_ENABLED == 'true' }}
+    if: ${{ vars.CLAUDE_SCHEDULED_AGENTS_ENABLED == 'true' && secrets.ANTHROPIC_API_KEY != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

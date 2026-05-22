@@ -11,7 +11,7 @@
 |---|---|---|
 | **Phase 0** — Agent infrastructure | 7 sub-areas | 100% |
 | **Phase 0+** — Leading-edge agent infra | 10 items | 90% (0+.6, 0+.9 superseded — see Phase 0++) |
-| **Phase 0++** — Claude Code platform refresh (May 2026) | 6 items | in progress — 0++.1/.2/.3/.5 shipped; 0++.4 + 0++.6 in review |
+| **Phase 0++** — Claude Code platform refresh (May 2026) | 6 items | 100% (0++.1–0++.6 all shipped) |
 | **Phase 1** — Critical bug fixes | 5 items | 100% (all shipped prior to this branch) |
 | **Phase 2** — Remaining PRD features | 7 items | 100% (2.1–2.7 all shipped prior to this branch) |
 | **Phase 3** — Beyond-PRD polish | 2 selected items | 100% (onboarding wizard + tray/notifications shipped) |
