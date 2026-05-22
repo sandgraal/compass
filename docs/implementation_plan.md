@@ -17,7 +17,7 @@
 | **Phase 3** — Beyond-PRD polish | 2 selected items | 100% (onboarding wizard + tray/notifications shipped) |
 | **Phase 4** — Finance forward roadmap | 8 items | 4.0–4.6 shipped; 4.7 closed early (Plaid is source of truth as of 2026-05-21; Excel pipeline retired) |
 | **Phase 5 (cont.)** — Bounded UX wins | 5 items | 100% (5.10–5.14 shipped) |
-| **Phase 6** — Code-health debt (May 2026) | 5 items | 6.1 = 78% (7/9 IPC tests shipped — `auth.ts`/`sync.ts` remain); 6.2–6.5 = 0% |
+| **Phase 6** — Code-health debt (May 2026) | 5 items | 6.1 ≈ 85% (most IPC tests shipped; `sync.ts` untested + `auth.ts` OAuth-flow handlers uncovered); 6.2–6.5 = 0% |
 
 PRD-completion of the running app: **~99%** (all Phases 1–3 + Phase 4.0–4.5 merged with UIs).
 
@@ -182,7 +182,8 @@ The Claude Code platform shipped meaningful features since Phase 0+ landed. Adop
 
 Compass owns the user's full financial life as of `feat/finance-rocket-money-import`
 (merged 2026-05). The Excel pipeline in the user-configured legacy finance project
-directory runs in parallel through 2026-06-10, then retires (see [`finance/legacy-cutover.md`](finance/legacy-cutover.md)).
+directory ran in parallel and was retired early on 2026-05-21 once Plaid became the
+source of truth (see [`finance/legacy-cutover.md`](finance/legacy-cutover.md) and §4.7).
 This phase turns the retrospective dashboard into a forward-looking financial command center.
 
 Each item below has its own plan doc under [`docs/finance/`](finance/) sized to land as one PR.
@@ -220,8 +221,8 @@ Plaid Link in a child BrowserWindow, encrypted tokens in Vault, `transactions/sy
 - [x] **PR 5 — Integrations card UI + Accounts-tab "linked" badge** — Plaid card in `src/pages/Integrations.tsx` with set-secret form, start-link CTA branching on `configured`/`hasSecret`, per-Item disconnect; `plaid:list-items` IPC + preload + types added; `src/pages/Finance.tsx` Accounts tab renders "linked · <institution>" badge on rows whose `plaidItemId` resolves
 - [x] **PR 6 — Daily 06:00 cron + error-surface UX** — `electron/cron-plaid.ts` schedules `syncAllPlaid()` at 06:00 local time (separate from generic `cron.ts` rotation so per-Item error codes can surface on the Item card); `cron-plaid.test.ts` covers scheduling + error surface; `cron.ts` skips `service === 'plaid'` rows in the generic loop
 
-### 4.7 [`legacy-cutover.md`](finance/legacy-cutover.md) — retire the Excel pipeline (2026-06-10)
-- [x] **Closed early (2026-05-21)** — Plaid is the source of truth as of this date; Excel parallel-run retired ahead of the original cutover date. Reconciliation log discontinued.
+### 4.7 [`legacy-cutover.md`](finance/legacy-cutover.md) — retire the Excel pipeline (closed early 2026-05-21)
+- [x] **Closed early (2026-05-21)** — Plaid is the source of truth as of this date; Excel parallel-run retired ahead of the originally planned 2026-06-10 cutover. Reconciliation log discontinued.
 
 ### Recommended sequence
 
@@ -233,7 +234,7 @@ Plaid Link in a child BrowserWindow, encrypted tokens in Vault, `transactions/sy
                                                                     │
                                                                     └→ 4.6 (Plaid, multi-PR)
 
-4.7 (cutover) runs as background ops doc throughout May 2026.
+4.7 (cutover) closed early on 2026-05-21 — Plaid became the source of truth ahead of schedule.
 ```
 
 4.4 and 4.5 are independent of each other; can parallelize in worktrees.
@@ -265,11 +266,11 @@ Net Worth view has live balances waiting.
 Backfill that's accumulated as the project shipped fast. None individually critical; together they're worth a dedicated phase. See [`strategic-review-2026-05.md`](strategic-review-2026-05.md) §"Phase 6" for the full audit.
 
 ### 6.1 IPC test coverage backfill
-Originally nine of thirteen `electron/ipc/*.ts` modules lacked a `.test.ts`. Seven shipped between PR #96 and #102 in May 2026; **`auth.ts` and `sync.ts` remain**.
+Originally most `electron/ipc/*.ts` modules lacked test coverage. The bulk shipped between PR #96 and #102 in May 2026. **What remains: `sync.ts` has no test at all, and `auth.ts` is only partially covered** — its PAT + Google-credentials handlers are tested (`auth-github-pat.test.ts`, `auth-google-creds.test.ts`), but the OAuth-flow handlers (`auth:connect-google`, `auth:connect-github`, `auth:disconnect`, `auth:get-status`, `auth:get-redirect-uris`) are not.
 - [x] **P0** — `electron/ipc/vault.ts` (security-critical) — shipped via #96
-- [ ] **P0** — `electron/ipc/auth.ts` (OAuth flow)
+- [~] **P0** — `electron/ipc/auth.ts` — partial: PAT + Google-creds handlers covered (`auth-github-pat.test.ts`, `auth-google-creds.test.ts`); OAuth-flow handlers still uncovered
 - [x] **P1** — `electron/ipc/finance.ts` (largest handler) — shipped via #102 (chunk 1/3 of 3)
-- [ ] **P1** — `electron/ipc/sync.ts`
+- [ ] **P1** — `electron/ipc/sync.ts` (no test)
 - [x] **P1** — `electron/ipc/knowledge.ts` — shipped via #97
 - [x] **P2** — `electron/ipc/settings.ts` — shipped via #98
 - [x] **P2** — `electron/ipc/spotlight.ts` (integration coverage exists; handler seam backfill) — shipped via #101
@@ -359,4 +360,4 @@ Driven by the May 2026 strategic review (`/Users/christopherennis/.claude/plans/
 
 **Phase 3**: First launch shows wizard once; habit reminder fires; tray menu opens quick-capture popup; `Cmd+Shift+T` works from any app.
 
-**Phase 4**: `npm run db:migrate -- --check` exits 0 after each schema item; `finance:get-geo-summary` and `finance:get-tax-summary` return SQL-aggregated results (not JS post-aggregation); Net Worth tab shows non-zero deltas after a snapshot capture; Forecast tab projects 90 days with at least the active subscriptions visible as outflow events; Plaid Link completes in sandbox env with a fixture institution; the Excel project at `~/Documents/Claude/Projects/Getting on top of finances/` is in `~/Documents/Claude/Archived/` after 2026-06-10.
+**Phase 4**: `npm run db:migrate -- --check` exits 0 after each schema item; `finance:get-geo-summary` and `finance:get-tax-summary` return SQL-aggregated results (not JS post-aggregation); Net Worth tab shows non-zero deltas after a snapshot capture; Forecast tab projects 90 days with at least the active subscriptions visible as outflow events; Plaid Link completes in sandbox env with a fixture institution; the Excel project at `~/Documents/Claude/Projects/Getting on top of finances/` was archived to `~/Documents/Claude/Archived/` at the early 2026-05-21 cutover.
