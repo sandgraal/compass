@@ -232,7 +232,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === 'compass_recent_commits') {
-      const limit = Math.min(50, Math.max(1, Number(args?.limit ?? 10)))
+      const parsedLimit = Number(args?.limit)
+      const requestedLimit = Number.isFinite(parsedLimit) ? parsedLimit : 10
+      const limit = Math.min(50, Math.max(1, requestedLimit))
       // execFileSync (not execSync) so the limit can't be shell-injected.
       let out: string
       try {
