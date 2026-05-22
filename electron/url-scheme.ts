@@ -62,7 +62,12 @@ export function parseCompassUrl(input: string): CompassCommand {
   let url: URL
   try {
     url = new URL(input)
-  } catch {
+  } catch (err) {
+    // `input` is untrusted (handed in by another app via the compass:// scheme)
+    // and may carry secrets in a query string or be pathologically long. Log a
+    // short bounded preview + length rather than the full value.
+    const preview = input.length > 32 ? `${input.slice(0, 32)}…` : input
+    console.warn(`[url-scheme] failed to parse URL (len=${input.length}); preview:`, preview, err)
     return { kind: 'unknown' }
   }
   if (url.protocol.replace(/:$/, '') !== SCHEME) return { kind: 'unknown' }

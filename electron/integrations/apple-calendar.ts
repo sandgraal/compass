@@ -260,7 +260,8 @@ function listIcsFiles(dir: string): string[] {
   let entries: string[]
   try {
     entries = readdirSync(dir)
-  } catch {
+  } catch (err) {
+    console.warn('[apple-calendar] readdir failed listing ICS files', dir, err)
     return out
   }
   for (const entry of entries) {
@@ -268,7 +269,8 @@ function listIcsFiles(dir: string): string[] {
     let stat: ReturnType<typeof statSync>
     try {
       stat = statSync(full)
-    } catch {
+    } catch (err) {
+      console.warn('[apple-calendar] stat failed; skipping entry', full, err)
       continue
     }
     if (stat.isDirectory()) {
@@ -296,8 +298,12 @@ function readCalendarTitle(calendarDir: string): string {
       const match = xml.match(/<key>Title<\/key>\s*<string>([^<]+)<\/string>/)
       if (match) return match[1].trim()
     }
-  } catch {
-    /* fall through */
+  } catch (err) {
+    console.warn(
+      '[apple-calendar] failed to read calendar title plist; using basename',
+      plistPath,
+      err
+    )
   }
   return (
     calendarDir
@@ -330,7 +336,8 @@ export function readAppleCalendars(options: AppleCalendarReadOptions = {}): Appl
   let calendarDirs: string[]
   try {
     calendarDirs = readdirSync(root).filter((name) => name.endsWith('.calendar'))
-  } catch {
+  } catch (err) {
+    console.warn('[apple-calendar] readdir failed listing calendars', root, err)
     return []
   }
   for (const dirName of calendarDirs) {
@@ -342,7 +349,8 @@ export function readAppleCalendars(options: AppleCalendarReadOptions = {}): Appl
       let content: string
       try {
         content = readFileSync(icsPath, 'utf8')
-      } catch {
+      } catch (err) {
+        console.warn('[apple-calendar] failed to read ICS file; skipping', icsPath, err)
         continue
       }
       const parsed = parseIcsFileInternal(content, title)

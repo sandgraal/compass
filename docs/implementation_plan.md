@@ -17,7 +17,7 @@
 | **Phase 3** — Beyond-PRD polish | 2 selected items | 100% (onboarding wizard + tray/notifications shipped) |
 | **Phase 4** — Finance forward roadmap | 8 items | 4.0–4.6 shipped; 4.7 closed early (Plaid is source of truth as of 2026-05-21; Excel pipeline retired) |
 | **Phase 5 (cont.)** — Bounded UX wins | 5 items | 100% (5.10–5.14 shipped) |
-| **Phase 6** — Code-health debt (May 2026) | 5 items | 6.1 ≈ 85% (most IPC tests shipped; `sync.ts` untested + `auth.ts` OAuth-flow handlers uncovered); 6.2–6.5 = 0% |
+| **Phase 6** — Code-health debt (May 2026) | 5 items | 6.1 = 100% (all IPC handlers tested) + 6.3 done; 6.2 / 6.4 / 6.5 = 0% |
 
 PRD-completion of the running app: **~99%** (all Phases 1–3 + Phase 4.0–4.5 merged with UIs).
 
@@ -283,7 +283,7 @@ Originally most `electron/ipc/*.ts` modules lacked test coverage. The bulk shipp
 - [ ] `electron/knowledge/writer.ts`
 
 ### 6.3 Empty-catch sweep
-Convert 13 silent `catch {}` to `catch (err) { console.warn('[area]', err) }` in: `electron/menu-bar.ts:206,251,268`, `electron/url-scheme.ts:65`, `electron/cron.ts:49,133`, `electron/integrations/finance-watcher.ts:133,244`, `electron/integrations/apple-calendar.ts:263,271,299,333,345`. (Recount 2026-05-21: original plan listed 10; `apple-calendar.ts` has 3 more than first audited; `cron.ts` line numbers shifted.)
+- [x] **Shipped** — converted all 13 silent `catch {}` to `catch (err) { console.warn('[area]', err) }` in `electron/menu-bar.ts` (x3), `electron/url-scheme.ts` (x1), `electron/cron.ts` (x2), `electron/integrations/finance-watcher.ts` (x2), `electron/integrations/apple-calendar.ts` (x5). Each warn carries an area tag + the relevant path/value for context; existing fall-through comments and return values preserved. Behaviour unchanged - affected suites still green (`url-scheme` 12, `cron-plaid` 9, `apple-calendar` 27, `apple-rrule` 37).
 
 ### 6.4 Biome warning cleanup
 - [ ] Fix the 78 standing warnings — concentrated in `electron/integrations/finance.ts:64-66` (noAssignInExpressions ×3) and `src/pages/Weekly.tsx` (a11y + exhaustive-deps + button-type)

@@ -130,7 +130,8 @@ function walkFilesWithDepthLimit(
     let entries: Dirent<string>[]
     try {
       entries = readdirSync(currentFolder, { withFileTypes: true, encoding: 'utf8' })
-    } catch {
+    } catch (err) {
+      console.warn('[finance-watcher] readdir failed; skipping folder', currentFolder, err)
       return
     }
 
@@ -241,8 +242,12 @@ export async function ingestWatchedFolderNow(): Promise<{
       if (!SUPPORTED_EXTS.some((ext) => path.toLowerCase().endsWith(ext))) return
       files.push(path)
     })
-  } catch {
-    /* folder disappeared between check and scan */
+  } catch (err) {
+    console.warn(
+      '[finance-watcher] scan failed (folder disappeared between check and scan?)',
+      watchedFolder,
+      err
+    )
   }
 
   const db = getDb()
