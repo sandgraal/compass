@@ -49,6 +49,16 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/guardrails.sh"
+          }
+        ]
+      }
     ]
   }
 }
