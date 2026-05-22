@@ -360,10 +360,14 @@ export default function Weekly(): JSX.Element {
             { key: 'next', label: '🎯 Next week priorities' }
           ].map(({ key, label }) => (
             <div key={key}>
-              <label className="text-xs text-muted-foreground font-medium mb-1.5 block">
+              <label
+                htmlFor={`weekly-reflection-${key}`}
+                className="text-xs text-muted-foreground font-medium mb-1.5 block"
+              >
                 {label}
               </label>
               <textarea
+                id={`weekly-reflection-${key}`}
                 value={reflection[key as keyof typeof reflection]}
                 onChange={(e) => saveReflection({ ...reflection, [key]: e.target.value })}
                 placeholder="Write here…"

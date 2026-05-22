@@ -244,10 +244,10 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
     for (const f of files) {
       if (f.path === relativePath) continue
       const content = readFileSync(join(KNOWLEDGE_DIR, f.path), 'utf8')
-      let m: RegExpExecArray | null
       let firstMatchIdx = -1
       wikilinkRe.lastIndex = 0
-      while ((m = wikilinkRe.exec(content)) != null) {
+      let m = wikilinkRe.exec(content)
+      while (m != null) {
         const inner = m[1].trim().toLowerCase()
         // Strip optional "|alias" — `[[foo|display]]` still links to foo.
         const target = inner.split('|')[0].trim()
@@ -255,6 +255,7 @@ export function registerKnowledgeHandlers(ipcMain: IpcMain): void {
           firstMatchIdx = m.index
           break
         }
+        m = wikilinkRe.exec(content)
       }
       if (firstMatchIdx === -1) continue
       const snippet = content
