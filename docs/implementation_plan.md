@@ -103,7 +103,7 @@ Modern (Nov 2025+) Claude Code best practice splits guidance into 4 layers. This
 - [x] **0+.3 Output styles** (`.claude/output-styles/`) — code-mode, explain-mode, commit-mode
 - [x] **0+.4 Plugin manifest** (`.claude/plugin.json`) — wrap whole `.claude/` as installable plugin
 - [x] **0+.5 Director-pattern agent orchestration** (`.claude/agents/director.md`) — coordinates parallel subagents per feature
-- [ ] **0+.6 Living docs PostToolUse hook** — auto-run docs-keeper on schema/preload edits
+- [x] **0+.6 Living docs PostToolUse hook** — superseded by 0++.3 (shipped) — see Phase 0++
 - [x] **0+.7 Parallel PR review pipeline** — `claude-code-action` runs security-auditor + ui-polish + bug-triager in parallel
 - [x] **0+.8 Worktree workflow** — `scripts/worktree.sh` + `docs/agent-orchestration.md`
 - [ ] **0+.9 Background scheduled-task agents** — nightly bug-triager, weekly docs-keeper, monthly security-auditor
@@ -117,7 +117,7 @@ The Claude Code platform shipped meaningful features since Phase 0+ landed. Adop
 
 - [ ] **0++.1 SessionStart hook** — `.claude/hooks/session-start.sh` invokes `scripts/project-status.ts` and emits a compact summary (current branch, last commit, sync queue, test status) into every new session. Wire in `.claude/settings.json` under `hooks.SessionStart`.
 - [ ] **0++.2 UserPromptSubmit guardrails** — `.claude/hooks/guardrails.sh` pattern-matches risky prompts: warn on "push" / "force push" + branch=main; suggest `/safe-commit` when "commit" appears without staged files; mirror data-dir blocks at the prompt level.
-- [ ] **0++.3 Living-docs PostToolUse hook** (supersedes 0+.6) — fire the `docs-keeper` subagent after edits to `electron/db/schema.ts`, `electron/preload.ts`, or `src/types/electron.d.ts`. These three files own the API surface and the docs always drift first when they change.
+- [x] **0++.3 Living-docs PostToolUse hook** (supersedes 0+.6) — `.claude/hooks/living-docs.sh` fires on Edit/Write to `electron/db/schema.ts`, `electron/db/schema.finance.ts`, `electron/preload.ts`, or `src/types/electron.d.ts` and emits an `additionalContext` nudge instructing the agent to run the `docs-keeper` subagent (a shell hook can't spawn a subagent directly). Advisory only — never blocks. Wired as a 2nd PostToolUse command alongside `post-schema-edit.sh`.
 - [ ] **0++.4 Background scheduled agents** (supersedes 0+.9) — `CronCreate` registers: **nightly** bug-triager, **weekly** docs-keeper, **monthly** security-auditor (diff-focused on `electron/ipc/vault.ts`, `auth.ts`, `main.ts`, `preload.ts`).
 - [ ] **0++.5 Subagent memory** — add `.claude/agents/<name>/memory/MEMORY.md` for `security-auditor` and `bug-triager`. Instruct each in its system prompt to consult before starting and update on completion. Lets them accumulate project-specific tribal knowledge across runs.
 - [ ] **0++.6 MCP server self-knowledge expansion** — extend `mcp/compass-mcp/index.ts` with `compass_recent_commits`, `compass_test_status`, `compass_integration_health`. Lets agents introspect without shelling out.
