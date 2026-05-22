@@ -286,8 +286,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         })
       } catch (err) {
         passed = false
-        const e = err as { stdout?: string; stderr?: string; message: string }
-        raw = `${e.stdout ?? ''}\n${e.stderr ?? ''}` || e.message
+        const e = err as { stdout?: string | Buffer; stderr?: string | Buffer; message: string }
+        const stdout = Buffer.isBuffer(e.stdout) ? e.stdout.toString('utf8') : (e.stdout ?? '')
+        const stderr = Buffer.isBuffer(e.stderr) ? e.stderr.toString('utf8') : (e.stderr ?? '')
+        raw = `${stdout}\n${stderr}` || e.message
       }
       // Pull the Vitest summary lines (Test Files / Tests). Strip ANSI color
       // codes via a constructed RegExp — the ESC byte cannot appear in a regex
