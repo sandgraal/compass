@@ -120,7 +120,7 @@ The Claude Code platform shipped meaningful features since Phase 0+ landed. Adop
 - [ ] **0++.3 Living-docs PostToolUse hook** (supersedes 0+.6) — fire the `docs-keeper` subagent after edits to `electron/db/schema.ts`, `electron/preload.ts`, or `src/types/electron.d.ts`. These three files own the API surface and the docs always drift first when they change.
 - [ ] **0++.4 Background scheduled agents** (supersedes 0+.9) — `CronCreate` registers: **nightly** bug-triager, **weekly** docs-keeper, **monthly** security-auditor (diff-focused on `electron/ipc/vault.ts`, `auth.ts`, `main.ts`, `preload.ts`).
 - [ ] **0++.5 Subagent memory** — add `.claude/agents/<name>/memory/MEMORY.md` for `security-auditor` and `bug-triager`. Instruct each in its system prompt to consult before starting and update on completion. Lets them accumulate project-specific tribal knowledge across runs.
-- [ ] **0++.6 MCP server self-knowledge expansion** — extend `mcp/compass-mcp/index.ts` with `compass_recent_commits`, `compass_test_status`, `compass_integration_health`. Lets agents introspect without shelling out.
+- [x] **0++.6 MCP server self-knowledge expansion** — extended `mcp/compass-mcp/index.ts` with `compass_recent_commits` (git log, repo root derived from `import.meta.url`, fields delimited by `%x1f` so subjects parse cleanly), `compass_test_status` (static inventory by default; `run=true` executes `npm run test:run` and returns the parsed pass/fail summary), and `compass_integration_health` (integrations joined with recent `sync_events` counts + last error). All read-only; `execFileSync` (not `execSync`) so args can't be shell-injected. Lets agents introspect without shelling out.
 
 ---
 

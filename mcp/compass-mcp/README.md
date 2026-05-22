@@ -11,6 +11,11 @@ Read-only MCP server exposing the Compass app's local SQLite database and knowle
 | `compass_recent_calendar` | Calendar events in next N days |
 | `compass_sync_status` | Last sync time + status per integration |
 | `compass_read_knowledge_file` | Full contents of a specific markdown file |
+| `compass_recent_commits` | Recent git commits on the current branch (sha, subject, author, date) |
+| `compass_test_status` | Test inventory (file count + names); `run=true` executes the suite and returns pass/fail summary |
+| `compass_integration_health` | Per-integration health: status, last sync, last error, recent sync-event counts |
+
+The last three are **self-knowledge** tools (Phase 0++.6): they let an agent introspect the repo (recent commits, test state) and the app's integration health without shelling out. `compass_recent_commits` + `compass_test_status` read the source tree (rooted at this file's location); `compass_integration_health` reads the app DB.
 
 ## What's deliberately NOT exposed
 
