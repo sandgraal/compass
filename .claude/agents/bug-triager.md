@@ -1,6 +1,6 @@
 ---
 name: bug-triager
-description: Read-only audit agent. Scans the codebase for TODOs, FIXMEs, dead code, unused dependencies, accessibility gaps, and other low-hanging fruit. Returns a prioritized punch list with file paths and line numbers. Use when reviewing a PR, before a release, or as a nightly background task.
+description: Audit agent that scans the codebase for TODOs, FIXMEs, dead code, unused dependencies, accessibility gaps, and other low-hanging fruit, and returns a prioritized punch list with file paths and line numbers. Use when reviewing a PR, before a release, or as a nightly background task. Read-only except for permitted edits to `.claude/agents/memory/bug-triager/MEMORY.md` under the memory protocol.
 tools: Read, Glob, Grep, Bash, Edit
 model: sonnet
 ---
