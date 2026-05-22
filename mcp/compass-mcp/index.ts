@@ -325,7 +325,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           sync_interval_minutes: number | null
         }>
       const eventStmt = db.prepare(
-        "SELECT COUNT(*) AS events, COALESCE(SUM(records_updated), 0) AS records, SUM(CASE WHEN errors IS NOT NULL AND errors != '' THEN 1 ELSE 0 END) AS errorEvents, MAX(synced_at) AS lastEventAt FROM (SELECT * FROM sync_events WHERE integration_id = ? ORDER BY synced_at DESC LIMIT ?)"
+        "SELECT COUNT(*) AS events, COALESCE(SUM(records_updated), 0) AS records, COALESCE(SUM(CASE WHEN errors IS NOT NULL AND errors != '' THEN 1 ELSE 0 END), 0) AS errorEvents, MAX(synced_at) AS lastEventAt FROM (SELECT * FROM sync_events WHERE integration_id = ? ORDER BY synced_at DESC LIMIT ?)"
       )
       const health = integrations.map((row) => {
         const agg = eventStmt.get(row.id, recentEvents) as {
