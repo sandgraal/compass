@@ -1,0 +1,45 @@
+name: Agent — weekly docs reconciliation
+
+# Phase 0++.4 (supersedes 0+.9). Runs the docs-keeper subagent weekly to keep
+# docs/ in sync with the code, and opens a PR if anything drifted.
+#
+# DORMANT BY DEFAULT: gated on the repo variable CLAUDE_SCHEDULED_AGENTS_ENABLED.
+# Enable with:
+#   gh variable set CLAUDE_SCHEDULED_AGENTS_ENABLED --body true
+# plus the ANTHROPIC_API_KEY secret.
+
+on:
+  schedule:
+    # 05:00 UTC every Monday
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  docs:
+    if: ${{ vars.CLAUDE_SCHEDULED_AGENTS_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run docs-keeper
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Run the docs-keeper subagent per `.claude/agents/docs-keeper.md`.
+            This is the weekly scheduled sweep:
+
+            1. Reconcile docs/architecture.md (IPC map + schema overview) and
+               docs/implementation_plan.md against the current code — handler
+               counts, schema tables, shipped vs pending checklist items.
+            2. If nothing drifted, do nothing and exit cleanly (no empty PR).
+            3. If docs changed, open a PR from a branch named
+               `chore/weekly-docs-reconcile-<YYYY-MM-DD>` with a summary of what
+               drifted and why. Never commit doc changes straight to main —
+               always go through a PR.
