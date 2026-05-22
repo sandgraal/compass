@@ -3,28 +3,38 @@
  * Seed synthetic demo data for README screenshots.
  *
  * SAFETY: this writes a full Compass data store (DB + knowledge files +
- * app settings). It must NEVER touch a real user's data, so it refuses to
- * run unless COMPASS_SEED_DEMO=1 is set AND the resolved data dir lives
- * under a throwaway HOME (the screenshot pipeline runs it with
- * `HOME=$(mktemp -d)`). All data here is fabricated — no real names,
- * accounts, tokens, or secrets.
+ * app settings) with DESTRUCTIVE inserts/updates. It must NEVER touch a real
+ * user's data, so it refuses to run unless BOTH COMPASS_SEED_DEMO=1 is set
+ * AND COMPASS_HOME points at an isolated throwaway dir (≠ the real home).
+ * All data here is fabricated — no real names, accounts, tokens, or secrets.
  *
  * Run (from repo root):
- *   COMPASS_SEED_DEMO=1 HOME="$(mktemp -d)" npx tsx scripts/seed-demo.ts
+ *   COMPASS_SEED_DEMO=1 COMPASS_HOME="$(mktemp -d)" npx tsx scripts/seed-demo.ts
  *
- * The paths.ts module derives every dir from homedir() ($HOME), so setting
- * HOME before launch isolates the entire store.
+ * paths.ts honors COMPASS_HOME (opt-in) to redirect the entire store.
  */
 import { createHash } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { getRawSqlite, initDb } from '../electron/db/client'
 import { seedKnowledgeFiles, updateKnowledgeFile } from '../electron/knowledge/writer'
-import { DATA_DIR, KNOWLEDGE_DIR, VAULT_DIR } from '../electron/paths'
+import { APP_DATA_DIR, DATA_DIR, KNOWLEDGE_DIR, VAULT_DIR } from '../electron/paths'
 
-if (process.env.COMPASS_SEED_DEMO !== '1') {
+// Hard safety gate. This script performs DESTRUCTIVE inserts/updates, so it
+// must never run against a real store. Two independent conditions:
+//   1. explicit opt-in via COMPASS_SEED_DEMO=1, and
+//   2. the data root must be ISOLATED — COMPASS_HOME set to something other
+//      than the real OS home (paths.ts otherwise falls back to homedir()).
+// Without (2), `tsx scripts/seed-demo.ts` would overwrite ~/Library/.../Compass.
+const compassHome = process.env.COMPASS_HOME?.trim() ?? ''
+const isIsolated = compassHome.length > 0 && compassHome !== homedir()
+if (process.env.COMPASS_SEED_DEMO !== '1' || !isIsolated) {
   console.error(
-    'Refusing to run: set COMPASS_SEED_DEMO=1 (and run under a throwaway HOME) to seed demo data.'
+    `Refusing to run: this seeder is destructive. Require BOTH:
+  COMPASS_SEED_DEMO=1   (explicit opt-in)
+  COMPASS_HOME=<throwaway dir>   (isolated store, must differ from your real home)
+Resolved data dir would have been: ${APP_DATA_DIR}`
   )
   process.exit(1)
 }

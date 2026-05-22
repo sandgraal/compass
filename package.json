@@ -27,7 +27,7 @@
     "test:run": "vitest --run --passWithNoTests",
     "test:coverage": "vitest --run --coverage --passWithNoTests",
     "test:e2e": "playwright test --pass-with-no-tests",
-    "screenshots": "npm rebuild better-sqlite3 && DEMO_HOME=\"$(mktemp -d)\" && COMPASS_SEED_DEMO=1 COMPASS_HOME=\"$DEMO_HOME\" tsx scripts/seed-demo.ts && npm run build && electron-builder install-app-deps && COMPASS_DEMO_HOME=\"$DEMO_HOME\" playwright test e2e/screenshots.e2e.ts; npm rebuild better-sqlite3",
+    "screenshots": "npm rebuild better-sqlite3 && DEMO_HOME=\"$(mktemp -d)\" && COMPASS_SEED_DEMO=1 COMPASS_HOME=\"$DEMO_HOME\" tsx scripts/seed-demo.ts && npm run build && electron-builder install-app-deps && COMPASS_DEMO_HOME=\"$DEMO_HOME\" playwright test e2e/screenshots.e2e.ts; CODE=$?; npm rebuild better-sqlite3; exit $CODE",
     "knip": "knip",
     "status": "tsx scripts/project-status.ts",
     "prepare": "lefthook install"

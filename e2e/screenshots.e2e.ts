@@ -29,6 +29,14 @@ async function show(win: Page, hash: string): Promise<void> {
   await win.waitForTimeout(1200)
 }
 
+// This is a capture utility, not a CI test. It only runs when the screenshot
+// pipeline points COMPASS_DEMO_HOME at a seeded throwaway store — so in plain
+// `playwright test` / CI (no env) it skips instead of failing.
+test.skip(
+  !process.env.COMPASS_DEMO_HOME,
+  'screenshot capture — run via `npm run screenshots`, not in CI'
+)
+
 test('capture README screenshots', async () => {
   test.setTimeout(120_000)
   if (!DEMO_HOME) throw new Error('COMPASS_DEMO_HOME must point at the seeded throwaway $HOME')
