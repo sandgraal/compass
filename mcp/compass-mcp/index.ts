@@ -121,7 +121,7 @@ const TOOLS = [
   {
     name: 'compass_test_status',
     description:
-      'Reports the test-suite state. By default returns a static inventory (test file count + names) for a fast answer. Pass run=true to actually execute `npm run test:run` and return the pass/fail summary (slower, ~10s). Read-only with respect to source.',
+      'Reports the test-suite state. By default returns a static inventory (test file count + names) for a fast answer. Pass run=true to execute `npm run test:run` and return the pass/fail summary — but that has filesystem side effects, so it is disabled unless the server was started with COMPASS_MCP_ALLOW_TEST_RUN=1 (otherwise run=true returns an error explaining how to enable it). Inventory mode is always read-only.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -129,7 +129,7 @@ const TOOLS = [
           type: 'boolean',
           default: false,
           description:
-            'If true, execute the suite and return pass/fail counts. If false, return inventory only.'
+            'If true, execute the suite and return pass/fail counts (requires COMPASS_MCP_ALLOW_TEST_RUN=1). If false, return inventory only.'
         }
       },
       additionalProperties: false
@@ -273,8 +273,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           )
         )
       }
-      // run=true: execute the suite. Vitest exits non-zero on failure, so we
-      // capture stdout from the thrown error too.
+      // run=true executes `npm run test:run`, which spawns local scripts and
+      // can write caches/artifacts to disk — a side effect at odds with this
+      // server's read-only posture. Gate it behind an explicit opt-in env var
+      // so a model can't trigger local command execution unprompted.
+      if (process.env.COMPASS_MCP_ALLOW_TEST_RUN !== '1') {
+        return errorResult(
+          'compass_test_status run=true executes `npm run test:run`, which runs local scripts and may write to disk. This is disabled by default. To allow it, start the server with COMPASS_MCP_ALLOW_TEST_RUN=1. (Inventory mode — run omitted/false — needs no opt-in.)'
+        )
+      }
+      // Vitest exits non-zero on failure, so we capture stdout from the thrown
+      // error too.
       let raw: string
       let passed = true
       try {
@@ -316,14 +325,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           'SELECT id, service, status, connected_at, last_synced_at, error_message, sync_interval_minutes FROM integrations'
         )
         .all() as Array<{
-          id: number
-          service: string
-          status: string | null
-          connected_at: number | null
-          last_synced_at: number | null
-          error_message: string | null
-          sync_interval_minutes: number | null
-        }>
+        id: number
+        service: string
+        status: string | null
+        connected_at: number | null
+        last_synced_at: number | null
+        error_message: string | null
+        sync_interval_minutes: number | null
+      }>
       const eventStmt = db.prepare(
         "SELECT COUNT(*) AS events, COALESCE(SUM(records_updated), 0) AS records, COALESCE(SUM(CASE WHEN errors IS NOT NULL AND errors != '' THEN 1 ELSE 0 END), 0) AS errorEvents, MAX(synced_at) AS lastEventAt FROM (SELECT * FROM sync_events WHERE integration_id = ? ORDER BY synced_at DESC LIMIT ?)"
       )
