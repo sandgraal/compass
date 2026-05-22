@@ -250,7 +250,7 @@ function tryRegisterShortcut(chord: string): boolean {
       if (tray) toggleCaptureWindow(tray)
     })
   } catch (err) {
-    console.warn('[menu-bar] globalShortcut.register failed', err)
+    console.warn('[menu-bar] globalShortcut.register failed', chord, err)
     return false
   }
 }

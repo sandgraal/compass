@@ -283,7 +283,7 @@ Originally most `electron/ipc/*.ts` modules lacked test coverage. The bulk shipp
 - [ ] `electron/knowledge/writer.ts`
 
 ### 6.3 Empty-catch sweep
-- [x] **Shipped** — converted all 13 silent `catch {}` to `catch (err) { console.warn('[area]', err) }` in `electron/menu-bar.ts` (x3), `electron/url-scheme.ts` (x1), `electron/cron.ts` (x2), `electron/integrations/finance-watcher.ts` (x2), `electron/integrations/apple-calendar.ts` (x5). Each warn carries an area tag + the relevant path/value for context; existing fall-through comments and return values preserved. Behaviour unchanged - affected suites (url-scheme, cron-plaid, apple-calendar x2) still green.
+- [x] **Shipped** — converted all 13 silent `catch {}` to `catch (err) { console.warn('[area]', err) }` in `electron/menu-bar.ts` (x3), `electron/url-scheme.ts` (x1), `electron/cron.ts` (x2), `electron/integrations/finance-watcher.ts` (x2), `electron/integrations/apple-calendar.ts` (x5). Each warn carries an area tag + the relevant path/value for context; existing fall-through comments and return values preserved. Behaviour unchanged - affected suites still green (`url-scheme` 12, `cron-plaid` 9, `apple-calendar` 27, `apple-rrule` 37).
 
 ### 6.4 Biome warning cleanup
 - [ ] Fix the 78 standing warnings — concentrated in `electron/integrations/finance.ts:64-66` (noAssignInExpressions ×3) and `src/pages/Weekly.tsx` (a11y + exhaustive-deps + button-type)

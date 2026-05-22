@@ -299,7 +299,11 @@ function readCalendarTitle(calendarDir: string): string {
       if (match) return match[1].trim()
     }
   } catch (err) {
-    console.warn('[apple-calendar] failed to read calendar title plist; using basename', err)
+    console.warn(
+      '[apple-calendar] failed to read calendar title plist; using basename',
+      plistPath,
+      err
+    )
   }
   return (
     calendarDir

@@ -243,7 +243,11 @@ export async function ingestWatchedFolderNow(): Promise<{
       files.push(path)
     })
   } catch (err) {
-    console.warn('[finance-watcher] scan failed (folder disappeared between check and scan?)', err)
+    console.warn(
+      '[finance-watcher] scan failed (folder disappeared between check and scan?)',
+      watchedFolder,
+      err
+    )
   }
 
   const db = getDb()
