@@ -1,0 +1,62 @@
+name: Agent — nightly bug triage
+
+# Phase 0++.4 (supersedes 0+.9). Runs the bug-triager subagent on a nightly
+# schedule and posts its punch list to a single rolling GitHub issue.
+#
+# DORMANT BY DEFAULT: gated on the repo variable CLAUDE_SCHEDULED_AGENTS_ENABLED.
+# It does nothing — and costs nothing — until you opt in with:
+#   gh variable set CLAUDE_SCHEDULED_AGENTS_ENABLED --body true
+# and configure the ANTHROPIC_API_KEY secret. Disable again by setting it to
+# anything other than 'true'.
+
+on:
+  schedule:
+    # 06:00 UTC daily
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  triage:
+    # The `secrets` context isn't available in a job-level `if:`, so we gate
+    # the job on the opt-in variable and map the key to job env, then guard
+    # the agent step on env (which IS available in a step `if:`). Result: when
+    # the secret is unset the job runs but the agent step skips — a clean green
+    # run rather than a hard failure.
+    if: ${{ vars.CLAUDE_SCHEDULED_AGENTS_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run bug-triager
+        if: ${{ env.ANTHROPIC_API_KEY != '' }}
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Run the bug-triager subagent per `.claude/agents/bug-triager.md`.
+            This is the nightly scheduled sweep, so:
+
+            1. Read `.claude/agents/memory/bug-triager/MEMORY.md` first and honor
+               its filters (skip known/accepted/false-positive items).
+            2. Produce the prioritized punch list over the whole repo.
+            3. Post (or update if one already exists) a single rolling GitHub
+               issue titled "🌙 Nightly bug triage" with the current punch list.
+               Don't open a new issue every night — find the existing open one by
+               that title and edit its body.
+            4. Update `.claude/agents/memory/bug-triager/MEMORY.md` per the memory
+               protocol (append a run-log entry; apply the retention rule). Then
+               commit and push that file directly to main:
+                 git add .claude/agents/memory/bug-triager/MEMORY.md
+                 git commit -m "chore(agent): nightly bug-triager memory update"
+                 git push
+               If the push is rejected by branch protection, that's non-fatal —
+               note it in the issue and continue; the issue body is the durable
+               record in that case.

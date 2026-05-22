@@ -1,0 +1,61 @@
+name: Agent — monthly security audit
+
+# Phase 0++.4 (supersedes 0+.9). Runs the security-auditor subagent monthly,
+# focused on the highest-risk files, and posts findings to a rolling issue.
+#
+# DORMANT BY DEFAULT: gated on the repo variable CLAUDE_SCHEDULED_AGENTS_ENABLED.
+# Enable with:
+#   gh variable set CLAUDE_SCHEDULED_AGENTS_ENABLED --body true
+# plus the ANTHROPIC_API_KEY secret.
+
+on:
+  schedule:
+    # 04:00 UTC on the 1st of each month
+    - cron: '0 4 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  audit:
+    # The `secrets` context isn't available in a job-level `if:`, so we gate
+    # the job on the opt-in variable and map the key to job env, then guard
+    # the agent step on env (which IS available in a step `if:`). Result: when
+    # the secret is unset the job runs but the agent step skips — a clean green
+    # run rather than a hard failure.
+    if: ${{ vars.CLAUDE_SCHEDULED_AGENTS_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run security-auditor
+        if: ${{ env.ANTHROPIC_API_KEY != '' }}
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Run the security-auditor subagent per `.claude/agents/security-auditor.md`.
+            This is the monthly scheduled sweep, diff-focused on the highest-risk
+            files: electron/ipc/vault.ts, electron/ipc/auth.ts, electron/db/schema.ts,
+            electron/main.ts, electron/preload.ts.
+
+            1. Read `.claude/agents/memory/security-auditor/MEMORY.md` first and
+               honor its filters (accepted risks, known-safe patterns).
+            2. Audit the focus files against the checklist in the agent spec.
+            3. Post (or update if one exists) a single rolling GitHub issue titled
+               "🔒 Monthly security audit" with the findings. Don't open a new
+               issue each month — edit the existing open one.
+            4. Update `.claude/agents/memory/security-auditor/MEMORY.md` per the
+               memory protocol (run-log entry; retention rule), then commit and
+               push it directly to main:
+                 git add .claude/agents/memory/security-auditor/MEMORY.md
+                 git commit -m "chore(agent): monthly security-auditor memory update"
+                 git push
+               If branch protection rejects the push, note it in the issue and
+               continue — the issue is the durable record in that case.
