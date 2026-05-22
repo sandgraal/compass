@@ -38,7 +38,11 @@ if [ -f "$status_json" ]; then
     age_hours=$(( (now_epoch - mtime_epoch) / 3600 ))
     status_age_line="status.json: ${age_hours}h old"
   fi
-  test_files=$(grep -o '"files":[[:space:]]*[0-9]*' "$status_json" 2>/dev/null | head -1 | grep -o '[0-9]*' || echo '?')
+  if command -v jq >/dev/null 2>&1; then
+    test_files="$(jq -r '.tests.files // "?"' "$status_json" 2>/dev/null || echo '?')"
+  else
+    test_files="$(grep -o '"files":[[:space:]]*[0-9]*' "$status_json" 2>/dev/null | head -1 | grep -o '[0-9]*' || echo '?')"
+  fi
   test_files_line="${test_files} test files tracked"
 fi
 
