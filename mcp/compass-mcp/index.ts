@@ -373,7 +373,7 @@ function walkKnowledge(): Array<{ path: string; title: string; content: string }
 }
 
 function walkTestFiles(): string[] {
-  const roots = ['electron', 'src', 'scripts']
+  const roots = ['electron', 'src', 'mcp']
   const skip = new Set(['node_modules', '.git', 'out', 'dist', '.vite', '.turbo'])
   const found: string[] = []
   const walk = (dir: string): void => {
