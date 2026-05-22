@@ -307,7 +307,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === 'compass_integration_health') {
       const db = openDb()
       if (!db) return errorResult('Compass DB not found')
-      const recentEvents = Math.min(100, Math.max(1, Number(args?.recentEvents ?? 20)))
+      const parsedRecentEvents = Number(args?.recentEvents)
+      const recentEvents = Number.isFinite(parsedRecentEvents)
+        ? Math.min(100, Math.max(1, parsedRecentEvents))
+        : 20
       const integrations = db
         .prepare(
           'SELECT id, service, status, connected_at, last_synced_at, error_message, sync_interval_minutes FROM integrations'
