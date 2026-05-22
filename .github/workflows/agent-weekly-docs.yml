@@ -20,14 +20,22 @@ permissions:
 
 jobs:
   docs:
-    if: ${{ vars.CLAUDE_SCHEDULED_AGENTS_ENABLED == 'true' && secrets.ANTHROPIC_API_KEY != '' }}
+    # The `secrets` context isn't available in a job-level `if:`, so we gate
+    # the job on the opt-in variable and map the key to job env, then guard
+    # the agent step on env (which IS available in a step `if:`). Result: when
+    # the secret is unset the job runs but the agent step skips — a clean green
+    # run rather than a hard failure.
+    if: ${{ vars.CLAUDE_SCHEDULED_AGENTS_ENABLED == 'true' }}
     runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Run docs-keeper
+        if: ${{ env.ANTHROPIC_API_KEY != '' }}
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
