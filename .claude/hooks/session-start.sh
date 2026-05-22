@@ -31,7 +31,7 @@ status_json=".claude/project-status.json"
 status_age_line=""
 test_files_line=""
 if [ -f "$status_json" ]; then
-  # macOS-compatible mtime; GNU stat differs but both repos run on darwin.
+  # Read mtime portably: use macOS/BSD `stat -f` first, then GNU/Linux `stat -c`.
   mtime_epoch="$(stat -f '%m' "$status_json" 2>/dev/null || stat -c '%Y' "$status_json" 2>/dev/null || echo 0)"
   if [ "$mtime_epoch" != "0" ]; then
     now_epoch="$(date +%s)"
