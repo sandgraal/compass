@@ -7,6 +7,7 @@
 
 - **At start:** Skim every section. Skip re-reporting items already on the punch list or accepted as out-of-scope.
 - **At end:** Append a dated entry under "Run log". When an item is resolved, edit the original entry inline (`~~text~~` so the trail survives).
+- **Retention:** Keep this file focused on active context. When the run log reaches a new calendar year, move prior-year run-log entries to `ARCHIVE.md` in this directory (grouped by year) and leave a one-line pointer.
 - **No secrets, tokens, or PII.** This file is in the repo.
 
 ## Persistent punch list

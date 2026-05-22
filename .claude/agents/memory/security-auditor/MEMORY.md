@@ -7,6 +7,7 @@
 
 - **At start:** Skim every section. Carry context forward — past findings, accepted risks, known-safe patterns.
 - **At end:** Append a dated entry under "Run log". If a finding from a prior run was resolved, edit the original entry inline (don't delete — strike through with `~~text~~` so the audit trail survives).
+- **Retention:** Keep this file focused on active context. When the run log reaches a new calendar year, move prior-year run-log entries to `ARCHIVE.md` in this directory (grouped by year) and leave a one-line pointer.
 - **Never store secrets, tokens, or PII here.** This file lives in the repo (`.claude/agents/memory/`) — treat it as public.
 
 ## Accepted risks (do not re-flag)
