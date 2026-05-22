@@ -315,7 +315,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         .prepare(
           'SELECT id, service, status, connected_at, last_synced_at, error_message, sync_interval_minutes FROM integrations'
         )
-        .all() as Array<{ id: number; service: string }>
+        .all() as Array<{
+          id: number
+          service: string
+          status: string | null
+          connected_at: number | null
+          last_synced_at: number | null
+          error_message: string | null
+          sync_interval_minutes: number | null
+        }>
       const eventStmt = db.prepare(
         "SELECT COUNT(*) AS events, COALESCE(SUM(records_updated), 0) AS records, SUM(CASE WHEN errors IS NOT NULL AND errors != '' THEN 1 ELSE 0 END) AS errorEvents, MAX(synced_at) AS lastEventAt FROM (SELECT * FROM sync_events WHERE integration_id = ? ORDER BY synced_at DESC LIMIT ?)"
       )
