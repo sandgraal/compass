@@ -109,6 +109,7 @@ export default function Settings(): JSX.Element {
               { id: 'system', icon: <Monitor size={14} />, label: 'System' }
             ].map((t) => (
               <button
+                type="button"
                 key={t.id}
                 onClick={() => {
                   const v =
@@ -237,6 +238,7 @@ export default function Settings(): JSX.Element {
           description="Browse your local knowledge base, vault, and database files in Finder"
         >
           <button
+            type="button"
             onClick={() => window.api?.settings.openDataDir()}
             className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors"
           >
@@ -251,6 +253,7 @@ export default function Settings(): JSX.Element {
           description="Save all your data (tasks, habits, finance, knowledge index) as a JSON file"
         >
           <button
+            type="button"
             onClick={async () => {
               const r = await window.api?.settings.exportData()
               if (r?.success) toast(`Exported to: ${r.path}`, 'success')
@@ -323,6 +326,7 @@ export default function Settings(): JSX.Element {
               </span>
             )}
             <button
+              type="button"
               onClick={() => checkOllama({ forceRefresh: true })}
               disabled={ollamaChecking}
               aria-label="Re-check Ollama status"
@@ -415,6 +419,7 @@ export default function Settings(): JSX.Element {
             description="Delete all files in your local knowledge-base folder"
           >
             <button
+              type="button"
               onClick={async () => {
                 const ok = await confirm({
                   title: 'Wipe knowledge base?',
@@ -438,6 +443,7 @@ export default function Settings(): JSX.Element {
             description="Delete all encrypted vault data (.enc files). Cannot be recovered."
           >
             <button
+              type="button"
               onClick={async () => {
                 const ok = await confirm({
                   title: 'Wipe vault?',
@@ -638,6 +644,7 @@ function Toggle({
 }: { enabled: boolean; onChange: (v: boolean) => void }): JSX.Element {
   return (
     <button
+      type="button"
       onClick={() => onChange(!enabled)}
       className={cn(
         'w-10 h-5 rounded-full transition-colors relative',
@@ -1178,6 +1185,7 @@ function ShortcutRecorder(): JSX.Element {
   return (
     <div className="flex items-center gap-2">
       <button
+        type="button"
         ref={buttonRef}
         onClick={recording ? cancelRecording : startRecording}
         disabled={saving}
@@ -1195,6 +1203,7 @@ function ShortcutRecorder(): JSX.Element {
       </button>
       {!recording && !saving && shortcut !== DEFAULT_SHORTCUT && (
         <button
+          type="button"
           onClick={resetToDefault}
           aria-label="Reset shortcut to default"
           className="text-xs text-muted-foreground hover:text-foreground transition-colors focus:outline-none focus:ring-1 focus:ring-primary rounded"

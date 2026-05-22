@@ -557,6 +557,7 @@ export default function Finance(): JSX.Element {
         </div>
         <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={pickFolder}
             className="inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded border border-border text-muted-foreground hover:text-foreground"
             title={watchFolder?.path}
@@ -567,6 +568,7 @@ export default function Finance(): JSX.Element {
               : 'Pick folder'}
           </button>
           <button
+            type="button"
             onClick={ingest}
             disabled={ingesting}
             className="inline-flex items-center gap-2 text-sm px-3 py-1.5 rounded bg-primary text-primary-foreground disabled:opacity-50"

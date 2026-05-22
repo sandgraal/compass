@@ -127,6 +127,7 @@ export default function Weekly(): JSX.Element {
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <button
+            type="button"
             onClick={() => setWeekStart(subWeeks(weekStart, 1))}
             className="p-1.5 rounded hover:bg-secondary transition-colors"
           >
@@ -141,6 +142,7 @@ export default function Weekly(): JSX.Element {
             </p>
           </div>
           <button
+            type="button"
             onClick={() => setWeekStart(addWeeks(weekStart, 1))}
             className="p-1.5 rounded hover:bg-secondary transition-colors"
           >
@@ -148,6 +150,7 @@ export default function Weekly(): JSX.Element {
           </button>
           {!isCurrentWeek && (
             <button
+              type="button"
               onClick={() => setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))}
               className="text-xs text-primary hover:underline"
             >

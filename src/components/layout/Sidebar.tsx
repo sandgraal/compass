@@ -154,6 +154,7 @@ export function Sidebar(): JSX.Element {
       {/* ⌘K hint + App version */}
       <div className="px-5 py-3 border-t border-sidebar-border space-y-2">
         <button
+          type="button"
           onClick={() => {
             window.dispatchEvent(
               new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true })

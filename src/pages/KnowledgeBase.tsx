@@ -469,6 +469,7 @@ export default function KnowledgeBase(): JSX.Element {
         {/* New file */}
         <div className="px-3 py-2 border-t border-border">
           <button
+            type="button"
             onClick={async () => {
               const title = prompt('File name:')
               if (!title) return
@@ -521,6 +522,7 @@ export default function KnowledgeBase(): JSX.Element {
               <div className="flex items-center gap-2">
                 {backlinks.length > 0 && (
                   <button
+                    type="button"
                     aria-label={`${backlinks.length} backlink${backlinks.length === 1 ? '' : 's'} — click to review`}
                     onClick={() => setShowBacklinks((v) => !v)}
                     className={cn(
@@ -536,6 +538,7 @@ export default function KnowledgeBase(): JSX.Element {
                 )}
                 {suggestions.length > 0 && (
                   <button
+                    type="button"
                     aria-label={`${suggestions.length} suggestion${suggestions.length === 1 ? '' : 's'} — click to review`}
                     onClick={() => setShowSuggestions((v) => !v)}
                     className={cn(
@@ -554,6 +557,7 @@ export default function KnowledgeBase(): JSX.Element {
                 )}
                 {diffOld !== null && (
                   <button
+                    type="button"
                     onClick={() => setShowDiff((v) => !v)}
                     className={cn(
                       'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors',
@@ -583,6 +587,7 @@ export default function KnowledgeBase(): JSX.Element {
                   {readingMode ? 'Exit' : 'Focus'}
                 </button>
                 <button
+                  type="button"
                   onClick={saveContent}
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors"
                 >
@@ -599,6 +604,7 @@ export default function KnowledgeBase(): JSX.Element {
                     <Link2 size={11} /> Notes that link here
                   </span>
                   <button
+                    type="button"
                     aria-label="Close backlinks panel"
                     onClick={() => setShowBacklinks(false)}
                     className="text-xs text-muted-foreground hover:text-foreground"
@@ -631,6 +637,7 @@ export default function KnowledgeBase(): JSX.Element {
                     <Lightbulb size={11} /> Suggested additions for this file
                   </span>
                   <button
+                    type="button"
                     aria-label="Close suggestions panel"
                     onClick={() => setShowSuggestions(false)}
                     className="text-xs text-muted-foreground hover:text-foreground"
@@ -659,6 +666,7 @@ export default function KnowledgeBase(): JSX.Element {
                     <GitCompare size={11} /> Changes from last sync
                   </span>
                   <button
+                    type="button"
                     onClick={() => setDiffOld(null)}
                     className="text-xs text-muted-foreground hover:text-foreground"
                   >
@@ -713,6 +721,7 @@ function CategoryGroup({
   return (
     <div className="mb-1">
       <button
+        type="button"
         onClick={() => setOpen(!open)}
         className="w-full flex items-center gap-1 px-4 py-1 text-xs font-medium text-muted-foreground hover:text-foreground uppercase tracking-wider"
       >
@@ -740,6 +749,7 @@ function FileTreeItem({
 }: { file: FileNode; selected: boolean; onClick: () => void }): JSX.Element {
   return (
     <button
+      type="button"
       onClick={onClick}
       className={cn(
         'w-full flex items-center gap-2 px-5 py-1.5 text-xs transition-colors text-left',
@@ -817,6 +827,7 @@ function SuggestionItem({
       </code>
       <div className="flex items-center gap-2">
         <button
+          type="button"
           aria-label="Accept suggestion"
           onClick={() => onAccept(suggestion.id)}
           className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors border border-emerald-500/20"
@@ -824,6 +835,7 @@ function SuggestionItem({
           <Check size={11} /> Accept
         </button>
         <button
+          type="button"
           aria-label="Dismiss suggestion"
           onClick={() => onDismiss(suggestion.id)}
           className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-secondary text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors"

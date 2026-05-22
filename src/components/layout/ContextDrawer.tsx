@@ -94,6 +94,7 @@ export function ContextDrawer(): JSX.Element {
           Context
         </div>
         <button
+          type="button"
           onClick={() => setContextDrawerOpen(false)}
           className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
         >
@@ -113,6 +114,7 @@ export function ContextDrawer(): JSX.Element {
           sections.map((section) => (
             <div key={section.id} className="mb-1">
               <button
+                type="button"
                 className="w-full flex items-center justify-between px-4 py-2 text-xs font-medium text-muted-foreground hover:text-foreground uppercase tracking-wider"
                 onClick={() =>
                   setExpanded((prev) => {
