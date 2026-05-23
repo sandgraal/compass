@@ -19,7 +19,7 @@
 | **Phase 5 (cont.)** — Bounded UX wins | 5 items | 100% (5.10–5.14 shipped) |
 | **Phase 6** — Code-health debt (May 2026) | 5 items | 6.1 + 6.2 + 6.3 + 6.5 done; 6.4 in progress (button-type cleared; 30 warnings + CI gate remain) |
 | **Phase 7** — Daily-Driver & Platform Roadmap | 6 tracks | **Proposed** — expert-recommended; not yet scheduled (see § Phase 7 + README roadmap) |
-| **Phase 8** — Claude Integration (bidirectional) | 6 items | **Proposed** — see § Phase 8 + [`claude-integration.md`](claude-integration.md) |
+| **Phase 8** — Claude Integration (bidirectional) | 6 items | **8.1 shipped** (MCP read + propose-write tools); 8.2–8.6 proposed — see § Phase 8 + [`claude-integration.md`](claude-integration.md) |
 
 PRD-completion of the running app: **~99%** (all Phases 1–3 + Phase 4.0–4.5 merged with UIs).
 
@@ -349,7 +349,7 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 
 **Hard invariants (carry into every item):** Claude never writes directly — it enqueues *proposals* to a `claude_proposals` queue; Compass is the sole writer via existing validated IPC; every mutation is human-approved + audit-logged; the **vault is never exposed**; finance is exposed as **summaries, not raw rows**; cloud LLM stays BYO-key + opt-in.
 
-- [~] **8.1 MCP capability expansion** — *read half shipped:* `compass_finance_summary` (aggregates-only — net worth + per-month income/expense/net + current-month spend by category; no raw rows), `compass_habit_streaks`, `compass_upcoming` added to `mcp/compass-mcp/index.ts`; the MCP now also honors the `COMPASS_HOME` override (read-only on `compass.db`). *Pending:* the `compass_propose_*` write tools, which append to a **separate append-only store** (`.data/claude-inbox.jsonl`) — paired with 8.2. *(spine)*
+- [x] **8.1 MCP capability expansion** — *read tools:* `compass_finance_summary` (aggregates-only — net worth + per-month income/expense/net + current-month spend by category; no raw rows), `compass_habit_streaks`, `compass_upcoming` in `mcp/compass-mcp/index.ts`; honors the `COMPASS_HOME` override (read-only on `compass.db`). *Propose-write tools (shipped):* `compass_propose_task` / `_note` / `_txn_tag` / `_habit_check` (`mcp/compass-mcp/proposals.ts`) validate input and append a `status:'pending'` proposal to a **separate append-only store** (`<app-data>/.data/claude-inbox.jsonl`) — they open no DB and touch no vault; nothing is applied until a human approves it (8.2). Local-day helpers extracted to `dates.ts`; unit-tested in `proposals.test.ts`. *(spine)*
 - [ ] **8.2 Claude Inbox (approval surface)** — app ingests the inbox into a `claude_proposals` table (`electron/db/schema.ts`, status/history) + `electron/ipc/claude.ts` (list/approve/reject/clear) + review drawer reusing `ConfirmDialog`/`Toast`; approve routes through existing write IPC; audit log. *(spine)*
 - [ ] **8.3 Claude Desktop connector** — package `compass-mcp` as a one-click DXT/`.mcpb` desktop-extension bundle + documented `claude_desktop_config.json` fallback.
 - [ ] **8.4 Cowork plugin (end-user)** — new end-user plugin (distinct from the dev `compass-stack`) bundling Compass skills (8.6) + MCP for Cowork sessions.
