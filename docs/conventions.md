@@ -122,3 +122,15 @@ Every PR includes:
 2. Test plan in PR description (manual steps to verify)
 3. Screenshot/recording for any UI change
 4. No new `alert()` or `confirm()` calls (use the unified primitives)
+
+## Gotchas (agents & contributors)
+
+Hard-won friction worth knowing up front:
+
+- **`npm test` is vitest *watch* mode — it hangs.** Use **`npm run test:run`** for a one-shot run.
+- **`better-sqlite3` has a native-ABI split.** Node-ABI is needed for `npm run test:run` and any `tsx` script (e.g. `scripts/seed-demo.ts`); Electron-ABI is needed for the built app and Playwright E2E. One install can't serve both.
+  - `npm run screenshots` handles the dance itself and leaves the repo Node-ABI (test-ready).
+  - After `npx electron-builder install-app-deps` (Electron-ABI), run **`npm rebuild better-sqlite3`** before tests/push or SQLite tests fail with a `NODE_MODULE_VERSION` error. The `.db` file itself is ABI-independent.
+- **Data isolation:** `electron/paths.ts` and `mcp/compass-mcp/index.ts` honor an opt-in **`COMPASS_HOME`** env var that redirects the *entire* data store (DB, vault, knowledge base) to a throwaway dir — set it for tests/screenshots so you never touch the real `~/Library/Application Support/Compass`. `scripts/seed-demo.ts` refuses to run unless `COMPASS_SEED_DEMO=1` **and** `COMPASS_HOME` is set to a dir other than the real home.
+- **Date-only columns are LOCAL calendar days.** `checklist_items.list_date`, `finance_transactions.date`, and `habit_entries.date` use the local day (see `src/lib/habit-streaks.ts`, `electron/integrations/finance-snapshot.ts`). Build keys from `getFullYear()/getMonth()/getDate()` and step by `setDate(getDate()-1)` — **never `toISOString().slice(...)`** (UTC → off-by-one + DST miscounts for non-UTC users).
+- **Working in a git worktree** (e.g. `.claude/worktrees/*`): you can't `git checkout main` (it's held by the primary checkout). Branch with **`git checkout -b <name> origin/main`** directly — don't chain `git checkout main && …` (the `&&` short-circuits silently and your commit lands on the wrong branch). With `gh pr create`, pass **`--head <branch> --base main`** explicitly. A fresh worktree may need a one-time `npm install` (the Electron binary can be missing); the project uses **npm** — delete any stray `pnpm-lock.yaml`/`pnpm-workspace.yaml`.
