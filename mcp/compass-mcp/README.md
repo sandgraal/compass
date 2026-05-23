@@ -14,8 +14,15 @@ Read-only MCP server exposing the Compass app's local SQLite database and knowle
 | `compass_recent_commits` | Recent git commits on the current branch (sha, subject, author, date) |
 | `compass_test_status` | Test inventory (file count + names); `run=true` executes the suite and returns pass/fail summary (opt-in — see below) |
 | `compass_integration_health` | Per-integration health: status, last sync, last error, recent sync-event counts |
+| `compass_finance_summary` | **Aggregate** finances only — net worth, per-month income/expense/net, current-month spend by category. Never raw transactions or account numbers |
+| `compass_habit_streaks` | Each active habit's current + longest streak |
+| `compass_upcoming` | Unified brief: today's tasks + next-N-days calendar events + payments due in 14 days |
 
-The last three are **self-knowledge** tools (Phase 0++.6): they let an agent introspect the repo (recent commits, test state) and the app's integration health without shelling out. `compass_recent_commits` + `compass_test_status` read the repo source tree (rooted at the repo, derived from the `index.ts` module location via `import.meta.url`); `compass_integration_health` reads the app DB.
+`compass_recent_commits` / `compass_test_status` / `compass_integration_health` are **self-knowledge** tools (Phase 0++.6) for repo + integration introspection. `compass_finance_summary` / `compass_habit_streaks` / `compass_upcoming` are the Phase 8.1 reads that let Claude reason over your life data — `finance_summary` is deliberately **aggregates-only** to keep raw transactions inside the privacy boundary.
+
+### Data isolation
+
+The server reads the app DB **read-only**. It honors the same opt-in `COMPASS_HOME` override as `electron/paths.ts`, so tests/screenshots can point it at a throwaway store; unset, it reads the real app data dir.
 
 ### `compass_test_status` and command execution
 

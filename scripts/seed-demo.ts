@@ -39,7 +39,11 @@ Resolved data dir would have been: ${APP_DATA_DIR}`
   process.exit(1)
 }
 
-const iso = (d: Date): string => d.toISOString().slice(0, 10)
+// LOCAL calendar day (YYYY-MM-DD) — matches the app's date-only semantics
+// (habits/finance use local days). Using toISOString() here would write UTC
+// keys that mismatch local-day readers (the app + the MCP) for non-UTC users.
+const iso = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const hashTxn = (date: string, amount: number, desc: string, account: string): string =>
   createHash('sha1')
     .update(`${date}|${amount.toFixed(2)}|${desc.trim().toLowerCase()}|${account}`)
