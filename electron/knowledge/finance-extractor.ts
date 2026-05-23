@@ -12,6 +12,7 @@
  * the humans (you, future-you) and the LLM context window.
  */
 
+import { localYm } from '../lib/dates'
 import { KNOWLEDGE_DIR } from '../paths'
 import { updateKnowledgeFile } from './writer'
 // import { getDb } from '../db/client'
@@ -189,7 +190,7 @@ export function writeFinancesMonthly(s: FinanceSnapshot): void {
     )
     return
   }
-  const cm = new Date().toISOString().slice(0, 7)
+  const cm = localYm()
   const inCm = s.transactions.filter(
     (t) => t.date.startsWith(cm) && t.amount < 0 && t.category !== 'Transfers'
   )
