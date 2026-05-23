@@ -20,7 +20,7 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import type { IpcMain } from 'electron'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as schema from '../db/schema'
 
 const { TMP_HOME } = vi.hoisted(() => {
@@ -90,7 +90,8 @@ beforeEach(() => {
       ingested_at INTEGER NOT NULL,
       resolved_at INTEGER,
       error TEXT,
-      result_ref TEXT
+      result_ref TEXT,
+      cleared_at INTEGER
     );
     CREATE TABLE checklist_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,6 +132,11 @@ beforeEach(() => {
 afterEach(() => {
   sqlite.close()
   rmSync(KB, { recursive: true, force: true })
+})
+
+afterAll(() => {
+  // Remove the whole temp home so repeated runs don't leak dirs.
+  rmSync(TMP_HOME, { recursive: true, force: true })
 })
 
 describe('ingestProposals', () => {
@@ -199,6 +205,14 @@ describe('applyProposal', () => {
     ).toThrow(/invalid listType/)
   })
 
+  it('task → rejects an impossible listDate (re-validates the LLM payload)', () => {
+    for (const listDate of ['2026-13-40', '2026-02-30', '05/23/2026']) {
+      expect(() =>
+        applyProposal(db(), 'task', { title: 'x', listType: 'daily', listDate })
+      ).toThrow(/invalid listDate/)
+    }
+  })
+
   it('note (create) → writes a file under the knowledge base', () => {
     const ref = applyProposal(db(), 'note', {
       path: 'notes/idea.md',
@@ -225,6 +239,12 @@ describe('applyProposal', () => {
   it('note → blocks path traversal (safeJoin)', () => {
     expect(() => applyProposal(db(), 'note', { path: '../escape.md', content: 'x' })).toThrow()
     expect(existsSync(join(TMP_HOME, 'escape.md'))).toBe(false)
+  })
+
+  it('note → rejects Windows/UNC/absolute/backslash paths', () => {
+    for (const path of ['C:\\notes\\x.md', '\\\\server\\share\\x.md', 'notes\\x.md', '/abs.md']) {
+      expect(() => applyProposal(db(), 'note', { path, content: 'x' })).toThrow(/relative .md path/)
+    }
   })
 
   it('txn_tag → sets a whitelisted tax tag + category on an existing txn', () => {
@@ -290,6 +310,13 @@ describe('applyProposal', () => {
       applyProposal(db(), 'habit_check', { habitId: 42, date: '2026-05-23', completed: true })
     ).toThrow(/habit not found/)
   })
+
+  it('habit_check → rejects an impossible date', () => {
+    sqlite.exec("INSERT INTO habits (id, name) VALUES (1, 'Run')")
+    expect(() =>
+      applyProposal(db(), 'habit_check', { habitId: 1, date: '2026-02-30', completed: true })
+    ).toThrow(/invalid date/)
+  })
 })
 
 describe('claude:* handlers', () => {
@@ -354,14 +381,43 @@ describe('claude:* handlers', () => {
     expect(db().select().from(schema.checklistItems).all()).toHaveLength(0)
   })
 
-  it('clear removes resolved rows but keeps pending', async () => {
+  it('clear soft-hides resolved rows from the inbox but keeps them in the table', async () => {
     const pending = seed('task', { title: 'keep', listType: 'daily', listDate: '2026-05-23' })
     const toReject = seed('task', { title: 'gone', listType: 'daily', listDate: '2026-05-23' })
     await handlers['claude:reject-proposal']({}, toReject)
     const res = (await handlers['claude:clear-resolved']({})) as { cleared: number }
     expect(res.cleared).toBe(1)
-    const rows = db().select().from(schema.claudeProposals).all()
-    expect(rows).toHaveLength(1)
-    expect(rows[0].id).toBe(pending)
+    // The inbox view shows only the pending one…
+    const visible = listProposals(db())
+    expect(visible).toHaveLength(1)
+    expect(visible[0].id).toBe(pending)
+    // …but the cleared row is RETAINED (with clearedAt set) for dedup.
+    const all = db().select().from(schema.claudeProposals).all()
+    expect(all).toHaveLength(2)
+    const clearedRow = all.find((r) => r.id === toReject)
+    expect(clearedRow?.clearedAt).not.toBeNull()
+  })
+
+  it('a resolved+cleared proposal is NOT resurrected by re-ingesting the JSONL (P1)', async () => {
+    // Simulate the MCP having appended a proposal to the never-truncated inbox.
+    const file = join(tmpdir(), `inbox-p1-${crypto.randomUUID()}.jsonl`)
+    const line = makeLine({
+      id: 'persist-1',
+      payload: { title: 'once', listType: 'daily', listDate: '2026-05-23' }
+    })
+    writeFileSync(file, `${line}\n`)
+    expect(ingestProposals(db(), file)).toBe(1)
+    const row = db().select().from(schema.claudeProposals).all()[0]
+
+    // Approve it, then clear resolved.
+    await handlers['claude:approve-proposal']({}, row.id)
+    await handlers['claude:clear-resolved']({})
+    expect(db().select().from(schema.checklistItems).all()).toHaveLength(1)
+
+    // Re-ingest the SAME (still-present) line — must NOT create a new pending row.
+    expect(ingestProposals(db(), file)).toBe(0)
+    expect(listProposals(db(), 'pending')).toHaveLength(0)
+    expect(db().select().from(schema.claudeProposals).all()).toHaveLength(1)
+    rmSync(file, { force: true })
   })
 })

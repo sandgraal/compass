@@ -319,5 +319,10 @@ export const claudeProposals = sqliteTable('claude_proposals', {
     .$defaultFn(() => new Date()),
   resolvedAt: integer('resolved_at', { mode: 'timestamp_ms' }), // approve/reject/fail time
   error: text('error'), // failure detail when status = 'failed'
-  resultRef: text('result_ref') // e.g. created checklist id / note path
+  resultRef: text('result_ref'), // e.g. created checklist id / note path
+  // Soft-clear: "clear resolved" hides rows from the inbox but KEEPS them so the
+  // append-only JSONL (never truncated) can't re-ingest + re-apply a resolved
+  // proposal as a fresh pending one. Dedup is by `proposalId`, so the row must
+  // survive a clear.
+  clearedAt: integer('cleared_at', { mode: 'timestamp_ms' })
 })

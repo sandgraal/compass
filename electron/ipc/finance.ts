@@ -52,9 +52,10 @@ function validateGeoSince(since: string): string {
   return since
 }
 
-// Accepted transaction tax tags. Exported so other write paths (e.g. the
-// Claude Inbox approval flow in ipc/claude.ts) validate against the same set.
-export const TAX_TAGS = new Set([
+// Accepted transaction tax tags. Exported as a ReadonlySet so other write
+// paths (e.g. the Claude Inbox approval flow in ipc/claude.ts) validate against
+// the same set without being able to mutate it.
+export const TAX_TAGS: ReadonlySet<string> = new Set([
   'tax:capex-airbnb',
   'tax:schedule-c-income',
   'tax:schedule-c-expense',

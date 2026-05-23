@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fb1950be-9627-40df-b32e-dfa32f894da3",
+  "id": "3116bc49-3161-4580-8b52-79d4d61d0356",
   "prevId": "18ff39d2-7e8d-42a1-8689-51ea50ae51fe",
   "tables": {
     "app_settings": {
@@ -450,6 +450,13 @@
         "result_ref": {
           "name": "result_ref",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cleared_at": {
+          "name": "cleared_at",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

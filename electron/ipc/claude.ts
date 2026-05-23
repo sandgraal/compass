@@ -15,9 +15,12 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import type BetterSqlite3 from 'better-sqlite3'
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
+import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core'
 import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
+import type * as schema from '../db/schema'
 import {
   checklistItems,
   claudeProposals,
@@ -31,8 +34,34 @@ import { safeJoin } from './knowledge'
 
 const LIST_TYPES = new Set(['daily', 'weekly', 'monthly'])
 const PROPOSAL_TYPES = new Set(['task', 'note', 'txn_tag', 'habit_check'])
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
-type Db = ReturnType<typeof getDb>
+// The concrete handle (getDb result) and a transaction handle both satisfy this
+// base, so apply logic can run either standalone or inside `db.transaction`.
+type Db = BaseSQLiteDatabase<'sync', BetterSqlite3.RunResult, typeof schema>
+
+/** A real calendar day in YYYY-MM-DD form (shape + round-trip through Date). */
+function isRealYmd(value: string): boolean {
+  if (!DATE_RE.test(value)) return false
+  const d = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value
+}
+
+/**
+ * A relative POSIX `.md` path that stays inside the knowledge base: no leading
+ * `/`, no `..`, no backslashes, no Windows drive letter / UNC. Mirrors the MCP
+ * propose-tool contract so approval enforces the same boundary as enqueueing.
+ */
+function isSafeNotePath(path: string): boolean {
+  return (
+    !!path &&
+    !path.startsWith('/') &&
+    !path.includes('..') &&
+    !path.includes('\\') &&
+    !/^[a-zA-Z]:/.test(path) &&
+    path.endsWith('.md')
+  )
+}
 
 export function inboxPath(): string {
   return join(DATA_DIR, 'claude-inbox.jsonl')
@@ -132,9 +161,21 @@ function toView(row: typeof claudeProposals.$inferSelect): ProposalView {
 }
 
 export function listProposals(db: Db, status?: string): ProposalView[] {
+  // Soft-cleared rows are hidden from the inbox but kept for dedup.
+  const notCleared = isNull(claudeProposals.clearedAt)
   const rows = status
-    ? db.select().from(claudeProposals).where(eq(claudeProposals.status, status)).all()
-    : db.select().from(claudeProposals).orderBy(desc(claudeProposals.ingestedAt)).all()
+    ? db
+        .select()
+        .from(claudeProposals)
+        .where(and(eq(claudeProposals.status, status), notCleared))
+        .orderBy(desc(claudeProposals.ingestedAt))
+        .all()
+    : db
+        .select()
+        .from(claudeProposals)
+        .where(notCleared)
+        .orderBy(desc(claudeProposals.ingestedAt))
+        .all()
   return rows.map(toView)
 }
 
@@ -155,7 +196,7 @@ export function applyProposal(db: Db, type: string, payload: Record<string, unkn
       const listType = str(payload.listType) || 'daily'
       if (!LIST_TYPES.has(listType)) throw new Error(`task: invalid listType "${listType}"`)
       const listDate = str(payload.listDate)
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(listDate)) throw new Error('task: invalid listDate')
+      if (!isRealYmd(listDate)) throw new Error('task: invalid listDate (need a real YYYY-MM-DD)')
       const row = db
         .insert(checklistItems)
         .values({
@@ -174,7 +215,11 @@ export function applyProposal(db: Db, type: string, payload: Record<string, unkn
 
     case 'note': {
       const rel = str(payload.path)
-      if (!rel.endsWith('.md')) throw new Error('note: path must end in .md')
+      if (!isSafeNotePath(rel)) {
+        throw new Error(
+          'note: path must be a relative .md path (no "..", absolute, or Windows/UNC)'
+        )
+      }
       const content = typeof payload.content === 'string' ? payload.content : ''
       if (!content.trim()) throw new Error('note: content is required')
       const mode = payload.mode === 'append' ? 'append' : 'create'
@@ -202,7 +247,11 @@ export function applyProposal(db: Db, type: string, payload: Record<string, unkn
       const taxTag = str(payload.taxTag)
       const category = str(payload.category)
       if (!taxTag && !category) throw new Error('txn_tag: nothing to set')
-      if (taxTag && !TAX_TAGS.has(taxTag)) throw new Error(`txn_tag: unknown tax tag "${taxTag}"`)
+      if (taxTag && !TAX_TAGS.has(taxTag)) {
+        throw new Error(
+          `txn_tag: unknown tax tag "${taxTag}" — allowed: ${[...TAX_TAGS].join(', ')}`
+        )
+      }
       const updates: Record<string, unknown> = {}
       if (taxTag) {
         updates.taxTag = taxTag
@@ -223,7 +272,7 @@ export function applyProposal(db: Db, type: string, payload: Record<string, unkn
       if (!Number.isInteger(habitId) || habitId <= 0)
         throw new Error('habit_check: invalid habitId')
       const date = str(payload.date)
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('habit_check: invalid date')
+      if (!isRealYmd(date)) throw new Error('habit_check: invalid date (need a real YYYY-MM-DD)')
       if (typeof payload.completed !== 'boolean')
         throw new Error('habit_check: completed must be boolean')
       const completed = payload.completed
@@ -274,11 +323,20 @@ export function registerClaudeHandlers(ipcMain: IpcMain): void {
       payload = {}
     }
     try {
-      const resultRef = applyProposal(db, row.type, payload)
-      db.update(claudeProposals)
-        .set({ status: 'approved', resolvedAt: new Date(), resultRef, error: null })
-        .where(eq(claudeProposals.id, id))
-        .run()
+      // Apply + mark-approved atomically so a failed status write can't leave
+      // the row 'pending' after the mutation already happened (which would let
+      // it be re-approved). For DB-only proposal types the whole thing rolls
+      // back together; the `note` type also writes a file inside the txn — that
+      // FS write isn't transactional, but a later create re-approve is caught
+      // by the file-exists guard, so it can't silently double-write.
+      const resultRef = db.transaction((tx) => {
+        const ref = applyProposal(tx, row.type, payload)
+        tx.update(claudeProposals)
+          .set({ status: 'approved', resolvedAt: new Date(), resultRef: ref, error: null })
+          .where(eq(claudeProposals.id, id))
+          .run()
+        return ref
+      })
       return { success: true, resultRef }
     } catch (err) {
       const error = (err as Error).message
@@ -302,12 +360,21 @@ export function registerClaudeHandlers(ipcMain: IpcMain): void {
     return { success: true }
   })
 
-  // Clear — remove resolved (approved/rejected/failed) rows from the table.
+  // Clear — soft-clear resolved (approved/rejected/failed) rows: stamp
+  // `clearedAt` so they drop out of the inbox view but the row survives for
+  // dedup. Hard-deleting would let the never-truncated JSONL re-ingest and
+  // re-apply a resolved proposal as a fresh pending one.
   ipcMain.handle('claude:clear-resolved', () => {
     const db = getDb()
     const res = db
-      .delete(claudeProposals)
-      .where(inArray(claudeProposals.status, ['approved', 'rejected', 'failed']))
+      .update(claudeProposals)
+      .set({ clearedAt: new Date() })
+      .where(
+        and(
+          inArray(claudeProposals.status, ['approved', 'rejected', 'failed']),
+          isNull(claudeProposals.clearedAt)
+        )
+      )
       .run()
     return { success: true, cleared: res.changes }
   })

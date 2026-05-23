@@ -9,7 +9,8 @@ CREATE TABLE `claude_proposals` (
 	`ingested_at` integer NOT NULL,
 	`resolved_at` integer,
 	`error` text,
-	`result_ref` text
+	`result_ref` text,
+	`cleared_at` integer
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `claude_proposals_proposal_id_unique` ON `claude_proposals` (`proposal_id`);
