@@ -28,6 +28,7 @@ import {
   stopFinanceWatcher
 } from '../integrations/finance-watcher'
 import { writeAllFinanceKnowledge } from '../knowledge/finance-extractor'
+import { localYm, localYmd } from '../lib/dates'
 import { DATA_DIR } from '../paths'
 
 const DEFAULT_MONEY_FOLDER = join(homedir(), 'Documents', 'Money')
@@ -44,7 +45,7 @@ function validateGeoSince(since: string): string {
   if (since < '2000-01-01') {
     throw new Error('Invalid since date. Earliest supported date is 2000-01-01.')
   }
-  const today = new Date().toISOString().slice(0, 10)
+  const today = localYmd()
   if (since > today) {
     throw new Error('Invalid since date. Date cannot be in the future.')
   }
@@ -818,7 +819,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   // ── Budget status (actual vs planned for a month) ─────────────────────────
   ipcMain.handle('finance:get-budget-status', (_event, month?: string) => {
     const db = getDb()
-    const m = month ?? new Date().toISOString().slice(0, 7)
+    const m = month ?? localYm()
     const budget = db.select().from(budgetRules).all()
     const txns = db
       .select()
