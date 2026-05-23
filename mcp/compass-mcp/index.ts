@@ -206,7 +206,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === 'compass_today_tasks') {
       const db = openDb()
       if (!db) return errorResult('Compass DB not found — is the app installed?')
-      const today = new Date().toISOString().slice(0, 10)
+      const today = localYmd()
       const rows = db
         .prepare(
           'SELECT id, title, body, category, checked, source FROM checklist_items WHERE list_type = ? AND list_date = ? ORDER BY sort_order'
