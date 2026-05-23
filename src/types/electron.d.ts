@@ -170,6 +170,19 @@ declare global {
     createdAt: Date | null
   }
 
+  interface ClaudeProposal {
+    id: number
+    proposalId: string
+    type: 'task' | 'note' | 'txn_tag' | 'habit_check' | string
+    payload: Record<string, unknown>
+    source: string
+    status: 'pending' | 'approved' | 'rejected' | 'failed' | string
+    createdAt: number | null
+    resolvedAt: number | null
+    error: string | null
+    resultRef: string | null
+  }
+
   interface Window {
     api: {
       auth: {
@@ -432,6 +445,14 @@ declare global {
         getEntries(month: string): Promise<Record<number, Record<string, boolean>>>
         getAllEntries(): Promise<Record<number, Record<string, boolean>>>
         toggle(habitId: number, date: string): Promise<{ success: boolean; completed: boolean }>
+      }
+      claude: {
+        listProposals(status?: string): Promise<ClaudeProposal[]>
+        approveProposal(
+          id: number
+        ): Promise<{ success: boolean; resultRef?: string; error?: string }>
+        rejectProposal(id: number): Promise<{ success: boolean; error?: string }>
+        clearResolved(): Promise<{ success: boolean; cleared: number }>
       }
       checklist: {
         getItems(listType: string, date: string): Promise<ChecklistItem[]>

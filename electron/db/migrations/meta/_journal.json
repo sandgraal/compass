@@ -71,6 +71,13 @@
       "when": 1778655167090,
       "tag": "0009_dear_freak",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1779561117127,
+      "tag": "0010_glorious_tenebrous",
+      "breakpoints": true
     }
   ]
 }

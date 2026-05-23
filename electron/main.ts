@@ -8,6 +8,7 @@ import { initDb } from './db/client'
 import { registerAssistantHandlers } from './ipc/assistant'
 import { registerAuthHandlers } from './ipc/auth'
 import { registerBackupHandlers } from './ipc/backup'
+import { registerClaudeHandlers } from './ipc/claude'
 import { registerFinanceHandlers } from './ipc/finance'
 import { registerHabitsHandlers } from './ipc/habits'
 import { registerKnowledgeHandlers } from './ipc/knowledge'
@@ -132,6 +133,7 @@ app.whenReady().then(async () => {
   registerSettingsHandlers(ipcMain)
   registerFinanceHandlers(ipcMain)
   registerHabitsHandlers(ipcMain)
+  registerClaudeHandlers(ipcMain)
   registerUpdaterHandlers(ipcMain)
   registerBackupHandlers(ipcMain)
   registerSearchHandlers(ipcMain)

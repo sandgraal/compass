@@ -211,6 +211,14 @@ const api = {
     toggle: (habitId: number, date: string) => ipcRenderer.invoke('habits:toggle', habitId, date)
   },
 
+  // --- Claude Inbox (proposals from the MCP, awaiting human approval) ---
+  claude: {
+    listProposals: (status?: string) => ipcRenderer.invoke('claude:list-proposals', status),
+    approveProposal: (id: number) => ipcRenderer.invoke('claude:approve-proposal', id),
+    rejectProposal: (id: number) => ipcRenderer.invoke('claude:reject-proposal', id),
+    clearResolved: () => ipcRenderer.invoke('claude:clear-resolved')
+  },
+
   // --- Finance ---
   finance: {
     ingestFolder: (folder?: string) => ipcRenderer.invoke('finance:ingest-folder', folder),

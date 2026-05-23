@@ -56,7 +56,7 @@ function countWords(text: string): number {
  *
  * Returns the absolute resolved path so callers can read/write directly.
  */
-function safeJoin(base: string, relativePath: string): string {
+export function safeJoin(base: string, relativePath: string): string {
   const resolvedBase = resolve(base)
   const resolvedTarget = resolve(resolvedBase, relativePath)
   const rel = relative(resolvedBase, resolvedTarget)
