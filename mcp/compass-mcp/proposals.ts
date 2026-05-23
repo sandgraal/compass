@@ -41,8 +41,34 @@ export type BuildResult =
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
+// Valid checklist list types — mirrors `checklist_items.list_type` in
+// electron/db/schema.ts ('daily' | 'weekly' | 'monthly'). No 'master'.
+const LIST_TYPES = new Set(['daily', 'weekly', 'monthly'])
+
 function asTrimmedString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+/**
+ * True only for a real calendar day in `YYYY-MM-DD` form. The shape regex alone
+ * would accept impossible dates (`2026-13-40`), so we also require the string to
+ * round-trip through `Date` — these proposals are later applied via DB writes.
+ */
+function isRealYmd(value: unknown): value is string {
+  if (typeof value !== 'string' || !DATE_RE.test(value)) return false
+  const d = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value
+}
+
+/**
+ * Resolve an optional date arg: absent → today (local day); a valid real date →
+ * itself; anything else → an error (don't silently retarget to today, which
+ * could enqueue a wrong-day mutation).
+ */
+function resolveDateArg(raw: unknown, field: string): { date: string } | { error: string } {
+  if (raw === undefined) return { date: localYmd() }
+  if (isRealYmd(raw)) return { date: raw }
+  return { error: `${field} must be a valid YYYY-MM-DD date` }
 }
 
 /**
@@ -61,10 +87,13 @@ export function buildProposal(
     case 'compass_propose_task': {
       const title = asTrimmedString(a.title)
       if (!title) return { error: 'title is required' }
-      const listType = a.listType === 'master' ? 'master' : 'daily'
-      const rawDate = a.listDate
-      const listDate = typeof rawDate === 'string' && DATE_RE.test(rawDate) ? rawDate : localYmd()
-      const payload: Record<string, unknown> = { title, listType, listDate }
+      if (a.listType !== undefined && !LIST_TYPES.has(a.listType as string)) {
+        return { error: 'listType must be one of daily, weekly, monthly' }
+      }
+      const listType = (a.listType as string) ?? 'daily'
+      const resolved = resolveDateArg(a.listDate, 'listDate')
+      if ('error' in resolved) return { error: resolved.error }
+      const payload: Record<string, unknown> = { title, listType, listDate: resolved.date }
       const body = asTrimmedString(a.body)
       if (body) payload.body = body
       const category = asTrimmedString(a.category)
@@ -74,8 +103,20 @@ export function buildProposal(
 
     case 'compass_propose_note': {
       const path = typeof a.path === 'string' ? a.path : ''
-      if (!path || path.startsWith('/') || path.includes('..') || !path.endsWith('.md')) {
-        return { error: 'path must be a relative .md path with no ".." segments' }
+      // Reject anything that isn't a relative POSIX .md path: leading '/',
+      // '..' segments, Windows drive letters (C:\...), and backslash / UNC
+      // (\\server\share\...) paths — all of which can escape the knowledge base.
+      if (
+        !path ||
+        path.startsWith('/') ||
+        path.includes('..') ||
+        path.includes('\\') ||
+        /^[a-zA-Z]:/.test(path) ||
+        !path.endsWith('.md')
+      ) {
+        return {
+          error: 'path must be a relative .md path (no "..", no absolute or Windows/UNC paths)'
+        }
       }
       const content = typeof a.content === 'string' ? a.content : ''
       if (!content.trim()) return { error: 'content is required' }
@@ -104,10 +145,15 @@ export function buildProposal(
       if (!Number.isInteger(habitId) || habitId <= 0) {
         return { error: 'habitId (positive integer) is required' }
       }
-      const rawDate = a.date
-      const date = typeof rawDate === 'string' && DATE_RE.test(rawDate) ? rawDate : localYmd()
-      const completed = a.completed === undefined ? true : Boolean(a.completed)
-      return { type: 'habit_check', payload: { habitId, date, completed } }
+      const resolved = resolveDateArg(a.date, 'date')
+      if ('error' in resolved) return { error: resolved.error }
+      // Strict boolean only — never coerce. The string 'false' (or any truthy
+      // non-boolean) must not silently flip the user's intended habit state.
+      if (a.completed !== undefined && typeof a.completed !== 'boolean') {
+        return { error: 'completed must be a boolean (true or false)' }
+      }
+      const completed = a.completed === undefined ? true : a.completed
+      return { type: 'habit_check', payload: { habitId, date: resolved.date, completed } }
     }
 
     default:
@@ -145,7 +191,7 @@ export const PROPOSE_TOOLS = [
         title: { type: 'string', description: 'Task title (required)' },
         body: { type: 'string', description: 'Optional longer note/body' },
         category: { type: 'string', description: 'Optional category label' },
-        listType: { type: 'string', enum: ['daily', 'master'], default: 'daily' },
+        listType: { type: 'string', enum: ['daily', 'weekly', 'monthly'], default: 'daily' },
         listDate: {
           type: 'string',
           description: 'YYYY-MM-DD local day for a daily-list item; defaults to today'

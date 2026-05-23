@@ -27,14 +27,14 @@ describe('buildProposal', () => {
         title: 'Plan Q3',
         body: 'rough outline',
         category: 'work',
-        listType: 'master',
+        listType: 'monthly',
         listDate: '2026-05-23'
       })
       expect(r).toEqual({
         type: 'task',
         payload: {
           title: 'Plan Q3',
-          listType: 'master',
+          listType: 'monthly',
           listDate: '2026-05-23',
           body: 'rough outline',
           category: 'work'
@@ -42,15 +42,34 @@ describe('buildProposal', () => {
       })
     })
 
-    it('ignores a malformed listDate and falls back to today', () => {
-      const r = buildProposal('compass_propose_task', { title: 'x', listDate: '05/23/2026' })
-      expect(r).toMatchObject({ payload: { listDate: localYmd() } })
+    it('rejects an unsupported listType (e.g. the old "master")', () => {
+      expect(buildProposal('compass_propose_task', { title: 'x', listType: 'master' })).toEqual({
+        error: 'listType must be one of daily, weekly, monthly'
+      })
+    })
+
+    it('rejects a malformed or impossible listDate instead of retargeting to today', () => {
+      for (const listDate of ['05/23/2026', '2026-13-40', '2026-02-30', 'today']) {
+        expect(buildProposal('compass_propose_task', { title: 'x', listDate })).toEqual({
+          error: 'listDate must be a valid YYYY-MM-DD date'
+        })
+      }
     })
   })
 
   describe('compass_propose_note', () => {
-    it('rejects traversal, absolute, and non-md paths', () => {
-      for (const path of ['../escape.md', '/etc/passwd.md', 'notes/x.txt', '']) {
+    it('rejects traversal, absolute, Windows/UNC, and non-md paths', () => {
+      for (const path of [
+        '../escape.md',
+        'a/../../escape.md',
+        '/etc/passwd.md',
+        'C:\\notes\\x.md',
+        'c:/notes/x.md',
+        '\\\\server\\share\\x.md',
+        'notes\\x.md',
+        'notes/x.txt',
+        ''
+      ]) {
         expect(buildProposal('compass_propose_note', { path, content: 'hi' })).toHaveProperty(
           'error'
         )
@@ -135,6 +154,20 @@ describe('buildProposal', () => {
         type: 'habit_check',
         payload: { habitId: 2, date: '2026-05-01', completed: false }
       })
+    })
+
+    it('rejects a non-boolean completed (no coercion of "false")', () => {
+      for (const completed of ['false', 'true', 0, 1, null]) {
+        expect(buildProposal('compass_propose_habit_check', { habitId: 2, completed })).toEqual({
+          error: 'completed must be a boolean (true or false)'
+        })
+      }
+    })
+
+    it('rejects an impossible date', () => {
+      expect(
+        buildProposal('compass_propose_habit_check', { habitId: 2, date: '2026-02-30' })
+      ).toEqual({ error: 'date must be a valid YYYY-MM-DD date' })
     })
   })
 
