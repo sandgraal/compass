@@ -19,6 +19,7 @@
 | **Phase 5 (cont.)** — Bounded UX wins | 5 items | 100% (5.10–5.14 shipped) |
 | **Phase 6** — Code-health debt (May 2026) | 5 items | 6.1 + 6.2 + 6.3 + 6.5 done; 6.4 in progress (button-type cleared; 30 warnings + CI gate remain) |
 | **Phase 7** — Daily-Driver & Platform Roadmap | 6 tracks | **Proposed** — expert-recommended; not yet scheduled (see § Phase 7 + README roadmap) |
+| **Phase 8** — Claude Integration (bidirectional) | 6 items | **Proposed** — see § Phase 8 + [`claude-integration.md`](claude-integration.md) |
 
 PRD-completion of the running app: **~99%** (all Phases 1–3 + Phase 4.0–4.5 merged with UIs).
 
@@ -339,6 +340,23 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 - [ ] **Accessibility pass** (M) — extends the in-flight Phase 6.4 a11y work to a full WCAG sweep.
 
 > The prior **"Deferred (revisit Q3 2026)"** list is superseded by the tracks above: PWA/companion → Track D; Plaid Investments → Track E; vault sharing → Track D; Apple Contacts → Track B.
+
+---
+
+## Phase 8 — Claude Integration (bidirectional, Proposed)
+
+> **Status: proposed, not scheduled.** Make Compass a first-class **bidirectional Claude citizen** — Claude (Desktop, Cowork, Code) can read *and* (with approval) act on Compass data, and Compass embeds Claude's agentic capabilities. Full design + the "Claude Inbox" confirmed-writes architecture + the five-lens expert evaluation live in [`claude-integration.md`](claude-integration.md). **Today's reality:** a read-only MCP for Claude Code + a BYO-key Ask Compass assistant — everything below is 🔜.
+
+**Hard invariants (carry into every item):** Claude never writes directly — it enqueues *proposals* to a `claude_proposals` queue; Compass is the sole writer via existing validated IPC; every mutation is human-approved + audit-logged; the **vault is never exposed**; finance is exposed as **summaries, not raw rows**; cloud LLM stays BYO-key + opt-in.
+
+- [ ] **8.1 MCP capability expansion** — extend `mcp/compass-mcp/index.ts` with privacy-respecting reads (`compass_finance_summary` aggregates-only, `compass_habit_streaks`, `compass_upcoming`) + propose-write tools (`compass_propose_task` / `_note` / `_txn_tag` / `_habit_check`). The MCP keeps `compass.db` **read-only** and appends proposals to a **separate append-only store it owns read-write** (`.data/claude-inbox.jsonl`) — never inserting into `compass.db`. Versioned contract + per-tool tests. *(spine)*
+- [ ] **8.2 Claude Inbox (approval surface)** — app ingests the inbox into a `claude_proposals` table (`electron/db/schema.ts`, status/history) + `electron/ipc/claude.ts` (list/approve/reject/clear) + review drawer reusing `ConfirmDialog`/`Toast`; approve routes through existing write IPC; audit log. *(spine)*
+- [ ] **8.3 Claude Desktop connector** — package `compass-mcp` as a one-click DXT/`.mcpb` desktop-extension bundle + documented `claude_desktop_config.json` fallback.
+- [ ] **8.4 Cowork plugin (end-user)** — new end-user plugin (distinct from the dev `compass-stack`) bundling Compass skills (8.6) + MCP for Cowork sessions.
+- [ ] **8.5 Embedded Claude Agent SDK in Ask Compass** — upgrade `assistant.ts`/`llm-client.ts` from raw `fetch` to the Claude Agent SDK: tool-use over local data (read + propose), prompt caching, agentic "plan my week" + proactive insights. Realizes Phase 7 Track E. *(independent, high-value)*
+- [ ] **8.6 Claude Skills for Compass** — `weekly-review` / `budget-check` / `morning-brief` / `capture-from-web` / `plan-my-week`, operating through the MCP tools; shipped in the Cowork plugin + DXT. Extends Phase 7 Track C.
+
+> Build order when greenlit: 8.1 → 8.2 (spine) → 8.3 / 8.4 / 8.6 (packaging) ; 8.5 in parallel. Each is its own PR with tests.
 
 ---
 

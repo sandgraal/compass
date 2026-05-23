@@ -145,6 +145,11 @@ Global ⌘K palette: `src/components/CommandPalette.tsx` (mounted in `App.tsx`).
 - Native theme listener (re-emits to renderer on macOS dark/light flip)
 - `electron-updater` — checks GitHub Releases 3 s after launch, then every 4 h; downloads silently; notifies renderer via `updater:status` push events
 
+## Claude / MCP boundary
+
+- `mcp/compass-mcp/index.ts` is a **separate, read-only** MCP process (opens the DB with `readonly: true`). It exposes a curated set of read tools (tasks, knowledge, calendar, sync, repo introspection) — **the vault and raw finance rows are excluded.** Registered for Claude Code via `.mcp.json`.
+- **Proposed (Phase 8, not built):** Claude *proposes* writes — the MCP appends them to a **separate, append-only inbox it owns read-write** (`.data/claude-inbox.jsonl`, distinct from the read-only `compass.db`), never to `compass.db` itself. The running app watches that inbox, surfaces a **Claude Inbox** for human approval, then executes the real change through the existing validated write IPC. Full design: [`claude-integration.md`](claude-integration.md). The boundary rule mirrors the renderer's: untrusted callers never mutate `compass.db`; the main process is the sole, validating writer.
+
 ## Release pipeline
 
 Shipping a new version to all running Compass instances:
