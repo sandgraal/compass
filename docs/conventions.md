@@ -118,7 +118,19 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 ## PR checklist
 
 Every PR includes:
-1. Passing `npm run typecheck && npm run check && npm test`
+1. Passing `npm run typecheck && npm run check && npm run test:run` (use `test:run`, not `test` — the latter starts watch mode; see Gotchas)
 2. Test plan in PR description (manual steps to verify)
 3. Screenshot/recording for any UI change
 4. No new `alert()` or `confirm()` calls (use the unified primitives)
+
+## Gotchas (agents & contributors)
+
+Hard-won friction worth knowing up front:
+
+- **`npm test` starts vitest in *watch* mode and won't exit** (it waits for file changes — fine interactively, but it'll appear to hang in a script/agent). Use **`npm run test:run`** for one-shot validation.
+- **`better-sqlite3` has a native-ABI split.** Node-ABI is needed for `npm run test:run` and any `tsx` script (e.g. `scripts/seed-demo.ts`); Electron-ABI is needed for the built app and Playwright E2E. One install can't serve both.
+  - `npm run screenshots` handles the dance itself and leaves the repo Node-ABI (test-ready).
+  - After `npx electron-builder install-app-deps` (Electron-ABI), run **`npm rebuild better-sqlite3`** before tests/push or SQLite tests fail with a `NODE_MODULE_VERSION` error. The `.db` file itself is ABI-independent.
+- **Data isolation:** `electron/paths.ts` and `mcp/compass-mcp/index.ts` honor an opt-in **`COMPASS_HOME`** env var that redirects the *entire* data store (DB, vault, knowledge base) to a throwaway dir — set it for tests/screenshots so you never touch the real `~/Library/Application Support/Compass`. `scripts/seed-demo.ts` refuses to run unless `COMPASS_SEED_DEMO=1` **and** `COMPASS_HOME` is set to a dir other than the real home.
+- **Date-only columns: prefer LOCAL calendar days.** `finance_transactions.date` and `habit_entries.date` use the local day (see `electron/integrations/finance-snapshot.ts`, `src/lib/habit-streaks.ts`). Build keys from `getFullYear()/getMonth()/getDate()` and step by `setDate(getDate()-1)` — not `toISOString().slice(...)` (UTC → off-by-one + DST miscounts for non-UTC users). **Known inconsistency:** `checklist_items.list_date` is currently keyed by `src/lib/utils.ts todayISO()`, which is *UTC* — so `compass_today_tasks` reads UTC to match, while the newer `compass_upcoming` reads local. New local-day code should follow the finance/habits pattern; unifying checklist on local day is a tracked cleanup.
+- **Working in a git worktree** (e.g. `.claude/worktrees/*`): you can't `git checkout main` (it's held by the primary checkout). Branch with **`git checkout -b <name> origin/main`** directly — don't chain `git checkout main && …` (the `&&` short-circuits silently and your commit lands on the wrong branch). With `gh pr create`, pass **`--head <branch> --base main`** explicitly. A fresh worktree may need a one-time `npm install` (the Electron binary can be missing); the project uses **npm** — delete any stray `pnpm-lock.yaml`/`pnpm-workspace.yaml`.
