@@ -21,8 +21,11 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
  */
 import Database from 'better-sqlite3'
 
-// Mirror electron/paths.ts — but we open the DB read-only
-const APP_DATA_DIR = join(homedir(), 'Library', 'Application Support', 'Compass')
+// Mirror electron/paths.ts — but we open the DB read-only. Honor the same
+// opt-in COMPASS_HOME override so E2E / screenshot / test tooling can point
+// the MCP at a throwaway store instead of the real one. Unset = real home.
+const HOME_BASE = process.env.COMPASS_HOME?.trim() || homedir()
+const APP_DATA_DIR = join(HOME_BASE, 'Library', 'Application Support', 'Compass')
 const DB_PATH = join(APP_DATA_DIR, '.data', 'compass.db')
 const KNOWLEDGE_DIR = join(APP_DATA_DIR, 'knowledge-base')
 
@@ -30,6 +33,7 @@ const KNOWLEDGE_DIR = join(APP_DATA_DIR, 'knowledge-base')
 // Used by the self-knowledge tools that introspect the source tree (git log,
 // test inventory) rather than the user's app data.
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const DAY_MS = 86_400_000
 
 function openDb(): Database.Database | null {
   try {
@@ -143,6 +147,36 @@ const TOOLS = [
       type: 'object',
       properties: {
         recentEvents: { type: 'integer', minimum: 1, maximum: 100, default: 20 }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'compass_finance_summary',
+    description:
+      'Returns AGGREGATE financial figures only — net worth (assets/liabilities), per-month income/expense/net for the last N months, and current-month spend by category. NEVER returns individual transaction rows, descriptions, or account numbers (privacy boundary). Read-only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        months: { type: 'integer', minimum: 1, maximum: 24, default: 6 }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'compass_habit_streaks',
+    description:
+      'Returns each active habit with its current streak (consecutive days completed, ending today or yesterday) and longest streak. Read-only.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
+    name: 'compass_upcoming',
+    description:
+      "A unified daily brief: today's daily checklist items, calendar events in the next N days, and accounts with a payment due in the next 14 days. Read-only.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        days: { type: 'integer', minimum: 1, maximum: 30, default: 7 }
       },
       additionalProperties: false
     }
@@ -347,6 +381,139 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       })
       db.close()
       return textResult(JSON.stringify(health, null, 2))
+    }
+
+    if (name === 'compass_finance_summary') {
+      const db = openDb()
+      if (!db) return errorResult('Compass DB not found')
+      const months = Math.min(
+        24,
+        Math.max(1, Number.isFinite(Number(args?.months)) ? Number(args?.months) : 6)
+      )
+      // Net worth from account balances (debt accounts count as liabilities).
+      const accounts = db
+        .prepare(
+          'SELECT type, is_debt AS isDebt, asset_class AS assetClass, balance FROM finance_accounts'
+        )
+        .all() as Array<{ type: string; isDebt: number; assetClass: string; balance: number }>
+      let assets = 0
+      let liabilities = 0
+      for (const a of accounts) {
+        const bal = a.balance ?? 0
+        if (a.isDebt || a.assetClass === 'liability') liabilities += bal
+        else assets += bal
+      }
+      // Per-month income/expense/net over the window (Transfers excluded both sides).
+      // Aggregated in SQL — no individual rows leave the boundary.
+      const monthly = db
+        .prepare(
+          `SELECT substr(date, 1, 7) AS month,
+                  ROUND(SUM(CASE WHEN amount > 0 AND category != 'Transfers' THEN amount ELSE 0 END), 2) AS income,
+                  ROUND(-SUM(CASE WHEN amount < 0 AND category != 'Transfers' THEN amount ELSE 0 END), 2) AS expense,
+                  COUNT(*) AS txns
+           FROM finance_transactions
+           GROUP BY month ORDER BY month DESC LIMIT ?`
+        )
+        .all(months) as Array<{ month: string; income: number; expense: number; txns: number }>
+      for (const m of monthly)
+        (m as { net?: number }).net = Math.round((m.income - m.expense) * 100) / 100
+      // Current-month spend by category (aggregate; no descriptions).
+      const currentMonth = new Date().toISOString().slice(0, 7)
+      const byCategory = db
+        .prepare(
+          `SELECT category, ROUND(-SUM(amount), 2) AS spent
+           FROM finance_transactions
+           WHERE amount < 0 AND category != 'Transfers' AND substr(date, 1, 7) = ?
+           GROUP BY category ORDER BY spent DESC`
+        )
+        .all(currentMonth)
+      db.close()
+      return textResult(
+        JSON.stringify(
+          {
+            netWorth: {
+              assets: Math.round(assets * 100) / 100,
+              liabilities: Math.round(liabilities * 100) / 100,
+              net: Math.round((assets - liabilities) * 100) / 100
+            },
+            accountCount: accounts.length,
+            monthly,
+            currentMonth: { month: currentMonth, byCategory },
+            note: 'Aggregates only — no individual transactions or account numbers are exposed.'
+          },
+          null,
+          2
+        )
+      )
+    }
+
+    if (name === 'compass_habit_streaks') {
+      const db = openDb()
+      if (!db) return errorResult('Compass DB not found')
+      const habits = db
+        .prepare('SELECT id, name FROM habits WHERE active = 1 ORDER BY id')
+        .all() as Array<{ id: number; name: string }>
+      const entryStmt = db.prepare(
+        'SELECT date FROM habit_entries WHERE habit_id = ? AND completed = 1'
+      )
+      const DAY = DAY_MS
+      const todayStr = new Date().toISOString().slice(0, 10)
+      const result = habits.map((h) => {
+        const days = new Set((entryStmt.all(h.id) as Array<{ date: string }>).map((r) => r.date))
+        // Current streak: walk back from today (allow "yesterday" so an as-yet-unchecked
+        // today doesn't break it), counting consecutive completed days.
+        let current = 0
+        let cursor = days.has(todayStr) ? Date.now() : Date.now() - DAY
+        while (days.has(new Date(cursor).toISOString().slice(0, 10))) {
+          current++
+          cursor -= DAY
+        }
+        // Longest streak across all completed days.
+        const sorted = [...days].sort()
+        let longest = 0
+        let run = 0
+        let prev: number | null = null
+        for (const d of sorted) {
+          const t = new Date(`${d}T00:00:00Z`).getTime()
+          run = prev !== null && t - prev === DAY ? run + 1 : 1
+          if (run > longest) longest = run
+          prev = t
+        }
+        return { id: h.id, name: h.name, current, longest, totalCompletions: days.size }
+      })
+      db.close()
+      return textResult(JSON.stringify(result, null, 2))
+    }
+
+    if (name === 'compass_upcoming') {
+      const db = openDb()
+      if (!db) return errorResult('Compass DB not found')
+      const days = Math.min(
+        30,
+        Math.max(1, Number.isFinite(Number(args?.days)) ? Number(args?.days) : 7)
+      )
+      const today = new Date().toISOString().slice(0, 10)
+      const now = Date.now()
+      const cutoff = now + days * DAY_MS
+      const tasks = db
+        .prepare(
+          'SELECT title, status, category FROM checklist_items WHERE list_type = ? AND list_date = ? ORDER BY sort_order'
+        )
+        .all('daily', today)
+      const events = (
+        db
+          .prepare(
+            'SELECT title, start_at, location FROM calendar_events WHERE start_at IS NOT NULL ORDER BY start_at'
+          )
+          .all() as Array<{ start_at: number | null }>
+      ).filter((e) => e.start_at && e.start_at >= now && e.start_at <= cutoff)
+      const paymentsDue = db
+        .prepare(
+          'SELECT name, payment_due_date AS dueDate FROM finance_accounts WHERE payment_due_date IS NOT NULL AND payment_due_date >= ? AND payment_due_date <= ? ORDER BY payment_due_date'
+        )
+        .all(today, new Date(now + 14 * DAY_MS).toISOString().slice(0, 10))
+      db.close()
+      return textResult(JSON.stringify({ date: today, tasks, events, paymentsDue }, null, 2))
     }
 
     return errorResult(`Unknown tool: ${name}`)
