@@ -19,17 +19,21 @@ The hard constraint: *let an assistant help with your life OS without letting it
 | Compass → Claude | "Ask Compass" — BYO Anthropic/OpenAI key, raw `fetch` to the messages API, RAG over local notes. No tool-use, caching, or agentic loops. | `electron/ipc/assistant.ts`, `electron/integrations/llm-client.ts` |
 | Packaging | `compass-stack` plugin bundles the **developer** agent infra (subagents/skills/hooks/MCP) for Claude Code — not an end-user data connector. | `.claude/plugin.json` |
 
+<a id="claude-inbox"></a>
+
 ## Core architecture — the "Claude Inbox" (confirmed writes) 🔜
 
-The MCP server is a **separate process** that opens the DB **read-only**. It must never mutate app data directly. So writes are *proposals*, not mutations — Compass stays the sole writer, and a human approves every change.
+The MCP server is a **separate process** that opens the main Compass DB (`compass.db`) **read-only**. It must never mutate app data. So writes are *proposals* appended to a **separate, append-only proposal inbox** (NOT the read-only main DB) — Compass stays the sole writer to its real data, and a human approves every change.
+
+**Where proposals live (resolving the read-only constraint):** the MCP appends each proposal to a dedicated store it owns read-write — a JSONL file at `.data/claude-inbox.jsonl` (simplest), or its own small `claude-inbox.db` — distinct from the read-only `compass.db`. The running Compass app watches that store, mirrors entries into a `claude_proposals` table for status/history, and on approval writes the real change to `compass.db` / knowledge files via existing IPC. The MCP never touches `compass.db`, the vault, or knowledge files.
 
 ```mermaid
 flowchart LR
-  claude["Claude\n(Desktop / Cowork / Code)"] -->|"compass_propose_* tool"| mcp["compass-mcp\n(read-only DB)"]
-  mcp -->|"enqueue proposal"| q[("claude_proposals\nqueue")]
+  claude["Claude\n(Desktop / Cowork / Code)"] -->|"compass_propose_* tool"| mcp["compass-mcp\n(reads compass.db read-only)"]
+  mcp -->|"append (read-write, separate store)"| q[("claude-inbox.jsonl\n(proposal inbox)")]
   q -->|"watch / poll"| app["Compass app"]
   app --> inbox["Claude Inbox\n(human-readable diff,\napprove / reject)"]
-  inbox -->|"approve → existing write IPC (validated)"| db[("SQLite / knowledge files")]
+  inbox -->|"approve → existing write IPC (validated)"| db[("compass.db / knowledge files")]
   inbox -->|"reject → discard + log"| q
   subgraph excluded["Never exposed to Claude"]
     vault[["Vault (secrets)"]]
@@ -38,7 +42,7 @@ flowchart LR
 ```
 
 **Invariants (non-negotiable):**
-1. Claude **never** writes the DB, vault, or knowledge files directly — it only enqueues proposals.
+1. Claude **never** writes `compass.db`, the vault, or knowledge files — it only appends to the separate, append-only proposal inbox.
 2. Compass remains the **sole writer**, executing approved proposals through its **existing, input-validating** IPC handlers.
 3. **Every** mutation is **human-approved** in the Claude Inbox and **audit-logged**.
 4. The **vault is never exposed** to any Claude surface (read or write).
