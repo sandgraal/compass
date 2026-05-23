@@ -118,7 +118,7 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 ## PR checklist
 
 Every PR includes:
-1. Passing `npm run typecheck && npm run check && npm test`
+1. Passing `npm run typecheck && npm run check && npm run test:run` (use `test:run`, not `test` — the latter starts watch mode; see Gotchas)
 2. Test plan in PR description (manual steps to verify)
 3. Screenshot/recording for any UI change
 4. No new `alert()` or `confirm()` calls (use the unified primitives)
@@ -127,7 +127,7 @@ Every PR includes:
 
 Hard-won friction worth knowing up front:
 
-- **`npm test` is vitest *watch* mode — it hangs.** Use **`npm run test:run`** for a one-shot run.
+- **`npm test` starts vitest in *watch* mode and won't exit** (it waits for file changes — fine interactively, but it'll appear to hang in a script/agent). Use **`npm run test:run`** for one-shot validation.
 - **`better-sqlite3` has a native-ABI split.** Node-ABI is needed for `npm run test:run` and any `tsx` script (e.g. `scripts/seed-demo.ts`); Electron-ABI is needed for the built app and Playwright E2E. One install can't serve both.
   - `npm run screenshots` handles the dance itself and leaves the repo Node-ABI (test-ready).
   - After `npx electron-builder install-app-deps` (Electron-ABI), run **`npm rebuild better-sqlite3`** before tests/push or SQLite tests fail with a `NODE_MODULE_VERSION` error. The `.db` file itself is ABI-independent.
