@@ -26,6 +26,7 @@
 import { type BrowserWindow, app } from 'electron'
 import { getDb } from './db/client'
 import { checklistItems } from './db/schema'
+import { localYmd } from './lib/dates'
 
 const SCHEME = 'compass'
 const CAPTURE_RATE_LIMIT_WINDOW_MS = 60_000
@@ -122,7 +123,7 @@ export function executeCompassCommand(
       }
       try {
         const db = getDb()
-        const today = new Date().toISOString().slice(0, 10)
+        const today = localYmd()
         db.insert(checklistItems)
           .values({
             listType: 'daily',
