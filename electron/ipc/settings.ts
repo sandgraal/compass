@@ -23,6 +23,7 @@ import {
   syncEvents
 } from '../db/schema'
 import { detectOllama } from '../knowledge/ollama'
+import { localYmd } from '../lib/dates'
 import { restartQuickCaptureShortcut } from '../menu-bar'
 import { DATA_DIR, KNOWLEDGE_DIR, VAULT_DIR } from '../paths'
 
@@ -234,7 +235,7 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('checklist:quick-add', (_event, title: string) => {
     try {
       const db = getDb()
-      const today = new Date().toISOString().slice(0, 10)
+      const today = localYmd()
       const trimmed = String(title).trim()
       if (!trimmed) return { success: false, error: 'Title cannot be empty' }
       db.insert(checklistItems)
