@@ -8,7 +8,7 @@ All user data stays on disk; only OAuth tokens leave the machine (and only to Go
 - `npm run build` — production build
 - `npm run typecheck` — both renderer + main process
 - `npm run check` — Biome lint + format check
-- `npm run test:run` — Vitest unit tests, one-shot (`npm test` is *watch* mode — it won't exit)
+- `npm run test:run` — Vitest unit tests, one-shot (`npm test` defaults to *watch* mode in an interactive terminal — won't exit)
 - `npm run test:e2e` — Playwright E2E
 
 ## Pointers (do not duplicate the content here — go read these)
