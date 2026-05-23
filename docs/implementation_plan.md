@@ -18,6 +18,7 @@
 | **Phase 4** — Finance forward roadmap | 8 items | 4.0–4.6 shipped; 4.7 closed early (Plaid is source of truth as of 2026-05-21; Excel pipeline retired) |
 | **Phase 5 (cont.)** — Bounded UX wins | 5 items | 100% (5.10–5.14 shipped) |
 | **Phase 6** — Code-health debt (May 2026) | 5 items | 6.1 + 6.2 + 6.3 + 6.5 done; 6.4 in progress (button-type cleared; 30 warnings + CI gate remain) |
+| **Phase 7** — Daily-Driver & Platform Roadmap | 6 tracks | **Proposed** — expert-recommended; not yet scheduled (see § Phase 7 + README roadmap) |
 
 PRD-completion of the running app: **~99%** (all Phases 1–3 + Phase 4.0–4.5 merged with UIs).
 
@@ -294,6 +295,50 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 ### 6.5 Type-safety escape audit
 - [x] **Shipped** — removed all 4 remaining escapes: `electron/preload-quick-capture.ts` + `electron/preload.ts` (×3 `@ts-ignore` on the non-isolated `window.*` fallback assignments) now use a localized widened-`window` cast instead of suppression; `electron/ipc/finance.ts:106` dropped `db as any` (the `getDb()` return type already matches `ingestCsvFolder`'s `BetterSQLite3Database<typeof schema>` param, so the cast was dead). typecheck stays green.
 - [ ] **Deferred (deliberate non-change):** narrowing `PlaidEnv` in `electron/integrations/plaid/vault.ts` from `'sandbox' | 'development' | 'production'` to `'sandbox' | 'production'`. The vault layer is an intentionally env-agnostic keyed store (config.ts is the validation gate that rejects the retired `development` env); `vault.test.ts` exercises `'development'` precisely to prove the store is env-key-generic. Narrowing here would break those isolation tests and over-couple the store to the gate. Leaving as-is.
+
+---
+
+## Phase 7 — Daily-Driver & Platform Roadmap (Proposed)
+
+> **Status: proposed, not scheduled.** Output of a May-2026 "expert-team" evaluation (Product Strategy, Growth/Retention, Integrations, Platform/Ecosystem, Privacy/Security & Mobile) of what turns Compass from a powerful tool into something people open *every day* — and into a platform. Mirrored in the README roadmap. Compass is **100% local today**; items tagged **(opt-in cloud)** are a deliberate, clearly-bounded departure from local-only — always opt-in, never default. Sizes are rough order-of-magnitude (S/M/L/XL).
+
+### Track A — Daily-driver hook (retention)
+- [ ] **Morning Brief digest** (M) — one card unifying today's calendar + due tasks + finance alerts (low-cash, payments due, price hikes) + inbox action items; optional system-notification at a chosen time. *Why: gives a reason to open the app first thing.*
+- [ ] **Evening / weekly review ritual** (M) — extend the Weekly page into a guided close-out (wins, blockers, carry-over) + a monthly rollup. *Why: habitual return cadence.*
+- [ ] **Global + voice quick-capture** (M) — expand the tray quick-capture into a system-wide capture bar (note / task / expense) with optional voice-to-text. *Why: friction-free capture is the #1 PKM retention driver.*
+
+### Track B — Integrations ("common apps/sites")
+- [ ] **Notion + Obsidian import/export** (M) — two-way markdown bridge for the PKM crowd. *Built on `docs/integrations.md` extractor pattern.*
+- [ ] **Slack** (M) — capture messages to tasks/notes; post a daily digest. (opt-in cloud for the API)
+- [ ] **Linear / Jira** (M) — issues alongside GitHub on the dashboard.
+- [ ] **Todoist / Things / Apple Reminders** (M) — task sync.
+- [ ] **Outlook / Office 365 + CalDAV calendar; IMAP / Outlook email** (L) — calendar/email beyond Google + Apple.
+- [ ] **Apple Health / Strava / Spotify** (L) — life-logging streams into knowledge + habits.
+- [ ] **Browser extension web-clipper** (L) — clip a page → knowledge note; select text → task.
+- [ ] **Email-parsed receipts / bills** (M) — auto-extract receipts into finance + reminders.
+
+### Track C — Platform & API
+- [ ] **Plugin / extension API** (XL) — let the community ship integrations; sandboxed.
+- [ ] **Integrations marketplace** (L) — discover + install plugins in-app.
+- [ ] **Webhooks + expanded MCP surface** (M) — build on the existing `mcp/compass-mcp` server (already exposes commits/tests/integration health) for richer agent + automation access.
+- [ ] **Zapier / Make connector** (M). (opt-in cloud)
+
+### Track D — Sync & reach (opt-in cloud)
+- [ ] **E2E-encrypted multi-device sync** (XL) — optional, client-side-encrypted; the local-first contract is preserved (server sees only ciphertext). *Folds in the deferred "PWA / web companion".*
+- [ ] **Mobile companion** (XL) — read-only first, then capture. *Folds in deferred PWA item.*
+- [ ] **Encrypted sharing / shared spaces** (L) — share a vault entry / note with a trusted partner. *Folds in the deferred "vault entry sharing".*
+
+### Track E — Intelligence
+- [ ] **Proactive insights** (M) — spending anomalies, stale notes, habit slippage, "you have $X uncategorized".
+- [ ] **Agentic "plan my week"** (L) — build on the in-repo agent infra to draft a weekly plan from calendar + tasks + goals.
+- [ ] **Plaid Investments / holdings** (M) — *folds in the deferred Plaid Investments item* — only if retirement net-worth goes beyond manual edits.
+
+### Track F — Polish & reach
+- [ ] **Theming / customization** (S).
+- [ ] **Mobile-responsive layouts** (M) — prerequisite for the companion.
+- [ ] **Accessibility pass** (M) — extends the in-flight Phase 6.4 a11y work to a full WCAG sweep.
+
+> The prior **"Deferred (revisit Q3 2026)"** list is superseded by the tracks above: PWA/companion → Track D; Plaid Investments → Track E; vault sharing → Track D; Apple Contacts → Track B.
 
 ---
 
