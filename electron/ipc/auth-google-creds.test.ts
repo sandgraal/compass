@@ -10,6 +10,7 @@
 
 import type { IpcMain } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { restoreEnvVar } from '../test/env'
 
 const encryptStringMock = vi.fn<(s: string) => Buffer>((s) => Buffer.from(`enc:${s}`, 'utf8'))
 const decryptStringMock = vi.fn<(b: Buffer) => string>((b) =>
@@ -83,16 +84,8 @@ beforeEach(() => {
 })
 afterEach(() => {
   // Restore env to its pre-test state — see comment on originalEnv above.
-  if (originalEnv.clientId === undefined) {
-    process.env.GOOGLE_CLIENT_ID = ''
-  } else {
-    process.env.GOOGLE_CLIENT_ID = originalEnv.clientId
-  }
-  if (originalEnv.clientSecret === undefined) {
-    process.env.GOOGLE_CLIENT_SECRET = ''
-  } else {
-    process.env.GOOGLE_CLIENT_SECRET = originalEnv.clientSecret
-  }
+  restoreEnvVar('GOOGLE_CLIENT_ID', originalEnv.clientId)
+  restoreEnvVar('GOOGLE_CLIENT_SECRET', originalEnv.clientSecret)
   vi.unstubAllGlobals()
 })
 

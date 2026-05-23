@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { restoreEnvVar } from '../test/env'
 
 const originalHome = process.env.HOME
 const MIGRATIONS_FOLDER = join(__dirname, 'migrations')
@@ -122,8 +123,7 @@ async function loadClientForHome(home: string): Promise<typeof import('./client'
 }
 
 afterEach(() => {
-  if (originalHome) process.env.HOME = originalHome
-  else process.env.HOME = undefined
+  restoreEnvVar('HOME', originalHome)
   vi.resetModules()
 })
 
