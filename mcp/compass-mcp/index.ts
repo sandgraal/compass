@@ -35,6 +35,16 @@ const KNOWLEDGE_DIR = join(APP_DATA_DIR, 'knowledge-base')
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const DAY_MS = 86_400_000
 
+// Date-only columns (`checklist_items.list_date`, `finance_transactions.date`,
+// `habit_entries.date`) store the *local* calendar day, matching the app's
+// canonical helpers (`src/lib/habit-streaks.ts`, `finance-snapshot.ts`). Build
+// keys from local Y/M/D — never `toISOString()` (which is UTC and shifts the
+// day boundary / miscounts across DST for non-UTC users).
+const localYmd = (d: Date = new Date()): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const localYm = (d: Date = new Date()): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+
 function openDb(): Database.Database | null {
   try {
     return new Database(DB_PATH, { readonly: true, fileMustExist: true })
@@ -386,134 +396,148 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === 'compass_finance_summary') {
       const db = openDb()
       if (!db) return errorResult('Compass DB not found')
-      const months = Math.min(
-        24,
-        Math.max(1, Number.isFinite(Number(args?.months)) ? Number(args?.months) : 6)
-      )
-      // Net worth from account balances (debt accounts count as liabilities).
-      const accounts = db
-        .prepare(
-          'SELECT type, is_debt AS isDebt, asset_class AS assetClass, balance FROM finance_accounts'
+      try {
+        const months = Math.min(
+          24,
+          Math.max(1, Number.isFinite(Number(args?.months)) ? Number(args?.months) : 6)
         )
-        .all() as Array<{ type: string; isDebt: number; assetClass: string; balance: number }>
-      let assets = 0
-      let liabilities = 0
-      for (const a of accounts) {
-        const bal = a.balance ?? 0
-        if (a.isDebt || a.assetClass === 'liability') liabilities += bal
-        else assets += bal
-      }
-      // Per-month income/expense/net over the window (Transfers excluded both sides).
-      // Aggregated in SQL — no individual rows leave the boundary.
-      const monthly = db
-        .prepare(
-          `SELECT substr(date, 1, 7) AS month,
-                  ROUND(SUM(CASE WHEN amount > 0 AND category != 'Transfers' THEN amount ELSE 0 END), 2) AS income,
-                  ROUND(-SUM(CASE WHEN amount < 0 AND category != 'Transfers' THEN amount ELSE 0 END), 2) AS expense,
-                  COUNT(*) AS txns
-           FROM finance_transactions
-           GROUP BY month ORDER BY month DESC LIMIT ?`
-        )
-        .all(months) as Array<{ month: string; income: number; expense: number; txns: number }>
-      for (const m of monthly)
-        (m as { net?: number }).net = Math.round((m.income - m.expense) * 100) / 100
-      // Current-month spend by category (aggregate; no descriptions).
-      const currentMonth = new Date().toISOString().slice(0, 7)
-      const byCategory = db
-        .prepare(
-          `SELECT category, ROUND(-SUM(amount), 2) AS spent
-           FROM finance_transactions
-           WHERE amount < 0 AND category != 'Transfers' AND substr(date, 1, 7) = ?
-           GROUP BY category ORDER BY spent DESC`
-        )
-        .all(currentMonth)
-      db.close()
-      return textResult(
-        JSON.stringify(
-          {
-            netWorth: {
-              assets: Math.round(assets * 100) / 100,
-              liabilities: Math.round(liabilities * 100) / 100,
-              net: Math.round((assets - liabilities) * 100) / 100
+        // Net worth from account balances (debt accounts count as liabilities).
+        const accounts = db
+          .prepare(
+            'SELECT type, is_debt AS isDebt, asset_class AS assetClass, balance FROM finance_accounts'
+          )
+          .all() as Array<{ type: string; isDebt: number; assetClass: string; balance: number }>
+        let assets = 0
+        let liabilities = 0
+        for (const a of accounts) {
+          const bal = a.balance ?? 0
+          if (a.isDebt || a.assetClass === 'liability') liabilities += bal
+          else assets += bal
+        }
+        // Per-month income/expense/net over the window (Transfers excluded both
+        // sides; `txns` counts non-transfer rows only, to stay consistent with
+        // the income/expense figures). Aggregated in SQL — no rows leave.
+        const monthly = db
+          .prepare(
+            `SELECT substr(date, 1, 7) AS month,
+                    ROUND(SUM(CASE WHEN amount > 0 AND category != 'Transfers' THEN amount ELSE 0 END), 2) AS income,
+                    ROUND(-SUM(CASE WHEN amount < 0 AND category != 'Transfers' THEN amount ELSE 0 END), 2) AS expense,
+                    SUM(CASE WHEN category != 'Transfers' THEN 1 ELSE 0 END) AS txns
+             FROM finance_transactions
+             GROUP BY month ORDER BY month DESC LIMIT ?`
+          )
+          .all(months) as Array<{ month: string; income: number; expense: number; txns: number }>
+        for (const m of monthly)
+          (m as { net?: number }).net = Math.round((m.income - m.expense) * 100) / 100
+        // Current-month spend by category (aggregate; no descriptions).
+        // Local month bucket — matches the app's local-day finance semantics.
+        const currentMonth = localYm()
+        const byCategory = db
+          .prepare(
+            `SELECT category, ROUND(-SUM(amount), 2) AS spent
+             FROM finance_transactions
+             WHERE amount < 0 AND category != 'Transfers' AND substr(date, 1, 7) = ?
+             GROUP BY category ORDER BY spent DESC`
+          )
+          .all(currentMonth)
+        return textResult(
+          JSON.stringify(
+            {
+              netWorth: {
+                assets: Math.round(assets * 100) / 100,
+                liabilities: Math.round(liabilities * 100) / 100,
+                net: Math.round((assets - liabilities) * 100) / 100
+              },
+              accountCount: accounts.length,
+              monthly,
+              currentMonth: { month: currentMonth, byCategory },
+              note: 'Aggregates only — no individual transactions or account numbers are exposed.'
             },
-            accountCount: accounts.length,
-            monthly,
-            currentMonth: { month: currentMonth, byCategory },
-            note: 'Aggregates only — no individual transactions or account numbers are exposed.'
-          },
-          null,
-          2
+            null,
+            2
+          )
         )
-      )
+      } finally {
+        db.close()
+      }
     }
 
     if (name === 'compass_habit_streaks') {
       const db = openDb()
       if (!db) return errorResult('Compass DB not found')
-      const habits = db
-        .prepare('SELECT id, name FROM habits WHERE active = 1 ORDER BY id')
-        .all() as Array<{ id: number; name: string }>
-      const entryStmt = db.prepare(
-        'SELECT date FROM habit_entries WHERE habit_id = ? AND completed = 1'
-      )
-      const DAY = DAY_MS
-      const todayStr = new Date().toISOString().slice(0, 10)
-      const result = habits.map((h) => {
-        const days = new Set((entryStmt.all(h.id) as Array<{ date: string }>).map((r) => r.date))
-        // Current streak: walk back from today (allow "yesterday" so an as-yet-unchecked
-        // today doesn't break it), counting consecutive completed days.
-        let current = 0
-        let cursor = days.has(todayStr) ? Date.now() : Date.now() - DAY
-        while (days.has(new Date(cursor).toISOString().slice(0, 10))) {
-          current++
-          cursor -= DAY
-        }
-        // Longest streak across all completed days.
-        const sorted = [...days].sort()
-        let longest = 0
-        let run = 0
-        let prev: number | null = null
-        for (const d of sorted) {
-          const t = new Date(`${d}T00:00:00Z`).getTime()
-          run = prev !== null && t - prev === DAY ? run + 1 : 1
-          if (run > longest) longest = run
-          prev = t
-        }
-        return { id: h.id, name: h.name, current, longest, totalCompletions: days.size }
-      })
-      db.close()
-      return textResult(JSON.stringify(result, null, 2))
+      try {
+        const habits = db
+          .prepare('SELECT id, name FROM habits WHERE active = 1 ORDER BY id')
+          .all() as Array<{ id: number; name: string }>
+        const entryStmt = db.prepare(
+          'SELECT date FROM habit_entries WHERE habit_id = ? AND completed = 1'
+        )
+        const result = habits.map((h) => {
+          const days = new Set((entryStmt.all(h.id) as Array<{ date: string }>).map((r) => r.date))
+          // Current streak: walk back by *calendar* days (DST-safe) from today,
+          // allowing "yesterday" so an as-yet-unchecked today doesn't break it.
+          // Matches src/lib/habit-streaks.ts local-day semantics.
+          let current = 0
+          const cursor = new Date()
+          if (!days.has(localYmd(cursor))) cursor.setDate(cursor.getDate() - 1)
+          while (days.has(localYmd(cursor))) {
+            current++
+            cursor.setDate(cursor.getDate() - 1)
+          }
+          // Longest streak: consecutive-day runs over the sorted local-day keys.
+          // UTC-midnight timestamps of consecutive YYYY-MM-DD keys are always
+          // exactly one day apart (UTC has no DST), so this adjacency check is safe.
+          const sorted = [...days].sort()
+          let longest = 0
+          let run = 0
+          let prev: number | null = null
+          for (const d of sorted) {
+            const t = new Date(`${d}T00:00:00Z`).getTime()
+            run = prev !== null && t - prev === DAY_MS ? run + 1 : 1
+            if (run > longest) longest = run
+            prev = t
+          }
+          return { id: h.id, name: h.name, current, longest, totalCompletions: days.size }
+        })
+        return textResult(JSON.stringify(result, null, 2))
+      } finally {
+        db.close()
+      }
     }
 
     if (name === 'compass_upcoming') {
       const db = openDb()
       if (!db) return errorResult('Compass DB not found')
-      const days = Math.min(
-        30,
-        Math.max(1, Number.isFinite(Number(args?.days)) ? Number(args?.days) : 7)
-      )
-      const today = new Date().toISOString().slice(0, 10)
-      const now = Date.now()
-      const cutoff = now + days * DAY_MS
-      const tasks = db
-        .prepare(
-          'SELECT title, status, category FROM checklist_items WHERE list_type = ? AND list_date = ? ORDER BY sort_order'
+      try {
+        const days = Math.min(
+          30,
+          Math.max(1, Number.isFinite(Number(args?.days)) ? Number(args?.days) : 7)
         )
-        .all('daily', today)
-      const events = (
-        db
+        const today = localYmd()
+        const now = Date.now()
+        const cutoff = now + days * DAY_MS
+        const tasks = db
           .prepare(
-            'SELECT title, start_at, location FROM calendar_events WHERE start_at IS NOT NULL ORDER BY start_at'
+            'SELECT title, status, category FROM checklist_items WHERE list_type = ? AND list_date = ? ORDER BY sort_order'
           )
-          .all() as Array<{ start_at: number | null }>
-      ).filter((e) => e.start_at && e.start_at >= now && e.start_at <= cutoff)
-      const paymentsDue = db
-        .prepare(
-          'SELECT name, payment_due_date AS dueDate FROM finance_accounts WHERE payment_due_date IS NOT NULL AND payment_due_date >= ? AND payment_due_date <= ? ORDER BY payment_due_date'
-        )
-        .all(today, new Date(now + 14 * DAY_MS).toISOString().slice(0, 10))
-      db.close()
-      return textResult(JSON.stringify({ date: today, tasks, events, paymentsDue }, null, 2))
+          .all('daily', today)
+        // Push the time window into SQL so SQLite can use the index and avoid
+        // scanning the whole table as calendar_events grows.
+        const events = db
+          .prepare(
+            'SELECT title, start_at, location FROM calendar_events WHERE start_at IS NOT NULL AND start_at >= ? AND start_at <= ? ORDER BY start_at'
+          )
+          .all(now, cutoff)
+        const dueWindowEnd = localYmd(new Date(now + 14 * DAY_MS))
+        const paymentsDue = db
+          .prepare(
+            'SELECT name, payment_due_date AS dueDate FROM finance_accounts WHERE payment_due_date IS NOT NULL AND payment_due_date >= ? AND payment_due_date <= ? ORDER BY payment_due_date'
+          )
+          .all(today, dueWindowEnd)
+        return textResult(JSON.stringify({ date: today, tasks, events, paymentsDue }, null, 2))
+      } finally {
+        db.close()
+      }
     }
 
     return errorResult(`Unknown tool: ${name}`)
