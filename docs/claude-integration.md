@@ -51,11 +51,11 @@ flowchart LR
 
 ## Phase 8 tracks (proposed)
 
-### 8.1 MCP capability expansion 🔜
-Extend `mcp/compass-mcp/index.ts` (today's 8 read tools are the pattern):
+### 8.1 MCP capability expansion ✅ *(shipped)*
+Extends `mcp/compass-mcp/index.ts`:
 - **New privacy-respecting reads:** `compass_finance_summary` (aggregates only), `compass_habit_streaks`, `compass_upcoming` (unified daily brief).
-- **Propose-write tools** (enqueue only): `compass_propose_task`, `compass_propose_note`, `compass_propose_txn_tag`, `compass_propose_habit_check`.
-- Versioned tool contract; per-tool unit tests + a proposal-enqueue test.
+- **Propose-write tools** (enqueue only): `compass_propose_task`, `compass_propose_note`, `compass_propose_txn_tag`, `compass_propose_habit_check` — in `proposals.ts`; each validates input, opens no DB / touches no vault, and appends a `status:'pending'` proposal to the append-only inbox (`<app-data>/.data/claude-inbox.jsonl`). Note paths are relative `.md` only (traversal blocked).
+- Per-tool unit tests in `proposals.test.ts` (validation + enqueue round-trip). The JSONL line schema (`{ id, createdAt, status, source, type, payload }`) is the contract 8.2 consumes — keep it stable.
 
 ### 8.2 Claude Inbox — approval surface 🔜
 - New `claude_proposals` table (`electron/db/schema.ts`) + `electron/ipc/claude.ts` (list / approve / reject / clear) via the canonical preload + `electron.d.ts` 3-file pattern.

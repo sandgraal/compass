@@ -9,9 +9,18 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 /**
  * Compass MCP Server
  *
- * Exposes Compass's local SQLite + knowledge base as a read-only MCP server
- * so Claude can answer "what's on my schedule today?" or "search my knowledge
- * base for X" while coding — closing the dogfooding loop.
+ * Exposes Compass's local SQLite + knowledge base to Claude so it can answer
+ * "what's on my schedule today?" or "search my knowledge base for X" while
+ * coding — closing the dogfooding loop.
+ *
+ * READ tools open `compass.db` read-only and never mutate anything.
+ *
+ * PROPOSE-WRITE tools (`compass_propose_*`) do NOT touch the database or the
+ * vault either — they append a proposal to an append-only inbox
+ * (`<app-data>/.data/claude-inbox.jsonl`). The Compass app ingests that inbox
+ * and the user approves/rejects each proposal in the Claude Inbox; approval is
+ * what actually applies the change, via the app's existing validated write IPC.
+ * See proposals.ts and docs/claude-integration.md.
  *
  * Vault fields and OAuth tokens are EXPLICITLY EXCLUDED. Returned data may
  * include user content (task titles, calendar event titles, knowledge files).
@@ -20,6 +29,8 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
  * Register in .mcp.json (already done at repo root).
  */
 import Database from 'better-sqlite3'
+import { DAY_MS, localYm, localYmd } from './dates.js'
+import { PROPOSE_TOOLS, appendProposal, buildProposal, makeProposal } from './proposals.js'
 
 // Mirror electron/paths.ts — but we open the DB read-only. Honor the same
 // opt-in COMPASS_HOME override so E2E / screenshot / test tooling can point
@@ -28,22 +39,18 @@ const HOME_BASE = process.env.COMPASS_HOME?.trim() || homedir()
 const APP_DATA_DIR = join(HOME_BASE, 'Library', 'Application Support', 'Compass')
 const DB_PATH = join(APP_DATA_DIR, '.data', 'compass.db')
 const KNOWLEDGE_DIR = join(APP_DATA_DIR, 'knowledge-base')
+// Append-only proposal inbox written by the compass_propose_* tools and
+// consumed by the Compass app (Phase 8.2). Lives alongside compass.db in the
+// app data dir — never the repo working tree.
+const INBOX_PATH = join(APP_DATA_DIR, '.data', 'claude-inbox.jsonl')
 
 // Repo root, derived from this file's location (mcp/compass-mcp/index.ts).
 // Used by the self-knowledge tools that introspect the source tree (git log,
 // test inventory) rather than the user's app data.
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
-const DAY_MS = 86_400_000
 
-// Date-only columns (`checklist_items.list_date`, `finance_transactions.date`,
-// `habit_entries.date`) store the *local* calendar day, matching the app's
-// canonical helpers (`src/lib/habit-streaks.ts`, `finance-snapshot.ts`). Build
-// keys from local Y/M/D — never `toISOString()` (which is UTC and shifts the
-// day boundary / miscounts across DST for non-UTC users).
-const localYmd = (d: Date = new Date()): string =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-const localYm = (d: Date = new Date()): string =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+// Local-calendar-day helpers (DAY_MS, localYmd, localYm) live in dates.ts so
+// the read tools here and the propose tools in proposals.ts share one source.
 
 function openDb(): Database.Database | null {
   try {
@@ -190,7 +197,9 @@ const TOOLS = [
       },
       additionalProperties: false
     }
-  }
+  },
+  // Propose-write tools — enqueue to the Claude Inbox, never mutate directly.
+  ...PROPOSE_TOOLS
 ]
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
@@ -206,7 +215,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === 'compass_today_tasks') {
       const db = openDb()
       if (!db) return errorResult('Compass DB not found — is the app installed?')
-      const today = new Date().toISOString().slice(0, 10)
+      const today = localYmd()
       const rows = db
         .prepare(
           'SELECT id, title, body, category, checked, source FROM checklist_items WHERE list_type = ? AND list_date = ? ORDER BY sort_order'
@@ -538,6 +547,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       } finally {
         db.close()
       }
+    }
+
+    if (name.startsWith('compass_propose_')) {
+      const built = buildProposal(name, args)
+      if ('error' in built) return errorResult(built.error)
+      const proposal = makeProposal(built.type, built.payload)
+      appendProposal(INBOX_PATH, proposal)
+      return textResult(
+        JSON.stringify(
+          {
+            queued: true,
+            proposalId: proposal.id,
+            type: proposal.type,
+            status: 'pending',
+            note: 'Proposal enqueued to the Claude Inbox. Nothing has changed yet — it takes effect only after you review and approve it in Compass.'
+          },
+          null,
+          2
+        )
+      )
     }
 
     return errorResult(`Unknown tool: ${name}`)

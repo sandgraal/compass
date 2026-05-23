@@ -31,7 +31,7 @@ import {
 } from 'recharts'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
-import { cn } from '../lib/utils'
+import { cn, isoDate, isoMonth } from '../lib/utils'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -263,7 +263,7 @@ export default function Finance(): JSX.Element {
   const { toast: showToast } = useToast()
   const confirm = useConfirm()
 
-  const month = new Date().toISOString().slice(0, 7)
+  const month = isoMonth(new Date())
 
   const refresh = useCallback(async () => {
     const isElectron = typeof window !== 'undefined' && !!window.api
@@ -273,7 +273,7 @@ export default function Finance(): JSX.Element {
       // the bulk of activity, not just the few days of the current month.
       const since = new Date()
       since.setFullYear(since.getFullYear() - 1)
-      const sinceIso = since.toISOString().slice(0, 10)
+      const sinceIso = isoDate(since)
       const [t, a, d, b, r, s, g, x] = await Promise.all([
         window.api.finance.getTransactions({ month, limit: 200 }),
         window.api.finance.getAccounts(),
