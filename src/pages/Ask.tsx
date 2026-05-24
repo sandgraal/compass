@@ -12,7 +12,18 @@
  * AI assist → Ask Compass.
  */
 
-import { ArrowUp, Bot, ExternalLink, MessageSquare, Sparkles, Square, X } from 'lucide-react'
+import {
+  ArrowUp,
+  Bot,
+  ExternalLink,
+  Inbox,
+  MessageSquare,
+  Sparkles,
+  Square,
+  Wand2,
+  Wrench,
+  X
+} from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { renderAssistantMarkdown } from '../lib/markdown-render'
@@ -40,6 +51,9 @@ interface ChatTurn {
   outputTokens?: number
   error?: string
   pending?: boolean
+  // Agent-mode metadata (Phase 8.5).
+  toolCalls?: Array<{ name: string; ok: boolean }>
+  proposalIds?: string[]
 }
 
 const STORAGE_KEY = 'compass:ask:turns'
@@ -70,6 +84,7 @@ export default function Ask(): JSX.Element {
   const [turns, setTurns] = useState<ChatTurn[]>(() => loadStoredTurns())
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
+  const [agentMode, setAgentMode] = useState(false)
   const navigate = useNavigate()
   const scrollerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -100,6 +115,11 @@ export default function Ask(): JSX.Element {
 
   const hasKey =
     status !== null && status.configuredProviders.length > 0 && status.activeProvider !== null
+  // Agent mode is an Anthropic tool-use loop; force it off for other providers.
+  const agentAvailable = status?.activeProvider === 'anthropic'
+  useEffect(() => {
+    if (!agentAvailable && agentMode) setAgentMode(false)
+  }, [agentAvailable, agentMode])
 
   async function send() {
     const q = draft.trim()
@@ -127,8 +147,11 @@ export default function Ask(): JSX.Element {
       .filter((t) => !t.pending && !t.error && t.content.length > 0)
       .map((t) => ({ role: t.role, content: t.content }))
 
+    const askHistory = history.slice(0, -1)
     try {
-      const res = await window.api.assistant.ask({ question: q, history: history.slice(0, -1) })
+      const res = agentMode
+        ? await window.api.assistant.agent({ question: q, history: askHistory })
+        : await window.api.assistant.ask({ question: q, history: askHistory })
       if (res.success) {
         setTurns((prev) =>
           prev.map((t) =>
@@ -137,7 +160,9 @@ export default function Ask(): JSX.Element {
                   ...t,
                   content: res.answer,
                   pending: false,
-                  citations: res.citations,
+                  citations: 'citations' in res ? res.citations : undefined,
+                  toolCalls: 'toolCalls' in res ? res.toolCalls : undefined,
+                  proposalIds: 'proposalIds' in res ? res.proposalIds : undefined,
                   model: res.model,
                   provider: res.provider,
                   inputTokens: res.inputTokens,
@@ -190,6 +215,25 @@ export default function Ask(): JSX.Element {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setAgentMode((v) => !v)}
+            disabled={!agentAvailable}
+            aria-pressed={agentMode}
+            title={
+              agentAvailable
+                ? 'Agent mode: Claude reads your data via tools and proposes changes you approve in the Claude Inbox.'
+                : 'Agent mode needs Anthropic as the active provider (Settings → AI assist).'
+            }
+            className={cn(
+              'flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-40',
+              agentMode
+                ? 'border-primary/50 bg-primary/15 text-primary'
+                : 'border-border text-muted-foreground hover:text-foreground'
+            )}
+          >
+            <Wand2 size={12} /> Agent{agentMode ? ' on' : ''}
+          </button>
           {status?.activeProvider && (
             <span className="text-xs text-muted-foreground bg-secondary px-2 py-1 rounded">
               {status.activeProvider} · {status.models[status.activeProvider] ?? 'default'}
@@ -218,6 +262,7 @@ export default function Ask(): JSX.Element {
               <Turn
                 key={t.id}
                 turn={t}
+                onOpenInbox={() => navigate('/claude-inbox')}
                 onOpenNote={(p) => {
                   // KnowledgeBase reads `compass:open-knowledge` from
                   // sessionStorage on mount and also listens for the
@@ -254,7 +299,11 @@ export default function Ask(): JSX.Element {
                   }
                 }}
                 rows={2}
-                placeholder="Ask anything about your notes… (⌘↵ to send)"
+                placeholder={
+                  agentMode
+                    ? 'Ask Claude to plan, analyze, or propose changes… (⌘↵ to send)'
+                    : 'Ask anything about your notes… (⌘↵ to send)'
+                }
                 className="flex-1 bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 outline-none focus:ring-1 focus:ring-primary resize-none"
               />
               {busy ? (
@@ -277,9 +326,19 @@ export default function Ask(): JSX.Element {
               )}
             </div>
             <p className="text-[10px] text-muted-foreground mt-2">
-              Compass sends your question + the top-{6} matching knowledge snippets to{' '}
-              {status?.activeProvider ?? 'the configured provider'}. Vault entries, task titles, and
-              transactions are never included.
+              {agentMode ? (
+                <>
+                  Agent mode: Claude reads your agenda + finance <em>summaries</em> via tools and
+                  can <strong>propose</strong> changes — which you approve in the Claude Inbox. The
+                  vault is never exposed; finance is summaries only.
+                </>
+              ) : (
+                <>
+                  Compass sends your question + the top-{6} matching knowledge snippets to{' '}
+                  {status?.activeProvider ?? 'the configured provider'}. Vault entries, task titles,
+                  and transactions are never included.
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -347,10 +406,12 @@ function FirstTurnEmptyState({ onPick }: { onPick: (q: string) => void }): JSX.E
 
 function Turn({
   turn,
-  onOpenNote
+  onOpenNote,
+  onOpenInbox
 }: {
   turn: ChatTurn
   onOpenNote: (path: string) => void
+  onOpenInbox: () => void
 }): JSX.Element {
   if (turn.role === 'user') {
     return (
@@ -377,6 +438,25 @@ function Turn({
           <div className="text-sm text-destructive">{turn.error}</div>
         ) : (
           <AssistantBubble content={turn.content} />
+        )}
+        {turn.toolCalls && turn.toolCalls.length > 0 && !turn.pending && (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <Wrench size={11} className="text-muted-foreground" aria-hidden />
+            {turn.toolCalls.map((tc, i) => (
+              <span
+                key={`${tc.name}-${i}`}
+                className={cn(
+                  'text-[10px] px-1.5 py-0.5 rounded border',
+                  tc.ok
+                    ? 'border-border bg-secondary/60 text-muted-foreground'
+                    : 'border-destructive/40 bg-destructive/10 text-destructive'
+                )}
+              >
+                {tc.name}
+                {tc.ok ? '' : ' ✕'}
+              </span>
+            ))}
+          </div>
         )}
         {turn.model && !turn.pending && !turn.error && (
           <div className="mt-3 pt-2 border-t border-border/40 flex items-center gap-3 text-[10px] text-muted-foreground">
@@ -421,6 +501,24 @@ function Turn({
             ))}
           </ul>
         </div>
+      )}
+      {turn.proposalIds && turn.proposalIds.length > 0 && (
+        <button
+          type="button"
+          onClick={onOpenInbox}
+          className="group flex items-center gap-2 text-left w-full rounded-lg border border-primary/30 bg-primary/10 px-4 py-2.5 text-sm text-foreground hover:border-primary/60 transition-colors"
+        >
+          <Inbox size={15} className="text-primary shrink-0" />
+          <span className="flex-1">
+            <span className="font-medium">
+              {turn.proposalIds.length} change{turn.proposalIds.length === 1 ? '' : 's'} proposed
+            </span>{' '}
+            <span className="text-muted-foreground">
+              — nothing's applied yet. Review &amp; approve in the Claude Inbox.
+            </span>
+          </span>
+          <ExternalLink size={12} className="text-muted-foreground/60 group-hover:text-primary" />
+        </button>
       )}
     </div>
   )

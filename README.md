@@ -56,11 +56,11 @@ It's a *daily driver*: open it in the morning for your brief (calendar + tasks +
 | **🔐 Vault** | ✅ AES-256-GCM encrypted categories · ✅ OS-Keychain master key · ✅ auto-lock · ✅ 1Password CSV import · 🔜 encrypted sharing with a trusted partner |
 | **📅 Calendar** | ✅ Google Calendar · ✅ Apple Calendar (local `.ics`, RRULE expansion) · 🔜 Outlook / Office 365 · 🔜 CalDAV |
 | **✅ Tasks & habits** | ✅ daily / weekly / monthly checklists · ✅ habit streaks · ✅ tray quick-capture · ✅ `compass://` URL scheme · 🔜 Todoist / Things / Reminders sync · 🔜 voice capture |
-| **🤖 Assistant** | ✅ RAG over your knowledge base · ✅ BYO Anthropic/OpenAI key · ✅ local Ollama option · 🔜 proactive insights · 🔜 agentic "plan my week" |
+| **🤖 Assistant** | ✅ RAG over your knowledge base · ✅ BYO Anthropic/OpenAI key · ✅ local Ollama option · ✅ agentic mode (Claude tool-use over your data; proposes changes via the Claude Inbox) · 🔜 proactive insights |
 | **🔎 Search** | ✅ global ⌘K across notes, tasks, vault titles, transactions |
 | **🔗 Integrations** | ✅ Google · ✅ GitHub · ✅ Gmail action items · ✅ Plaid · ✅ Apple Calendar · 🔜 Slack · 🔜 Linear / Jira · 🔜 Apple Health / Strava · 🔜 browser extension |
 | **🧩 Platform** | ✅ local MCP server (agent introspection) · ✅ encrypted backup / restore · ✅ auto-update · 🔜 public plugin API + marketplace · 🔜 opt-in E2E-encrypted sync · 🔜 mobile companion |
-| **🤝 Claude** | ✅ MCP (read + propose) for Claude Code · ✅ BYO-key Ask Compass · ✅ confirmed-write **Claude Inbox** · ✅ end-user plugin + Compass skills (morning brief, weekly review, budget check, plan-my-week, web capture) · 🔜 one-click Claude Desktop bundle · 🔜 embedded Claude Agent SDK ("plan my week") |
+| **🤝 Claude** | ✅ MCP (read + propose) for Claude Code · ✅ BYO-key Ask Compass · ✅ confirmed-write **Claude Inbox** · ✅ end-user plugin + Compass skills (morning brief, weekly review, budget check, plan-my-week, web capture) · ✅ embedded agentic Ask Compass (Claude tool-use + propose) · 🔜 one-click Claude Desktop bundle |
 
 ## Works with Claude
 
@@ -68,7 +68,7 @@ Compass **works with Claude in both directions** — it exposes its data to Clau
 
 - **Claude reads your Compass** — *today* via the MCP in Claude Code ("what's on my plate today?", "search my notes for X"), and via the **end-user plugin** (`claude-plugin/`) in Cowork/Desktop with ready-made skills (morning brief, weekly review, budget check); 🔜 a one-click Claude Desktop bundle.
 - **Claude acts on your Compass** — *today* through **confirmed writes**: Claude *proposes* a change (a task, a note, a transaction tag) via the MCP and you **approve it in the Claude Inbox** inside Compass. Compass stays the sole writer; every change is human-approved.
-- **Compass embeds Claude** — *today* "Ask Compass" answers grounded in your knowledge base (BYO key, local-Ollama-first); 🔜 an embedded **Claude Agent SDK** for agentic **"plan my week"** and proactive insights.
+- **Compass embeds Claude** — "Ask Compass" answers grounded in your knowledge base (BYO key, local-Ollama-first), plus an **Agent mode** where Claude reads your agenda + finance summaries via tools and **proposes** changes you approve in the Claude Inbox (e.g. "plan my week"); 🔜 proactive insights.
 
 > 🔒 **What Claude never sees:** your **vault** (secrets) is categorically excluded, and finance is exposed as **summaries, not raw transactions**. Cloud LLM access is always BYO-key and opt-in. See the [security model](docs/claude-integration.md#claude-inbox).
 
