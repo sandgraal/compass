@@ -22,12 +22,17 @@ Or manually:
 
 ```bash
 git clone https://github.com/sandgraal/compass.wiki.git /tmp/compass-wiki
+find /tmp/compass-wiki -maxdepth 1 -name '*.md' -delete   # drop stale/renamed pages
 cp wiki/*.md /tmp/compass-wiki/
+rm -f /tmp/compass-wiki/PUBLISHING.md                     # not a wiki page
 cd /tmp/compass-wiki
 git add -A
 git commit -m "docs(wiki): comprehensive Compass documentation"
 git push
 ```
+
+> `publish.sh` does the `find … -delete` (so renamed/removed pages don't orphan) and the
+> `PUBLISHING.md` exclusion for you — prefer it over the manual steps.
 
 ## Notes
 

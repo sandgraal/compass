@@ -102,9 +102,12 @@ git push --follow-tags   # GitHub Actions builds, signs, publishes to GitHub Rel
 ```
 
 CI (`.github/workflows/release.yml`) runs on macOS, builds via `electron-builder --publish always`,
-and uploads `.dmg` + `latest-mac.yml`. It needs repo secrets `CSC_LINK` + `CSC_KEY_PASSWORD` for
-signing and fails fast without them. **Never run `npm run release` locally** — let CI build
-reproducibly. The running app picks up the new release on its next check.
+and uploads `.dmg` + `latest-mac.yml`. If repo secrets `CSC_LINK` + `CSC_KEY_PASSWORD` are set the
+build is **signed**; if they're absent the workflow logs a warning, sets
+`CSC_IDENTITY_AUTO_DISCOVERY=false`, and **publishes an unsigned release** (it does not fail). Note
+that macOS auto-update verifies signatures, so unsigned releases won't auto-update cleanly — set the
+certs for production. **Never run `npm run release` locally** — let CI build reproducibly. The
+running app picks up the new release on its next check.
 
 ## Related
 

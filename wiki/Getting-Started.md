@@ -43,7 +43,7 @@ Finishing (or skipping) the wizard drops you on the **[Dashboard](Dashboard)**.
 The intended rhythm:
 
 - **Morning** — open the **[Dashboard](Dashboard)** / **[Daily](Planner-Daily-Weekly-Monthly#daily)** view for your brief: today's tasks, calendar, GitHub due items, and Gmail action items.
-- **Through the day** — capture notes and tasks. Use the tray **[Quick Capture](Search-and-Command-Palette#quick-capture)** or ⌘K command palette without leaving what you're doing. Drop bank/credit statements into your watched **[Finance](Finance)** folder.
+- **Through the day** — capture notes and tasks. Use the tray **[Quick Capture](Search-and-Command-Palette#tray-quick-capture)** or ⌘K command palette without leaving what you're doing. Drop bank/credit statements into your watched **[Finance](Finance)** folder.
 - **Sunday** — run the **[Weekly Review](Planner-Daily-Weekly-Monthly#weekly)** ritual.
 
 ## Running from source (developers)
