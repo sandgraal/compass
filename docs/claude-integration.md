@@ -70,8 +70,10 @@ Extends `mcp/compass-mcp/index.ts`:
 ### 8.4 Cowork plugin (end-user) — ✅ *(shipped)*
 - `claude-plugin/` is a new **end-user** plugin (distinct from the dev `compass-stack`): `.claude-plugin/plugin.json` + `.mcp.json` register the Compass MCP and expose the 8.6 skills, with an install README (incl. the Claude Desktop manual-config fallback). A Cowork/Desktop/Code session can now run "do my weekly review", "what's my morning brief", etc.
 
-### 8.5 Embedded Claude Agent SDK in Ask Compass 🔜
-- Upgrade `electron/ipc/assistant.ts` + `electron/integrations/llm-client.ts` from raw `fetch` to the official **Claude Agent SDK** (or `@anthropic-ai/sdk` with tool-use): agentic loops with **tool-use over local data** (read + propose-write via the same inbox), **prompt caching** of the knowledge context, and flagship flows — **"plan my week"** and **proactive insights** (spend anomalies, stale notes, habit slippage). Still BYO-key, local-first.
+### 8.5 Embedded Claude agent in Ask Compass — *backend shipped; UI 🔜*
+- ✅ `assistant:agent` runs a **bounded Anthropic tool-use loop** (`electron/ipc/assistant.ts`). The client (`llm-client.ts`) gained tool-use + **`cache_control` prompt caching** — kept **HTTP-only, no SDK** to match the codebase's deliberate "don't pull in LLM SDKs" convention.
+- ✅ Tools (`electron/integrations/assistant-tools.ts`): read `get_upcoming` + `get_finance_summary` (aggregates only), and `propose_task` — which **enqueues a `pending` `claude_proposals` row** (→ the Claude Inbox) rather than writing directly. The same propose→approve funnel as the MCP. Vault excluded; OpenAI keeps the single-shot RAG `ask`.
+- 🔜 Renderer toggle (agentic vs. RAG), more tools (notes, habits, txn-tag), and proactive-insights surfacing (spend anomalies, habit slippage).
 
 ### 8.6 Claude Skills for Compass — ✅ *(shipped)*
 - `claude-plugin/skills/`: `morning-brief`, `weekly-review`, `budget-check`, `plan-my-week`, `capture-from-web`. Each is **read-first** (via the MCP read tools) and routes any change through `compass_propose_*` → the Claude Inbox approval flow — never a direct write. The vault is never exposed; finance stays at the summary level.
