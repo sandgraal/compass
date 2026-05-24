@@ -126,6 +126,8 @@ Pattern: every IPC handler lives in `electron/ipc/<domain>.ts`, is exposed throu
 | `/integrations` | `src/pages/Integrations.tsx` |
 | `/finance` | `src/pages/Finance.tsx` |
 | `/settings` | `src/pages/Settings.tsx` |
+| `/ask` | `src/pages/Ask.tsx` (Phase 5.12 RAG assistant) |
+| `/claude-inbox` | `src/pages/ClaudeInbox.tsx` (Phase 8.2 — review/approve Claude proposals) |
 
 Layout shell: `src/components/layout/AppLayout.tsx` (Sidebar + main + ContextDrawer).
 Global ⌘K palette: `src/components/CommandPalette.tsx` (mounted in `App.tsx`).

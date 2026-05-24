@@ -8,6 +8,7 @@ import {
   DollarSign,
   FileText,
   FolderOpen,
+  Inbox,
   LayoutDashboard,
   LineChart,
   Plug,
@@ -162,6 +163,14 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
         nav('/ask')
       },
       keywords: ['ask', 'assistant', 'chat', 'ai', 'llm', 'claude', 'gpt', 'rag']
+    },
+    {
+      id: 'claude-inbox',
+      label: 'Claude Inbox',
+      description: 'Review & approve changes Claude proposed',
+      icon: <Inbox size={15} />,
+      action: () => nav('/claude-inbox'),
+      keywords: ['claude', 'inbox', 'proposals', 'approve', 'review', 'mcp', 'pending']
     },
     {
       id: 'vault',
