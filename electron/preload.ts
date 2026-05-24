@@ -108,6 +108,10 @@ const api = {
       question: string
       history?: Array<{ role: 'user' | 'assistant'; content: string }>
     }) => ipcRenderer.invoke('assistant:ask', payload),
+    agent: (payload: {
+      question: string
+      history?: Array<{ role: 'user' | 'assistant'; content: string }>
+    }) => ipcRenderer.invoke('assistant:agent', payload),
     cancel: () => ipcRenderer.invoke('assistant:cancel')
   },
 

@@ -27,6 +27,8 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import type { IpcMain } from 'electron'
+import { getDb } from '../db/client'
+import { ASSISTANT_TOOLS, executeAssistantTool } from '../integrations/assistant-tools'
 import {
   type LlmProvider,
   clearAllAssistantKeys,
@@ -38,9 +40,26 @@ import {
   setAssistantKey,
   setProviderModel
 } from '../integrations/assistant-vault'
-import { LlmAbortError, type LlmMessage, callLlm } from '../integrations/llm-client'
+import {
+  type AnthropicContentBlock,
+  LlmAbortError,
+  type LlmMessage,
+  callLlm
+} from '../integrations/llm-client'
 import { semanticSearch } from '../knowledge/embeddings'
 import { KNOWLEDGE_DIR } from '../paths'
+
+const MAX_AGENT_STEPS = 6
+
+const AGENT_SYSTEM_PROMPT = `You are Compass, the user's local-first personal life-OS assistant, running inside the Compass app with tools over the user's own data.
+
+You can READ the user's agenda and finances with tools, and you can PROPOSE changes — but you can NEVER write to the user's data directly.
+
+How to work:
+- Call a read tool (e.g. get_upcoming, get_finance_summary) to ground your answer in real data BEFORE answering. Don't guess at the user's tasks, events, or numbers.
+- To add or change something, call a propose_* tool. This enqueues a proposal the user must APPROVE in the Compass "Claude Inbox" — it does NOT take effect immediately. After proposing, tell the user plainly that you've queued it for their approval and that nothing has changed yet. Never claim you already made the change.
+- Finances are summaries only (no individual transactions). The vault (secrets) is never available to you.
+- Be concise. Prefer tight bullets. When you cite a number or item, it should come from a tool result, not memory.`
 
 const MAX_QUESTION_LENGTH = 2000
 const MAX_HISTORY_TURNS = 12
@@ -162,6 +181,95 @@ function buildContextBlock(chunks: ContextChunk[]): string {
   return chunks
     .map((c, i) => `[${i + 1}] (${c.path} — ${c.title})\n${c.snippet}`)
     .join('\n\n---\n\n')
+}
+
+interface AgentResult {
+  answer: string
+  model: string
+  toolCalls: Array<{ name: string; ok: boolean }>
+  proposalIds: string[]
+  inputTokens: number
+  outputTokens: number
+}
+
+/**
+ * Bounded Anthropic tool-use loop (Phase 8.5). The model reads via tools and
+ * proposes changes via `propose_*` (which enqueue to the Claude Inbox — never a
+ * direct write). Each step calls the Messages API with the tool set + prompt
+ * caching; we execute any `tool_use` blocks locally and feed `tool_result`s
+ * back until the model stops requesting tools (or we hit MAX_AGENT_STEPS).
+ */
+async function runAgent(
+  auth: { provider: LlmProvider; key: string; model?: string },
+  question: string,
+  history: LlmMessage[],
+  signal: AbortSignal
+): Promise<AgentResult> {
+  const db = getDb()
+  const messages: LlmMessage[] = [...history, { role: 'user', content: question }]
+  const toolCalls: Array<{ name: string; ok: boolean }> = []
+  const proposalIds: string[] = []
+  let answer = ''
+  let model = auth.model ?? ''
+  let inputTokens = 0
+  let outputTokens = 0
+
+  for (let step = 0; step < MAX_AGENT_STEPS; step++) {
+    throwIfAborted(signal)
+    const res = await callLlm({
+      provider: 'anthropic',
+      apiKey: auth.key,
+      model: auth.model,
+      system: AGENT_SYSTEM_PROMPT,
+      messages,
+      tools: ASSISTANT_TOOLS as unknown as Parameters<typeof callLlm>[0]['tools'],
+      cacheSystem: true,
+      maxTokens: 1024,
+      signal
+    })
+    model = res.model
+    inputTokens += res.inputTokens ?? 0
+    outputTokens += res.outputTokens ?? 0
+
+    if (res.stopReason === 'tool_use' && res.toolUses && res.toolUses.length > 0) {
+      // Record the assistant's turn (text + the tool_use blocks) verbatim.
+      const assistantBlocks: AnthropicContentBlock[] = []
+      if (res.text) assistantBlocks.push({ type: 'text', text: res.text })
+      for (const tu of res.toolUses) {
+        assistantBlocks.push({ type: 'tool_use', id: tu.id, name: tu.name, input: tu.input })
+      }
+      messages.push({ role: 'assistant', content: assistantBlocks })
+
+      // Execute each requested tool and feed results back.
+      const resultBlocks: AnthropicContentBlock[] = []
+      for (const tu of res.toolUses) {
+        const out = executeAssistantTool(db, tu.name, tu.input)
+        toolCalls.push({ name: tu.name, ok: out.ok })
+        if (out.ok) {
+          const data = out.data as { proposalId?: string }
+          if (typeof data?.proposalId === 'string') proposalIds.push(data.proposalId)
+        }
+        resultBlocks.push({
+          type: 'tool_result',
+          tool_use_id: tu.id,
+          content: JSON.stringify(out.ok ? out.data : { error: out.error }),
+          is_error: !out.ok
+        })
+      }
+      messages.push({ role: 'user', content: resultBlocks })
+      continue
+    }
+
+    // No tool requested → this is the final answer.
+    answer = res.text
+    break
+  }
+
+  if (!answer) {
+    answer =
+      'I gathered what I could but ran out of reasoning steps before finishing. Try narrowing the request.'
+  }
+  return { answer, model, toolCalls, proposalIds, inputTokens, outputTokens }
 }
 
 export function registerAssistantHandlers(ipcMain: IpcMain): void {
@@ -360,7 +468,88 @@ export function registerAssistantHandlers(ipcMain: IpcMain): void {
       }
     }
   })
+
+  // Agentic Ask (Phase 8.5) — Anthropic tool-use loop over local data. The
+  // model reads via tools and proposes changes (which land in the Claude Inbox
+  // for approval). Anthropic-only; OpenAI keeps the single-shot RAG `ask` path.
+  ipcMain.handle('assistant:agent', async (_event, payload: unknown) => {
+    if (!payload || typeof payload !== 'object') {
+      return { success: false, error: 'Invalid request payload' }
+    }
+    const { question, history } = payload as { question?: unknown; history?: unknown }
+    if (typeof question !== 'string' || question.trim().length === 0) {
+      return { success: false, error: 'Question is required' }
+    }
+    if (question.length > MAX_QUESTION_LENGTH) {
+      return {
+        success: false,
+        error: `Question is too long (max ${MAX_QUESTION_LENGTH} characters)`
+      }
+    }
+    const cleanedHistory: LlmMessage[] = Array.isArray(history)
+      ? history
+          .filter(
+            (m): m is { role: 'user' | 'assistant'; content: string } =>
+              !!m &&
+              typeof m === 'object' &&
+              'role' in m &&
+              'content' in m &&
+              (m.role === 'user' || m.role === 'assistant') &&
+              typeof m.content === 'string'
+          )
+          .slice(-MAX_HISTORY_TURNS * 2)
+      : []
+
+    const auth = readActiveKeyInternal()
+    if (!auth) {
+      return {
+        success: false,
+        error:
+          'No LLM API key configured. Add one in Settings → AI assist → Ask Compass before asking.'
+      }
+    }
+    if (auth.provider !== 'anthropic') {
+      return {
+        success: false,
+        error:
+          'Agentic Ask uses Claude tool-use — switch the active provider to Anthropic in Settings, or use the standard Ask for OpenAI.'
+      }
+    }
+
+    if (currentController) currentController.abort()
+    const controller = new AbortController()
+    currentController = controller
+
+    try {
+      const result = await runAgent(auth, question, cleanedHistory, controller.signal)
+      return {
+        success: true,
+        answer: result.answer,
+        model: result.model,
+        provider: auth.provider,
+        toolCalls: result.toolCalls,
+        proposalIds: result.proposalIds,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens
+      }
+    } catch (err) {
+      if (err instanceof LlmAbortError) {
+        return { success: false, cancelled: true }
+      }
+      return { success: false, error: (err as Error).message }
+    } finally {
+      if (currentController === controller) {
+        currentController = null
+      }
+    }
+  })
 }
 
 // Exported for tests.
-export const _internal = { gatherContext, buildContextBlock, SYSTEM_PROMPT }
+export const _internal = {
+  gatherContext,
+  buildContextBlock,
+  SYSTEM_PROMPT,
+  AGENT_SYSTEM_PROMPT,
+  runAgent
+}

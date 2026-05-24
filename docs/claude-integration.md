@@ -69,8 +69,10 @@ Extends `mcp/compass-mcp/index.ts`:
 ### 8.4 Cowork plugin (end-user) 🔜
 - A new **end-user** Cowork plugin (distinct from the dev `compass-stack`) bundling Compass skills (8.6) + the MCP, so Cowork sessions can run "do my weekly review", "tag last month's CR spend", etc.
 
-### 8.5 Embedded Claude Agent SDK in Ask Compass 🔜
-- Upgrade `electron/ipc/assistant.ts` + `electron/integrations/llm-client.ts` from raw `fetch` to the official **Claude Agent SDK** (or `@anthropic-ai/sdk` with tool-use): agentic loops with **tool-use over local data** (read + propose-write via the same inbox), **prompt caching** of the knowledge context, and flagship flows — **"plan my week"** and **proactive insights** (spend anomalies, stale notes, habit slippage). Still BYO-key, local-first.
+### 8.5 Embedded Claude agent in Ask Compass — *backend shipped; UI 🔜*
+- ✅ `assistant:agent` runs a **bounded Anthropic tool-use loop** (`electron/ipc/assistant.ts`). The client (`llm-client.ts`) gained tool-use + **`cache_control` prompt caching** — kept **HTTP-only, no SDK** to match the codebase's deliberate "don't pull in LLM SDKs" convention.
+- ✅ Tools (`electron/integrations/assistant-tools.ts`): read `get_upcoming` + `get_finance_summary` (aggregates only), and `propose_task` — which **enqueues a `pending` `claude_proposals` row** (→ the Claude Inbox) rather than writing directly. The same propose→approve funnel as the MCP. Vault excluded; OpenAI keeps the single-shot RAG `ask`.
+- 🔜 Renderer toggle (agentic vs. RAG), more tools (notes, habits, txn-tag), and proactive-insights surfacing (spend anomalies, habit slippage).
 
 ### 8.6 Claude Skills for Compass 🔜
 - Author skills usable across Desktop/Cowork/Code: `weekly-review`, `budget-check`, `morning-brief`, `capture-from-web`, `plan-my-week` — all operating through the MCP tools. Shipped in the Cowork plugin + DXT.

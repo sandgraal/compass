@@ -311,6 +311,22 @@ declare global {
             }
           | { success: false; error?: string; cancelled?: boolean }
         >
+        agent(payload: {
+          question: string
+          history?: Array<{ role: 'user' | 'assistant'; content: string }>
+        }): Promise<
+          | {
+              success: true
+              answer: string
+              model: string
+              provider: 'anthropic' | 'openai'
+              toolCalls: Array<{ name: string; ok: boolean }>
+              proposalIds: string[]
+              inputTokens?: number
+              outputTokens?: number
+            }
+          | { success: false; error?: string; cancelled?: boolean }
+        >
         cancel(): Promise<{ success: boolean; error?: string }>
       }
       backup: {

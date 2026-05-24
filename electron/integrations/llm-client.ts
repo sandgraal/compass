@@ -23,7 +23,25 @@ import type { LlmProvider } from './assistant-vault'
 
 export interface LlmMessage {
   role: 'user' | 'assistant'
-  content: string
+  // A plain string (the common case) or Anthropic content blocks — the agent
+  // loop (Phase 8.5) passes `tool_use` / `tool_result` blocks through here.
+  content: string | AnthropicContentBlock[]
+}
+
+/** Anthropic tool definition (`input_schema` is JSON Schema). */
+export interface AnthropicTool {
+  name: string
+  description: string
+  input_schema: Record<string, unknown>
+}
+
+/** A minimal Anthropic content block (text / tool_use / tool_result). */
+export type AnthropicContentBlock = Record<string, unknown> & { type: string }
+
+export interface LlmToolUse {
+  id: string
+  name: string
+  input: Record<string, unknown>
 }
 
 export interface LlmRequest {
@@ -33,6 +51,10 @@ export interface LlmRequest {
   system: string
   messages: LlmMessage[]
   maxTokens?: number
+  /** Anthropic tool-use (8.5). Ignored by the OpenAI path. */
+  tools?: AnthropicTool[]
+  /** Mark the system prompt with `cache_control` for prompt caching (Anthropic). */
+  cacheSystem?: boolean
   /** AbortSignal so the renderer can cancel mid-request via `assistant:cancel`. */
   signal?: AbortSignal
 }
@@ -42,6 +64,10 @@ export interface LlmResponse {
   model: string
   inputTokens?: number
   outputTokens?: number
+  /** Anthropic `stop_reason` (e.g. 'tool_use', 'end_turn') when available. */
+  stopReason?: string
+  /** Tool-use blocks the model emitted (Anthropic, when tools are supplied). */
+  toolUses?: LlmToolUse[]
 }
 
 export class LlmAbortError extends Error {
@@ -76,15 +102,24 @@ export async function callLlm(req: LlmRequest): Promise<LlmResponse> {
 async function callAnthropic(
   req: LlmRequest & { model: string; maxTokens: number }
 ): Promise<LlmResponse> {
-  const body = {
+  // System as a content-block array when caching, so we can attach
+  // `cache_control` (Anthropic caches the stable prefix and bills repeat turns
+  // at a fraction of the input-token cost).
+  const system = req.cacheSystem
+    ? [{ type: 'text', text: req.system, cache_control: { type: 'ephemeral' } }]
+    : req.system
+  const body: Record<string, unknown> = {
     model: req.model,
     max_tokens: req.maxTokens,
-    system: req.system,
+    system,
     messages: req.messages.map((m) => ({
       role: m.role,
-      content: [{ type: 'text', text: m.content }]
+      // Pass structured blocks (tool_use / tool_result) through untouched;
+      // wrap a plain string as a single text block.
+      content: typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : m.content
     }))
   }
+  if (req.tools && req.tools.length > 0) body.tools = req.tools
   let resp: Response
   try {
     resp = await fetch('https://api.anthropic.com/v1/messages', {
@@ -124,8 +159,9 @@ async function callAnthropic(
     )
   }
   const json = (await resp.json()) as {
-    content?: Array<{ type: string; text?: string }>
+    content?: Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown }>
     model?: string
+    stop_reason?: string
     usage?: { input_tokens?: number; output_tokens?: number }
   }
   const text =
@@ -133,11 +169,20 @@ async function callAnthropic(
       ?.filter((c) => c.type === 'text' && typeof c.text === 'string')
       .map((c) => c.text as string)
       .join('') ?? ''
+  const toolUses: LlmToolUse[] = (json.content ?? [])
+    .filter((c) => c.type === 'tool_use' && typeof c.id === 'string' && typeof c.name === 'string')
+    .map((c) => ({
+      id: c.id as string,
+      name: c.name as string,
+      input: (c.input ?? {}) as Record<string, unknown>
+    }))
   return {
     text,
     model: json.model ?? req.model,
     inputTokens: json.usage?.input_tokens,
-    outputTokens: json.usage?.output_tokens
+    outputTokens: json.usage?.output_tokens,
+    stopReason: json.stop_reason,
+    toolUses: toolUses.length > 0 ? toolUses : undefined
   }
 }
 
@@ -145,9 +190,14 @@ async function callOpenAI(
   req: LlmRequest & { model: string; maxTokens: number }
 ): Promise<LlmResponse> {
   // OpenAI accepts the system message as the first item in `messages`.
+  // The OpenAI path only ever receives plain-string turns (the agent loop is
+  // Anthropic-only); coerce defensively so block arrays never reach the wire.
   const oaiMessages = [
     { role: 'system', content: req.system },
-    ...req.messages.map((m) => ({ role: m.role, content: m.content }))
+    ...req.messages.map((m) => ({
+      role: m.role,
+      content: typeof m.content === 'string' ? m.content : ''
+    }))
   ]
   const body = {
     model: req.model,
