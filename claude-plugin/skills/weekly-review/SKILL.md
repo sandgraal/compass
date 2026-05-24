@@ -10,7 +10,10 @@ user approves in the Compass Claude Inbox. Never write directly.
 
 ## 1. Gather (read-only)
 
-- **`compass_upcoming`** (`days: 7`) — current tasks + the week's events.
+- **`compass_upcoming`** (`days: 7`) — returns **today's** daily checklist plus
+  the next 7 days of *calendar events* and any payments due. Note: it does **not**
+  return a full week of tasks (only today's list) — don't claim week-wide task
+  coverage; review today's open items + the week's events.
 - **`compass_habit_streaks`** — current vs. longest streak per habit.
 - **`compass_finance_summary`** (`months: 2`) — net worth + this month's spend by
   category (aggregates only; no raw transactions).

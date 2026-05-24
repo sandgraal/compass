@@ -11,8 +11,11 @@ directly.
 
 ## 1. Understand the week
 
-- **`compass_upcoming`** (`days: 7`) — existing tasks + calendar events, so you
-  don't double-book or duplicate.
+- **`compass_upcoming`** (`days: 7`) — the week's **calendar events** (plus
+  **today's** task list and payments due), so you can plan **around** what's
+  already scheduled. Caveat: it shows only *today's* tasks, not a full week of
+  them — so treat it as event/availability context, and confirm existing
+  commitments with the user rather than assuming you can see every task.
 - If the user references standing goals, **`compass_search_knowledge`** for the
   relevant note (e.g. "goals", "projects").
 - Ask the user for this week's priorities if they haven't stated them.

@@ -1,6 +1,6 @@
 # Compass ↔ Claude — Integration Design
 
-> **Status: design + roadmap (Phase 8, proposed).** This documents how Compass becomes a first-class, **bidirectional** Claude citizen. Most of it is **not built yet** — see the 🔜 tags and [`implementation_plan.md` § Phase 8](implementation_plan.md). Today's reality: a **read-only** MCP for **Claude Code** + a BYO-key "Ask Compass" assistant.
+> **Status: partially shipped.** This documents how Compass becomes a first-class, **bidirectional** Claude citizen. **Shipped:** the MCP **read + propose** tools (8.1), the in-app **Claude Inbox** approval surface (8.2), and the **end-user plugin + skills** (8.4/8.6). **Remaining (🔜):** the one-click Desktop bundle (8.3) and the embedded agent in Ask Compass (8.5). Per-item status is tagged below and in [`implementation_plan.md` § Phase 8](implementation_plan.md).
 
 ## Why
 
@@ -15,13 +15,14 @@ The hard constraint: *let an assistant help with your life OS without letting it
 
 | Direction | What exists | Where |
 |---|---|---|
-| Claude → Compass | Read-only stdio MCP, 8 tools (tasks, knowledge search/read, calendar, sync status, repo commits/test-status/integration-health). Registered for **Claude Code** only. **Vault excluded; finance raw rows excluded.** | `mcp/compass-mcp/index.ts`, `.mcp.json` |
-| Compass → Claude | "Ask Compass" — BYO Anthropic/OpenAI key, raw `fetch` to the messages API, RAG over local notes. No tool-use, caching, or agentic loops. | `electron/ipc/assistant.ts`, `electron/integrations/llm-client.ts` |
-| Packaging | `compass-stack` plugin bundles the **developer** agent infra (subagents/skills/hooks/MCP) for Claude Code — not an end-user data connector. | `.claude/plugin.json` |
+| Claude → Compass | stdio MCP with **read tools** (tasks, knowledge search/read, calendar, sync status, finance summaries, habit streaks, upcoming, repo commits/test-status/integration-health) **and `compass_propose_*` write-proposal tools** (task/note/txn-tag/habit-check) that enqueue to the Claude Inbox. **Vault excluded; finance raw rows excluded.** | `mcp/compass-mcp/index.ts`, `proposals.ts`, `.mcp.json` |
+| Claude → Compass (act) | **Claude Inbox** — proposals land in `claude_proposals`; the user approves/rejects in-app and approval applies the change via validated write logic (re-validated as a trust boundary). | `electron/ipc/claude.ts`, `src/pages/ClaudeInbox.tsx` |
+| Compass → Claude | "Ask Compass" — BYO Anthropic/OpenAI key, RAG over local notes. *(Agentic tool-use + caching is 8.5, 🔜.)* | `electron/ipc/assistant.ts`, `electron/integrations/llm-client.ts` |
+| Packaging | **`compass`** end-user plugin (MCP + skills) for Desktop/Cowork/Code — requires a repo checkout (self-contained bundle is 8.3). Separate from the **developer** `compass-stack` plugin (subagents/skills/hooks for *building* Compass). | `claude-plugin/`, `.claude/plugin.json` |
 
 <a id="claude-inbox"></a>
 
-## Core architecture — the "Claude Inbox" (confirmed writes) 🔜
+## Core architecture — the "Claude Inbox" (confirmed writes) ✅
 
 The MCP server is a **separate process** that opens the main Compass DB (`compass.db`) **read-only**. It must never mutate app data. So writes are *proposals* appended to a **separate, append-only proposal inbox** (NOT the read-only main DB) — Compass stays the sole writer to its real data, and a human approves every change.
 
