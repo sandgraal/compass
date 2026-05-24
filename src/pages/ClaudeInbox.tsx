@@ -133,6 +133,8 @@ export default function ClaudeInbox(): JSX.Element {
   }
 
   async function clearResolved(): Promise<void> {
+    const isElectron = typeof window !== 'undefined' && !!window.api?.claude
+    if (!isElectron) return
     try {
       const res = await window.api.claude.clearResolved()
       toast(`Cleared ${res.cleared} resolved proposal${res.cleared === 1 ? '' : 's'}`, 'info')
