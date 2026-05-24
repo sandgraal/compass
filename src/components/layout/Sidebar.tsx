@@ -4,6 +4,7 @@ import {
   CalendarDays,
   CalendarRange,
   Circle,
+  Inbox,
   LayoutDashboard,
   Plug2,
   Settings,
@@ -75,6 +76,7 @@ export function Sidebar(): JSX.Element {
     { label: 'Monthly', to: '/monthly', icon: <CalendarCheck size={18} /> },
     { label: 'Knowledge Base', to: '/knowledge', icon: <BookOpen size={18} /> },
     { label: 'Ask Compass', to: '/ask', icon: <Sparkles size={18} /> },
+    { label: 'Claude Inbox', to: '/claude-inbox', icon: <Inbox size={18} /> },
     { label: 'Vault', to: '/vault', icon: <ShieldCheck size={18} /> },
     { label: 'Finance', to: '/finance', icon: <TrendingUp size={18} /> },
     {
