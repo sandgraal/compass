@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin.json",
+  "name": "compass",
+  "version": "0.1.0",
+  "description": "Talk to your Compass life OS from Claude. Registers the Compass MCP server (read + propose tools) and end-user skills (morning brief, weekly review, budget check, plan-my-week, web capture). Claude reads your data and proposes changes; every write is approved in Compass's Claude Inbox. Requires a local Compass repo checkout (the MCP runs from it); a self-contained desktop bundle is upcoming (Compass Phase 8.3).",
+  "author": "Compass contributors",
+  "license": "MIT",
+  "components": {
+    "skills": "skills",
+    "mcpServers": ".mcp.json"
+  },
+  "homepage": "https://github.com/sandgraal/compass",
+  "repository": "https://github.com/sandgraal/compass",
+  "keywords": [
+    "compass",
+    "life-os",
+    "mcp",
+    "local-first",
+    "personal-knowledge",
+    "finance",
+    "habits"
+  ]
+}

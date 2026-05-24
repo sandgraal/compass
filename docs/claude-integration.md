@@ -1,6 +1,6 @@
 # Compass ↔ Claude — Integration Design
 
-> **Status: design + roadmap (Phase 8, proposed).** This documents how Compass becomes a first-class, **bidirectional** Claude citizen. Most of it is **not built yet** — see the 🔜 tags and [`implementation_plan.md` § Phase 8](implementation_plan.md). Today's reality: a **read-only** MCP for **Claude Code** + a BYO-key "Ask Compass" assistant.
+> **Status: partially shipped.** This documents how Compass becomes a first-class, **bidirectional** Claude citizen. **Shipped:** the MCP **read + propose** tools (8.1), the in-app **Claude Inbox** approval surface (8.2), and the **end-user plugin + skills** (8.4/8.6). **Remaining (🔜):** the one-click Desktop bundle (8.3) and the embedded agent in Ask Compass (8.5). Per-item status is tagged below and in [`implementation_plan.md` § Phase 8](implementation_plan.md).
 
 ## Why
 
@@ -15,13 +15,14 @@ The hard constraint: *let an assistant help with your life OS without letting it
 
 | Direction | What exists | Where |
 |---|---|---|
-| Claude → Compass | Read-only stdio MCP, 8 tools (tasks, knowledge search/read, calendar, sync status, repo commits/test-status/integration-health). Registered for **Claude Code** only. **Vault excluded; finance raw rows excluded.** | `mcp/compass-mcp/index.ts`, `.mcp.json` |
-| Compass → Claude | "Ask Compass" — BYO Anthropic/OpenAI key, raw `fetch` to the messages API, RAG over local notes. No tool-use, caching, or agentic loops. | `electron/ipc/assistant.ts`, `electron/integrations/llm-client.ts` |
-| Packaging | `compass-stack` plugin bundles the **developer** agent infra (subagents/skills/hooks/MCP) for Claude Code — not an end-user data connector. | `.claude/plugin.json` |
+| Claude → Compass | stdio MCP with **read tools** (tasks, knowledge search/read, calendar, sync status, finance summaries, habit streaks, upcoming, repo commits/test-status/integration-health) **and `compass_propose_*` write-proposal tools** (task/note/txn-tag/habit-check) that enqueue to the Claude Inbox. **Vault excluded; finance raw rows excluded.** | `mcp/compass-mcp/index.ts`, `proposals.ts`, `.mcp.json` |
+| Claude → Compass (act) | **Claude Inbox** — proposals land in `claude_proposals`; the user approves/rejects in-app and approval applies the change via validated write logic (re-validated as a trust boundary). | `electron/ipc/claude.ts`, `src/pages/ClaudeInbox.tsx` |
+| Compass → Claude | "Ask Compass" — BYO Anthropic/OpenAI key, RAG over local notes. *(Agentic tool-use + caching is 8.5, 🔜.)* | `electron/ipc/assistant.ts`, `electron/integrations/llm-client.ts` |
+| Packaging | **`compass`** end-user plugin (MCP + skills) for Desktop/Cowork/Code — requires a repo checkout (self-contained bundle is 8.3). Separate from the **developer** `compass-stack` plugin (subagents/skills/hooks for *building* Compass). | `claude-plugin/`, `.claude/plugin.json` |
 
 <a id="claude-inbox"></a>
 
-## Core architecture — the "Claude Inbox" (confirmed writes) 🔜
+## Core architecture — the "Claude Inbox" (confirmed writes) ✅
 
 The MCP server is a **separate process** that opens the main Compass DB (`compass.db`) **read-only**. It must never mutate app data. So writes are *proposals* appended to a **separate, append-only proposal inbox** (NOT the read-only main DB) — Compass stays the sole writer to its real data, and a human approves every change.
 
@@ -64,16 +65,16 @@ Extends `mcp/compass-mcp/index.ts`:
 - ✅ A review **page** (`src/pages/ClaudeInbox.tsx`, route `/claude-inbox`, sidebar + ⌘K entry) surfaces pending proposals with a human-readable summary per type and one-click approve/reject (reusing `Toast` + `ConfirmDialog`) plus clear-resolved.
 
 ### 8.3 Claude Desktop connector (DXT / `.mcpb`) 🔜
-- Package `compass-mcp` as a one-click **desktop-extension bundle** (no dev toolchain) so any Claude Desktop user can connect their Compass; documented `claude_desktop_config.json` snippet as fallback. Ships read + propose tools.
+- Package `compass-mcp` as a one-click **desktop-extension bundle** (no dev toolchain) so any Claude Desktop user can connect their Compass. The **manual `claude_desktop_config.json` fallback is documented today** in `claude-plugin/README.md`; the remaining work is the bundled artifact, gated on packaging the `better-sqlite3` native dependency.
 
-### 8.4 Cowork plugin (end-user) 🔜
-- A new **end-user** Cowork plugin (distinct from the dev `compass-stack`) bundling Compass skills (8.6) + the MCP, so Cowork sessions can run "do my weekly review", "tag last month's CR spend", etc.
+### 8.4 Cowork plugin (end-user) — ✅ *(shipped)*
+- `claude-plugin/` is a new **end-user** plugin (distinct from the dev `compass-stack`): `.claude-plugin/plugin.json` + `.mcp.json` register the Compass MCP and expose the 8.6 skills, with an install README (incl. the Claude Desktop manual-config fallback). A Cowork/Desktop/Code session can now run "do my weekly review", "what's my morning brief", etc.
 
 ### 8.5 Embedded Claude Agent SDK in Ask Compass 🔜
 - Upgrade `electron/ipc/assistant.ts` + `electron/integrations/llm-client.ts` from raw `fetch` to the official **Claude Agent SDK** (or `@anthropic-ai/sdk` with tool-use): agentic loops with **tool-use over local data** (read + propose-write via the same inbox), **prompt caching** of the knowledge context, and flagship flows — **"plan my week"** and **proactive insights** (spend anomalies, stale notes, habit slippage). Still BYO-key, local-first.
 
-### 8.6 Claude Skills for Compass 🔜
-- Author skills usable across Desktop/Cowork/Code: `weekly-review`, `budget-check`, `morning-brief`, `capture-from-web`, `plan-my-week` — all operating through the MCP tools. Shipped in the Cowork plugin + DXT.
+### 8.6 Claude Skills for Compass — ✅ *(shipped)*
+- `claude-plugin/skills/`: `morning-brief`, `weekly-review`, `budget-check`, `plan-my-week`, `capture-from-web`. Each is **read-first** (via the MCP read tools) and routes any change through `compass_propose_*` → the Claude Inbox approval flow — never a direct write. The vault is never exposed; finance stays at the summary level.
 
 ## Expert deep-dive (five lenses)
 
