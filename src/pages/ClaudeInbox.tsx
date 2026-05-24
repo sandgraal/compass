@@ -124,6 +124,7 @@ export default function ClaudeInbox(): JSX.Element {
         setProposals((prev) => prev.filter((x) => x.id !== p.id))
       } else {
         toast(res.error || 'Reject failed', 'error')
+        void refresh() // reconcile status changes (e.g. no longer pending)
       }
     } catch {
       toast('Reject failed', 'error')
