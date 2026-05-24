@@ -64,16 +64,16 @@ Extends `mcp/compass-mcp/index.ts`:
 - ✅ A review **page** (`src/pages/ClaudeInbox.tsx`, route `/claude-inbox`, sidebar + ⌘K entry) surfaces pending proposals with a human-readable summary per type and one-click approve/reject (reusing `Toast` + `ConfirmDialog`) plus clear-resolved.
 
 ### 8.3 Claude Desktop connector (DXT / `.mcpb`) 🔜
-- Package `compass-mcp` as a one-click **desktop-extension bundle** (no dev toolchain) so any Claude Desktop user can connect their Compass; documented `claude_desktop_config.json` snippet as fallback. Ships read + propose tools.
+- Package `compass-mcp` as a one-click **desktop-extension bundle** (no dev toolchain) so any Claude Desktop user can connect their Compass. The **manual `claude_desktop_config.json` fallback is documented today** in `claude-plugin/README.md`; the remaining work is the bundled artifact, gated on packaging the `better-sqlite3` native dependency.
 
-### 8.4 Cowork plugin (end-user) 🔜
-- A new **end-user** Cowork plugin (distinct from the dev `compass-stack`) bundling Compass skills (8.6) + the MCP, so Cowork sessions can run "do my weekly review", "tag last month's CR spend", etc.
+### 8.4 Cowork plugin (end-user) — ✅ *(shipped)*
+- `claude-plugin/` is a new **end-user** plugin (distinct from the dev `compass-stack`): `.claude-plugin/plugin.json` + `.mcp.json` register the Compass MCP and expose the 8.6 skills, with an install README (incl. the Claude Desktop manual-config fallback). A Cowork/Desktop/Code session can now run "do my weekly review", "what's my morning brief", etc.
 
 ### 8.5 Embedded Claude Agent SDK in Ask Compass 🔜
 - Upgrade `electron/ipc/assistant.ts` + `electron/integrations/llm-client.ts` from raw `fetch` to the official **Claude Agent SDK** (or `@anthropic-ai/sdk` with tool-use): agentic loops with **tool-use over local data** (read + propose-write via the same inbox), **prompt caching** of the knowledge context, and flagship flows — **"plan my week"** and **proactive insights** (spend anomalies, stale notes, habit slippage). Still BYO-key, local-first.
 
-### 8.6 Claude Skills for Compass 🔜
-- Author skills usable across Desktop/Cowork/Code: `weekly-review`, `budget-check`, `morning-brief`, `capture-from-web`, `plan-my-week` — all operating through the MCP tools. Shipped in the Cowork plugin + DXT.
+### 8.6 Claude Skills for Compass — ✅ *(shipped)*
+- `claude-plugin/skills/`: `morning-brief`, `weekly-review`, `budget-check`, `plan-my-week`, `capture-from-web`. Each is **read-first** (via the MCP read tools) and routes any change through `compass_propose_*` → the Claude Inbox approval flow — never a direct write. The vault is never exposed; finance stays at the summary level.
 
 ## Expert deep-dive (five lenses)
 
