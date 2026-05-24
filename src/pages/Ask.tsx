@@ -215,25 +215,29 @@ export default function Ask(): JSX.Element {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setAgentMode((v) => !v)}
-            disabled={!agentAvailable}
-            aria-pressed={agentMode}
+          <span
             title={
               agentAvailable
                 ? 'Agent mode: Claude reads your data via tools and proposes changes you approve in the Claude Inbox.'
                 : 'Agent mode needs Anthropic as the active provider (Settings → AI assist).'
             }
-            className={cn(
-              'flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-40',
-              agentMode
-                ? 'border-primary/50 bg-primary/15 text-primary'
-                : 'border-border text-muted-foreground hover:text-foreground'
-            )}
+            className="inline-flex"
           >
-            <Wand2 size={12} /> Agent{agentMode ? ' on' : ''}
-          </button>
+            <button
+              type="button"
+              onClick={() => setAgentMode((v) => !v)}
+              disabled={!agentAvailable}
+              aria-pressed={agentMode}
+              className={cn(
+                'flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-40',
+                agentMode
+                  ? 'border-primary/50 bg-primary/15 text-primary'
+                  : 'border-border text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <Wand2 size={12} /> Agent{agentMode ? ' on' : ''}
+            </button>
+          </span>
           {status?.activeProvider && (
             <span className="text-xs text-muted-foreground bg-secondary px-2 py-1 rounded">
               {status.activeProvider} · {status.models[status.activeProvider] ?? 'default'}
