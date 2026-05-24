@@ -52,6 +52,23 @@ function validateGeoSince(since: string): string {
   return since
 }
 
+// Accepted transaction tax tags. Exported as a ReadonlySet so other write
+// paths (e.g. the Claude Inbox approval flow in ipc/claude.ts) validate against
+// the same set without being able to mutate it.
+export const TAX_TAGS: ReadonlySet<string> = new Set([
+  'tax:capex-airbnb',
+  'tax:schedule-c-income',
+  'tax:schedule-c-expense',
+  'tax:schedule-e-income',
+  'tax:schedule-e-expense',
+  'tax:charitable',
+  'tax:medical',
+  'tax:home-office',
+  'tax:personal',
+  'tax:investment',
+  'tax:none'
+])
+
 export function getMoneyFolder(): string {
   try {
     const db = getDb()
@@ -397,21 +414,8 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     if (!Number.isFinite(id) || !Number.isInteger(id) || id <= 0) {
       return { success: false, error: `Invalid transaction id: ${id}` }
     }
-    // Whitelist accepted values to keep schema clean.
-    const allowed = new Set([
-      'tax:capex-airbnb',
-      'tax:schedule-c-income',
-      'tax:schedule-c-expense',
-      'tax:schedule-e-income',
-      'tax:schedule-e-expense',
-      'tax:charitable',
-      'tax:medical',
-      'tax:home-office',
-      'tax:personal',
-      'tax:investment',
-      'tax:none'
-    ])
-    if (!allowed.has(taxTag)) {
+    // Whitelist accepted values to keep schema clean (shared TAX_TAGS).
+    if (!TAX_TAGS.has(taxTag)) {
       return { success: false, error: `Unknown tax tag: ${taxTag}` }
     }
     const result = db

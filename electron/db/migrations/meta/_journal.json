@@ -71,6 +71,13 @@
       "when": 1778655167090,
       "tag": "0009_dear_freak",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1779563807230,
+      "tag": "0010_regular_living_mummy",
+      "breakpoints": true
     }
   ]
 }

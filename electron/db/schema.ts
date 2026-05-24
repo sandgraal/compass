@@ -299,3 +299,30 @@ export const knowledgeSuggestions = sqliteTable('knowledge_suggestions', {
   status: text('status').notNull().default('pending'), // 'pending' | 'accepted' | 'dismissed'
   reviewedAt: integer('reviewed_at', { mode: 'timestamp_ms' })
 })
+
+// ---- Claude Proposals (Claude Inbox — Phase 8.2) ----
+// Confirmed-writes queue: the read-only MCP appends proposals to
+// `.data/claude-inbox.jsonl`; the app ingests them here (dedup by
+// `proposalId`) and the user approves/rejects each one. On approve the change
+// is applied via the app's validated write paths; nothing mutates user data
+// until then. See electron/ipc/claude.ts + docs/claude-integration.md.
+export const claudeProposals = sqliteTable('claude_proposals', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  proposalId: text('proposal_id').notNull().unique(), // UUID minted by the MCP — dedup key
+  type: text('type').notNull(), // 'task' | 'note' | 'txn_tag' | 'habit_check'
+  payload: text('payload').notNull(), // JSON string of the type-specific payload
+  source: text('source').notNull().default('claude-mcp'),
+  status: text('status').notNull().default('pending'), // 'pending' | 'approved' | 'rejected' | 'failed'
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(), // when the MCP minted it
+  ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  resolvedAt: integer('resolved_at', { mode: 'timestamp_ms' }), // approve/reject/fail time
+  error: text('error'), // failure detail when status = 'failed'
+  resultRef: text('result_ref'), // e.g. created checklist id / note path
+  // Soft-clear: "clear resolved" hides rows from the inbox but KEEPS them so the
+  // append-only JSONL (never truncated) can't re-ingest + re-apply a resolved
+  // proposal as a fresh pending one. Dedup is by `proposalId`, so the row must
+  // survive a clear.
+  clearedAt: integer('cleared_at', { mode: 'timestamp_ms' })
+})

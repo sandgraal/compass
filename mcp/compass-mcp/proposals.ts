@@ -45,6 +45,23 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 // electron/db/schema.ts ('daily' | 'weekly' | 'monthly'). No 'master'.
 const LIST_TYPES = new Set(['daily', 'weekly', 'monthly'])
 
+// Accepted transaction tax tags. MUST stay in sync with `TAX_TAGS` in
+// electron/ipc/finance.ts — the Claude Inbox rejects any other value on
+// approval, so validating here gives a useful error at enqueue time instead.
+const TAX_TAGS = new Set([
+  'tax:capex-airbnb',
+  'tax:schedule-c-income',
+  'tax:schedule-c-expense',
+  'tax:schedule-e-income',
+  'tax:schedule-e-expense',
+  'tax:charitable',
+  'tax:medical',
+  'tax:home-office',
+  'tax:personal',
+  'tax:investment',
+  'tax:none'
+])
+
 function asTrimmedString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -131,7 +148,12 @@ export function buildProposal(
       }
       const payload: Record<string, unknown> = { transactionId }
       const taxTag = asTrimmedString(a.taxTag)
-      if (taxTag) payload.taxTag = taxTag
+      if (taxTag) {
+        if (!TAX_TAGS.has(taxTag)) {
+          return { error: `taxTag must be one of: ${[...TAX_TAGS].join(', ')}` }
+        }
+        payload.taxTag = taxTag
+      }
       const category = asTrimmedString(a.category)
       if (category) payload.category = category
       if (!('taxTag' in payload) && !('category' in payload)) {
@@ -224,7 +246,23 @@ export const PROPOSE_TOOLS = [
       type: 'object',
       properties: {
         transactionId: { type: 'integer', minimum: 1, description: 'Transaction id (required)' },
-        taxTag: { type: 'string', description: 'Tax tag to set' },
+        taxTag: {
+          type: 'string',
+          enum: [
+            'tax:capex-airbnb',
+            'tax:schedule-c-income',
+            'tax:schedule-c-expense',
+            'tax:schedule-e-income',
+            'tax:schedule-e-expense',
+            'tax:charitable',
+            'tax:medical',
+            'tax:home-office',
+            'tax:personal',
+            'tax:investment',
+            'tax:none'
+          ],
+          description: 'Tax tag to set (must be one of the allowed tax:* values)'
+        },
         category: { type: 'string', description: 'Category to set' }
       },
       required: ['transactionId'],

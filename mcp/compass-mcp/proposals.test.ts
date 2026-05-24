@@ -116,17 +116,29 @@ describe('buildProposal', () => {
       })
     })
 
-    it('builds with taxTag and/or category', () => {
+    it('builds with a whitelisted taxTag and/or category', () => {
       expect(
         buildProposal('compass_propose_txn_tag', {
           transactionId: 5,
-          taxTag: 'charity',
+          taxTag: 'tax:charitable',
           category: 'Gifts'
         })
       ).toEqual({
         type: 'txn_tag',
-        payload: { transactionId: 5, taxTag: 'charity', category: 'Gifts' }
+        payload: { transactionId: 5, taxTag: 'tax:charitable', category: 'Gifts' }
       })
+    })
+
+    it('rejects a taxTag outside the allowed tax:* set', () => {
+      const r = buildProposal('compass_propose_txn_tag', { transactionId: 5, taxTag: 'charity' })
+      expect(r).toHaveProperty('error')
+      expect((r as { error: string }).error).toMatch(/taxTag must be one of/)
+    })
+
+    it('still allows category-only proposals', () => {
+      expect(
+        buildProposal('compass_propose_txn_tag', { transactionId: 5, category: 'Gifts' })
+      ).toEqual({ type: 'txn_tag', payload: { transactionId: 5, category: 'Gifts' } })
     })
   })
 

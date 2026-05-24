@@ -76,6 +76,7 @@ CSP enforced in production builds (no eval, no remote scripts, allowlist for OAu
 | `categorization_rules` | Pattern → category rules for auto-categorization. |
 | `habits` | User-defined habits with icon + color. |
 | `habit_entries` | Per-habit-per-day completion (boolean). |
+| `claude_proposals` | Claude Inbox queue (Phase 8.2). Proposals the read-only MCP appended to `.data/claude-inbox.jsonl`, ingested here (dedup by MCP `proposal_id`) with `status` (`pending`/`approved`/`rejected`/`failed`); approve applies via validated write logic. Migration `0010`. |
 
 ## Vault (encrypted, NOT in SQLite)
 
@@ -103,6 +104,7 @@ Registered in `electron/main.ts`:
 - `registerSettingsHandlers` — get/set/getAll, data export, wipe, **per-integration sync interval**, Ollama detect, quick-capture shortcut
 - `registerFinanceHandlers` — txns, accounts, debt summary, budget, rules, **geo summary, tax summary + override (Phase 4.3), net-worth snapshot/trajectory + capture + manual balance (Phase 4.4), forecast + override CRUD (Phase 4.5), tax-pack export (Phase 5.4: `finance:export-tax-pack`)**
 - `registerHabitsHandlers` — habit CRUD + toggle entries
+- `registerClaudeHandlers` — Claude Inbox (Phase 8.2): `claude:list-proposals` (ingests `.data/claude-inbox.jsonl`, dedup by MCP `proposal_id`), `claude:approve-proposal` (re-validates the LLM-written payload, then applies via the same write logic — `safeJoin` path-safety, shared `TAX_TAGS` whitelist, list-type domain, strict booleans — recording `approved`+`resultRef` or `failed`+error), `claude:reject-proposal`, `claude:clear-resolved` (**soft**-clears — stamps `cleared_at` so the row drops out of the inbox but survives for dedup, since the append-only JSONL is never truncated). The vault is never touched.
 - `registerUpdaterHandlers` — `updater:check`, `updater:install-and-restart`; pushes `updater:status` events to renderer
 - `registerCompassUrlScheme` (in `electron/url-scheme.ts`) — registers the `compass://` protocol handler (`capture`, `open/<page>`, `search`); routes URLs from `open-url` (macOS) and `second-instance` (Win/Linux) into IPC events the renderer consumes. `electron/integrations/apple-calendar.ts` adds `syncAppleCalendar` (Phase 5.7) which is dispatched from `sync.ts` for the `apple-calendar` service.
 - `registerBackupHandlers` — `backup:create`, `backup:restore` (Phase 5.1, passphrase-derived AES-256-GCM)
