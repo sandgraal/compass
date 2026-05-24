@@ -189,15 +189,20 @@ async function callAnthropic(
 async function callOpenAI(
   req: LlmRequest & { model: string; maxTokens: number }
 ): Promise<LlmResponse> {
-  // OpenAI accepts the system message as the first item in `messages`.
-  // The OpenAI path only ever receives plain-string turns (the agent loop is
-  // Anthropic-only); coerce defensively so block arrays never reach the wire.
+  // OpenAI accepts the system message as the first item in `messages`. It only
+  // supports plain-string turns — tool-use block arrays are Anthropic-only, so
+  // reaching here with one is a programming error: fail loud rather than
+  // silently dropping content and producing misleading output.
   const oaiMessages = [
     { role: 'system', content: req.system },
-    ...req.messages.map((m) => ({
-      role: m.role,
-      content: typeof m.content === 'string' ? m.content : ''
-    }))
+    ...req.messages.map((m) => {
+      if (typeof m.content !== 'string') {
+        throw new Error(
+          'OpenAI path received non-string message content (tool-use blocks are Anthropic-only).'
+        )
+      }
+      return { role: m.role, content: m.content }
+    })
   ]
   const body = {
     model: req.model,

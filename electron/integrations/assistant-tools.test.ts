@@ -86,7 +86,7 @@ describe('get_upcoming', () => {
       )
       .run(dueStr)
 
-    const res = executeAssistantTool(db(), 'get_upcoming', { days: 7 })
+    const res = executeAssistantTool(db(), sqlite, 'get_upcoming', { days: 7 })
     expect(res.ok).toBe(true)
     const data = (
       res as {
@@ -116,7 +116,7 @@ describe('get_finance_summary', () => {
       .prepare('INSERT INTO finance_transactions (date, amount, category) VALUES (?, ?, ?)')
       .run(`${m}-06`, 3000, 'Income')
 
-    const res = executeAssistantTool(db(), 'get_finance_summary', { months: 6 })
+    const res = executeAssistantTool(db(), sqlite, 'get_finance_summary', { months: 6 })
     expect(res.ok).toBe(true)
     const data = (
       res as {
@@ -136,7 +136,7 @@ describe('get_finance_summary', () => {
 
 describe('propose_task', () => {
   it('enqueues a pending proposal (does NOT add a checklist item)', () => {
-    const res = executeAssistantTool(db(), 'propose_task', {
+    const res = executeAssistantTool(db(), sqlite, 'propose_task', {
       title: 'Call dentist',
       listType: 'daily'
     })
@@ -154,12 +154,12 @@ describe('propose_task', () => {
   })
 
   it('rejects an empty title, bad listType, and impossible date', () => {
-    expect(executeAssistantTool(db(), 'propose_task', {}).ok).toBe(false)
-    expect(executeAssistantTool(db(), 'propose_task', { title: 'x', listType: 'master' }).ok).toBe(
-      false
-    )
+    expect(executeAssistantTool(db(), sqlite, 'propose_task', {}).ok).toBe(false)
     expect(
-      executeAssistantTool(db(), 'propose_task', { title: 'x', listDate: '2026-02-30' }).ok
+      executeAssistantTool(db(), sqlite, 'propose_task', { title: 'x', listType: 'master' }).ok
+    ).toBe(false)
+    expect(
+      executeAssistantTool(db(), sqlite, 'propose_task', { title: 'x', listDate: '2026-02-30' }).ok
     ).toBe(false)
     expect(db().select().from(schema.claudeProposals).all()).toHaveLength(0)
   })
@@ -167,7 +167,7 @@ describe('propose_task', () => {
 
 describe('executeAssistantTool', () => {
   it('returns an error for an unknown tool', () => {
-    const res = executeAssistantTool(db(), 'nope', {})
+    const res = executeAssistantTool(db(), sqlite, 'nope', {})
     expect(res).toEqual({ ok: false, error: 'Unknown tool: nope' })
   })
 })

@@ -14,7 +14,8 @@ import * as schema from '../db/schema'
 let sqlite: Database.Database
 
 vi.mock('../db/client', () => ({
-  getDb: () => drizzle(sqlite, { schema })
+  getDb: () => drizzle(sqlite, { schema }),
+  getRawSqlite: () => sqlite
 }))
 
 import { _internal } from './assistant'

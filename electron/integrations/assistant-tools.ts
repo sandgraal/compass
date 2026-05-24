@@ -15,11 +15,13 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { and, eq, gte, lte } from 'drizzle-orm'
+import type BetterSqlite3 from 'better-sqlite3'
+import { and, asc, eq, gte, lte } from 'drizzle-orm'
 import type { getDb } from '../db/client'
 import { calendarEvents, checklistItems, claudeProposals, financeAccounts } from '../db/schema'
 
 type Db = ReturnType<typeof getDb>
+type RawSqlite = BetterSqlite3.Database
 
 const DAY_MS = 86_400_000
 const LIST_TYPES = new Set(['daily', 'weekly', 'monthly'])
@@ -116,8 +118,9 @@ function getUpcoming(db: Db, input: Record<string, unknown>): unknown {
     })
     .from(checklistItems)
     .where(and(eq(checklistItems.listType, 'daily'), eq(checklistItems.listDate, today)))
+    .orderBy(asc(checklistItems.sortOrder))
     .all()
-  const events = db
+  const eventRows = db
     .select({
       title: calendarEvents.title,
       startAt: calendarEvents.startAt,
@@ -127,8 +130,15 @@ function getUpcoming(db: Db, input: Record<string, unknown>): unknown {
     .where(
       and(gte(calendarEvents.startAt, new Date(now)), lte(calendarEvents.startAt, new Date(cutoff)))
     )
-    .orderBy(calendarEvents.startAt)
+    .orderBy(asc(calendarEvents.startAt))
     .all()
+  // Normalize the timestamp to a JSON primitive (epoch ms) — matches the MCP's
+  // `compass_upcoming` shape rather than leaking a Date/ISO string.
+  const events = eventRows.map((e) => ({
+    title: e.title,
+    startAtMs: e.startAt ? e.startAt.getTime() : null,
+    location: e.location
+  }))
   const dueWindowEnd = localYmd(new Date(now + 14 * DAY_MS))
   const paymentsDue = db
     .select({ name: financeAccounts.name, dueDate: financeAccounts.paymentDueDate })
@@ -144,7 +154,7 @@ function getUpcoming(db: Db, input: Record<string, unknown>): unknown {
   return { date: today, tasks, events, paymentsDue }
 }
 
-function getFinanceSummary(db: Db, input: Record<string, unknown>): unknown {
+function getFinanceSummary(db: Db, sqlite: RawSqlite, input: Record<string, unknown>): unknown {
   const months = Math.min(
     24,
     Math.max(1, Number.isFinite(Number(input.months)) ? Number(input.months) : 6)
@@ -166,13 +176,8 @@ function getFinanceSummary(db: Db, input: Record<string, unknown>): unknown {
   }
   const round = (n: number): number => Math.round(n * 100) / 100
   // Drizzle's typed builder doesn't express `GROUP BY substr(date,1,7)` cleanly,
-  // so run the monthly + by-category aggregates as raw prepared statements via
-  // the underlying better-sqlite3 handle. (Mirrors mcp/compass-mcp finance SQL.)
-  const sqlite = (
-    db as unknown as {
-      $client?: { prepare: (s: string) => { all: (...a: unknown[]) => unknown[] } }
-    }
-  ).$client
+  // so run the monthly + by-category aggregates as raw prepared statements on the
+  // injected better-sqlite3 handle. (Mirrors mcp/compass-mcp finance SQL.)
   let monthlyRows: Array<{
     month: string
     income: number
@@ -181,25 +186,23 @@ function getFinanceSummary(db: Db, input: Record<string, unknown>): unknown {
     net?: number
   }> = []
   let byCategory: Array<{ category: string; spent: number }> = []
-  if (sqlite) {
-    monthlyRows = sqlite
-      .prepare(
-        `SELECT substr(date,1,7) AS month,
+  monthlyRows = sqlite
+    .prepare(
+      `SELECT substr(date,1,7) AS month,
                 ROUND(SUM(CASE WHEN amount > 0 AND category != 'Transfers' THEN amount ELSE 0 END),2) AS income,
                 ROUND(-SUM(CASE WHEN amount < 0 AND category != 'Transfers' THEN amount ELSE 0 END),2) AS expense,
                 SUM(CASE WHEN category != 'Transfers' THEN 1 ELSE 0 END) AS txns
          FROM finance_transactions GROUP BY month ORDER BY month DESC LIMIT ?`
-      )
-      .all(months) as typeof monthlyRows
-    for (const m of monthlyRows) m.net = round(m.income - m.expense)
-    byCategory = sqlite
-      .prepare(
-        `SELECT category, ROUND(-SUM(amount),2) AS spent FROM finance_transactions
+    )
+    .all(months) as typeof monthlyRows
+  for (const m of monthlyRows) m.net = round(m.income - m.expense)
+  byCategory = sqlite
+    .prepare(
+      `SELECT category, ROUND(-SUM(amount),2) AS spent FROM finance_transactions
          WHERE amount < 0 AND category != 'Transfers' AND substr(date,1,7) = ?
          GROUP BY category ORDER BY spent DESC`
-      )
-      .all(localYm()) as typeof byCategory
-  }
+    )
+    .all(localYm()) as typeof byCategory
   return {
     netWorth: {
       assets: round(assets),
@@ -249,6 +252,7 @@ function proposeTask(db: Db, input: Record<string, unknown>): unknown {
  */
 export function executeAssistantTool(
   db: Db,
+  sqlite: RawSqlite,
   name: string,
   input: Record<string, unknown>
 ): ToolResult {
@@ -257,7 +261,7 @@ export function executeAssistantTool(
       case 'get_upcoming':
         return { ok: true, data: getUpcoming(db, input) }
       case 'get_finance_summary':
-        return { ok: true, data: getFinanceSummary(db, input) }
+        return { ok: true, data: getFinanceSummary(db, sqlite, input) }
       case 'propose_task': {
         const res = proposeTask(db, input) as Record<string, unknown>
         if ('error' in res) return { ok: false, error: String(res.error) }

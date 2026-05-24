@@ -27,7 +27,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import type { IpcMain } from 'electron'
-import { getDb } from '../db/client'
+import { getDb, getRawSqlite } from '../db/client'
 import { ASSISTANT_TOOLS, executeAssistantTool } from '../integrations/assistant-tools'
 import {
   type LlmProvider,
@@ -183,6 +183,16 @@ function buildContextBlock(chunks: ContextChunk[]): string {
     .join('\n\n---\n\n')
 }
 
+/**
+ * Scrub a tool-execution error before it's handed back to the model. The
+ * agent's own validation messages are safe and useful, but a raw DB/library
+ * error can echo SQL or user values — so collapse whitespace and cap length.
+ */
+function sanitizeToolError(message: string): string {
+  const oneLine = message.replace(/\s+/g, ' ').trim()
+  return oneLine.length > 160 ? `${oneLine.slice(0, 157)}…` : oneLine
+}
+
 interface AgentResult {
   answer: string
   model: string
@@ -206,6 +216,7 @@ async function runAgent(
   signal: AbortSignal
 ): Promise<AgentResult> {
   const db = getDb()
+  const sqlite = getRawSqlite()
   const messages: LlmMessage[] = [...history, { role: 'user', content: question }]
   const toolCalls: Array<{ name: string; ok: boolean }> = []
   const proposalIds: string[] = []
@@ -243,7 +254,7 @@ async function runAgent(
       // Execute each requested tool and feed results back.
       const resultBlocks: AnthropicContentBlock[] = []
       for (const tu of res.toolUses) {
-        const out = executeAssistantTool(db, tu.name, tu.input)
+        const out = executeAssistantTool(db, sqlite, tu.name, tu.input)
         toolCalls.push({ name: tu.name, ok: out.ok })
         if (out.ok) {
           const data = out.data as { proposalId?: string }
@@ -252,7 +263,10 @@ async function runAgent(
         resultBlocks.push({
           type: 'tool_result',
           tool_use_id: tu.id,
-          content: JSON.stringify(out.ok ? out.data : { error: out.error }),
+          // Sanitize failures before they reach the provider: raw DB/library
+          // errors can carry SQL fragments or user values. Send a short, scrubbed
+          // message only (full detail stays local via the toolCalls trace).
+          content: JSON.stringify(out.ok ? out.data : { error: sanitizeToolError(out.error) }),
           is_error: !out.ok
         })
       }
