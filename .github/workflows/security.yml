@@ -10,8 +10,8 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -23,7 +23,7 @@ jobs:
       - name: Knip — dead deps surface attack
         run: npx knip --no-progress --reporter codeclimate > knip-report.json || true
       - name: Upload knip report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: knip-report
           path: knip-report.json
