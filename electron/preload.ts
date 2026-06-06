@@ -174,6 +174,11 @@ const api = {
     getEvents: (start: string, end: string) => ipcRenderer.invoke('calendar:get-events', start, end)
   },
 
+  // --- Morning Brief digest ---
+  morningBrief: {
+    get: () => ipcRenderer.invoke('morning-brief:get')
+  },
+
   // --- GitHub Items ---
   github: {
     getItems: (state?: string) => ipcRenderer.invoke('github:get-items', state)

@@ -18,7 +18,7 @@
 | **Phase 4** — Finance forward roadmap | 8 items | 4.0–4.6 shipped; 4.7 closed early (Plaid is source of truth as of 2026-05-21; Excel pipeline retired) |
 | **Phase 5 (cont.)** — Bounded UX wins | 5 items | 100% (5.10–5.14 shipped) |
 | **Phase 6** — Code-health debt (May 2026) | 5 items | 100% — 6.1 IPC test backfill (vault/auth/finance×3/sync/knowledge/settings/spotlight/habits/updater), 6.2 knowledge tests, 6.3 empty-catch sweep, 6.4 Biome 0-warning + `--error-on-warnings` CI gate (#139), 6.5 type-safety audit all shipped |
-| **Phase 7** — Daily-Driver & Platform Roadmap | 6 tracks | **Proposed** — expert-recommended; not yet scheduled (see § Phase 7 + README roadmap) |
+| **Phase 7** — Daily-Driver & Platform Roadmap | 6 tracks | **Scheduled (2026-06-06).** Track A started: **Morning Brief digest shipped** (`morning-brief:get` aggregator + Dashboard card); remaining Track A (evening/weekly review, global+voice quick-capture) + Tracks B–F still open. See § Phase 7. |
 | **Phase 8** — Claude Integration (bidirectional) | 6 items | **8.1, 8.2, 8.4, 8.5, 8.6 shipped** (MCP read+propose tools, in-app Claude Inbox, end-user plugin, 5 skills, agentic Ask Compass); only 8.3 (one-click DXT bundle) remains — see § Phase 8 + [`claude-integration.md`](claude-integration.md) |
 
 PRD-completion of the running app: **~99%** (all Phases 1–3 + Phase 4.0–4.5 merged with UIs).
@@ -303,12 +303,12 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 
 ---
 
-## Phase 7 — Daily-Driver & Platform Roadmap (Proposed)
+## Phase 7 — Daily-Driver & Platform Roadmap
 
-> **Status: proposed, not scheduled.** Output of a May-2026 "expert-team" evaluation (Product Strategy, Growth/Retention, Integrations, Platform/Ecosystem, Privacy/Security & Mobile) of what turns Compass from a powerful tool into something people open *every day* — and into a platform. Mirrored in the README roadmap. Compass is **100% local today**; items tagged **(opt-in cloud)** are a deliberate, clearly-bounded departure from local-only — always opt-in, never default. Sizes are rough order-of-magnitude (S/M/L/XL).
+> **Status: SCHEDULED (2026-06-06).** Track A is underway (Morning Brief shipped); the rest remains the prioritized backlog below. Output of a May-2026 "expert-team" evaluation (Product Strategy, Growth/Retention, Integrations, Platform/Ecosystem, Privacy/Security & Mobile) of what turns Compass from a powerful tool into something people open *every day* — and into a platform. Mirrored in the README roadmap. Compass is **100% local today**; items tagged **(opt-in cloud)** are a deliberate, clearly-bounded departure from local-only — always opt-in, never default. Sizes are rough order-of-magnitude (S/M/L/XL).
 
 ### Track A — Daily-driver hook (retention)
-- [ ] **Morning Brief digest** (M) — one card unifying today's calendar + due tasks + finance alerts (low-cash, payments due, price hikes) + inbox action items; optional system-notification at a chosen time. *Why: gives a reason to open the app first thing.*
+- [x] **Morning Brief digest** (M) — **shipped 2026-06-06.** Single server-side aggregator `morning-brief:get` (`electron/ipc/morning-brief.ts`, 100% covered) returning today's calendar events (local-day window) + unchecked daily tasks + debt payments due ≤7 days + unresolved Gmail inbox actions + a one-line summary; rendered as a glanceable card atop the Dashboard (`src/components/MorningBrief.tsx`). `buildMorningBrief(db, now)` is exported for reuse. *Follow-up (not yet built): the optional system-notification at a chosen time + low-cash/price-hike finance alerts (needs the forecast + subscription-audit feeds wired in).*
 - [ ] **Evening / weekly review ritual** (M) — extend the Weekly page into a guided close-out (wins, blockers, carry-over) + a monthly rollup. *Why: habitual return cadence.*
 - [ ] **Global + voice quick-capture** (M) — expand the tray quick-capture into a system-wide capture bar (note / task / expense) with optional voice-to-text. *Why: friction-free capture is the #1 PKM retention driver.*
 
