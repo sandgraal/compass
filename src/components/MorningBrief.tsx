@@ -98,8 +98,11 @@ export function MorningBrief(): JSX.Element | null {
               {s.count}
             </p>
             <ul className="mt-1.5 space-y-0.5">
-              {s.lines.slice(0, 3).map((line) => (
-                <li key={line} className="text-xs text-muted-foreground truncate">
+              {s.lines.slice(0, 3).map((line, idx) => (
+                // Section-scoped positional key: line text isn't guaranteed
+                // unique (duplicate titles/subjects/times are plausible), and
+                // these lists are static per render (never reordered).
+                <li key={`${s.key}-${idx}`} className="text-xs text-muted-foreground truncate">
                   {line}
                 </li>
               ))}

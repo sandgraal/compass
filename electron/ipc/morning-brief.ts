@@ -153,7 +153,7 @@ export function buildMorningBrief(
     })
     .sort((a, b) => (a.paymentDueDate < b.paymentDueDate ? -1 : 1))
 
-  const payments = { count: payItems.length, items: payItems }
+  const payments = { count: payItems.length, items: payItems.slice(0, MAX_PER_SECTION) }
 
   // ── Unresolved inbox (Gmail) actions ────────────────────────────────────────
   const inboxRows = db.select().from(gmailActions).where(eq(gmailActions.done, false)).all()

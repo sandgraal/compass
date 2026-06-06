@@ -212,11 +212,24 @@ describe('buildMorningBrief', () => {
     expect(brief.summary).toBe('1 event today · 1 task due')
   })
 
-  it('caps each section at 5 items but keeps the true counts', async () => {
-    for (let i = 0; i < 8; i++) seedTask(`task ${i}`, '2026-05-15', { sortOrder: i })
+  it('caps every section at 5 items but keeps the true counts', async () => {
+    for (let i = 0; i < 8; i++) {
+      seedTask(`task ${i}`, '2026-05-15', { sortOrder: i })
+      seedEvent(`event ${i}`, new Date(2026, 4, 15, 8, i, 0))
+      seedGmail(`inbox ${i}`)
+    }
+    // 6 debts, each due on a distinct day within the 7-day window (05-15..05-21).
+    for (let i = 0; i < 6; i++) seedDebt(`debt ${i}`, `2026-05-${15 + i}`)
+
     const brief = await buildAt(NOW)
     expect(brief.tasks.dueCount).toBe(8)
     expect(brief.tasks.items).toHaveLength(5)
+    expect(brief.calendar.count).toBe(8)
+    expect(brief.calendar.events).toHaveLength(5)
+    expect(brief.inbox.count).toBe(8)
+    expect(brief.inbox.items).toHaveLength(5)
+    expect(brief.payments.count).toBe(6)
+    expect(brief.payments.items).toHaveLength(5)
   })
 })
 
