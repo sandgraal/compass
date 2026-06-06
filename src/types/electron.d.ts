@@ -161,6 +161,34 @@ declare global {
     createdAt: Date
   }
 
+  interface MorningBrief {
+    date: string
+    greeting: string
+    calendar: {
+      count: number
+      events: Array<{ title: string; startAt: string | null; allDay: boolean }>
+    }
+    tasks: {
+      dueCount: number
+      items: Array<{ id: number; title: string; category: string | null }>
+    }
+    payments: {
+      count: number
+      items: Array<{
+        id: number
+        name: string
+        paymentDueDate: string
+        daysRemaining: number
+        minPayment: number
+      }>
+    }
+    inbox: {
+      count: number
+      items: Array<{ id: number; subject: string; from: string }>
+    }
+    summary: string
+  }
+
   interface Habit {
     id: number
     name: string
@@ -481,6 +509,9 @@ declare global {
       }
       calendar: {
         getEvents(start: string, end: string): Promise<CalendarEvent[]>
+      }
+      morningBrief: {
+        get(): Promise<MorningBrief>
       }
       github: {
         getItems(state?: string): Promise<GitHubItem[]>

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { MorningBrief } from '../components/MorningBrief'
 import { cn, formatRelative, formatTime, todayISO } from '../lib/utils'
 
 interface DashStat {
@@ -172,6 +173,9 @@ export default function Dashboard(): JSX.Element {
           Sync now
         </button>
       </div>
+
+      {/* Morning Brief — one glanceable digest of what matters today */}
+      <MorningBrief />
 
       {/* Stats row */}
       <div className="grid grid-cols-4 gap-4 mb-8">
