@@ -131,18 +131,22 @@ export default function Weekly(): JSX.Element {
 
   async function handleCarryOver() {
     if (typeof window === 'undefined' || !window.api?.weeklyReview) return
-    const res = await window.api.weeklyReview.carryOver(isoDate(weekStart))
-    if (res.success) {
-      const n = res.carried ?? 0
-      toast(
-        n > 0
-          ? `Carried ${n} unfinished task${n === 1 ? '' : 's'} to today`
-          : 'Nothing to carry over',
-        n > 0 ? 'success' : 'info'
-      )
-      setReloadNonce((v) => v + 1)
-    } else {
-      toast(res.error ?? 'Carry-over failed', 'error')
+    try {
+      const res = await window.api.weeklyReview.carryOver(isoDate(weekStart))
+      if (res.success) {
+        const n = res.carried ?? 0
+        toast(
+          n > 0
+            ? `Carried ${n} unfinished task${n === 1 ? '' : 's'} to today`
+            : 'Nothing to carry over',
+          n > 0 ? 'success' : 'info'
+        )
+        setReloadNonce((v) => v + 1)
+      } else {
+        toast(res.error ?? 'Carry-over failed', 'error')
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Carry-over failed', 'error')
     }
   }
 

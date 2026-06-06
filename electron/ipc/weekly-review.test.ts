@@ -70,13 +70,27 @@ afterEach(() => {
 function seed(
   listDate: string,
   title: string,
-  opts: { checked?: boolean; source?: string; listType?: string } = {}
+  opts: {
+    checked?: boolean
+    source?: string
+    listType?: string
+    body?: string | null
+    sortOrder?: number
+  } = {}
 ) {
   sqlite
     .prepare(
-      'INSERT INTO checklist_items (list_type, list_date, title, checked, source, created_at) VALUES (?, ?, ?, ?, ?, 0)'
+      'INSERT INTO checklist_items (list_type, list_date, title, checked, source, body, sort_order, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
     )
-    .run(opts.listType ?? 'daily', listDate, title, opts.checked ? 1 : 0, opts.source ?? 'manual')
+    .run(
+      opts.listType ?? 'daily',
+      listDate,
+      title,
+      opts.checked ? 1 : 0,
+      opts.source ?? 'manual',
+      opts.body ?? null,
+      opts.sortOrder ?? 0
+    )
 }
 
 // Reference week: 2026-05-11 .. 2026-05-17 (the aggregator is day-of-week
@@ -189,6 +203,18 @@ describe('weekly-review:carry-over handler', () => {
     expect(moved.map((m) => m.title)).toEqual(['A', 'B'])
   })
 
+  it('preserves body + sortOrder when carrying a task forward', async () => {
+    seed('2026-05-12', 'Detailed task', { body: 'sub-steps here', sortOrder: 7 })
+    const h = await registerAndGet('weekly-review:carry-over')
+    await invoke(h, WEEK, '2026-05-20')
+    const row = sqlite
+      .prepare(
+        "SELECT body, sort_order FROM checklist_items WHERE list_date = '2026-05-20' AND title = 'Detailed task'"
+      )
+      .get() as { body: string; sort_order: number }
+    expect(row).toEqual({ body: 'sub-steps here', sort_order: 7 })
+  })
+
   it('is idempotent — skips titles already present on the target day', async () => {
     seedReferenceWeek()
     const h = await registerAndGet('weekly-review:carry-over')
@@ -219,5 +245,20 @@ describe('weekly-review:carry-over handler', () => {
   it('rejects a malformed weekStart', async () => {
     const h = await registerAndGet('weekly-review:carry-over')
     expect(await invoke(h, 'garbage', '2026-05-20')).toMatchObject({ success: false })
+  })
+
+  it('rejects an explicitly-provided invalid toDate (no silent fallback to today)', async () => {
+    seedReferenceWeek()
+    const h = await registerAndGet('weekly-review:carry-over')
+    const res = (await invoke(h, WEEK, 'not-a-date')) as { success: boolean; error?: string }
+    expect(res.success).toBe(false)
+    expect(res.error).toMatch(/toDate/i)
+    // Nothing was carried anywhere.
+    const total = sqlite
+      .prepare(
+        "SELECT COUNT(*) c FROM checklist_items WHERE list_date NOT BETWEEN '2026-05-04' AND '2026-05-18'"
+      )
+      .get() as { c: number }
+    expect(total.c).toBe(0)
   })
 })

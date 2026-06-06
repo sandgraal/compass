@@ -66,6 +66,8 @@ type DailyRow = {
   checked: boolean | null
   category: string | null
   source: string | null
+  body: string | null
+  sortOrder: number | null
 }
 
 function dailyRowsForKeys(db: ReturnType<typeof getDb>, keys: string[]): DailyRow[] {
@@ -76,7 +78,9 @@ function dailyRowsForKeys(db: ReturnType<typeof getDb>, keys: string[]): DailyRo
       listDate: checklistItems.listDate,
       checked: checklistItems.checked,
       category: checklistItems.category,
-      source: checklistItems.source
+      source: checklistItems.source,
+      body: checklistItems.body,
+      sortOrder: checklistItems.sortOrder
     })
     .from(checklistItems)
     .where(and(eq(checklistItems.listType, 'daily'), inArray(checklistItems.listDate, keys)))
@@ -152,7 +156,16 @@ export function registerWeeklyReviewHandlers(ipcMain: IpcMain): void {
       toDate: unknown
     ): { success: boolean; carried?: number; error?: string } => {
       if (!isValidYmd(weekStart)) return { success: false, error: 'Invalid weekStart date' }
-      const target = isValidYmd(toDate) ? toDate : localYmd()
+      // Omitted toDate → default to today. An explicitly-provided but invalid
+      // toDate is an error (don't silently retarget the user's tasks).
+      let target: string
+      if (toDate === undefined || toDate === null) {
+        target = localYmd()
+      } else if (isValidYmd(toDate)) {
+        target = toDate
+      } else {
+        return { success: false, error: 'Invalid toDate' }
+      }
 
       const db = getDb()
       const keys = weekDayKeys(weekStart)
@@ -177,7 +190,9 @@ export function registerWeeklyReviewHandlers(ipcMain: IpcMain): void {
             listType: 'daily',
             listDate: target,
             title: item.title,
+            body: item.body,
             category: item.category ?? 'personal',
+            sortOrder: item.sortOrder ?? 0,
             source: 'manual',
             createdAt: new Date()
           })
