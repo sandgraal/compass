@@ -38,8 +38,8 @@ jobs:
         run: npx knip --no-progress
         continue-on-error: true
 
-      - name: Vitest
-        run: npm run test:run
+      - name: Vitest (with coverage thresholds)
+        run: npm run test:coverage
 
       - name: Build
         run: npm run build
