@@ -18,7 +18,8 @@
  *   - checklist:quick-add     → empty-title guard, today's date, 500-char clamp
  *
  * Only the off-DB collaborators are mocked (electron, cron, ollama, menu-bar);
- * localYmd + the DB are real.
+ * the DB is real. quick-add's "today" stamp is made deterministic by pinning
+ * the clock with vi.useFakeTimers rather than mocking the date helper.
  */
 
 import Database from 'better-sqlite3'
@@ -26,7 +27,6 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import type { IpcMain } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as schema from '../db/schema'
-import { localYmd } from '../lib/dates'
 
 let sqlite: Database.Database
 
@@ -275,6 +275,5 @@ describe('checklist:quick-add', () => {
     } finally {
       vi.useRealTimers()
     }
-  })
   })
 })
