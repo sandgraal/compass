@@ -189,6 +189,21 @@ declare global {
     summary: string
   }
 
+  interface WeeklyReview {
+    weekStart: string
+    weekEnd: string
+    totalTasks: number
+    completedTasks: number
+    completionPct: number
+    prevCompletionPct: number | null
+    deltaPct: number | null
+    perDay: Array<{ date: string; total: number; done: number }>
+    carryOver: {
+      count: number
+      items: Array<{ id: number; title: string; listDate: string; category: string | null }>
+    }
+  }
+
   interface Habit {
     id: number
     name: string
@@ -512,6 +527,13 @@ declare global {
       }
       morningBrief: {
         get(): Promise<MorningBrief>
+      }
+      weeklyReview: {
+        get(weekStart: string): Promise<WeeklyReview>
+        carryOver(
+          weekStart: string,
+          toDate?: string
+        ): Promise<{ success: boolean; carried?: number; error?: string }>
       }
       github: {
         getItems(state?: string): Promise<GitHubItem[]>

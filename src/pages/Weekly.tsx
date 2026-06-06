@@ -7,8 +7,16 @@ import {
   startOfWeek,
   subWeeks
 } from 'date-fns'
-import { Calendar, CheckSquare, ChevronLeft, ChevronRight, GitBranch } from 'lucide-react'
+import {
+  ArrowRight,
+  Calendar,
+  CheckSquare,
+  ChevronLeft,
+  ChevronRight,
+  GitBranch
+} from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useToast } from '../components/ui/Toast'
 import { cn, isoDate } from '../lib/utils'
 
 export default function Weekly(): JSX.Element {
@@ -19,6 +27,10 @@ export default function Weekly(): JSX.Element {
   const [goals, setGoals] = useState(['', '', ''])
   const [reflection, setReflection] = useState({ wellDone: '', blockers: '', next: '' })
   const [prevCompletionPct, setPrevCompletionPct] = useState<number | null>(null)
+  // Carry-over: count of unfinished manual tasks this week (from weekly-review:get).
+  const [carryOverCount, setCarryOverCount] = useState(0)
+  const [reloadNonce, setReloadNonce] = useState(0)
+  const { toast } = useToast()
 
   const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 })
   const days = eachDayOfInterval({ start: weekStart, end: weekEnd })
@@ -51,6 +63,12 @@ export default function Weekly(): JSX.Element {
       setEvents(results[7] as CalendarEvent[])
       setGithubItems(results[8] as GitHubItem[])
 
+      // Weekly review close-out stats (carry-over candidates).
+      window.api.weeklyReview
+        ?.get(isoDate(weekStart))
+        .then((r) => setCarryOverCount(r.carryOver.count))
+        .catch(() => setCarryOverCount(0))
+
       const s = results[9] as Record<string, string>
       const savedGoals = s[`weekly_goals_${weekKey}`]
       const savedReflection = s[`weekly_reflection_${weekKey}`]
@@ -75,7 +93,7 @@ export default function Weekly(): JSX.Element {
         setPrevCompletionPct(null)
       }
     })
-  }, [weekStart])
+  }, [weekStart, reloadNonce])
 
   const goalsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reflectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -110,6 +128,27 @@ export default function Weekly(): JSX.Element {
     },
     [weekKey]
   )
+
+  async function handleCarryOver() {
+    if (typeof window === 'undefined' || !window.api?.weeklyReview) return
+    try {
+      const res = await window.api.weeklyReview.carryOver(isoDate(weekStart))
+      if (res.success) {
+        const n = res.carried ?? 0
+        toast(
+          n > 0
+            ? `Carried ${n} unfinished task${n === 1 ? '' : 's'} to today`
+            : 'Nothing to carry over',
+          n > 0 ? 'success' : 'info'
+        )
+        setReloadNonce((v) => v + 1)
+      } else {
+        toast(res.error ?? 'Carry-over failed', 'error')
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Carry-over failed', 'error')
+    }
+  }
 
   const totalTasks = Object.values(allItems).flat().length
   const completedTasks = Object.values(allItems)
@@ -354,7 +393,19 @@ export default function Weekly(): JSX.Element {
 
       {/* Weekly review */}
       <div className="bg-card border border-border rounded-xl p-5">
-        <h3 className="text-sm font-semibold mb-4">Weekly Review</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold">Weekly Review</h3>
+          {carryOverCount > 0 && (
+            <button
+              type="button"
+              onClick={handleCarryOver}
+              className="flex items-center gap-1.5 text-xs text-primary hover:bg-primary/10 px-2.5 py-1.5 rounded-lg transition-colors"
+            >
+              <ArrowRight size={13} />
+              Carry {carryOverCount} unfinished task{carryOverCount === 1 ? '' : 's'} to today
+            </button>
+          )}
+        </div>
         <div className="grid grid-cols-3 gap-4">
           {[
             { key: 'wellDone', label: '✅ What went well?' },
