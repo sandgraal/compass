@@ -91,7 +91,7 @@ Modern (Nov 2025+) Claude Code best practice splits guidance into 4 layers. This
 ### 0.7 Tooling — leading-edge stack
 **Lint + format**: [x] Biome [x] Oxlint (CI fast-layer) [x] ESLint (React-only minimal config) [x] Knip
 **Hooks**: [x] Lefthook (replaces Husky)
-**Tests**: [x] Vitest [x] Playwright (E2E) [ ] coverage 70% on `electron/ipc/` + `electron/knowledge/`
+**Tests**: [x] Vitest [x] Playwright (E2E) [x] coverage 70% on `electron/ipc/` + `electron/knowledge/` — **met** as of 2026-06-06: `electron/ipc` 70.8% lines / 82% funcs / 83% branches, `electron/knowledge` 85% lines (thresholds live in `vitest.config.ts`; backfilled via the search/backup/assistant/finance/sync handler suites). CI enforcement (swap the `test:run` step for `test:coverage`) is intentionally deferred until a wider margin lands — at 70.8% the buffer is thin, so flipping it now would let a single untested handler in an unrelated PR break CI. Flip it LAST, like the Biome gate, once `assistant.ts` ask/agent + `auth.ts`/`settings.ts` coverage builds headroom.
 **Type safety**: [x] `npm run typecheck` script [ ] electron-trpc (incremental adoption)
 **Dependency hygiene**: [x] Renovate [ ] syncpack [x] remove `react-beautiful-dnd`
 **Release**: [x] Changesets [x] electron-updater auto-update (GitHub Actions CI pipeline — `npm version patch && git push --follow-tags`)
