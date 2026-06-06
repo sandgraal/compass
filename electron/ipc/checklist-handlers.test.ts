@@ -259,15 +259,22 @@ describe('checklist:quick-add', () => {
   })
 
   it('adds a daily item dated today, capped at 500 chars', async () => {
-    const h = await registerAndGet('checklist:quick-add')
-    const longTitle = 'x'.repeat(600)
-    expect(await invoke(h, longTitle)).toEqual({ success: true })
-    const row = sqlite
-      .prepare('SELECT list_type, list_date, title, sort_order FROM checklist_items')
-      .get() as { list_type: string; list_date: string; title: string; sort_order: number }
-    expect(row.list_type).toBe('daily')
-    expect(row.list_date).toBe(localYmd())
-    expect(row.title).toHaveLength(500)
-    expect(row.sort_order).toBe(999)
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-10T08:00:00'))
+    try {
+      const h = await registerAndGet('checklist:quick-add')
+      const longTitle = 'x'.repeat(600)
+      expect(await invoke(h, longTitle)).toEqual({ success: true })
+      const row = sqlite
+        .prepare('SELECT list_type, list_date, title, sort_order FROM checklist_items')
+        .get() as { list_type: string; list_date: string; title: string; sort_order: number }
+      expect(row.list_type).toBe('daily')
+      expect(row.list_date).toBe('2026-05-10')
+      expect(row.title).toHaveLength(500)
+      expect(row.sort_order).toBe(999)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
   })
 })
