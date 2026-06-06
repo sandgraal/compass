@@ -390,11 +390,7 @@ describe('syncAppleCalendar', () => {
     expect(stored.title).toBe('(No title)')
   })
 
-  it('records error + flips integration to status=error when the reader throws', async () => {
-    // NOTE: the error path uses a plain UPDATE (not insert-on-conflict), so an
-    // existing integration row is required for the status flip to be observable.
-    // First-ever sync failures on an unseen service silently no-op — flagged
-    // as a latent behavior for follow-up but locking down current behavior here.
+  it('records error + flips an existing integration row to status=error when the reader throws', async () => {
     seedIntegration('apple-calendar')
     readAppleCalendarsMock.mockImplementation(() => {
       throw new Error('calendar locked')
@@ -410,6 +406,29 @@ describe('syncAppleCalendar', () => {
     expect(rowCount('sync_events')).toBe(1)
     const ev = sqlite.prepare('SELECT errors FROM sync_events').get() as { errors: string }
     expect(ev.errors).toBe('calendar locked')
+  })
+
+  it('creates the integration row on a first-ever sync failure (no connect flow exists)', async () => {
+    // Regression guard: Apple Calendar has no auth/connect step, so the very
+    // first sync attempt may fail before any row exists. The error path must
+    // upsert (not plain-UPDATE) so the failure surfaces as a status=error row
+    // plus a logged sync_event — rather than vanishing silently.
+    expect(rowCount('integrations')).toBe(0)
+    readAppleCalendarsMock.mockImplementation(() => {
+      throw new Error('first run, no permission yet')
+    })
+    const { syncAppleCalendar } = await loadSync()
+    const result = await syncAppleCalendar()
+    expect(result).toEqual({
+      service: 'apple-calendar',
+      success: false,
+      error: 'first run, no permission yet'
+    })
+    expect(integrationStatus('apple-calendar')).toEqual({
+      status: 'error',
+      error_message: 'first run, no permission yet'
+    })
+    expect(rowCount('sync_events')).toBe(1)
   })
 
   it('does not fire a notification when no events were read (0 records, no error)', async () => {

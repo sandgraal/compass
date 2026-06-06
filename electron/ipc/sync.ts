@@ -409,9 +409,18 @@ export async function syncAppleCalendar(mainWindow?: BrowserWindow | null): Prom
     return { service: 'apple-calendar', success: true, recordsUpdated }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    db.update(integrations)
-      .set({ status: 'error', errorMessage: message })
-      .where(eq(integrations.service, 'apple-calendar'))
+    // Upsert (not a plain UPDATE): Apple Calendar has no connect/auth flow, so
+    // its integration row is only ever created by the success path above. If the
+    // very first sync fails before that ever ran, a plain UPDATE would match no
+    // row and the failure would vanish — no status flip, and getIntegrationId
+    // would return null so no sync_event would be logged either. Mirror the
+    // success-path upsert so a first-time failure still surfaces.
+    db.insert(integrations)
+      .values({ service: 'apple-calendar', status: 'error', errorMessage: message })
+      .onConflictDoUpdate({
+        target: integrations.service,
+        set: { status: 'error', errorMessage: message }
+      })
       .run()
     integrationId = getIntegrationId(db, 'apple-calendar')
     if (integrationId != null) {
