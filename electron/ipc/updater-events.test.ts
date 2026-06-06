@@ -43,7 +43,10 @@ vi.mock('electron', () => ({
 }))
 
 const checkForUpdatesMock = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined)
-const listeners = new Map<string, (arg: unknown) => void>()
+// Model the real EventEmitter: `on` STACKS listeners per event. A Map<event,
+// single-listener> would hide a duplicate-registration bug (the overwrite
+// would keep just one), defeating the "registers only once" test.
+const listeners = new Map<string, Array<(arg: unknown) => void>>()
 const autoUpdaterMock = {
   logger: null as unknown,
   autoDownload: true,
@@ -51,7 +54,9 @@ const autoUpdaterMock = {
   checkForUpdates: checkForUpdatesMock,
   quitAndInstall: vi.fn(),
   on: (event: string, listener: (arg: unknown) => void) => {
-    listeners.set(event, listener)
+    const existing = listeners.get(event) ?? []
+    existing.push(listener)
+    listeners.set(event, existing)
   }
 }
 vi.mock('electron-updater', () => ({ autoUpdater: autoUpdaterMock }))
@@ -64,10 +69,12 @@ async function freshInit() {
   return mod
 }
 
+// Invoke EVERY listener registered for the event — so a duplicate registration
+// (e.g. a broken once-only guard) surfaces as extra push() calls.
 function fire(event: string, arg?: unknown): void {
-  const l = listeners.get(event)
-  if (!l) throw new Error(`listener not registered: ${event}`)
-  l(arg)
+  const ls = listeners.get(event)
+  if (!ls || ls.length === 0) throw new Error(`listener not registered: ${event}`)
+  for (const l of ls) l(arg)
 }
 
 beforeEach(() => {
