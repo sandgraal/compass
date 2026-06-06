@@ -825,6 +825,7 @@ function AskCompassSettings(): JSX.Element {
     setAskStatus(s)
   }
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only fetch
   useEffect(() => {
     void refresh()
   }, [])
@@ -1156,6 +1157,7 @@ function ShortcutRecorder(): JSX.Element {
   }
 
   // Capture keydown while in recording mode
+  // biome-ignore lint/correctness/useExhaustiveDependencies: handlers re-read on each recording cycle; only `recording` should re-attach the listener
   useEffect(() => {
     if (!recording) return
 
@@ -1180,7 +1182,7 @@ function ShortcutRecorder(): JSX.Element {
 
     window.addEventListener('keydown', onKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
-  }, [recording]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [recording])
 
   return (
     <div className="flex items-center gap-2">
@@ -1239,6 +1241,7 @@ function SpotlightMirrorSettings(): JSX.Element {
     setPathDraft(s.path)
   }
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only fetch
   useEffect(() => {
     void refresh()
   }, [])

@@ -163,6 +163,7 @@ export default function KnowledgeBase(): JSX.Element {
   // inside the editor and route to selectFile() instead of letting the
   // browser navigate. Resolves the target to a real .md path using the
   // current file index — title-match wins, then basename, then full path.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-attach on editor mount/swap; `editor` listed to retrigger when TipTap instance changes
   useEffect(() => {
     const editorRoot = document.querySelector('.tiptap-editor') as HTMLElement | null
     if (!editorRoot) return
@@ -335,6 +336,7 @@ export default function KnowledgeBase(): JSX.Element {
 
   // Auto-save on content change (debounced)
   const debouncedContent = useDebounce(content, 2000)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally fires on debounced content only; saveContent reads the latest selectedPath
   useEffect(() => {
     if (debouncedContent && selectedPath) saveContent()
   }, [debouncedContent])
@@ -1098,6 +1100,7 @@ function DiffView({ oldText, newText }: { oldText: string; newText: string }): J
     if (!shown.has(idx)) return
     if (prevIdx >= 0 && idx > prevIdx + 1) {
       chunks.push(
+        // biome-ignore lint/suspicious/noArrayIndexKey: diff renderer — line position IS the identity
         <div key={`gap-${idx}`} className="px-4 py-0.5 text-xs text-muted-foreground/40">
           ···
         </div>
@@ -1106,6 +1109,7 @@ function DiffView({ oldText, newText }: { oldText: string; newText: string }): J
     prevIdx = idx
     chunks.push(
       <div
+        // biome-ignore lint/suspicious/noArrayIndexKey: diff renderer — line position IS the identity
         key={idx}
         className={cn(
           'px-4 py-0.5 font-mono text-xs whitespace-pre-wrap',

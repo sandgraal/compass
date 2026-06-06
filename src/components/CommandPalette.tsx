@@ -393,6 +393,7 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
         filtered[selectedIdx]?.action()
       }
     },
+    // biome-ignore lint/correctness/useExhaustiveDependencies: `filtered` is re-derived per render; handler must close over the current value
     [open, filtered, selectedIdx, onClose]
   )
 

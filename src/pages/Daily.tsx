@@ -78,9 +78,20 @@ export default function Daily(): JSX.Element {
   const dateStr = isoDate(date)
   const isToday = dateStr === todayISO()
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: loadData closes over `date`; re-run when date changes
   useEffect(() => {
     loadData()
   }, [date])
+
+  // Close the template modal on Escape (the backdrop button handles mouse close)
+  useEffect(() => {
+    if (!templateOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setTemplateOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [templateOpen])
 
   // Listen for the ⌘K "New task" command
   useEffect(() => {
@@ -677,57 +688,64 @@ export default function Daily(): JSX.Element {
 
       {/* Template editor modal */}
       {templateOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
-          onClick={() => setTemplateOpen(false)}
-        >
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-          <div
-            className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <div>
-                <h2 className="text-sm font-semibold text-foreground">Daily Template</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Use <code className="text-primary">## Category</code> headings (morning, work,
-                  personal, evening) and <code className="text-primary">- [ ] Task</code> items
-                </p>
+        <>
+          <button
+            type="button"
+            aria-label="Close template editor"
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
+            onClick={() => setTemplateOpen(false)}
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+            {/* biome-ignore lint/a11y/useSemanticElements: native <dialog> requires imperative showModal(); declarative pattern kept */}
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Daily template editor"
+              className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden pointer-events-auto"
+            >
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                <div>
+                  <h2 className="text-sm font-semibold text-foreground">Daily Template</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Use <code className="text-primary">## Category</code> headings (morning, work,
+                    personal, evening) and <code className="text-primary">- [ ] Task</code> items
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setTemplateOpen(false)}
+                  className="p-1.5 rounded hover:bg-secondary text-muted-foreground"
+                >
+                  <X size={14} />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setTemplateOpen(false)}
-                className="p-1.5 rounded hover:bg-secondary text-muted-foreground"
-              >
-                <X size={14} />
-              </button>
-            </div>
-            <div className="p-5">
-              <textarea
-                value={templateContent}
-                onChange={(e) => setTemplateContent(e.target.value)}
-                className="w-full h-72 bg-secondary border border-border rounded-lg px-4 py-3 text-sm font-mono text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary resize-none"
-                spellCheck={false}
-              />
-            </div>
-            <div className="flex justify-end gap-2 px-5 py-4 border-t border-border">
-              <button
-                type="button"
-                onClick={() => setTemplateOpen(false)}
-                className="text-sm px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={saveTemplate}
-                className="text-sm px-4 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-              >
-                Save template
-              </button>
+              <div className="p-5">
+                <textarea
+                  value={templateContent}
+                  onChange={(e) => setTemplateContent(e.target.value)}
+                  className="w-full h-72 bg-secondary border border-border rounded-lg px-4 py-3 text-sm font-mono text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary resize-none"
+                  spellCheck={false}
+                />
+              </div>
+              <div className="flex justify-end gap-2 px-5 py-4 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setTemplateOpen(false)}
+                  className="text-sm px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={saveTemplate}
+                  className="text-sm px-4 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+                >
+                  Save template
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   )
