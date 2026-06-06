@@ -5,11 +5,13 @@ import { schedulePlaidDailySync, stopPlaidDailySync } from './cron-plaid'
 import { getDb, getRawSqlite } from './db/client'
 import { appSettings, integrations } from './db/schema'
 import { captureSnapshots } from './integrations/finance-snapshot'
+import { morningBriefCronExpr, notifyMorningBrief } from './ipc/morning-brief'
 import { syncAppleCalendar, syncGitHub, syncGoogle } from './ipc/sync'
 
 // Map of service name -> active scheduled task (so we can stop/restart per integration).
 const scheduledTasks = new Map<string, cron.ScheduledTask>()
 let snapshotTask: cron.ScheduledTask | null = null
+let morningBriefTask: cron.ScheduledTask | null = null
 
 // Daily at 00:05 local time. Runs the net-worth balance snapshot pass for
 // every account. Idempotent — captureSnapshots() skips accounts that
@@ -29,6 +31,37 @@ function scheduleFinanceSnapshot(): void {
   snapshotTask?.stop()
   snapshotTask = cron.schedule(SNAPSHOT_CRON, runFinanceSnapshot)
   snapshotTask.start()
+}
+
+// Daily Morning Brief notification at the user-chosen local time
+// (`morningBriefNotifyTime` = "HH:MM", or empty/off). Best-effort: a failure
+// to read the setting or build the digest must never crash the scheduler.
+function scheduleMorningBrief(): void {
+  morningBriefTask?.stop()
+  morningBriefTask = null
+  let time: string | null = null
+  try {
+    const db = getDb()
+    const row = db
+      .select()
+      .from(appSettings)
+      .where(eq(appSettings.key, 'morningBriefNotifyTime'))
+      .get()
+    time = row?.value ?? null
+  } catch (err) {
+    console.warn('[cron] read morningBriefNotifyTime failed; brief notification off', err)
+    return
+  }
+  const expr = morningBriefCronExpr(time)
+  if (!expr) return // off / invalid → no schedule
+  morningBriefTask = cron.schedule(expr, () => {
+    try {
+      notifyMorningBrief()
+    } catch (err) {
+      console.error('[cron] morning brief notification failed:', err)
+    }
+  })
+  morningBriefTask.start()
 }
 
 function getMainWindow(): BrowserWindow | undefined {
@@ -70,6 +103,8 @@ function stopAllJobs(): void {
   scheduledTasks.clear()
   snapshotTask?.stop()
   snapshotTask = null
+  morningBriefTask?.stop()
+  morningBriefTask = null
   // Plaid daily task is scheduled separately (see cron-plaid.ts for the
   // rationale on why it's not driven by the per-integration interval).
   stopPlaidDailySync()
@@ -136,6 +171,7 @@ export function startCronJobs(): void {
     console.warn('[cron] scheduling from integrations failed (DB not ready?)', err)
   }
   scheduleFinanceSnapshot()
+  scheduleMorningBrief()
   schedulePlaidDailySync()
 }
 

@@ -19,6 +19,21 @@ let sqlite: Database.Database
 
 vi.mock('../db/client', () => ({ getDb: () => drizzle(sqlite, { schema }) }))
 
+// electron Notification — a class (vitest 4 needs function/class under `new`),
+// with a spy ctor + show + settable isSupported.
+const notificationShowMock = vi.fn()
+const notificationCtorMock = vi.fn()
+const notificationIsSupportedMock = vi.fn(() => true)
+class MockNotification {
+  show = notificationShowMock
+  constructor(options: unknown) {
+    notificationCtorMock(options)
+  }
+}
+vi.mock('electron', () => ({
+  Notification: Object.assign(MockNotification, { isSupported: notificationIsSupportedMock })
+}))
+
 type Handler = (event: unknown, ...args: unknown[]) => unknown
 const handlers: Record<string, Handler> = {}
 const fakeIpcMain: Pick<IpcMain, 'handle'> = {
@@ -89,8 +104,14 @@ beforeEach(() => {
       done INTEGER DEFAULT 0,
       synced_at INTEGER
     );
+    CREATE TABLE app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER
+    );
   `)
   for (const k of Object.keys(handlers)) delete handlers[k]
+  notificationIsSupportedMock.mockReturnValue(true)
 })
 
 afterEach(() => {
@@ -250,5 +271,76 @@ describe('morning-brief:get handler', () => {
     })
     expect(['Good morning', 'Good afternoon', 'Good evening']).toContain(brief.greeting)
     expect(brief.summary).toBe('0 events today · 0 tasks due')
+  })
+})
+
+// ── morningBriefCronExpr ─────────────────────────────────────────────────────
+
+describe('morningBriefCronExpr', () => {
+  it('maps a valid HH:MM to a daily cron expression (M H * * *)', async () => {
+    const { morningBriefCronExpr } = await import('./morning-brief')
+    expect(morningBriefCronExpr('07:30')).toBe('30 7 * * *')
+    expect(morningBriefCronExpr('00:00')).toBe('0 0 * * *')
+    expect(morningBriefCronExpr('9:05')).toBe('5 9 * * *')
+    expect(morningBriefCronExpr('23:59')).toBe('59 23 * * *')
+  })
+
+  it('returns null when off (empty / null / undefined)', async () => {
+    const { morningBriefCronExpr } = await import('./morning-brief')
+    expect(morningBriefCronExpr('')).toBeNull()
+    expect(morningBriefCronExpr(null)).toBeNull()
+    expect(morningBriefCronExpr(undefined)).toBeNull()
+  })
+
+  it('returns null for malformed times', async () => {
+    const { morningBriefCronExpr } = await import('./morning-brief')
+    for (const bad of ['24:00', '25:30', '12:60', '7', '7:5', 'abc', '08:00x']) {
+      expect(morningBriefCronExpr(bad)).toBeNull()
+    }
+  })
+})
+
+// ── notifyMorningBrief ───────────────────────────────────────────────────────
+
+describe('notifyMorningBrief', () => {
+  async function notifyAt(now: Date) {
+    const { notifyMorningBrief } = await import('./morning-brief')
+    return notifyMorningBrief(drizzle(sqlite, { schema }), now)
+  }
+
+  it('fires a notification summarizing the day when something is actionable', async () => {
+    seedTask('Reply to Sam', '2026-05-15')
+    seedEvent('Standup', new Date(2026, 4, 15, 10, 0, 0))
+    const shown = await notifyAt(NOW)
+    expect(shown).toBe(true)
+    expect(notificationCtorMock).toHaveBeenCalledOnce()
+    const arg = notificationCtorMock.mock.calls[0][0] as { title: string; body: string }
+    expect(arg.title).toBe("Good morning — today's brief")
+    expect(arg.body).toBe('1 event today · 1 task due')
+    expect(notificationShowMock).toHaveBeenCalledOnce()
+  })
+
+  it('no-ops when nothing is actionable (empty day)', async () => {
+    const shown = await notifyAt(NOW)
+    expect(shown).toBe(false)
+    expect(notificationCtorMock).not.toHaveBeenCalled()
+  })
+
+  it('respects notificationsEnabled=false', async () => {
+    seedTask('Reply to Sam', '2026-05-15')
+    sqlite
+      .prepare("INSERT INTO app_settings (key, value) VALUES ('notificationsEnabled', 'false')")
+      .run()
+    const shown = await notifyAt(NOW)
+    expect(shown).toBe(false)
+    expect(notificationCtorMock).not.toHaveBeenCalled()
+  })
+
+  it('no-ops when the platform has no notification support', async () => {
+    seedTask('Reply to Sam', '2026-05-15')
+    notificationIsSupportedMock.mockReturnValue(false)
+    const shown = await notifyAt(NOW)
+    expect(shown).toBe(false)
+    expect(notificationCtorMock).not.toHaveBeenCalled()
   })
 })
