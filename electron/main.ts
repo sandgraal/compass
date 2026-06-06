@@ -20,6 +20,7 @@ import { registerSpotlightHandlers, startKnowledgeMirrorWatcher } from './ipc/sp
 import { registerSyncHandlers } from './ipc/sync'
 import { initAutoUpdater, registerUpdaterHandlers, scheduleUpdateChecks } from './ipc/updater'
 import { registerVaultHandlers } from './ipc/vault'
+import { registerWeeklyReviewHandlers } from './ipc/weekly-review'
 import { initMenuBar } from './menu-bar'
 import { APP_DATA_DIR, DATA_DIR, KNOWLEDGE_DIR, VAULT_DIR } from './paths'
 import { registerCompassUrlScheme } from './url-scheme'
@@ -141,6 +142,7 @@ app.whenReady().then(async () => {
   registerSpotlightHandlers(ipcMain)
   registerPlaidHandlers(ipcMain)
   registerMorningBriefHandlers(ipcMain)
+  registerWeeklyReviewHandlers(ipcMain)
 
   // Toggle content protection when navigating to/from vault
   ipcMain.on('vault:set-content-protection', (_event, enabled: boolean) => {

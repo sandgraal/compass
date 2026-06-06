@@ -179,6 +179,13 @@ const api = {
     get: () => ipcRenderer.invoke('morning-brief:get')
   },
 
+  // --- Weekly review ritual ---
+  weeklyReview: {
+    get: (weekStart: string) => ipcRenderer.invoke('weekly-review:get', weekStart),
+    carryOver: (weekStart: string, toDate?: string) =>
+      ipcRenderer.invoke('weekly-review:carry-over', weekStart, toDate)
+  },
+
   // --- GitHub Items ---
   github: {
     getItems: (state?: string) => ipcRenderer.invoke('github:get-items', state)
