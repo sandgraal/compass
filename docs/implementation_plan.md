@@ -268,11 +268,11 @@ Net Worth view has live balances waiting.
 Backfill that's accumulated as the project shipped fast. None individually critical; together they're worth a dedicated phase. See [`strategic-review-2026-05.md`](strategic-review-2026-05.md) §"Phase 6" for the full audit.
 
 ### 6.1 IPC test coverage backfill
-Originally most `electron/ipc/*.ts` modules lacked test coverage. The bulk shipped between PR #96 and #102 in May 2026. **What remains: `sync.ts` has no test at all, and `auth.ts` is only partially covered** — its PAT + Google-credentials handlers are tested (`auth-github-pat.test.ts`, `auth-google-creds.test.ts`), but the OAuth-flow handlers (`auth:connect-google`, `auth:connect-github`, `auth:disconnect`, `auth:get-status`, `auth:get-redirect-uris`) are not.
+Originally most `electron/ipc/*.ts` modules lacked test coverage. The bulk shipped between PR #96 and #102 in May 2026. **What remains: `auth.ts` is partially covered** — its PAT + Google-credentials handlers + `auth:disconnect` / `auth:get-status` / `auth:get-redirect-uris` are tested, but the OAuth-flow start handlers (`auth:connect-google`, `auth:connect-github`) are not.
 - [x] **P0** — `electron/ipc/vault.ts` (security-critical) — shipped via #96
-- [~] **P0** — `electron/ipc/auth.ts` — partial: PAT + Google-creds handlers covered (`auth-github-pat.test.ts`, `auth-google-creds.test.ts`); OAuth-flow handlers still uncovered
+- [~] **P0** — `electron/ipc/auth.ts` — partial: PAT + Google-creds + disconnect/get-status/get-redirect-uris covered (`auth-github-pat.test.ts`, `auth-google-creds.test.ts`, `auth.test.ts`); `auth:connect-google` and `auth:connect-github` OAuth-flow start handlers still uncovered (require browser interaction + loopback callback mocking)
 - [x] **P1** — `electron/ipc/finance.ts` (largest handler) — shipped via #102 (chunk 1/3 of 3)
-- [ ] **P1** — `electron/ipc/sync.ts` (no test)
+- [x] **P1** — `electron/ipc/sync.ts` — chunk 1 (`sync.test.ts`, 15 tests on `registerSyncHandlers` DB/validation handlers) shipped earlier; chunk 2 (`sync-providers.test.ts`, 30 tests on `syncGoogle` / `syncGitHub` / `syncAppleCalendar` / `runSuggestionExtractors` / `maybeSendNotification` / `sync:trigger` per-service / `sync:trigger-all`) shipped 2026-06-05. Lock-down of current behavior also surfaced a latent bug: the error-path of `syncAppleCalendar` uses a plain UPDATE on `integrations`, so the very first failed sync on an unseen service silently no-ops the status flip — documented in the test and worth a follow-up fix.
 - [x] **P1** — `electron/ipc/knowledge.ts` — shipped via #97
 - [x] **P2** — `electron/ipc/settings.ts` — shipped via #98
 - [x] **P2** — `electron/ipc/spotlight.ts` (integration coverage exists; handler seam backfill) — shipped via #101
