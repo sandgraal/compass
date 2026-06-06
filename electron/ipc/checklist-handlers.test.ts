@@ -26,7 +26,6 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import type { IpcMain } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as schema from '../db/schema'
-import { localYmd } from '../lib/dates'
 
 let sqlite: Database.Database
 
@@ -275,6 +274,5 @@ describe('checklist:quick-add', () => {
     } finally {
       vi.useRealTimers()
     }
-  })
   })
 })
