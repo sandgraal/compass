@@ -45,13 +45,24 @@ vi.mock('../db/client', () => ({
   getDb: () => drizzle(sqlite, { schema })
 }))
 
-// Electron: BrowserWindow.getAllWindows + Notification (with isSupported + show)
+// Electron: BrowserWindow.getAllWindows + Notification (with isSupported + show).
+// The handler does `new Notification(...).show()`. Under vitest 4 a `new` on an
+// arrow-returning vi.fn doesn't apply the returned object, so `.show` is
+// undefined and the construct silently no-ops. Use a real class for the ctor
+// (also immune to biome's useArrowFunction rewrite) and a plain spy to record
+// the construction args for assertions.
 const notificationShowMock = vi.fn()
-const notificationCtorMock = vi.fn(() => ({ show: notificationShowMock }))
+const notificationCtorMock = vi.fn()
 const notificationIsSupportedMock = vi.fn(() => true)
+class MockNotification {
+  show = notificationShowMock
+  constructor(options: unknown) {
+    notificationCtorMock(options)
+  }
+}
 vi.mock('electron', () => ({
   BrowserWindow: { getAllWindows: () => [] },
-  Notification: Object.assign(notificationCtorMock, { isSupported: notificationIsSupportedMock })
+  Notification: Object.assign(MockNotification, { isSupported: notificationIsSupportedMock })
 }))
 
 // Plaid sync — unused here but imported by sync.ts.
@@ -240,7 +251,6 @@ beforeEach(() => {
   vi.resetAllMocks()
   // Re-establish the per-mock defaults that the factories wire into the module.
   notificationIsSupportedMock.mockReturnValue(true)
-  notificationCtorMock.mockImplementation(() => ({ show: notificationShowMock }))
   extractContactsFromGmailMock.mockReturnValue([])
   extractOrgsFromGmailMock.mockReturnValue([])
   extractContactsFromGithubMock.mockReturnValue([])
