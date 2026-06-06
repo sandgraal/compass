@@ -14,10 +14,15 @@
  *                        to 'disconnected' with lastSyncedAt cleared.
  *   - auth:get-status  → returns integration rows.
  *   - auth:get-redirect-uris → the fixed loopback callback URIs.
+ *   - auth:connect-google / auth:connect-github → the credential/env GUARD
+ *     CLAUSES only: each returns a plain { error } before opening any window
+ *     when creds are missing or placeholders. The guards are pure; the rest
+ *     of the dance is out of scope (see below).
  *
- * Out of scope (as in the sibling files): the OAuth dances themselves
- * (auth:connect-google / auth:connect-github) open a real BrowserWindow +
- * HTTP server and are exercised by integration in real Electron.
+ * Out of scope (as in the sibling files): the OAuth dances PAST the guard
+ * (auth:connect-google / auth:connect-github happy path) open a real
+ * BrowserWindow + HTTP server and are exercised by integration in real
+ * Electron — these tests never reach waitForOAuthCode.
  *
  * The DB is a real in-memory SQLite (so disconnect/get-status exercise true
  * SQL); fs + safeStorage are in-memory fakes.
@@ -258,5 +263,80 @@ describe('auth:get-redirect-uris', () => {
       google: 'http://localhost:4242/oauth/google/callback',
       github: 'http://localhost:4242/oauth/github/callback'
     })
+  })
+})
+
+// ── connect-handler guard clauses ─────────────────────────────────────────────
+//
+// The full OAuth dances (auth:connect-google / auth:connect-github) open a real
+// BrowserWindow + loopback HTTP server, so the happy path stays an integration
+// concern. But each handler runs a pure credential/env guard FIRST and returns
+// a plain { error } object before any of that — those branches are pure and
+// worth locking down so a regression can't silently strand the connect button.
+// Every test here asserts an early return; none reaches waitForOAuthCode.
+
+describe('auth:connect guard clauses', () => {
+  // These handlers read process.env directly (github) or via getOAuthCredentials'
+  // env fallback (google). Snapshot + restore the four relevant vars so the host
+  // environment can't make these flaky, and so we never accidentally supply a
+  // full valid credential pair (which would launch the real OAuth window).
+  const ENV_KEYS = [
+    'GOOGLE_CLIENT_ID',
+    'GOOGLE_CLIENT_SECRET',
+    'GITHUB_CLIENT_ID',
+    'GITHUB_CLIENT_SECRET'
+  ] as const
+  const saved: Record<string, string | undefined> = {}
+
+  beforeEach(() => {
+    for (const k of ENV_KEYS) {
+      saved[k] = process.env[k]
+      delete process.env[k]
+    }
+  })
+
+  afterEach(() => {
+    for (const k of ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k]
+      else process.env[k] = saved[k]
+    }
+  })
+
+  it('auth:connect-google returns an error when no credentials are configured', async () => {
+    // fakeFs is empty (no encrypted creds) and env is cleared → getOAuthCredentials → null
+    const h = await registerAndGet('auth:connect-google')
+    const result = (await invoke(h)) as { error?: string; success?: boolean }
+    expect(result.success).toBeUndefined()
+    expect(result.error).toMatch(/credentials not configured/i)
+  })
+
+  it('auth:connect-github errors when GITHUB_CLIENT_ID is missing', async () => {
+    const h = await registerAndGet('auth:connect-github')
+    const result = (await invoke(h)) as { error?: string }
+    expect(result.error).toMatch(/GITHUB_CLIENT_ID not configured/)
+  })
+
+  it('auth:connect-github rejects the placeholder client id', async () => {
+    process.env.GITHUB_CLIENT_ID = 'your_github_client_id_here'
+    process.env.GITHUB_CLIENT_SECRET = 'real-secret'
+    const h = await registerAndGet('auth:connect-github')
+    const result = (await invoke(h)) as { error?: string }
+    expect(result.error).toMatch(/GITHUB_CLIENT_ID not configured/)
+  })
+
+  it('auth:connect-github errors when the secret is missing even with a valid client id', async () => {
+    process.env.GITHUB_CLIENT_ID = 'Iv1.realclientid'
+    // GITHUB_CLIENT_SECRET intentionally unset
+    const h = await registerAndGet('auth:connect-github')
+    const result = (await invoke(h)) as { error?: string }
+    expect(result.error).toMatch(/GITHUB_CLIENT_SECRET not configured/)
+  })
+
+  it('auth:connect-github rejects the placeholder secret', async () => {
+    process.env.GITHUB_CLIENT_ID = 'Iv1.realclientid'
+    process.env.GITHUB_CLIENT_SECRET = 'your_github_client_secret_here'
+    const h = await registerAndGet('auth:connect-github')
+    const result = (await invoke(h)) as { error?: string }
+    expect(result.error).toMatch(/GITHUB_CLIENT_SECRET not configured/)
   })
 })
