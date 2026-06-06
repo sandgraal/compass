@@ -29,9 +29,21 @@ import type { IpcMain } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as schema from '../db/schema'
 
-const TEST_ROOT = '/tmp/compass-search-handlers-test'
-const KB_DIR = join(TEST_ROOT, 'kb')
-const VAULT_DIR_PATH = join(TEST_ROOT, 'vault')
+// Unique temp root per worker — portable (uses os.tmpdir(), not a literal
+// /tmp) and collision-free under parallel Vitest processes. Computed in
+// vi.hoisted so the `../paths` mock factory (hoisted above imports) can
+// reference the same constants.
+const { TEST_ROOT, KB_DIR, VAULT_DIR_PATH } = vi.hoisted(() => {
+  const os = require('node:os') as typeof import('node:os')
+  const path = require('node:path') as typeof import('node:path')
+  const fs = require('node:fs') as typeof import('node:fs')
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'compass-search-test-'))
+  return {
+    TEST_ROOT: root,
+    KB_DIR: path.join(root, 'kb'),
+    VAULT_DIR_PATH: path.join(root, 'vault')
+  }
+})
 
 let sqlite: Database.Database
 
@@ -40,8 +52,8 @@ vi.mock('../db/client', () => ({
 }))
 
 vi.mock('../paths', () => ({
-  KNOWLEDGE_DIR: '/tmp/compass-search-handlers-test/kb',
-  VAULT_DIR: '/tmp/compass-search-handlers-test/vault'
+  KNOWLEDGE_DIR: KB_DIR,
+  VAULT_DIR: VAULT_DIR_PATH
 }))
 
 // Vault crypto — indirection so the per-test mocks are read lazily (factory
