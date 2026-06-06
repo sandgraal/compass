@@ -25,6 +25,7 @@ export default function Weekly(): JSX.Element {
   const isCurrentWeek = isSameDay(weekStart, startOfWeek(new Date(), { weekStartsOn: 1 }))
   const weekKey = isoDate(weekStart)
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: days, weekEnd, weekKey are pure derivatives of weekStart
   useEffect(() => {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
@@ -313,6 +314,7 @@ export default function Weekly(): JSX.Element {
           </h3>
           <div className="space-y-2">
             {goals.map((goal, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: goals are positional slots (Goal 1..N), never reordered
               <div key={i} className="flex items-center gap-2">
                 <div className="w-5 h-5 rounded border border-border shrink-0 flex items-center justify-center text-xs text-muted-foreground">
                   {i + 1}

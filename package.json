@@ -19,7 +19,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx electron/db/migrate.ts",
     "typecheck": "tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.node.json --noEmit",
-    "check": "biome check .",
+    "check": "biome check --error-on-warnings .",
     "format": "biome check --write .",
     "lint:fast": "oxlint .",
     "lint:react": "eslint src",

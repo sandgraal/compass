@@ -99,6 +99,7 @@ export default function Dashboard(): JSX.Element {
     })
   }
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only initialization
   useEffect(() => {
     const hour = new Date().getHours()
     setGreeting(hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening')

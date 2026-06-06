@@ -1,7 +1,7 @@
 import { BookOpen, Calendar, ChevronDown, ChevronRight, GitBranch, Inbox, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { cn, formatDate, formatTime } from '../../lib/utils'
+import { formatDate, formatTime } from '../../lib/utils'
 import { useAppStore } from '../../store/appStore'
 
 interface ContextSection {
@@ -23,6 +23,7 @@ export function ContextDrawer(): JSX.Element {
   const [sections, setSections] = useState<ContextSection[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['calendar', 'github']))
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refetch context on route change
   useEffect(() => {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) {
@@ -133,23 +134,34 @@ export function ContextDrawer(): JSX.Element {
 
               {expanded.has(section.id) && (
                 <div className="space-y-0.5 pb-2">
-                  {section.items.map((item, i) => (
-                    <div
-                      key={i}
-                      className={cn(
-                        'px-4 py-2',
-                        item.href && 'cursor-pointer hover:bg-secondary/50 transition-colors'
-                      )}
-                      onClick={() => item.href && window.open(item.href)}
-                    >
-                      <p className="text-xs text-foreground truncate">{item.title}</p>
-                      {item.subtitle && (
-                        <p className="text-xs text-muted-foreground truncate mt-0.5">
-                          {item.subtitle}
-                        </p>
-                      )}
-                    </div>
-                  ))}
+                  {section.items.map((item) => {
+                    const key = `${section.id}:${item.title}:${item.href ?? ''}`
+                    return item.href ? (
+                      <a
+                        key={key}
+                        href={item.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block px-4 py-2 cursor-pointer hover:bg-secondary/50 transition-colors"
+                      >
+                        <p className="text-xs text-foreground truncate">{item.title}</p>
+                        {item.subtitle && (
+                          <p className="text-xs text-muted-foreground truncate mt-0.5">
+                            {item.subtitle}
+                          </p>
+                        )}
+                      </a>
+                    ) : (
+                      <div key={key} className="px-4 py-2">
+                        <p className="text-xs text-foreground truncate">{item.title}</p>
+                        {item.subtitle && (
+                          <p className="text-xs text-muted-foreground truncate mt-0.5">
+                            {item.subtitle}
+                          </p>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </div>
