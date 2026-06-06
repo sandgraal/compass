@@ -91,7 +91,9 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
         set: { value: String(value), updatedAt: new Date() }
       })
       .run()
-    if (key === 'syncInterval') {
+    // Reschedule background jobs when a cron-affecting setting changes:
+    // sync cadence, or the Morning Brief notification time.
+    if (key === 'syncInterval' || key === 'morningBriefNotifyTime') {
       restartCronJobs()
     }
     return { success: true }

@@ -19,9 +19,15 @@
  */
 
 import { and, eq, inArray } from 'drizzle-orm'
-import type { IpcMain } from 'electron'
+import { type IpcMain, Notification } from 'electron'
 import { getDb } from '../db/client'
-import { calendarEvents, checklistItems, financeAccounts, gmailActions } from '../db/schema'
+import {
+  appSettings,
+  calendarEvents,
+  checklistItems,
+  financeAccounts,
+  gmailActions
+} from '../db/schema'
 import { localYmd } from '../lib/dates'
 
 const MAX_PER_SECTION = 5
@@ -179,4 +185,40 @@ export function buildMorningBrief(
 
 export function registerMorningBriefHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('morning-brief:get', (): MorningBrief => buildMorningBrief())
+}
+
+/**
+ * Translate a local `HH:MM` (24h) into a daily cron expression (`M H * * *`),
+ * or null when the time is empty/invalid (= notification off). Pure — used by
+ * the cron scheduler and unit-tested directly.
+ */
+export function morningBriefCronExpr(time: string | null | undefined): string | null {
+  if (!time) return null
+  const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(time.trim())
+  if (!match) return null
+  return `${Number(match[2])} ${Number(match[1])} * * *`
+}
+
+/**
+ * Build the digest and fire a single OS notification summarizing it. Best-effort
+ * (mirrors `sync.ts maybeSendNotification`): respects the `notificationsEnabled`
+ * setting, no-ops when nothing is actionable, and when the platform has no
+ * notification support. Returns whether a notification was shown — handy for
+ * the cron caller's logs and for tests.
+ */
+export function notifyMorningBrief(
+  db: ReturnType<typeof getDb> = getDb(),
+  now: Date = new Date()
+): boolean {
+  const brief = buildMorningBrief(db, now)
+  const total =
+    brief.calendar.count + brief.tasks.dueCount + brief.payments.count + brief.inbox.count
+  if (total === 0) return false // nothing worth interrupting the user for
+  if (!Notification.isSupported()) return false
+
+  const row = db.select().from(appSettings).where(eq(appSettings.key, 'notificationsEnabled')).get()
+  if (row && row.value === 'false') return false
+
+  new Notification({ title: `${brief.greeting} — today's brief`, body: brief.summary }).show()
+  return true
 }

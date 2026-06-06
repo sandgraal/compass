@@ -23,6 +23,8 @@ export default function Settings(): JSX.Element {
   const { theme, setTheme } = useAppStore()
   const [syncInterval, setSyncInterval] = useState('15')
   const [notifications, setNotifications] = useState(true)
+  // Morning Brief notification time — '' = off, else local 'HH:MM'.
+  const [morningBriefTime, setMorningBriefTime] = useState('')
   const [contextDrawer, setContextDrawer] = useState(true)
   const { setContextDrawerOpen } = useAppStore()
   const { toast } = useToast()
@@ -47,6 +49,7 @@ export default function Settings(): JSX.Element {
         const savedModel = s.ollamaModel || ''
         setSyncInterval(s.syncInterval || '15')
         setNotifications(s.notificationsEnabled !== 'false')
+        setMorningBriefTime(s.morningBriefNotifyTime ?? '')
         setContextDrawer(s.showContextDrawer !== 'false')
         setOllamaEnabled(s.ollamaSuggestionsEnabled === 'true')
         setOllamaModel(savedModel)
@@ -185,6 +188,26 @@ export default function Settings(): JSX.Element {
               save('notificationsEnabled', String(v))
             }}
           />
+        </SettingsRow>
+        <SettingsRow
+          label="Morning Brief"
+          description="Send a daily notification summarizing today's events, tasks, payments, and inbox at a chosen time. Requires sync notifications on."
+        >
+          <select
+            value={morningBriefTime}
+            onChange={(e) => {
+              setMorningBriefTime(e.target.value)
+              save('morningBriefNotifyTime', e.target.value)
+            }}
+            aria-label="Morning Brief notification time"
+            className="bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+          >
+            <option value="">Off</option>
+            <option value="07:00">7:00 AM</option>
+            <option value="08:00">8:00 AM</option>
+            <option value="09:00">9:00 AM</option>
+            <option value="18:00">6:00 PM</option>
+          </select>
         </SettingsRow>
       </SettingsSection>
 
