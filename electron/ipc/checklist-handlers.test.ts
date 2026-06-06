@@ -18,7 +18,8 @@
  *   - checklist:quick-add     → empty-title guard, today's date, 500-char clamp
  *
  * Only the off-DB collaborators are mocked (electron, cron, ollama, menu-bar);
- * localYmd + the DB are real.
+ * the DB is real. quick-add's "today" stamp is made deterministic by pinning
+ * the clock with vi.useFakeTimers rather than mocking the date helper.
  */
 
 import Database from 'better-sqlite3'
