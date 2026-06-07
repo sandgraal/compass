@@ -29,6 +29,7 @@ import {
   gmailActions
 } from '../db/schema'
 import { type ForecastResult, buildForecast } from '../integrations/finance-forecast'
+import { type Subscription, auditSubscriptions } from '../integrations/finance-subscriptions'
 import { localYmd } from '../lib/dates'
 
 const MAX_PER_SECTION = 5
@@ -64,7 +65,31 @@ export interface MorningBrief {
     items: Array<{ id: number; subject: string; from: string }>
   }
   lowCash: LowCashAlert
+  priceHikes: PriceHikeAlert
   summary: string
+}
+
+/**
+ * Recent subscription price hikes surfaced from the subscription audit
+ * (`auditSubscriptions`, which already computes recent-vs-historical median
+ * deltas per active recurring charge). `items` is the largest-delta hikes;
+ * `count` is the total. Opt-in via the `priceHikeAlertEnabled` setting.
+ */
+export interface PriceHikeAlert {
+  enabled: boolean
+  count: number
+  items: Array<{
+    merchant: string
+    cadence: string
+    recentMedian: number
+    historicalMedian: number
+    delta: number
+    pct: number
+  }>
+}
+
+function emptyPriceHikes(): PriceHikeAlert {
+  return { enabled: false, count: 0, items: [] }
 }
 
 /**
@@ -107,12 +132,14 @@ function buildSummary(
   tasks: number,
   payments: number,
   inbox: number,
-  lowCash: LowCashAlert
+  lowCash: LowCashAlert,
+  priceHikes: PriceHikeAlert
 ): string {
   const parts = [`${pluralize(events, 'event')} today`, `${pluralize(tasks, 'task')} due`]
   if (payments > 0) parts.push(`${pluralize(payments, 'payment')} this week`)
   if (inbox > 0) parts.push(`${pluralize(inbox, 'inbox item')}`)
   if (lowCash.soonest) parts.push('⚠️ low cash ahead')
+  if (priceHikes.count > 0) parts.push(`⚠️ ${pluralize(priceHikes.count, 'price hike')}`)
   return parts.join(' · ')
 }
 
@@ -219,13 +246,60 @@ export function computeLowCashAlert(
 }
 
 /**
+ * Pure summarizer: keep only the audited subscriptions flagged with a recent
+ * price hike, largest dollar delta first, and cap the surfaced list.
+ */
+export function buildPriceHikeAlert(
+  subscriptions: Subscription[],
+  opts: { enabled: boolean }
+): PriceHikeAlert {
+  if (!opts.enabled) return emptyPriceHikes()
+  const hikes = subscriptions
+    .filter((s) => s.priceHike)
+    .sort((a, b) => b.priceHikeDelta - a.priceHikeDelta)
+  return {
+    enabled: true,
+    count: hikes.length,
+    items: hikes.slice(0, MAX_PER_SECTION).map((s) => ({
+      merchant: s.merchant,
+      cadence: s.cadence,
+      recentMedian: s.recentMedian,
+      historicalMedian: s.historicalMedian,
+      delta: s.priceHikeDelta,
+      pct: s.priceHikePct
+    }))
+  }
+}
+
+/**
+ * Boundary helper: read the opt-in `priceHikeAlertEnabled` setting, run the
+ * subscription audit (which computes the recent-vs-historical hike deltas), and
+ * summarize. Disabled → empty without touching the audit.
+ */
+export function computePriceHikeAlert(
+  db: ReturnType<typeof getDb> = getDb(),
+  now: Date = new Date()
+): PriceHikeAlert {
+  const enabledRow = db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, 'priceHikeAlertEnabled'))
+    .get()
+  if (enabledRow?.value !== 'true') return emptyPriceHikes()
+
+  const audit = auditSubscriptions(db, { today: now })
+  return buildPriceHikeAlert(audit.active, { enabled: true })
+}
+
+/**
  * Assemble the digest from current DB state. `now` is injectable for tests +
  * the future scheduled-notification caller; defaults to the live clock.
  */
 export function buildMorningBrief(
   db: ReturnType<typeof getDb> = getDb(),
   now: Date = new Date(),
-  lowCash: LowCashAlert = emptyLowCash()
+  lowCash: LowCashAlert = emptyLowCash(),
+  priceHikes: PriceHikeAlert = emptyPriceHikes()
 ): MorningBrief {
   const today = localYmd(now)
 
@@ -321,7 +395,15 @@ export function buildMorningBrief(
     payments,
     inbox,
     lowCash,
-    summary: buildSummary(calendar.count, tasks.dueCount, payments.count, inbox.count, lowCash)
+    priceHikes,
+    summary: buildSummary(
+      calendar.count,
+      tasks.dueCount,
+      payments.count,
+      inbox.count,
+      lowCash,
+      priceHikes
+    )
   }
 }
 
@@ -329,7 +411,12 @@ export function registerMorningBriefHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('morning-brief:get', (): MorningBrief => {
     const db = getDb()
     const now = new Date()
-    return buildMorningBrief(db, now, computeLowCashAlert(db, getRawSqlite(), now))
+    return buildMorningBrief(
+      db,
+      now,
+      computeLowCashAlert(db, getRawSqlite(), now),
+      computePriceHikeAlert(db, now)
+    )
   })
 }
 
@@ -355,15 +442,17 @@ export function morningBriefCronExpr(time: string | null | undefined): string | 
 export function notifyMorningBrief(
   db: ReturnType<typeof getDb> = getDb(),
   now: Date = new Date(),
-  lowCash: LowCashAlert = emptyLowCash()
+  lowCash: LowCashAlert = emptyLowCash(),
+  priceHikes: PriceHikeAlert = emptyPriceHikes()
 ): boolean {
-  const brief = buildMorningBrief(db, now, lowCash)
+  const brief = buildMorningBrief(db, now, lowCash, priceHikes)
   const total =
     brief.calendar.count +
     brief.tasks.dueCount +
     brief.payments.count +
     brief.inbox.count +
-    (brief.lowCash.soonest ? 1 : 0)
+    (brief.lowCash.soonest ? 1 : 0) +
+    brief.priceHikes.count
   if (total === 0) return false // nothing worth interrupting the user for
   if (!Notification.isSupported()) return false
 

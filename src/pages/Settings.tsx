@@ -28,6 +28,8 @@ export default function Settings(): JSX.Element {
   // Low-cash alert: opt-in flag + dollar threshold shown in the Morning Brief.
   const [lowCashEnabled, setLowCashEnabled] = useState(false)
   const [lowCashThreshold, setLowCashThreshold] = useState('500')
+  // Price-hike alert: opt-in subscription price-increase warning in the brief.
+  const [priceHikeEnabled, setPriceHikeEnabled] = useState(false)
   const [contextDrawer, setContextDrawer] = useState(true)
   const { setContextDrawerOpen } = useAppStore()
   const { toast } = useToast()
@@ -55,6 +57,7 @@ export default function Settings(): JSX.Element {
         setMorningBriefTime(s.morningBriefNotifyTime ?? '')
         setLowCashEnabled(s.lowCashAlertEnabled === 'true')
         setLowCashThreshold(s.lowCashThreshold ?? '500')
+        setPriceHikeEnabled(s.priceHikeAlertEnabled === 'true')
         setContextDrawer(s.showContextDrawer !== 'false')
         setOllamaEnabled(s.ollamaSuggestionsEnabled === 'true')
         setOllamaModel(savedModel)
@@ -251,6 +254,18 @@ export default function Settings(): JSX.Element {
             </div>
           </SettingsRow>
         )}
+        <SettingsRow
+          label="Price-hike alert"
+          description="Warn in the Morning Brief when a subscription's recent charges are materially higher than its historical average (from the subscription audit)."
+        >
+          <Toggle
+            enabled={priceHikeEnabled}
+            onChange={(v) => {
+              setPriceHikeEnabled(v)
+              save('priceHikeAlertEnabled', String(v))
+            }}
+          />
+        </SettingsRow>
       </SettingsSection>
 
       {/* Security */}

@@ -1,4 +1,12 @@
-import { AlertTriangle, Calendar, CheckSquare, Inbox, Sparkles, Wallet } from 'lucide-react'
+import {
+  AlertTriangle,
+  Calendar,
+  CheckSquare,
+  Inbox,
+  Sparkles,
+  TrendingUp,
+  Wallet
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { cn, formatTime } from '../lib/utils'
@@ -90,6 +98,22 @@ export function MorningBrief(): JSX.Element | null {
               ? 'today'
               : `in ${brief.lowCash.soonest.daysRemaining}d`}
             {brief.lowCash.count > 1 && ` · ${brief.lowCash.count} accounts affected`}
+          </span>
+        </Link>
+      )}
+      {brief.priceHikes.count > 0 && brief.priceHikes.items[0] && (
+        <Link
+          to="/finance"
+          className="flex items-center gap-2 px-5 py-2.5 bg-orange-500/10 border-b border-orange-500/30 hover:bg-orange-500/15 transition-colors"
+        >
+          <TrendingUp size={14} className="text-orange-400 shrink-0" />
+          <span className="text-xs text-orange-200">
+            <span className="font-semibold">Price hike:</span> {brief.priceHikes.items[0].merchant}{' '}
+            up $
+            {brief.priceHikes.items[0].delta.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+            {brief.priceHikes.items[0].pct > 0 &&
+              ` (+${Math.round(brief.priceHikes.items[0].pct)}%)`}
+            {brief.priceHikes.count > 1 && ` · ${brief.priceHikes.count} subscriptions`}
           </span>
         </Link>
       )}

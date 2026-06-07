@@ -13,6 +13,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import type { IpcMain } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as schema from '../db/schema'
+import type { Subscription } from '../integrations/finance-subscriptions'
 import type { MorningBrief } from './morning-brief'
 
 let sqlite: Database.Database
@@ -37,6 +38,27 @@ const buildForecastMock = vi.fn<(...args: unknown[]) => ForecastReturn>(() => ({
 }))
 vi.mock('../integrations/finance-forecast', () => ({
   buildForecast: (...args: unknown[]) => buildForecastMock(...args)
+}))
+
+// Subscription audit is likewise controlled here so computePriceHikeAlert's
+// settings-gating + hike summarization are tested without seeding a full
+// recurring-transaction stream (the audit has its own suite).
+type AuditReturn = {
+  totalActiveAnnual: number
+  active: unknown[]
+  zombies: unknown[]
+  expired: unknown[]
+  duplicates: unknown[]
+}
+const auditSubscriptionsMock = vi.fn<(...args: unknown[]) => AuditReturn>(() => ({
+  totalActiveAnnual: 0,
+  active: [],
+  zombies: [],
+  expired: [],
+  duplicates: []
+}))
+vi.mock('../integrations/finance-subscriptions', () => ({
+  auditSubscriptions: (...args: unknown[]) => auditSubscriptionsMock(...args)
 }))
 
 // electron Notification — a class (vitest 4 needs function/class under `new`),
@@ -514,6 +536,149 @@ describe('low-cash in the assembled brief', () => {
   it('notifyMorningBrief fires on a low-cash-only day (no other items)', async () => {
     const { notifyMorningBrief } = await import('./morning-brief')
     const shown = notifyMorningBrief(drizzle(sqlite, { schema }), NOW, ALERT)
+    expect(shown).toBe(true)
+    expect(notificationCtorMock).toHaveBeenCalledOnce()
+  })
+})
+
+// ── price-hike alert ──────────────────────────────────────────────────────────
+
+// Minimal Subscription factory — only the fields buildPriceHikeAlert reads
+// vary; the rest are plausible defaults so the object satisfies the type.
+function mkSub(over: {
+  merchant: string
+  priceHike?: boolean
+  priceHikeDelta?: number
+  priceHikePct?: number
+  recentMedian?: number
+  historicalMedian?: number
+  cadence?: string
+}): Subscription {
+  return {
+    merchant: over.merchant,
+    account: 'Card',
+    category: 'subscriptions',
+    subcategory: '',
+    cadence: (over.cadence ?? 'monthly') as Subscription['cadence'],
+    medianAmount: over.recentMedian ?? 10,
+    minAmount: 5,
+    maxAmount: 20,
+    annualCost: 120,
+    firstSeen: '2026-01-01',
+    lastSeen: '2026-05-01',
+    daysSinceLast: 5,
+    nCharges: 6,
+    status: 'active' as Subscription['status'],
+    priceBump: false,
+    priceHike: over.priceHike ?? false,
+    priceHikeDelta: over.priceHikeDelta ?? 0,
+    priceHikePct: over.priceHikePct ?? 0,
+    recentMedian: over.recentMedian ?? 10,
+    historicalMedian: over.historicalMedian ?? 10
+  }
+}
+
+describe('buildPriceHikeAlert', () => {
+  it('returns disabled empty when disabled (ignores subscriptions)', async () => {
+    const { buildPriceHikeAlert } = await import('./morning-brief')
+    const r = buildPriceHikeAlert([mkSub({ merchant: 'Netflix', priceHike: true })], {
+      enabled: false
+    })
+    expect(r).toEqual({ enabled: false, count: 0, items: [] })
+  })
+
+  it('keeps only hikes, largest dollar delta first', async () => {
+    const { buildPriceHikeAlert } = await import('./morning-brief')
+    const r = buildPriceHikeAlert(
+      [
+        mkSub({ merchant: 'Calm', priceHike: false, priceHikeDelta: 99 }), // not a hike
+        mkSub({ merchant: 'Spotify', priceHike: true, priceHikeDelta: 2, priceHikePct: 20 }),
+        mkSub({ merchant: 'Disney+', priceHike: true, priceHikeDelta: 5, priceHikePct: 38 })
+      ],
+      { enabled: true }
+    )
+    expect(r.enabled).toBe(true)
+    expect(r.count).toBe(2)
+    expect(r.items.map((i) => i.merchant)).toEqual(['Disney+', 'Spotify'])
+    expect(r.items[0]).toMatchObject({ delta: 5, pct: 38 })
+  })
+
+  it('caps the surfaced list at 5 but keeps the true count', async () => {
+    const { buildPriceHikeAlert } = await import('./morning-brief')
+    const subs = Array.from({ length: 8 }, (_, i) =>
+      mkSub({ merchant: `m${i}`, priceHike: true, priceHikeDelta: i + 1 })
+    )
+    const r = buildPriceHikeAlert(subs, { enabled: true })
+    expect(r.count).toBe(8)
+    expect(r.items).toHaveLength(5)
+    expect(r.items[0].merchant).toBe('m7') // delta 8, highest
+  })
+
+  it('reports no hikes when none are flagged', async () => {
+    const { buildPriceHikeAlert } = await import('./morning-brief')
+    const r = buildPriceHikeAlert([mkSub({ merchant: 'Netflix' })], { enabled: true })
+    expect(r).toEqual({ enabled: true, count: 0, items: [] })
+  })
+})
+
+describe('computePriceHikeAlert', () => {
+  async function compute(now: Date) {
+    const { computePriceHikeAlert } = await import('./morning-brief')
+    return computePriceHikeAlert(drizzle(sqlite, { schema }), now)
+  }
+  const NOW2 = new Date(2026, 4, 15, 8, 0, 0)
+
+  it('is disabled by default and never runs the audit', async () => {
+    const r = await compute(NOW2)
+    expect(r.enabled).toBe(false)
+    expect(auditSubscriptionsMock).not.toHaveBeenCalled()
+  })
+
+  it('summarizes audited hikes when enabled', async () => {
+    setSetting('priceHikeAlertEnabled', 'true')
+    auditSubscriptionsMock.mockReturnValueOnce({
+      totalActiveAnnual: 0,
+      active: [
+        mkSub({ merchant: 'Steady', priceHike: false }),
+        mkSub({ merchant: 'Hulu', priceHike: true, priceHikeDelta: 4, priceHikePct: 25 })
+      ],
+      zombies: [],
+      expired: [],
+      duplicates: []
+    })
+    const r = await compute(NOW2)
+    expect(r.enabled).toBe(true)
+    expect(r.count).toBe(1)
+    expect(r.items[0]).toMatchObject({ merchant: 'Hulu', delta: 4, pct: 25 })
+  })
+})
+
+describe('price-hike in the assembled brief', () => {
+  const HIKES = {
+    enabled: true,
+    count: 2,
+    items: [
+      {
+        merchant: 'Disney+',
+        cadence: 'monthly',
+        recentMedian: 18,
+        historicalMedian: 13,
+        delta: 5,
+        pct: 38
+      }
+    ]
+  }
+
+  it('buildMorningBrief embeds the injected hikes and flags the summary', async () => {
+    const { buildMorningBrief } = await import('./morning-brief')
+    const brief = buildMorningBrief(drizzle(sqlite, { schema }), NOW, undefined, HIKES)
+    expect(brief.priceHikes).toEqual(HIKES)
+    expect(brief.summary).toContain('2 price hikes')
+  })
+
+  it('notifyMorningBrief fires on a price-hike-only day', async () => {
+    const { notifyMorningBrief } = await import('./morning-brief')
+    const shown = notifyMorningBrief(drizzle(sqlite, { schema }), NOW, undefined, HIKES)
     expect(shown).toBe(true)
     expect(notificationCtorMock).toHaveBeenCalledOnce()
   })
