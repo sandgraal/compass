@@ -5,7 +5,7 @@ import { schedulePlaidDailySync, stopPlaidDailySync } from './cron-plaid'
 import { getDb, getRawSqlite } from './db/client'
 import { appSettings, integrations } from './db/schema'
 import { captureSnapshots } from './integrations/finance-snapshot'
-import { morningBriefCronExpr, notifyMorningBrief } from './ipc/morning-brief'
+import { computeLowCashAlert, morningBriefCronExpr, notifyMorningBrief } from './ipc/morning-brief'
 import { syncAppleCalendar, syncGitHub, syncGoogle } from './ipc/sync'
 
 // Map of service name -> active scheduled task (so we can stop/restart per integration).
@@ -56,7 +56,18 @@ function scheduleMorningBrief(): void {
   if (!expr) return // off / invalid → no schedule
   morningBriefTask = cron.schedule(expr, () => {
     try {
-      notifyMorningBrief()
+      const db = getDb()
+      // Cheap gate first: if notifications are off, skip the (comparatively
+      // expensive) cash-flow forecast entirely. notifyMorningBrief re-checks
+      // this, but short-circuiting here avoids the forecast work each day.
+      const notifRow = db
+        .select()
+        .from(appSettings)
+        .where(eq(appSettings.key, 'notificationsEnabled'))
+        .get()
+      if (notifRow?.value === 'false') return
+      const fireTime = new Date()
+      notifyMorningBrief(db, fireTime, computeLowCashAlert(db, getRawSqlite(), fireTime))
     } catch (err) {
       console.error('[cron] morning brief notification failed:', err)
     }

@@ -186,6 +186,18 @@ declare global {
       count: number
       items: Array<{ id: number; subject: string; from: string }>
     }
+    lowCash: {
+      enabled: boolean
+      threshold: number
+      count: number
+      soonest: {
+        accountId: number
+        accountName: string
+        date: string
+        balance: number
+        daysRemaining: number
+      } | null
+    }
     summary: string
   }
 

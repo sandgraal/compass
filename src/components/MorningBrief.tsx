@@ -1,4 +1,4 @@
-import { Calendar, CheckSquare, Inbox, Sparkles, Wallet } from 'lucide-react'
+import { AlertTriangle, Calendar, CheckSquare, Inbox, Sparkles, Wallet } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { cn, formatTime } from '../lib/utils'
@@ -76,6 +76,23 @@ export function MorningBrief(): JSX.Element | null {
         <h2 className="text-sm font-semibold text-foreground">Today's brief</h2>
         <span className="text-xs text-muted-foreground ml-auto">{brief.summary}</span>
       </div>
+      {brief.lowCash.soonest && (
+        <Link
+          to="/finance"
+          className="flex items-center gap-2 px-5 py-2.5 bg-amber-500/10 border-b border-amber-500/30 hover:bg-amber-500/15 transition-colors"
+        >
+          <AlertTriangle size={14} className="text-amber-400 shrink-0" />
+          <span className="text-xs text-amber-200">
+            <span className="font-semibold">Low cash ahead:</span>{' '}
+            {brief.lowCash.soonest.accountName} projected to dip to $
+            {brief.lowCash.soonest.balance.toLocaleString('en-US', { maximumFractionDigits: 0 })}{' '}
+            {brief.lowCash.soonest.daysRemaining <= 0
+              ? 'today'
+              : `in ${brief.lowCash.soonest.daysRemaining}d`}
+            {brief.lowCash.count > 1 && ` · ${brief.lowCash.count} accounts affected`}
+          </span>
+        </Link>
+      )}
       <div className="grid grid-cols-4 divide-x divide-border">
         {sections.map((s) => (
           <Link

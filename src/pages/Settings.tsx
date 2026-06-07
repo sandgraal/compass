@@ -25,6 +25,9 @@ export default function Settings(): JSX.Element {
   const [notifications, setNotifications] = useState(true)
   // Morning Brief notification time — '' = off, else local 'HH:MM'.
   const [morningBriefTime, setMorningBriefTime] = useState('')
+  // Low-cash alert: opt-in flag + dollar threshold shown in the Morning Brief.
+  const [lowCashEnabled, setLowCashEnabled] = useState(false)
+  const [lowCashThreshold, setLowCashThreshold] = useState('500')
   const [contextDrawer, setContextDrawer] = useState(true)
   const { setContextDrawerOpen } = useAppStore()
   const { toast } = useToast()
@@ -50,6 +53,8 @@ export default function Settings(): JSX.Element {
         setSyncInterval(s.syncInterval || '15')
         setNotifications(s.notificationsEnabled !== 'false')
         setMorningBriefTime(s.morningBriefNotifyTime ?? '')
+        setLowCashEnabled(s.lowCashAlertEnabled === 'true')
+        setLowCashThreshold(s.lowCashThreshold ?? '500')
         setContextDrawer(s.showContextDrawer !== 'false')
         setOllamaEnabled(s.ollamaSuggestionsEnabled === 'true')
         setOllamaModel(savedModel)
@@ -209,6 +214,43 @@ export default function Settings(): JSX.Element {
             <option value="18:00">6:00 PM</option>
           </select>
         </SettingsRow>
+        <SettingsRow
+          label="Low-cash alert"
+          description="Warn in the Morning Brief when a cash account is projected to dip below your threshold within the next two weeks (uses the cash-flow forecast)."
+        >
+          <Toggle
+            enabled={lowCashEnabled}
+            onChange={(v) => {
+              setLowCashEnabled(v)
+              save('lowCashAlertEnabled', String(v))
+            }}
+          />
+        </SettingsRow>
+        {lowCashEnabled && (
+          <SettingsRow
+            label="Low-cash threshold"
+            description="Projected balance below this dollar amount triggers the alert."
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm text-muted-foreground">$</span>
+              <input
+                type="number"
+                min={0}
+                step={50}
+                value={lowCashThreshold}
+                onChange={(e) => setLowCashThreshold(e.target.value)}
+                onBlur={(e) => {
+                  const n = Math.max(0, Math.floor(Number(e.target.value) || 0))
+                  const next = String(n)
+                  setLowCashThreshold(next)
+                  save('lowCashThreshold', next)
+                }}
+                aria-label="Low-cash threshold in dollars"
+                className="w-24 bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+          </SettingsRow>
+        )}
       </SettingsSection>
 
       {/* Security */}
