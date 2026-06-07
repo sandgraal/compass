@@ -186,6 +186,11 @@ const api = {
       ipcRenderer.invoke('weekly-review:carry-over', weekStart, toDate)
   },
 
+  // --- Monthly rollup ---
+  monthlyRollup: {
+    get: (month: string) => ipcRenderer.invoke('monthly-rollup:get', month)
+  },
+
   // --- GitHub Items ---
   github: {
     getItems: (state?: string) => ipcRenderer.invoke('github:get-items', state)

@@ -12,6 +12,7 @@ import { registerClaudeHandlers } from './ipc/claude'
 import { registerFinanceHandlers } from './ipc/finance'
 import { registerHabitsHandlers } from './ipc/habits'
 import { registerKnowledgeHandlers } from './ipc/knowledge'
+import { registerMonthlyRollupHandlers } from './ipc/monthly-rollup'
 import { registerMorningBriefHandlers } from './ipc/morning-brief'
 import { registerPlaidHandlers } from './ipc/plaid'
 import { registerSearchHandlers } from './ipc/search'
@@ -143,6 +144,7 @@ app.whenReady().then(async () => {
   registerPlaidHandlers(ipcMain)
   registerMorningBriefHandlers(ipcMain)
   registerWeeklyReviewHandlers(ipcMain)
+  registerMonthlyRollupHandlers(ipcMain)
 
   // Toggle content protection when navigating to/from vault
   ipcMain.on('vault:set-content-protection', (_event, enabled: boolean) => {

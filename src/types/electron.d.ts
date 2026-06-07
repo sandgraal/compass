@@ -204,6 +204,27 @@ declare global {
     }
   }
 
+  interface MonthlyWeek {
+    weekStart: string
+    weekEnd: string
+    totalTasks: number
+    completedTasks: number
+    completionPct: number
+  }
+
+  interface MonthlyRollup {
+    month: string
+    monthStart: string
+    monthEnd: string
+    totalTasks: number
+    completedTasks: number
+    completionPct: number
+    prevCompletionPct: number | null
+    deltaPct: number | null
+    weeks: MonthlyWeek[]
+    bestWeek: { weekStart: string; completionPct: number } | null
+  }
+
   interface Habit {
     id: number
     name: string
@@ -534,6 +555,9 @@ declare global {
           weekStart: string,
           toDate?: string
         ): Promise<{ success: boolean; carried?: number; error?: string }>
+      }
+      monthlyRollup: {
+        get(month: string): Promise<MonthlyRollup>
       }
       github: {
         getItems(state?: string): Promise<GitHubItem[]>

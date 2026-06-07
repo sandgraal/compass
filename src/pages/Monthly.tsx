@@ -11,6 +11,7 @@ import {
   subMonths
 } from 'date-fns'
 import {
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   DollarSign,
@@ -66,6 +67,7 @@ export default function Monthly(): JSX.Element {
   const [budgetLines, setBudgetLines] = useState<
     { category: string; budget: number; actual: number }[]
   >([])
+  const [rollup, setRollup] = useState<MonthlyRollup | null>(null)
   const newHabitInputRef = useRef<HTMLInputElement>(null)
 
   const monthEnd = endOfMonth(month)
@@ -93,12 +95,14 @@ export default function Monthly(): JSX.Element {
       window.api.finance.getDebtSummary().catch(() => ({ debts: [] })),
       window.api.finance
         .getBudgetStatus(monthKey)
-        .catch(() => ({ lines: [], totals: { budget: 0, actual: 0 } }))
-    ]).then(([calEvents, s, habitList, entries, allEntries, debtData, budgetData]) => {
+        .catch(() => ({ lines: [], totals: { budget: 0, actual: 0 } })),
+      window.api.monthlyRollup.get(monthKey).catch(() => null)
+    ]).then(([calEvents, s, habitList, entries, allEntries, debtData, budgetData, rollupData]) => {
       setEvents(calEvents)
       setHabits(habitList)
       setHabitEntries(entries)
       setAllHabitEntries(allEntries)
+      setRollup(rollupData)
 
       // Finance snapshot
       const d = debtData as {
@@ -278,6 +282,61 @@ export default function Monthly(): JSX.Element {
               })}
             </div>
           </div>
+
+          {/* Task completion rollup */}
+          {rollup && rollup.totalTasks > 0 && (
+            <div className="bg-card border border-border rounded-xl p-4">
+              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <CheckCircle2 size={14} /> Task Completion
+              </h3>
+              <div className="flex items-baseline gap-2 mb-1">
+                <span className="text-2xl font-semibold text-foreground">
+                  {rollup.completionPct}%
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {rollup.completedTasks}/{rollup.totalTasks} done
+                </span>
+                {rollup.deltaPct !== null && rollup.deltaPct !== 0 && (
+                  <span
+                    className={cn(
+                      'text-xs font-medium',
+                      rollup.deltaPct > 0 ? 'text-emerald-400' : 'text-red-400'
+                    )}
+                  >
+                    {rollup.deltaPct > 0 ? '↑' : '↓'} {Math.abs(rollup.deltaPct)}pts
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground mb-3">vs last month</p>
+              <div className="space-y-1.5">
+                {rollup.weeks.map((w) => (
+                  <div key={w.weekStart} className="flex items-center gap-2">
+                    <span className="text-[10px] font-mono text-muted-foreground w-12 shrink-0">
+                      {format(new Date(`${w.weekStart}T00:00:00`), 'MMM d')}
+                    </span>
+                    <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all"
+                        style={{ width: `${w.completionPct}%` }}
+                      />
+                    </div>
+                    <span className="text-[10px] font-mono text-muted-foreground w-8 text-right shrink-0">
+                      {w.totalTasks > 0 ? `${w.completionPct}%` : '—'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {rollup.bestWeek && (
+                <p className="text-xs text-muted-foreground mt-3">
+                  Best week:{' '}
+                  <span className="text-foreground font-medium">
+                    {format(new Date(`${rollup.bestWeek.weekStart}T00:00:00`), 'MMM d')}
+                  </span>{' '}
+                  ({rollup.bestWeek.completionPct}%)
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Monthly goals */}
           <div className="bg-card border border-border rounded-xl p-4">
