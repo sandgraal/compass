@@ -17,7 +17,27 @@ import type { MorningBrief } from './morning-brief'
 
 let sqlite: Database.Database
 
-vi.mock('../db/client', () => ({ getDb: () => drizzle(sqlite, { schema }) }))
+vi.mock('../db/client', () => ({
+  getDb: () => drizzle(sqlite, { schema }),
+  getRawSqlite: () => sqlite
+}))
+
+// Forecast engine is exercised by its own suite — here we control its output so
+// computeLowCashAlert's settings-gating + cash-account filtering are tested in
+// isolation (no need to seed the full subscription/income/calendar feed set).
+type ForecastReturn = {
+  events: unknown[]
+  trajectory: unknown[]
+  lowDates: Array<{ accountId: number; date: string; balance: number }>
+}
+const buildForecastMock = vi.fn<(...args: unknown[]) => ForecastReturn>(() => ({
+  events: [],
+  trajectory: [],
+  lowDates: []
+}))
+vi.mock('../integrations/finance-forecast', () => ({
+  buildForecast: (...args: unknown[]) => buildForecastMock(...args)
+}))
 
 // electron Notification — a class (vitest 4 needs function/class under `new`),
 // with a spy ctor + show + settable isSupported.
@@ -108,6 +128,12 @@ beforeEach(() => {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
       updated_at INTEGER
+    );
+    CREATE TABLE finance_balance_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL,
+      captured_at INTEGER NOT NULL,
+      balance REAL NOT NULL
     );
   `)
   for (const k of Object.keys(handlers)) delete handlers[k]
@@ -342,5 +368,153 @@ describe('notifyMorningBrief', () => {
     const shown = await notifyAt(NOW)
     expect(shown).toBe(false)
     expect(notificationCtorMock).not.toHaveBeenCalled()
+  })
+})
+
+// ── buildLowCashAlert (pure) ──────────────────────────────────────────────────
+
+describe('buildLowCashAlert', () => {
+  const names = new Map<number, string>([
+    [1, 'Checking'],
+    [2, 'Savings']
+  ])
+
+  it('returns a disabled empty alert when disabled (ignores lowDates)', async () => {
+    const { buildLowCashAlert } = await import('./morning-brief')
+    const r = buildLowCashAlert([{ accountId: 1, date: '2026-05-20', balance: 12 }], names, {
+      enabled: false,
+      threshold: 500,
+      today: '2026-05-15'
+    })
+    expect(r).toEqual({ enabled: false, threshold: 500, count: 0, soonest: null })
+  })
+
+  it('picks the earliest dip and counts affected cash accounts', async () => {
+    const { buildLowCashAlert } = await import('./morning-brief')
+    const r = buildLowCashAlert(
+      [
+        { accountId: 2, date: '2026-05-25', balance: 100 },
+        { accountId: 1, date: '2026-05-19', balance: -50 }
+      ],
+      names,
+      { enabled: true, threshold: 500, today: '2026-05-15' }
+    )
+    expect(r.enabled).toBe(true)
+    expect(r.count).toBe(2)
+    expect(r.soonest).toEqual({
+      accountId: 1,
+      accountName: 'Checking',
+      date: '2026-05-19',
+      balance: -50,
+      daysRemaining: 4
+    })
+  })
+
+  it('ignores dips on accounts not in the cash map (e.g. debt accounts)', async () => {
+    const { buildLowCashAlert } = await import('./morning-brief')
+    const r = buildLowCashAlert(
+      [
+        { accountId: 9, date: '2026-05-16', balance: 5 }, // unknown → excluded
+        { accountId: 2, date: '2026-05-22', balance: 200 }
+      ],
+      names,
+      { enabled: true, threshold: 500, today: '2026-05-15' }
+    )
+    expect(r.count).toBe(1)
+    expect(r.soonest?.accountId).toBe(2)
+  })
+
+  it('reports no soonest when nothing dips', async () => {
+    const { buildLowCashAlert } = await import('./morning-brief')
+    const r = buildLowCashAlert([], names, { enabled: true, threshold: 500, today: '2026-05-15' })
+    expect(r).toEqual({ enabled: true, threshold: 500, count: 0, soonest: null })
+  })
+})
+
+// ── computeLowCashAlert (settings-gating + cash filtering) ─────────────────────
+
+function setSetting(key: string, value: string) {
+  sqlite.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?)').run(key, value)
+}
+function seedCashAccount(name: string, opts: { isDebt?: boolean } = {}) {
+  sqlite
+    .prepare("INSERT INTO finance_accounts (name, type, is_debt) VALUES (?, 'checking', ?)")
+    .run(name, opts.isDebt ? 1 : 0)
+}
+
+describe('computeLowCashAlert', () => {
+  async function compute(now: Date) {
+    const { computeLowCashAlert } = await import('./morning-brief')
+    return computeLowCashAlert(drizzle(sqlite, { schema }), sqlite, now)
+  }
+  const NOW = new Date(2026, 4, 15, 8, 0, 0)
+
+  it('is disabled by default and never calls the forecast', async () => {
+    const r = await compute(NOW)
+    expect(r.enabled).toBe(false)
+    expect(buildForecastMock).not.toHaveBeenCalled()
+  })
+
+  it('defaults the threshold to 500 and clamps a negative override', async () => {
+    setSetting('lowCashAlertEnabled', 'true')
+    setSetting('lowCashThreshold', '-9999')
+    await compute(NOW)
+    const opts = buildForecastMock.mock.calls[0][3] as {
+      lowCashThreshold: number
+      windowDays: number
+    }
+    expect(opts.lowCashThreshold).toBe(0)
+    expect(opts.windowDays).toBe(14)
+  })
+
+  it('summarizes the forecast dip for a cash account when enabled', async () => {
+    setSetting('lowCashAlertEnabled', 'true')
+    setSetting('lowCashThreshold', '500')
+    seedCashAccount('Checking') // id 1, cash
+    seedCashAccount('Card', { isDebt: true }) // id 2, debt → excluded
+    buildForecastMock.mockReturnValueOnce({
+      events: [],
+      trajectory: [],
+      lowDates: [
+        { accountId: 1, date: '2026-05-21', balance: 120 },
+        { accountId: 2, date: '2026-05-18', balance: 3 } // debt → must be ignored
+      ]
+    })
+    const r = await compute(NOW)
+    expect(r.enabled).toBe(true)
+    expect(r.threshold).toBe(500)
+    expect(r.count).toBe(1)
+    expect(r.soonest).toMatchObject({ accountId: 1, accountName: 'Checking', balance: 120 })
+  })
+})
+
+// ── low-cash threaded into the brief + notification ───────────────────────────
+
+describe('low-cash in the assembled brief', () => {
+  const ALERT = {
+    enabled: true,
+    threshold: 500,
+    count: 1,
+    soonest: {
+      accountId: 1,
+      accountName: 'Checking',
+      date: '2026-05-19',
+      balance: 120,
+      daysRemaining: 4
+    }
+  }
+
+  it('buildMorningBrief embeds the injected alert and flags it in the summary', async () => {
+    const { buildMorningBrief } = await import('./morning-brief')
+    const brief = buildMorningBrief(drizzle(sqlite, { schema }), NOW, ALERT)
+    expect(brief.lowCash).toEqual(ALERT)
+    expect(brief.summary).toContain('low cash ahead')
+  })
+
+  it('notifyMorningBrief fires on a low-cash-only day (no other items)', async () => {
+    const { notifyMorningBrief } = await import('./morning-brief')
+    const shown = notifyMorningBrief(drizzle(sqlite, { schema }), NOW, ALERT)
+    expect(shown).toBe(true)
+    expect(notificationCtorMock).toHaveBeenCalledOnce()
   })
 })

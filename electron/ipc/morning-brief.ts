@@ -20,7 +20,7 @@
 
 import { and, eq, inArray } from 'drizzle-orm'
 import { type IpcMain, Notification } from 'electron'
-import { getDb } from '../db/client'
+import { getDb, getRawSqlite } from '../db/client'
 import {
   appSettings,
   calendarEvents,
@@ -28,10 +28,15 @@ import {
   financeAccounts,
   gmailActions
 } from '../db/schema'
+import { type ForecastResult, buildForecast } from '../integrations/finance-forecast'
 import { localYmd } from '../lib/dates'
 
 const MAX_PER_SECTION = 5
 const PAYMENT_WINDOW_DAYS = 7
+// Near-term horizon for the brief's low-cash projection — a morning glance
+// cares about the next couple of weeks, not the full 90-day Forecast tab.
+const LOW_CASH_HORIZON_DAYS = 14
+const LOW_CASH_DEFAULT_THRESHOLD = 500
 
 export interface MorningBrief {
   date: string
@@ -58,7 +63,33 @@ export interface MorningBrief {
     count: number
     items: Array<{ id: number; subject: string; from: string }>
   }
+  lowCash: LowCashAlert
   summary: string
+}
+
+/**
+ * Forward-looking low-cash warning derived from the 90-day cash-flow forecast
+ * (Phase 4.5), evaluated over the brief's near-term horizon. `soonest` is the
+ * earliest projected dip below `threshold` across the user's cash (non-debt)
+ * accounts; null when nothing dips (or the alert is disabled). Opt-in via the
+ * `lowCashAlertEnabled` setting so it never surprises users who haven't set a
+ * threshold.
+ */
+export interface LowCashAlert {
+  enabled: boolean
+  threshold: number
+  count: number
+  soonest: {
+    accountId: number
+    accountName: string
+    date: string
+    balance: number
+    daysRemaining: number
+  } | null
+}
+
+function emptyLowCash(threshold = 0): LowCashAlert {
+  return { enabled: false, threshold, count: 0, soonest: null }
 }
 
 function greetingFor(hour: number): string {
@@ -71,11 +102,120 @@ function pluralize(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`
 }
 
-function buildSummary(events: number, tasks: number, payments: number, inbox: number): string {
+function buildSummary(
+  events: number,
+  tasks: number,
+  payments: number,
+  inbox: number,
+  lowCash: LowCashAlert
+): string {
   const parts = [`${pluralize(events, 'event')} today`, `${pluralize(tasks, 'task')} due`]
   if (payments > 0) parts.push(`${pluralize(payments, 'payment')} this week`)
   if (inbox > 0) parts.push(`${pluralize(inbox, 'inbox item')}`)
+  if (lowCash.soonest) parts.push('⚠️ low cash ahead')
   return parts.join(' · ')
+}
+
+function daysBetweenYmd(fromYmd: string, toYmd: string): number {
+  const from = new Date(`${fromYmd}T00:00:00`).getTime()
+  const to = new Date(`${toYmd}T00:00:00`).getTime()
+  return Math.round((to - from) / 86_400_000)
+}
+
+/**
+ * Pure summarizer: turn the forecast's `lowDates` into a single near-term
+ * alert. Considers only accounts present in `cashNameById` (the user's cash
+ * accounts), picks the earliest dip, and reports how many cash accounts dip.
+ */
+export function buildLowCashAlert(
+  lowDates: ForecastResult['lowDates'],
+  cashNameById: Map<number, string>,
+  opts: { enabled: boolean; threshold: number; today: string }
+): LowCashAlert {
+  if (!opts.enabled) return emptyLowCash(opts.threshold)
+  const known = lowDates.filter((d) => cashNameById.has(d.accountId))
+  const sorted = [...known].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+  const first = sorted[0]
+  const soonest = first
+    ? {
+        accountId: first.accountId,
+        accountName: cashNameById.get(first.accountId) as string,
+        date: first.date,
+        balance: first.balance,
+        daysRemaining: daysBetweenYmd(opts.today, first.date)
+      }
+    : null
+  return { enabled: true, threshold: opts.threshold, count: known.length, soonest }
+}
+
+/**
+ * Boundary helper: read the user's low-cash settings, run the cash-flow
+ * forecast over the brief's near-term horizon, and summarize. Lives outside
+ * `buildMorningBrief` (which stays a pure assembler) because the forecast needs
+ * raw SQLite. Disabled → returns an empty alert without touching the forecast.
+ */
+export function computeLowCashAlert(
+  db: ReturnType<typeof getDb> = getDb(),
+  sqlite: ReturnType<typeof getRawSqlite> = getRawSqlite(),
+  now: Date = new Date()
+): LowCashAlert {
+  const enabledRow = db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, 'lowCashAlertEnabled'))
+    .get()
+  const enabled = enabledRow?.value === 'true'
+
+  const thresholdRow = db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, 'lowCashThreshold'))
+    .get()
+  const parsed = Number(thresholdRow?.value)
+  const threshold = Number.isFinite(parsed)
+    ? Math.max(0, Math.min(1_000_000_000, parsed))
+    : LOW_CASH_DEFAULT_THRESHOLD
+
+  if (!enabled) return emptyLowCash(threshold)
+
+  // Cash (non-debt) accounts only — a low-cash threshold is meaningless for
+  // debt balances (where positive = amount owed).
+  const accounts = sqlite.prepare('SELECT id, name, is_debt FROM finance_accounts').all() as Array<{
+    id: number
+    name: string
+    is_debt: number
+  }>
+  const cashNameById = new Map<number, string>()
+  for (const a of accounts) if (a.is_debt !== 1) cashNameById.set(a.id, a.name)
+
+  // Starting balances: latest snapshot per account, defaulting to 0 (mirrors
+  // finance:get-forecast so brand-new accounts aren't silently omitted).
+  const latest = sqlite
+    .prepare(
+      `SELECT s.account_id, s.balance
+         FROM finance_balance_snapshots s
+         JOIN (
+           SELECT account_id, MAX(captured_at) AS m
+             FROM finance_balance_snapshots GROUP BY account_id
+         ) latest ON latest.account_id = s.account_id AND latest.m = s.captured_at`
+    )
+    .all() as Array<{ account_id: number; balance: number }>
+  const balById = new Map<number, number>()
+  for (const r of latest) balById.set(r.account_id, r.balance)
+  const startingBalances: Record<number, number> = {}
+  for (const a of accounts) startingBalances[a.id] = balById.get(a.id) ?? 0
+
+  const forecast = buildForecast(db, sqlite, startingBalances, {
+    windowDays: LOW_CASH_HORIZON_DAYS,
+    lowCashThreshold: threshold,
+    today: now
+  })
+
+  return buildLowCashAlert(forecast.lowDates, cashNameById, {
+    enabled: true,
+    threshold,
+    today: localYmd(now)
+  })
 }
 
 /**
@@ -84,7 +224,8 @@ function buildSummary(events: number, tasks: number, payments: number, inbox: nu
  */
 export function buildMorningBrief(
   db: ReturnType<typeof getDb> = getDb(),
-  now: Date = new Date()
+  now: Date = new Date(),
+  lowCash: LowCashAlert = emptyLowCash()
 ): MorningBrief {
   const today = localYmd(now)
 
@@ -179,12 +320,16 @@ export function buildMorningBrief(
     tasks,
     payments,
     inbox,
-    summary: buildSummary(calendar.count, tasks.dueCount, payments.count, inbox.count)
+    lowCash,
+    summary: buildSummary(calendar.count, tasks.dueCount, payments.count, inbox.count, lowCash)
   }
 }
 
 export function registerMorningBriefHandlers(ipcMain: IpcMain): void {
-  ipcMain.handle('morning-brief:get', (): MorningBrief => buildMorningBrief())
+  ipcMain.handle('morning-brief:get', (): MorningBrief => {
+    const now = new Date()
+    return buildMorningBrief(getDb(), now, computeLowCashAlert(getDb(), getRawSqlite(), now))
+  })
 }
 
 /**
@@ -208,11 +353,16 @@ export function morningBriefCronExpr(time: string | null | undefined): string | 
  */
 export function notifyMorningBrief(
   db: ReturnType<typeof getDb> = getDb(),
-  now: Date = new Date()
+  now: Date = new Date(),
+  lowCash: LowCashAlert = emptyLowCash()
 ): boolean {
-  const brief = buildMorningBrief(db, now)
+  const brief = buildMorningBrief(db, now, lowCash)
   const total =
-    brief.calendar.count + brief.tasks.dueCount + brief.payments.count + brief.inbox.count
+    brief.calendar.count +
+    brief.tasks.dueCount +
+    brief.payments.count +
+    brief.inbox.count +
+    (brief.lowCash.soonest ? 1 : 0)
   if (total === 0) return false // nothing worth interrupting the user for
   if (!Notification.isSupported()) return false
 
