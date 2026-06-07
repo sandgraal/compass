@@ -198,6 +198,18 @@ declare global {
         daysRemaining: number
       } | null
     }
+    priceHikes: {
+      enabled: boolean
+      count: number
+      items: Array<{
+        merchant: string
+        cadence: string
+        recentMedian: number
+        historicalMedian: number
+        delta: number
+        pct: number
+      }>
+    }
     summary: string
   }
 
