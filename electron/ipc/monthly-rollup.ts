@@ -69,12 +69,14 @@ function mondayOf(ymd: string): string {
 
 /** First (`YYYY-MM-01`) and last (`YYYY-MM-DD`) local day of a `YYYY-MM` month. */
 function monthBounds(month: string): { start: string; end: string } {
-  const year = Number(month.slice(0, 4))
-  const monthNum = Number(month.slice(5, 7)) // 1..12
   const start = `${month}-01`
-  const lastDay = new Date(year, monthNum, 0).getDate()
-  const end = `${month}-${String(lastDay).padStart(2, '0')}`
-  return { start, end }
+  // Day 0 of the *next* month rolls back to this month's last day. Parse the
+  // ISO string (not `new Date(year, ...)`, which maps years 0–99 to 1900–1999),
+  // and keep the validated `month` prefix so the year stays zero-padded.
+  const d = new Date(`${start}T00:00:00`)
+  d.setMonth(d.getMonth() + 1, 0)
+  const lastDay = String(d.getDate()).padStart(2, '0')
+  return { start, end: `${month}-${lastDay}` }
 }
 
 /** Total/completed daily checklist tasks whose `list_date` is within [start, end]. */

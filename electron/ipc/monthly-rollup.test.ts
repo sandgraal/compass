@@ -185,6 +185,13 @@ describe('buildMonthlyRollup', () => {
     expect(r.deltaPct).toBe(100)
   })
 
+  it('computes the correct month end for years 0–99 (no 1900 mapping)', async () => {
+    // `new Date(99, 12, 0)` would yield a 1999 date; ISO-string parsing keeps year 99.
+    const r = await build('0099-12')
+    expect(r.monthStart).toBe('0099-12-01')
+    expect(r.monthEnd).toBe('0099-12-31')
+  })
+
   it('ignores non-daily list items', async () => {
     seed('2026-05-10', 'tmpl', { checked: false, listType: 'template' })
     seed('2026-05-10', 'real', { checked: true })
