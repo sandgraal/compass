@@ -56,8 +56,18 @@ function scheduleMorningBrief(): void {
   if (!expr) return // off / invalid → no schedule
   morningBriefTask = cron.schedule(expr, () => {
     try {
+      const db = getDb()
+      // Cheap gate first: if notifications are off, skip the (comparatively
+      // expensive) cash-flow forecast entirely. notifyMorningBrief re-checks
+      // this, but short-circuiting here avoids the forecast work each day.
+      const notifRow = db
+        .select()
+        .from(appSettings)
+        .where(eq(appSettings.key, 'notificationsEnabled'))
+        .get()
+      if (notifRow?.value === 'false') return
       const fireTime = new Date()
-      notifyMorningBrief(getDb(), fireTime, computeLowCashAlert(getDb(), getRawSqlite(), fireTime))
+      notifyMorningBrief(db, fireTime, computeLowCashAlert(db, getRawSqlite(), fireTime))
     } catch (err) {
       console.error('[cron] morning brief notification failed:', err)
     }

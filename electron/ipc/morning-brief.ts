@@ -327,8 +327,9 @@ export function buildMorningBrief(
 
 export function registerMorningBriefHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('morning-brief:get', (): MorningBrief => {
+    const db = getDb()
     const now = new Date()
-    return buildMorningBrief(getDb(), now, computeLowCashAlert(getDb(), getRawSqlite(), now))
+    return buildMorningBrief(db, now, computeLowCashAlert(db, getRawSqlite(), now))
   })
 }
 
