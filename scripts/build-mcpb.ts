@@ -36,6 +36,9 @@ function parseArch(): NodeJS.Architecture {
   const i = process.argv.indexOf('--arch')
   if (i === -1) return process.arch
   const arch = process.argv[i + 1]
+  if (arch === undefined) {
+    throw new Error('--arch requires a value: arm64 or x64 (e.g. npm run build:mcpb -- --arch x64)')
+  }
   if (arch !== 'arm64' && arch !== 'x64') {
     throw new Error(`--arch must be arm64 or x64, got "${arch}"`)
   }
@@ -63,6 +66,12 @@ function installNativeDep(targetArch: string): void {
   const mcpPkg = JSON.parse(
     readFileSync(join(ROOT, 'mcp', 'compass-mcp', 'package.json'), 'utf8')
   ) as { dependencies: Record<string, string> }
+  const sqliteRange = mcpPkg.dependencies?.['better-sqlite3']
+  if (!sqliteRange) {
+    throw new Error(
+      'better-sqlite3 not found in mcp/compass-mcp/package.json dependencies — the bundle cannot ship its native binding without it'
+    )
+  }
   const rootPkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as {
     version: string
   }
@@ -75,7 +84,7 @@ function installNativeDep(targetArch: string): void {
         version: rootPkg.version,
         private: true,
         type: 'module',
-        dependencies: { 'better-sqlite3': mcpPkg.dependencies['better-sqlite3'] }
+        dependencies: { 'better-sqlite3': sqliteRange }
       },
       null,
       2
@@ -103,28 +112,34 @@ function smokeTest(serverPath: string): Promise<void> {
       env: { ...process.env, COMPASS_MCP_BUNDLED: '1', COMPASS_HOME: STAGING },
       stdio: ['pipe', 'pipe', 'pipe']
     })
-    const timer = setTimeout(() => {
+    // Settle exactly once — the timer, a response, and exit can all race
+    // (e.g. our own kill() after resolving fires 'exit' again).
+    let settled = false
+    const settle = (outcome: 'resolve' | 'reject', error?: Error): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
       child.kill()
-      reject(new Error('smoke test timed out waiting for initialize response'))
-    }, 15000)
+      if (outcome === 'resolve') resolve()
+      else reject(error)
+    }
+    const timer = setTimeout(
+      () => settle('reject', new Error('smoke test timed out waiting for initialize response')),
+      15000
+    )
     let out = ''
     child.stdout.on('data', (chunk: Buffer) => {
       out += chunk.toString()
-      if (out.includes('"result"')) {
-        clearTimeout(timer)
-        child.kill()
-        resolve()
-      }
+      if (out.includes('"result"')) settle('resolve')
     })
     let err = ''
     child.stderr.on('data', (chunk: Buffer) => {
       err += chunk.toString()
     })
+    // Any exit before a response is a failure — including a clean code 0,
+    // which would otherwise hang this promise until the timeout.
     child.on('exit', (code) => {
-      if (code !== null && code !== 0) {
-        clearTimeout(timer)
-        reject(new Error(`bundled server exited with code ${code}:\n${err}`))
-      }
+      settle('reject', new Error(`bundled server exited (code ${code}) before responding:\n${err}`))
     })
     child.stdin.write(
       `${JSON.stringify({

@@ -64,7 +64,7 @@ You should see `compass` in the list.
 
 ## Desktop extension (`.mcpb`) — one-click Claude Desktop install
 
-Phase 8.3 packages this server as a self-contained [MCP Bundle](https://github.com/anthropics/mcpb) so a Claude Desktop user can connect Compass without a repo checkout or dev toolchain:
+Phase 8.3 packages this server as a self-contained [MCP Bundle](https://github.com/anthropics/mcpb) so a Claude Desktop user can connect Compass without a repo checkout or dev toolchain. **macOS only** for now — the manifest declares `platforms: ["darwin"]` because Compass itself stores its data under `~/Library/Application Support/Compass`:
 
 ```bash
 npm run build:mcpb                  # bundle for this machine's arch
