@@ -16,6 +16,7 @@
     "preview": "electron-vite preview",
     "package": "npm run build && electron-builder",
     "release": "npm run build && electron-builder --publish always",
+    "build:mcpb": "tsx scripts/build-mcpb.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx electron/db/migrate.ts",
     "typecheck": "tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.node.json --noEmit",
@@ -83,6 +84,7 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@anthropic-ai/mcpb": "^2.1.2",
     "@biomejs/biome": "^1.9.4",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/tsconfig": "^2.0.0",
@@ -101,6 +103,7 @@
     "electron-builder": "^26.9.0",
     "electron-playwright-helpers": "^1.7.1",
     "electron-vite": "^5.0.0",
+    "esbuild": "^0.25.12",
     "eslint": "^9.16.0",
     "eslint-plugin-react-hooks": "^5.1.0",
     "eslint-plugin-react-refresh": "^0.4.16",
@@ -115,7 +118,7 @@
     "vitest": "^4.1.8"
   },
   "overrides": {
-    "esbuild": "^0.25.0",
+    "esbuild": "$esbuild",
     "vite": "$vite"
   },
   "engines": {

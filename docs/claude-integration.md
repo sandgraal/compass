@@ -1,6 +1,6 @@
 # Compass ↔ Claude — Integration Design
 
-> **Status: partially shipped.** This documents how Compass becomes a first-class, **bidirectional** Claude citizen. **Shipped:** the MCP **read + propose** tools (8.1), the in-app **Claude Inbox** approval surface (8.2), and the **end-user plugin + skills** (8.4/8.6). **Remaining (🔜):** the one-click Desktop bundle (8.3) and the embedded agent in Ask Compass (8.5). Per-item status is tagged below and in [`implementation_plan.md` § Phase 8](implementation_plan.md).
+> **Status: fully shipped (8.1–8.6).** This documents how Compass becomes a first-class, **bidirectional** Claude citizen: the MCP **read + propose** tools (8.1), the in-app **Claude Inbox** approval surface (8.2), the one-click **`.mcpb` Desktop bundle** (8.3), the **end-user plugin + skills** (8.4/8.6), and the **embedded agent in Ask Compass** (8.5). Per-item status is tagged below and in [`implementation_plan.md` § Phase 8](implementation_plan.md).
 
 ## Why
 
@@ -17,8 +17,8 @@ The hard constraint: *let an assistant help with your life OS without letting it
 |---|---|---|
 | Claude → Compass | stdio MCP with **read tools** (tasks, knowledge search/read, calendar, sync status, finance summaries, habit streaks, upcoming, repo commits/test-status/integration-health) **and `compass_propose_*` write-proposal tools** (task/note/txn-tag/habit-check) that enqueue to the Claude Inbox. **Vault excluded; finance raw rows excluded.** | `mcp/compass-mcp/index.ts`, `proposals.ts`, `.mcp.json` |
 | Claude → Compass (act) | **Claude Inbox** — proposals land in `claude_proposals`; the user approves/rejects in-app and approval applies the change via validated write logic (re-validated as a trust boundary). | `electron/ipc/claude.ts`, `src/pages/ClaudeInbox.tsx` |
-| Compass → Claude | "Ask Compass" — BYO Anthropic/OpenAI key, RAG over local notes. *(Agentic tool-use + caching is 8.5, 🔜.)* | `electron/ipc/assistant.ts`, `electron/integrations/llm-client.ts` |
-| Packaging | **`compass`** end-user plugin (MCP + skills) for Desktop/Cowork/Code — requires a repo checkout (self-contained bundle is 8.3). Separate from the **developer** `compass-stack` plugin (subagents/skills/hooks for *building* Compass). | `claude-plugin/`, `.claude/plugin.json` |
+| Compass → Claude | "Ask Compass" — BYO Anthropic/OpenAI key, RAG over local notes, plus the **agentic tool-use loop with prompt caching** (8.5). | `electron/ipc/assistant.ts`, `electron/integrations/llm-client.ts` |
+| Packaging | **`compass`** end-user plugin (MCP + skills) for Cowork/Code from a repo checkout, **plus the self-contained one-click `.mcpb` Desktop bundle** (8.3 — `npm run build:mcpb`, attached to tagged releases). Separate from the **developer** `compass-stack` plugin (subagents/skills/hooks for *building* Compass). | `claude-plugin/`, `scripts/build-mcpb.ts`, `.claude/plugin.json` |
 
 <a id="claude-inbox"></a>
 
@@ -64,8 +64,11 @@ Extends `mcp/compass-mcp/index.ts`:
 - ✅ **Trust boundary:** the JSONL is LLM-written, so every field is re-validated on apply — path traversal via the shared `safeJoin`, the shared `TAX_TAGS` whitelist, the list-type domain, strict booleans, explicit habit state. The vault is never touched.
 - ✅ A review **page** (`src/pages/ClaudeInbox.tsx`, route `/claude-inbox`, sidebar + ⌘K entry) surfaces pending proposals with a human-readable summary per type and one-click approve/reject (reusing `Toast` + `ConfirmDialog`) plus clear-resolved.
 
-### 8.3 Claude Desktop connector (DXT / `.mcpb`) 🔜
-- Package `compass-mcp` as a one-click **desktop-extension bundle** (no dev toolchain) so any Claude Desktop user can connect their Compass. The **manual `claude_desktop_config.json` fallback is documented today** in `claude-plugin/README.md`; the remaining work is the bundled artifact, gated on packaging the `better-sqlite3` native dependency.
+### 8.3 Claude Desktop connector (DXT / `.mcpb`) — ✅ *(shipped)*
+- ✅ `npm run build:mcpb` (`scripts/build-mcpb.ts`) produces a self-contained **`.mcpb` bundle** (`dist/compass-mcp-<os>-<arch>.mcpb`): esbuild compiles the TS server (+ MCP SDK) into one ESM file, and the **`better-sqlite3` native binding is npm-installed into the bundle** (the previously-noted gate — per-arch via `npm_config_arch`). The manifest (`mcp/compass-mcp/mcpb-manifest.ts`, schema-validated in unit tests AND at build time) launches it with `COMPASS_MCP_BUNDLED=1`.
+- ✅ **Bundled mode** (`mcp/compass-mcp/bundle-mode.ts`): drops the two repo self-knowledge tools (`compass_recent_commits`, `compass_test_status`) from `tools/list` and answers their calls with a clear error — there's no source checkout inside a bundle. All other tools (reads + proposals) behave identically.
+- ✅ The build **smoke-tests** the bundled artifact with a real MCP `initialize` handshake (proves the native binding loads; skipped for cross-arch builds), and tagged releases attach `compass-mcp-darwin-{arm64,x64}.mcpb` automatically (`release.yml`).
+- ✅ The **manual `claude_desktop_config.json` fallback** stays documented in `claude-plugin/README.md` (now framed as the from-checkout option). **Caveat:** the bundled binding matches the Node ABI of the build machine (CI: Node 22) — documented in `mcp/compass-mcp/README.md`.
 
 ### 8.4 Cowork plugin (end-user) — ✅ *(shipped)*
 - `claude-plugin/` is a new **end-user** plugin (distinct from the dev `compass-stack`): `.claude-plugin/plugin.json` + `.mcp.json` register the Compass MCP and expose the 8.6 skills, with an install README (incl. the Claude Desktop manual-config fallback). A Cowork/Desktop/Code session can now run "do my weekly review", "what's my morning brief", etc.

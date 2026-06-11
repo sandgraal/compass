@@ -61,3 +61,26 @@ claude mcp list
 ```
 
 You should see `compass` in the list.
+
+## Desktop extension (`.mcpb`) — one-click Claude Desktop install
+
+Phase 8.3 packages this server as a self-contained [MCP Bundle](https://github.com/anthropics/mcpb) so a Claude Desktop user can connect Compass without a repo checkout or dev toolchain. **macOS only** for now — the manifest declares `platforms: ["darwin"]` because Compass itself stores its data under `~/Library/Application Support/Compass`:
+
+```bash
+npm run build:mcpb                  # bundle for this machine's arch
+npm run build:mcpb -- --arch x64    # cross-arch (same OS only)
+```
+
+Output: `dist/compass-mcp-<os>-<arch>.mcpb`. Double-click it (or drag into Claude Desktop ▸ Settings ▸ Extensions) to install. Tagged releases attach the macOS bundles (arm64 + x64) automatically — see `.github/workflows/release.yml`.
+
+What the build does (`scripts/build-mcpb.ts`):
+
+1. esbuild-bundles `index.ts` (+ `dates.ts`, `proposals.ts`, the MCP SDK) into a single ESM file — `server/index.mjs`
+2. npm-installs `better-sqlite3` into the staging dir so the **platform-prebuilt native binding ships inside the bundle**
+3. writes `manifest.json` (built by `mcpb-manifest.ts`, version-synced with the root `package.json`, validated against the official schema)
+4. smoke-tests the bundled server with an MCP `initialize` handshake (proves the native binding loads; skipped for cross-arch builds)
+5. packs everything with `@anthropic-ai/mcpb`
+
+**Bundled mode:** the manifest sets `COMPASS_MCP_BUNDLED=1`, which drops the two repo self-knowledge tools (`compass_recent_commits`, `compass_test_status`) — there is no source checkout inside a bundle (see `bundle-mode.ts`). Everything else behaves identically.
+
+**Native-binding caveat:** the `better-sqlite3` binding is fetched for the **Node ABI of the machine that builds the bundle**. Build with the same major Node that Claude Desktop's runtime uses (CI uses Node 22). If Claude Desktop reports the extension failed to load after a Claude update, rebuild the bundle with a matching Node.
