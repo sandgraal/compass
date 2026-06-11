@@ -1,7 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+type CaptureKind = 'task' | 'note' | 'expense'
+
+const KINDS: CaptureKind[] = ['task', 'note', 'expense']
+
+const KIND_META: Record<CaptureKind, { label: string; placeholder: string; hint: string }> = {
+  task: {
+    label: 'Task',
+    placeholder: 'Quick task…',
+    hint: 'Enter adds to today · Tab switches type · Esc dismisses'
+  },
+  note: {
+    label: 'Note',
+    placeholder: 'Quick note…',
+    hint: 'Enter appends to your inbox note · Tab switches type'
+  },
+  expense: {
+    label: 'Expense',
+    placeholder: '12.50 coffee…',
+    hint: 'Amount + description, either order · Tab switches type'
+  }
+}
+
 export function QuickCapture() {
-  const [title, setTitle] = useState('')
+  const [kind, setKind] = useState<CaptureKind>('task')
+  const [text, setText] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -14,31 +37,39 @@ export function QuickCapture() {
     window.quickCaptureApi.hide()
   }, [])
 
+  const cycleKind = useCallback((dir: 1 | -1) => {
+    setError(null)
+    setKind((k) => KINDS[(KINDS.indexOf(k) + dir + KINDS.length) % KINDS.length])
+  }, [])
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Escape') {
         hide()
+      } else if (e.key === 'Tab') {
+        e.preventDefault()
+        cycleKind(e.shiftKey ? -1 : 1)
       }
     },
-    [hide]
+    [hide, cycleKind]
   )
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault()
-      const trimmed = title.trim()
+      const trimmed = text.trim()
       if (!trimmed) return
 
       setSubmitting(true)
       setError(null)
 
       try {
-        const result = await window.quickCaptureApi.quickAdd(trimmed)
+        const result = await window.quickCaptureApi.submit(kind, trimmed)
         if (result.success) {
-          setTitle('')
+          setText('')
           hide()
         } else {
-          setError(result.error ?? 'Failed to add task')
+          setError(result.error ?? 'Failed to capture')
         }
       } catch (err) {
         setError(String(err))
@@ -46,14 +77,20 @@ export function QuickCapture() {
         setSubmitting(false)
       }
     },
-    [title, hide]
+    [text, kind, hide]
   )
+
+  const selectKind = useCallback((k: CaptureKind) => {
+    setError(null)
+    setKind(k)
+    inputRef.current?.focus()
+  }, [])
 
   return (
     <div
       style={{
         width: '360px',
-        height: '80px',
+        height: '120px',
         background: 'hsl(222 47% 9%)',
         border: '1px solid hsl(222 47% 16%)',
         borderRadius: '10px',
@@ -65,6 +102,32 @@ export function QuickCapture() {
         overflow: 'hidden'
       }}
     >
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+        {KINDS.map((k) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => selectKind(k)}
+            aria-pressed={k === kind}
+            // Deliberately out of the tab order: Tab/Shift+Tab on the input
+            // IS the keyboard affordance for switching kinds (see handleKeyDown).
+            tabIndex={-1}
+            style={{
+              background: k === kind ? 'hsl(238 82% 68% / 0.18)' : 'transparent',
+              color: k === kind ? 'hsl(238 90% 78%)' : 'hsl(215 20% 55%)',
+              border: `1px solid ${k === kind ? 'hsl(238 82% 68% / 0.5)' : 'hsl(222 47% 18%)'}`,
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontFamily: 'inherit',
+              padding: '2px 10px',
+              cursor: 'pointer',
+              lineHeight: 1.4
+            }}
+          >
+            {KIND_META[k].label}
+          </button>
+        ))}
+      </div>
       <form
         onSubmit={handleSubmit}
         style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}
@@ -87,15 +150,15 @@ export function QuickCapture() {
           <input
             ref={inputRef}
             type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Quick task…"
+            placeholder={KIND_META[kind].placeholder}
             disabled={submitting}
             autoComplete="off"
             autoCorrect="off"
             spellCheck={false}
-            aria-label="Quick capture task title"
+            aria-label={`Quick capture ${KIND_META[kind].label.toLowerCase()}`}
             style={{
               flex: 1,
               background: 'transparent',
@@ -130,7 +193,7 @@ export function QuickCapture() {
               lineHeight: 1.2
             }}
           >
-            Press Enter to add to today · Esc to dismiss
+            {KIND_META[kind].hint}
           </p>
         )}
       </form>
