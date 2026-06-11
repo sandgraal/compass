@@ -129,6 +129,13 @@ const api = {
     backfillNow: () => ipcRenderer.invoke('spotlight:backfill-now')
   },
 
+  // --- Obsidian vault bridge (Phase 7 Track B) ---
+  obsidian: {
+    getStatus: () => ipcRenderer.invoke('obsidian:get-status'),
+    setVaultPath: (path: string) => ipcRenderer.invoke('obsidian:set-vault-path', path),
+    clear: () => ipcRenderer.invoke('obsidian:clear')
+  },
+
   // --- Plaid (Phase 4.6 — bank Link flow) ---
   plaid: {
     getStatus: () => ipcRenderer.invoke('plaid:get-status'),
