@@ -183,6 +183,22 @@ describe('quick-capture note', () => {
     expect(content).toBe('# Quick Capture Inbox\n\n- 2026-06-11 09:05 — remember the milk\n')
   })
 
+  it('re-adds the trailing newline when a hand-edit removed it', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-11T09:05:00'))
+    await submit('note', 'first')
+
+    // Simulate a hand-edit that drops the trailing newline
+    const file = join(knowledgeDir, 'inbox', 'quick-capture.md')
+    const { writeFileSync } = await import('node:fs')
+    writeFileSync(file, readFileSync(file, 'utf8').replace(/\n$/, ''), 'utf8')
+
+    await submit('note', 'second')
+    const lines = readFileSync(file, 'utf8').split('\n')
+    expect(lines).toContain('- 2026-06-11 09:05 — first')
+    expect(lines).toContain('- 2026-06-11 09:05 — second')
+  })
+
   it('appends to an existing inbox note and collapses newlines', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-11T09:05:00'))

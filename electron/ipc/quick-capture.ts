@@ -10,7 +10,7 @@
  * The capture window is the only consumer; it talks through the minimal
  * `preload-quick-capture.ts` bridge (window.api is NOT exposed there).
  */
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
@@ -85,13 +85,17 @@ function captureNote(text: string): QuickCaptureResult {
   if (!existsSync(fullPath)) {
     writeFileSync(fullPath, '# Quick Capture Inbox\n\n', 'utf8')
   }
+  // The user may have hand-edited the file and dropped the trailing newline —
+  // re-add it so the new bullet never glues onto the last line.
+  const prev = readFileSync(fullPath, 'utf8')
+  const sep = prev.endsWith('\n') ? '' : '\n'
   const now = new Date()
   const hh = String(now.getHours()).padStart(2, '0')
   const mm = String(now.getMinutes()).padStart(2, '0')
   // Single-line entries only — the capture bar is a one-line input, but
   // collapse any pasted newlines so one capture is always one bullet.
   const oneLine = text.replace(/\s*\n\s*/g, ' ')
-  appendFileSync(fullPath, `- ${localYmd(now)} ${hh}:${mm} — ${oneLine}\n`, 'utf8')
+  appendFileSync(fullPath, `${sep}- ${localYmd(now)} ${hh}:${mm} — ${oneLine}\n`, 'utf8')
   return { success: true }
 }
 
@@ -106,17 +110,19 @@ function captureExpense(text: string): QuickCaptureResult {
 
   const db = getDb()
   const date = localYmd()
+  const amount = -Math.abs(parsed.amount)
+  const description = parsed.description.slice(0, MAX_TITLE_LEN)
   // Each capture is an intentional, distinct purchase — two "4.50 coffee"
-  // captures in one day are two coffees. Salt the hash with the capture
-  // instant so the natural-field dedupe (built for re-ingested CSVs) never
-  // swallows the second one.
+  // captures in one day are two coffees. Salt the hash (via the account
+  // component) with the capture instant so the natural-field dedupe (built
+  // for re-ingested CSVs) never swallows the second one.
   const raw: RawTxn = {
     date,
-    amount: -Math.abs(parsed.amount),
-    description: parsed.description.slice(0, MAX_TITLE_LEN),
+    amount,
+    description,
     account: 'Quick Capture',
     sourceFile: 'quick-capture',
-    hash: hashTxn(date, -Math.abs(parsed.amount), parsed.description, `quick-capture:${Date.now()}`)
+    hash: hashTxn(date, amount, description, `quick-capture:${Date.now()}`)
   }
 
   const rules = db.select().from(categorizationRules).all()

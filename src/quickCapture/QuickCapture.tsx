@@ -108,6 +108,9 @@ export function QuickCapture() {
             key={k}
             type="button"
             onClick={() => selectKind(k)}
+            aria-pressed={k === kind}
+            // Deliberately out of the tab order: Tab/Shift+Tab on the input
+            // IS the keyboard affordance for switching kinds (see handleKeyDown).
             tabIndex={-1}
             style={{
               background: k === kind ? 'hsl(238 82% 68% / 0.18)' : 'transparent',
