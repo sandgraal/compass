@@ -38,7 +38,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, resolve as pathResolve, relative } from 'node:path'
+import { dirname, isAbsolute, join, resolve as pathResolve, relative } from 'node:path'
 import { eq } from 'drizzle-orm'
 import type { BrowserWindow } from 'electron'
 import { getDb } from '../db/client'
@@ -70,14 +70,19 @@ export function resolveVaultPath(input: string): string | null {
   if (typeof input !== 'string' || input.trim().length === 0) return null
   const trimmed = input.trim()
   const expanded = trimmed.startsWith('~') ? join(homedir(), trimmed.slice(1)) : trimmed
-  const abs = pathResolve(expanded)
-  return abs.startsWith('/') ? abs : null
+  // Absoluteness must be checked BEFORE pathResolve — resolve() would turn a
+  // relative input into a cwd-anchored absolute path and defeat the check.
+  // isAbsolute (not startsWith('/')) so Windows drive-letter paths pass.
+  if (!isAbsolute(expanded)) return null
+  return pathResolve(expanded)
 }
 
 /** Separator-boundary "a contains b (or equals)" check on resolved paths. */
 function contains(parent: string, child: string): boolean {
   const rel = relative(parent, child)
-  return rel === '' || (!rel.startsWith('..') && !rel.startsWith('/'))
+  // An absolute rel means different roots (e.g. different Windows drives)
+  // — definitely not contained. startsWith('/') alone would miss `D:\...`.
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
 }
 
 export function validateVaultPath(

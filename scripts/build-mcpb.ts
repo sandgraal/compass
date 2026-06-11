@@ -141,6 +141,10 @@ function smokeTest(serverPath: string): Promise<void> {
     child.on('exit', (code) => {
       settle('reject', new Error(`bundled server exited (code ${code}) before responding:\n${err}`))
     })
+    // Spawn-level failures (ENOENT, EACCES) emit 'error', not 'exit'.
+    child.on('error', (spawnErr) => {
+      settle('reject', spawnErr)
+    })
     child.stdin.write(
       `${JSON.stringify({
         jsonrpc: '2.0',

@@ -103,6 +103,9 @@ describe('validateVaultPath', () => {
     expect(validateVaultPath(join(root, 'file.md'), { appDataDir: appData }).ok).toBe(false)
     expect(validateVaultPath('relative/path', { appDataDir: appData }).ok).toBe(false)
     expect(validateVaultPath('', { appDataDir: appData }).ok).toBe(false)
+    // Relative input must be rejected even when it RESOLVES to an existing
+    // dir — pathResolve would silently anchor it to cwd otherwise.
+    expect(validateVaultPath('.', { appDataDir: appData }).ok).toBe(false)
   })
 
   it('rejects either nesting with the app data dir', async () => {
