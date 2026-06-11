@@ -51,6 +51,18 @@ const INTEGRATIONS: IntegrationConfig[] = [
     color: 'from-zinc-400/20 to-zinc-600/20',
     logo: ''
   },
+  // Obsidian is local-file based like Apple Calendar — no OAuth. The user
+  // points Compass at a vault folder; sync runs two one-way mirrors
+  // (vault → knowledge-base/obsidian, knowledge-base → vault/Compass).
+  {
+    id: 'obsidian',
+    name: 'Obsidian',
+    description:
+      'Two-way markdown bridge with a local vault — vault notes appear in your knowledge base, Compass notes appear in the vault. No cloud.',
+    scopes: ['local:markdown'],
+    color: 'from-purple-500/20 to-violet-600/20',
+    logo: '◆'
+  },
   {
     id: 'plaid',
     name: 'Plaid',
@@ -139,6 +151,16 @@ export default function Integrations(): JSX.Element {
   // Inline "set secret" form for Plaid. Mirrors the GitHub PAT / Google
   // credentials pattern from earlier PRs.
   const [plaidSecretInput, setPlaidSecretInput] = useState<string | null>(null)
+  // Obsidian vault bridge. Status mirrors `window.api.obsidian.getStatus()`;
+  // the path input follows the same null-= -collapsed convention as the
+  // PAT / Plaid-secret forms above.
+  const [obsidianStatus, setObsidianStatus] = useState<{
+    configured: boolean
+    vaultPath: string | null
+    looksLikeVault: boolean
+    error: string | null
+  } | null>(null)
+  const [obsidianPathInput, setObsidianPathInput] = useState<string | null>(null)
   const { toast } = useToast()
   const confirm = useConfirm()
 
@@ -167,6 +189,7 @@ export default function Integrations(): JSX.Element {
       })
 
     void loadPlaid()
+    void loadObsidian()
 
     // Load persisted sync log from DB on mount
     window.api.sync
@@ -202,6 +225,7 @@ export default function Integrations(): JSX.Element {
       // Without this, the "Last synced" timestamp on each bank wouldn't
       // update until the user navigated away and back.
       if (d.service === 'plaid') void loadPlaid()
+      if (d.service === 'obsidian') void loadObsidian()
     })
     return unsub
   }, [])
@@ -259,6 +283,12 @@ export default function Integrations(): JSX.Element {
       void connectPlaidBank()
       return
     }
+    // Obsidian: no OAuth — Connect opens the vault-path form; once a vault
+    // is configured the card's refresh icon (or cron) handles syncing.
+    if (service === 'obsidian') {
+      setObsidianPathInput(obsidianStatus?.vaultPath ?? '')
+      return
+    }
     setConnecting(service)
     try {
       // Apple Calendar is local-file based — no OAuth, just kick off a
@@ -299,6 +329,54 @@ export default function Integrations(): JSX.Element {
       setPlaidItems(items)
     } catch {
       /* IPC may not be wired in non-electron contexts (Storybook etc.); ignore */
+    }
+  }
+
+  // Refresh Obsidian bridge status. Called on mount, after configure /
+  // disconnect, and after every obsidian sync event.
+  async function loadObsidian(): Promise<void> {
+    const api = typeof window !== 'undefined' ? window.api : undefined
+    if (!api?.obsidian) return
+    try {
+      setObsidianStatus(await api.obsidian.getStatus())
+    } catch {
+      /* IPC may not be wired in non-electron contexts; ignore */
+    }
+  }
+
+  async function submitObsidianPath() {
+    if (typeof obsidianPathInput !== 'string') return
+    const path = obsidianPathInput.trim()
+    if (!path) {
+      toast('Enter the path to your Obsidian vault first.', 'error')
+      return
+    }
+    setConnecting('obsidian')
+    try {
+      const r = await window.api.obsidian.setVaultPath(path)
+      if (!r.success) {
+        toast(r.error ?? 'Could not use that folder.', 'error')
+        return
+      }
+      if (r.looksLikeVault === false) {
+        toast(
+          'Connected — note: no .obsidian folder found, treating it as a plain notes folder.',
+          'info'
+        )
+      } else {
+        toast('Obsidian vault connected.', 'success')
+      }
+      setObsidianPathInput(null)
+      await loadObsidian()
+      await loadStatuses()
+      triggerSync('obsidian')
+    } catch (err) {
+      toast(
+        `Couldn't save vault path: ${err instanceof Error ? err.message : String(err)}`,
+        'error'
+      )
+    } finally {
+      setConnecting(null)
     }
   }
 
@@ -447,7 +525,14 @@ export default function Integrations(): JSX.Element {
     if (!ok) return
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (isElectron) {
-      await window.api.auth.disconnect(service)
+      // Obsidian has no OAuth token — disconnect = forget the vault path.
+      // Files already mirrored (both directions) stay where they are.
+      if (service === 'obsidian') {
+        await window.api.obsidian.clear()
+        await loadObsidian()
+      } else {
+        await window.api.auth.disconnect(service)
+      }
       await loadStatuses()
     }
   }
@@ -892,6 +977,84 @@ export default function Integrations(): JSX.Element {
                 </div>
               )}
 
+              {/* ─── Obsidian card body ────────────────────────────────────
+                  Vault-path form (Connect / Change vault) or the configured
+                  vault row. Local folder only — no secrets involved. */}
+              {integration.id === 'obsidian' && obsidianPathInput !== null && (
+                <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
+                  <label
+                    htmlFor="obsidian-vault-path-input"
+                    className="block text-xs text-muted-foreground"
+                  >
+                    Vault folder (absolute path, ~ allowed)
+                  </label>
+                  <input
+                    id="obsidian-vault-path-input"
+                    type="text"
+                    placeholder="~/Documents/My Vault"
+                    aria-label="Obsidian vault folder path"
+                    value={obsidianPathInput}
+                    onChange={(e) => setObsidianPathInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void submitObsidianPath()
+                      else if (e.key === 'Escape') setObsidianPathInput(null)
+                    }}
+                    className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+                  />
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Vault notes are imported under <code className="font-mono">obsidian/</code> in
+                    your knowledge base; Compass notes are exported to a{' '}
+                    <code className="font-mono">Compass/</code> folder in the vault. Each side is
+                    one-way — no conflicts.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void submitObsidianPath()}
+                      disabled={connecting === 'obsidian' || !obsidianPathInput.trim()}
+                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
+                    >
+                      <Plug2 size={11} />
+                      {connecting === 'obsidian' ? 'Connecting…' : 'Connect & Sync'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setObsidianPathInput(null)}
+                      className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+              {integration.id === 'obsidian' &&
+                obsidianPathInput === null &&
+                obsidianStatus?.configured && (
+                  <div className="mb-3 flex items-center justify-between gap-2 px-2 py-1.5 bg-background/40 border border-border rounded text-xs">
+                    <div className="min-w-0">
+                      <div className="font-medium text-foreground truncate">
+                        {obsidianStatus.vaultPath}
+                      </div>
+                      {obsidianStatus.error ? (
+                        <div className="text-red-400">{obsidianStatus.error}</div>
+                      ) : (
+                        !obsidianStatus.looksLikeVault && (
+                          <div className="text-muted-foreground">
+                            Plain folder (no .obsidian found)
+                          </div>
+                        )
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setObsidianPathInput(obsidianStatus.vaultPath ?? '')}
+                      className="shrink-0 text-xs px-2 py-1 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Change vault
+                    </button>
+                  </div>
+                )}
+
               {/* Inline Google credentials form. Replaces the .env workflow
                   with paste-once UX. Saved values are encrypted via safeStorage
                   and never cross the IPC boundary again. */}
@@ -1053,7 +1216,8 @@ export default function Integrations(): JSX.Element {
                   </button>
                 ) : (integration.id === 'github' && githubPatInput !== null) ||
                   (integration.id === 'google' && googleCredsInput !== null) ||
-                  (integration.id === 'plaid' && plaidSecretInput !== null) ? null : (
+                  (integration.id === 'plaid' && plaidSecretInput !== null) ||
+                  (integration.id === 'obsidian' && obsidianPathInput !== null) ? null : (
                   <button
                     type="button"
                     onClick={() => connect(integration.id)}

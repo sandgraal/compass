@@ -479,6 +479,18 @@ declare global {
           | { success: false; error: string }
         >
       }
+      obsidian: {
+        getStatus(): Promise<{
+          configured: boolean
+          vaultPath: string | null
+          looksLikeVault: boolean
+          error: string | null
+        }>
+        setVaultPath(
+          path: string
+        ): Promise<{ success: boolean; looksLikeVault?: boolean; error?: string }>
+        clear(): Promise<{ success: boolean }>
+      }
       plaid: {
         getStatus(): Promise<{
           configured: boolean

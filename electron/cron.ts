@@ -5,6 +5,7 @@ import { schedulePlaidDailySync, stopPlaidDailySync } from './cron-plaid'
 import { getDb, getRawSqlite } from './db/client'
 import { appSettings, integrations } from './db/schema'
 import { captureSnapshots } from './integrations/finance-snapshot'
+import { syncObsidian } from './integrations/obsidian'
 import {
   computeLowCashAlert,
   computePriceHikeAlert,
@@ -114,6 +115,8 @@ function runSyncForService(service: string): void {
     void syncGitHub(win)
   } else if (service === 'apple-calendar') {
     void syncAppleCalendar(win)
+  } else if (service === 'obsidian') {
+    void syncObsidian(win)
   }
 }
 
