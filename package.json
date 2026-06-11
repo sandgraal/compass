@@ -118,7 +118,7 @@
     "vitest": "^4.1.8"
   },
   "overrides": {
-    "esbuild": "^0.25.0",
+    "esbuild": "$esbuild",
     "vite": "$vite"
   },
   "engines": {
