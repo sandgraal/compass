@@ -46,6 +46,19 @@ jobs:
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
 
+      # Claude Desktop one-click extension (Phase 8.3). Native better-sqlite3
+      # binding is fetched per-arch; the bundle matching the runner arch is
+      # smoke-tested, the other is a cross-arch build (binding can't execute here).
+      - name: Build Claude Desktop extension bundles (.mcpb)
+        run: |
+          npm run build:mcpb -- --arch arm64
+          npm run build:mcpb -- --arch x64
+
+      - name: Attach .mcpb bundles to the release
+        run: gh release upload "${GITHUB_REF_NAME}" dist/*.mcpb --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   release-windows:
     name: Build & publish Windows release
     runs-on: windows-latest

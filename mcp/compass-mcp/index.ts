@@ -29,6 +29,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
  * Register in .mcp.json (already done at repo root).
  */
 import Database from 'better-sqlite3'
+import { REPO_ONLY_TOOLS, filterToolsForBundle, isBundled } from './bundle-mode.js'
 import { DAY_MS, localYm, localYmd } from './dates.js'
 import { PROPOSE_TOOLS, appendProposal, buildProposal, makeProposal } from './proposals.js'
 
@@ -202,7 +203,9 @@ const TOOLS = [
   ...PROPOSE_TOOLS
 ]
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: filterToolsForBundle(TOOLS, isBundled())
+}))
 
 // ============================================================
 // Tool handlers
@@ -212,6 +215,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params
 
   try {
+    if (isBundled() && REPO_ONLY_TOOLS.has(name)) {
+      return errorResult(
+        `${name} inspects the Compass source repository and is not available in the bundled desktop extension. Run the MCP from a repo checkout to use it.`
+      )
+    }
+
     if (name === 'compass_today_tasks') {
       const db = openDb()
       if (!db) return errorResult('Compass DB not found — is the app installed?')

@@ -11,11 +11,11 @@ Talk to your [Compass](https://github.com/sandgraal/compass) life OS from Claude
   `morning-brief`, `weekly-review`, `budget-check`, `plan-my-week`,
   `capture-from-web`.
 
-> **Requires a local Compass repo checkout.** This plugin does **not** ship a
-> self-contained MCP binary — its `.mcp.json` runs the server from the Compass
-> repo (`mcp/compass-mcp/`), so the plugin must live inside (or alongside) a
-> Compass checkout. A one-click, self-contained desktop bundle is upcoming
-> (Compass **Phase 8.3**); until then use the manual config below.
+> **This plugin requires a local Compass repo checkout** — its `.mcp.json` runs
+> the server from the Compass repo (`mcp/compass-mcp/`), so the plugin must live
+> inside (or alongside) a Compass checkout. **Claude Desktop users don't need
+> it:** the one-click `.mcpb` desktop extension (Phase 8.3, below) is
+> self-contained.
 
 > This is the **end-user** plugin. It is intentionally separate from the
 > developer plugin (`compass-stack`, under the repo's `.claude/`) which ships
@@ -36,16 +36,23 @@ Claude (skill) ──compass_propose_*──▶ Claude Inbox (Compass app) ─�
 
 ## Install
 
+### Claude Desktop — one-click `.mcpb` bundle (recommended)
+Download `compass-mcp-darwin-<arch>.mcpb` from the latest
+[Compass release](https://github.com/sandgraal/compass/releases) (or build it
+from a checkout with `npm run build:mcpb`) and double-click it — Claude Desktop
+installs it as an extension. The bundle is self-contained (compiled server +
+native SQLite binding); no Node toolchain or repo checkout needed. See
+`mcp/compass-mcp/README.md` § Desktop extension for details.
+
 ### Claude Code / Cowork
 Use this `claude-plugin/` directory as a plugin **from within your Compass repo
 checkout** — its `.mcp.json` launches the server at
 `${CLAUDE_PLUGIN_ROOT}/../mcp/compass-mcp/index.ts` (i.e. the repo's `mcp/`).
-The plugin registers that MCP server and exposes the skills in `skills/`. (A
-self-contained, checkout-free bundle is Phase 8.3.)
+The plugin registers that MCP server and exposes the skills in `skills/`.
 
-### Claude Desktop (manual MCP config)
-Until the one-click desktop bundle ships (Compass Phase 8.3), add the server to
-your `claude_desktop_config.json`:
+### Claude Desktop (manual MCP config fallback)
+If you'd rather run from a checkout (e.g. to get the repo self-knowledge tools
+the bundle omits), add the server to your `claude_desktop_config.json`:
 
 ```jsonc
 {
