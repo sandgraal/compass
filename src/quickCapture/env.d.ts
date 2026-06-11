@@ -4,7 +4,10 @@
  */
 declare interface Window {
   quickCaptureApi: {
-    quickAdd(title: string): Promise<{ success: boolean; error?: string }>
+    submit(
+      kind: 'task' | 'note' | 'expense',
+      text: string
+    ): Promise<{ success: boolean; error?: string }>
     hide(): void
   }
 }

@@ -78,7 +78,7 @@ function createTray(__dirname: string): Tray {
 
   // Build a context menu for right-click
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'Quick add task', click: () => toggleCaptureWindow(t) },
+    { label: 'Quick capture', click: () => toggleCaptureWindow(t) },
     { type: 'separator' },
     {
       label: 'Open Compass',
@@ -110,7 +110,7 @@ function createTray(__dirname: string): Tray {
 function createCaptureWindow(__dirname: string): BrowserWindow {
   const win = new BrowserWindow({
     width: 360,
-    height: 80,
+    height: 120,
     show: false,
     frame: false,
     transparent: true,
@@ -168,7 +168,7 @@ export function toggleCaptureWindow(t: Tray): void {
   const trayDisplay = screen.getDisplayMatching(trayBounds)
   const { x: workAreaX, y: workAreaY, width: workAreaW, height: workAreaH } = trayDisplay.workArea
   const winW = 360
-  const winH = 80
+  const winH = 120
 
   let x = Math.round(trayBounds.x + trayBounds.width / 2 - winW / 2)
   // macOS: menu bar is at top; position window below tray icon

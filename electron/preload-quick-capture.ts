@@ -5,9 +5,11 @@
  */
 import { contextBridge, ipcRenderer } from 'electron'
 
+type QuickCaptureKind = 'task' | 'note' | 'expense'
+
 const quickCaptureApi = {
-  quickAdd: (title: string): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke('checklist:quick-add', title),
+  submit: (kind: QuickCaptureKind, text: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('quick-capture:submit', kind, text),
   hide: (): void => {
     ipcRenderer.send('quick-capture:hide')
   }

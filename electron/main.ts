@@ -15,6 +15,7 @@ import { registerKnowledgeHandlers } from './ipc/knowledge'
 import { registerMonthlyRollupHandlers } from './ipc/monthly-rollup'
 import { registerMorningBriefHandlers } from './ipc/morning-brief'
 import { registerPlaidHandlers } from './ipc/plaid'
+import { registerQuickCaptureHandlers } from './ipc/quick-capture'
 import { registerSearchHandlers } from './ipc/search'
 import { registerSettingsHandlers } from './ipc/settings'
 import { registerSpotlightHandlers, startKnowledgeMirrorWatcher } from './ipc/spotlight'
@@ -145,6 +146,7 @@ app.whenReady().then(async () => {
   registerMorningBriefHandlers(ipcMain)
   registerWeeklyReviewHandlers(ipcMain)
   registerMonthlyRollupHandlers(ipcMain)
+  registerQuickCaptureHandlers(ipcMain)
 
   // Toggle content protection when navigating to/from vault
   ipcMain.on('vault:set-content-protection', (_event, enabled: boolean) => {
