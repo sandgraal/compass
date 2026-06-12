@@ -50,6 +50,7 @@ CSP enforced in production builds (no eval, no remote scripts, allowlist for OAu
 | Knowledge — regex / Ollama suggestion pipeline | `electron/knowledge/suggestions.ts`, `electron/knowledge/ollama.ts` |
 | Tray + global shortcut + quick-capture window | `electron/menu-bar.ts`, `src/quickCapture/` |
 | Obsidian vault bridge (two one-way markdown mirrors) | `electron/integrations/obsidian.ts`, `electron/ipc/obsidian.ts` |
+| Notion import (shared pages → `knowledge-base/notion/`) | `electron/integrations/notion.ts` (+ `auth:connect-notion` in `electron/ipc/auth.ts`) |
 
 ## Database (Drizzle / SQLite via `better-sqlite3`)
 
@@ -98,7 +99,7 @@ Plain markdown files at `~/Library/Application Support/Compass/knowledge-base/<c
 ## IPC handler map (~80 handlers)
 
 Registered in `electron/main.ts`:
-- `registerAuthHandlers` — OAuth flows
+- `registerAuthHandlers` — OAuth flows + paste-once token handlers (`auth:connect-github-pat`; **`auth:connect-notion`** — Notion internal-integration token validated against `/v1/users/me`, encrypted via the standard `saveToken` path; Notion's own page-sharing model is the consent surface)
 - `registerSyncHandlers` — sync trigger, status, event log
 - `registerKnowledgeHandlers` — file CRUD, search, prev snapshot, suggestions accept/dismiss, **backlinks (Phase 5.3: `knowledge:get-backlinks`)**, **semantic search (Phase 5.9): `knowledge:get-embedding-status`, `knowledge:rebuild-embeddings`, `knowledge:semantic-search`** — backed by `electron/knowledge/embeddings.ts` and a JSON-on-disk index at `.data/knowledge-embeddings.json`
 - `registerVaultHandlers` — entry CRUD, 1Password CSV import, history

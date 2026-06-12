@@ -63,6 +63,18 @@ const INTEGRATIONS: IntegrationConfig[] = [
     color: 'from-purple-500/20 to-violet-600/20',
     logo: '◆'
   },
+  // Notion uses an internal-integration token (paste-once, like the GitHub
+  // PAT) — only pages the user explicitly shares with the integration are
+  // visible to the API. Import lands under knowledge-base/notion/.
+  {
+    id: 'notion',
+    name: 'Notion',
+    description:
+      'Imports pages you share with your Notion integration into the knowledge base as markdown.',
+    scopes: ['pages:read'],
+    color: 'from-slate-500/20 to-slate-700/20',
+    logo: 'N'
+  },
   {
     id: 'plaid',
     name: 'Plaid',
@@ -82,14 +94,6 @@ const SYNC_INTERVAL_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
 ]
 
 const UPCOMING_INTEGRATIONS: IntegrationConfig[] = [
-  {
-    id: 'notion',
-    name: 'Notion',
-    description: 'Notes, databases, and project wikis.',
-    scopes: ['read'],
-    color: 'from-slate-500/20 to-slate-700/20',
-    logo: 'N'
-  },
   {
     id: 'linear',
     name: 'Linear',
@@ -152,7 +156,7 @@ export default function Integrations(): JSX.Element {
   // credentials pattern from earlier PRs.
   const [plaidSecretInput, setPlaidSecretInput] = useState<string | null>(null)
   // Obsidian vault bridge. Status mirrors `window.api.obsidian.getStatus()`;
-  // the path input follows the same null-= -collapsed convention as the
+  // the path input follows the same null-=-collapsed convention as the
   // PAT / Plaid-secret forms above.
   const [obsidianStatus, setObsidianStatus] = useState<{
     configured: boolean
@@ -161,6 +165,9 @@ export default function Integrations(): JSX.Element {
     error: string | null
   } | null>(null)
   const [obsidianPathInput, setObsidianPathInput] = useState<string | null>(null)
+  // Notion internal-integration token form. Same null-=-collapsed
+  // convention as the GitHub PAT input above.
+  const [notionTokenInput, setNotionTokenInput] = useState<string | null>(null)
   const { toast } = useToast()
   const confirm = useConfirm()
 
@@ -289,6 +296,11 @@ export default function Integrations(): JSX.Element {
       setObsidianPathInput(obsidianStatus?.vaultPath ?? '')
       return
     }
+    // Notion: paste-once internal-integration token, like the GitHub PAT.
+    if (service === 'notion') {
+      setNotionTokenInput('')
+      return
+    }
     setConnecting(service)
     try {
       // Apple Calendar is local-file based — no OAuth, just kick off a
@@ -375,6 +387,31 @@ export default function Integrations(): JSX.Element {
         `Couldn't save vault path: ${err instanceof Error ? err.message : String(err)}`,
         'error'
       )
+    } finally {
+      setConnecting(null)
+    }
+  }
+
+  async function submitNotionToken() {
+    if (typeof notionTokenInput !== 'string') return
+    const token = notionTokenInput.trim()
+    if (!token) {
+      toast('Paste your Notion integration token first.', 'error')
+      return
+    }
+    setConnecting('notion')
+    try {
+      const r = await window.api.auth.connectNotion(token)
+      if (r.error) {
+        toast(`Connection failed: ${r.error}`, 'error')
+        return
+      }
+      toast(r.workspace ? `Connected to ${r.workspace}.` : 'Notion connected.', 'success')
+      setNotionTokenInput(null)
+      await loadStatuses()
+      triggerSync('notion')
+    } catch (err) {
+      toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
     } finally {
       setConnecting(null)
     }
@@ -1055,6 +1092,66 @@ export default function Integrations(): JSX.Element {
                   </div>
                 )}
 
+              {/* Inline Notion token form — internal-integration token,
+                  same paste-once flow as the GitHub PAT. Only pages shared
+                  with the integration are visible to the API. */}
+              {integration.id === 'notion' && !isConnected && notionTokenInput !== null && (
+                <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
+                  <div className="text-xs text-muted-foreground leading-relaxed">
+                    Create an internal integration at{' '}
+                    <a
+                      href="https://www.notion.so/my-integrations"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary underline underline-offset-2 inline-flex items-center gap-0.5"
+                    >
+                      notion.so/my-integrations
+                      <ExternalLink size={10} className="opacity-70" />
+                    </a>
+                    , paste its token here, then <em>share</em> the pages you want imported with
+                    that integration (page menu ▸ Connections). Compass stores the token encrypted
+                    on disk and only ever reads.
+                  </div>
+                  <label
+                    htmlFor="notion-token-input"
+                    className="block text-xs text-muted-foreground"
+                  >
+                    Notion integration token
+                  </label>
+                  <input
+                    id="notion-token-input"
+                    type="password"
+                    placeholder="ntn_… or secret_…"
+                    aria-label="Notion integration token"
+                    value={notionTokenInput}
+                    onChange={(e) => setNotionTokenInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void submitNotionToken()
+                      else if (e.key === 'Escape') setNotionTokenInput(null)
+                    }}
+                    className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void submitNotionToken()}
+                      disabled={connecting === 'notion' || !notionTokenInput.trim()}
+                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
+                    >
+                      <Plug2 size={11} />
+                      {connecting === 'notion' ? 'Connecting…' : 'Connect'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNotionTokenInput(null)}
+                      className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Inline Google credentials form. Replaces the .env workflow
                   with paste-once UX. Saved values are encrypted via safeStorage
                   and never cross the IPC boundary again. */}
@@ -1217,7 +1314,8 @@ export default function Integrations(): JSX.Element {
                 ) : (integration.id === 'github' && githubPatInput !== null) ||
                   (integration.id === 'google' && googleCredsInput !== null) ||
                   (integration.id === 'plaid' && plaidSecretInput !== null) ||
-                  (integration.id === 'obsidian' && obsidianPathInput !== null) ? null : (
+                  (integration.id === 'obsidian' && obsidianPathInput !== null) ||
+                  (integration.id === 'notion' && notionTokenInput !== null) ? null : (
                   <button
                     type="button"
                     onClick={() => connect(integration.id)}

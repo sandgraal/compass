@@ -596,6 +596,73 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     }
   })
 
+  // Notion internal-integration token (Phase 7 Track B). Same paste-once
+  // PAT pattern as GitHub: validate the format, prove it works against
+  // /v1/users/me, encrypt to disk, flip the integrations row. Only pages
+  // the user explicitly shares with the integration are visible to the API,
+  // so Notion's own sharing model is the consent surface.
+  ipcMain.handle('auth:connect-notion', async (_event, token: string) => {
+    if (typeof token !== 'string') {
+      return { error: 'Token must be a string.' }
+    }
+    const trimmed = token.trim()
+    if (!/^(ntn_|secret_)[A-Za-z0-9]{20,255}$/.test(trimmed)) {
+      return {
+        error:
+          "That doesn't look like a Notion integration token. Expected a string starting with `ntn_` (or legacy `secret_`) from notion.so/my-integrations."
+      }
+    }
+    try {
+      const meResp = await fetch('https://api.notion.com/v1/users/me', {
+        headers: {
+          Authorization: `Bearer ${trimmed}`,
+          'Notion-Version': '2022-06-28'
+        }
+      })
+      if (meResp.status === 401) {
+        return { error: 'Token rejected by Notion (401). It may be revoked or mistyped.' }
+      }
+      if (!meResp.ok) {
+        return { error: `Notion responded with HTTP ${meResp.status}.` }
+      }
+      const me = (await meResp.json()) as {
+        name?: string
+        bot?: { workspace_name?: string }
+      }
+      const workspace = me.bot?.workspace_name ?? me.name ?? null
+
+      saveToken('notion', {
+        access_token: trimmed,
+        auth_method: 'internal-integration',
+        workspace
+      })
+
+      const db = getDb()
+      db.insert(integrations)
+        .values({
+          service: 'notion',
+          connectedAt: new Date(),
+          status: 'connected',
+          scopes: JSON.stringify(['pages:read'])
+        })
+        .onConflictDoUpdate({
+          target: integrations.service,
+          set: {
+            connectedAt: new Date(),
+            status: 'connected',
+            scopes: JSON.stringify(['pages:read'])
+          }
+        })
+        .run()
+
+      return { success: true, workspace }
+    } catch (err) {
+      // Non-Error throws (e.g. a re-thrown string) must still produce a
+      // string error, or the renderer gets `{ error: undefined }`.
+      return { error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
   // Validate + store Google OAuth client credentials. Replaces the `.env`
   // workflow with an in-app form: paste once, encrypted to disk, never
   // crosses the IPC boundary again. The OAuth dance (`auth:connect-google`)

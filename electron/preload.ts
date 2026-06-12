@@ -39,6 +39,7 @@ const api = {
     clearGoogleCredentials: () => ipcRenderer.invoke('auth:clear-google-credentials'),
     connectGitHub: () => ipcRenderer.invoke('auth:connect-github'),
     connectGitHubWithPAT: (token: string) => ipcRenderer.invoke('auth:connect-github-pat', token),
+    connectNotion: (token: string) => ipcRenderer.invoke('auth:connect-notion', token),
     disconnect: (service: string) => ipcRenderer.invoke('auth:disconnect', service),
     getStatus: () => ipcRenderer.invoke('auth:get-status'),
     getRedirectUris: () => ipcRenderer.invoke('auth:get-redirect-uris')

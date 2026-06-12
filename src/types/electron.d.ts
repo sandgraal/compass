@@ -285,6 +285,9 @@ declare global {
         connectGitHubWithPAT(
           token: string
         ): Promise<{ success?: boolean; login?: string; error?: string }>
+        connectNotion(
+          token: string
+        ): Promise<{ success?: boolean; workspace?: string | null; error?: string }>
         disconnect(service: string): Promise<{ success: boolean }>
         getStatus(): Promise<IntegrationStatus[]>
         getRedirectUris(): Promise<RedirectUris>
