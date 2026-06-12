@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import CommandPalette from './components/CommandPalette'
 import { AppLayout } from './components/layout/AppLayout'
+import { isThemePreference } from './lib/theme'
 import Ask from './pages/Ask'
 import ClaudeInbox from './pages/ClaudeInbox'
 import Daily from './pages/Daily'
@@ -16,23 +17,29 @@ import Weekly from './pages/Weekly'
 import { useAppStore } from './store/appStore'
 
 export default function App(): JSX.Element {
-  const { setTheme } = useAppStore()
+  const { setThemePreference, setOsTheme, setAccent } = useAppStore()
   const [paletteOpen, setPaletteOpen] = useState(false)
 
   useEffect(() => {
-    // Sync with OS native theme
+    // Theme: restore the saved preference (dark/light/system) + accent, then
+    // track the OS theme — OS changes only take effect while the preference
+    // is 'system' (the store resolves that).
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (isElectron) {
-      window.api.theme.getNativeTheme().then((t) => setTheme(t))
-      const unsub = window.api.theme.onThemeChange((t) => setTheme(t as 'dark' | 'light'))
+      window.api.settings.getAll().then((s) => {
+        setThemePreference(isThemePreference(s.theme) ? s.theme : 'system')
+        if (s.accentColor) setAccent(s.accentColor)
+      })
+      window.api.theme.getNativeTheme().then((t) => setOsTheme(t))
+      const unsub = window.api.theme.onThemeChange((t) => setOsTheme(t as 'dark' | 'light'))
       return unsub
     }
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    setTheme(mq.matches ? 'dark' : 'light')
-    const handler = (e: MediaQueryListEvent) => setTheme(e.matches ? 'dark' : 'light')
+    setOsTheme(mq.matches ? 'dark' : 'light')
+    const handler = (e: MediaQueryListEvent) => setOsTheme(e.matches ? 'dark' : 'light')
     mq.addEventListener('change', handler)
     return () => mq.removeEventListener('change', handler)
-  }, [setTheme])
+  }, [setThemePreference, setOsTheme, setAccent])
 
   // ⌘K global shortcut
   useEffect(() => {

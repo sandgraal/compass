@@ -16,11 +16,12 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
+import { ACCENT_OPTIONS } from '../lib/theme'
 import { cn } from '../lib/utils'
 import { useAppStore } from '../store/appStore'
 
 export default function Settings(): JSX.Element {
-  const { theme, setTheme } = useAppStore()
+  const { theme, themePreference, setThemePreference, accent, setAccent } = useAppStore()
   const [syncInterval, setSyncInterval] = useState('15')
   const [notifications, setNotifications] = useState(true)
   // Morning Brief notification time — '' = off, else local 'HH:MM'.
@@ -115,32 +116,49 @@ export default function Settings(): JSX.Element {
         <SettingsRow label="Theme" description="Choose how Compass looks">
           <div className="flex items-center gap-2">
             {[
-              { id: 'light', icon: <Sun size={14} />, label: 'Light' },
-              { id: 'dark', icon: <Moon size={14} />, label: 'Dark' },
-              { id: 'system', icon: <Monitor size={14} />, label: 'System' }
+              { id: 'light' as const, icon: <Sun size={14} />, label: 'Light' },
+              { id: 'dark' as const, icon: <Moon size={14} />, label: 'Dark' },
+              { id: 'system' as const, icon: <Monitor size={14} />, label: 'System' }
             ].map((t) => (
               <button
                 type="button"
                 key={t.id}
                 onClick={() => {
-                  const v =
-                    t.id === 'system'
-                      ? window.matchMedia('(prefers-color-scheme: dark)').matches
-                        ? 'dark'
-                        : 'light'
-                      : (t.id as 'dark' | 'light')
-                  setTheme(v)
+                  setThemePreference(t.id)
                   save('theme', t.id)
                 }}
                 className={cn(
                   'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-colors',
-                  t.id === theme || (t.id === 'system' && !['light', 'dark'].includes(theme))
+                  t.id === themePreference
                     ? 'border-primary bg-primary/10 text-primary'
                     : 'border-border text-muted-foreground hover:text-foreground'
                 )}
               >
                 {t.icon} {t.label}
               </button>
+            ))}
+          </div>
+        </SettingsRow>
+
+        <SettingsRow label="Accent" description="Highlight color used across the app">
+          <div className="flex items-center gap-2">
+            {ACCENT_OPTIONS.map((a) => (
+              <button
+                type="button"
+                key={a.id}
+                title={a.label}
+                aria-label={`${a.label} accent`}
+                aria-pressed={a.id === accent}
+                onClick={() => {
+                  setAccent(a.id)
+                  save('accentColor', a.id)
+                }}
+                className={cn(
+                  'w-6 h-6 rounded-full border-2 transition-transform hover:scale-110',
+                  a.id === accent ? 'border-foreground scale-110' : 'border-transparent'
+                )}
+                style={{ backgroundColor: `hsl(${theme === 'light' ? a.light : a.dark})` }}
+              />
             ))}
           </div>
         </SettingsRow>
