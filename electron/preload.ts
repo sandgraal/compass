@@ -137,6 +137,11 @@ const api = {
     clear: () => ipcRenderer.invoke('obsidian:clear')
   },
 
+  // --- Proactive insights (Phase 7 Track E) ---
+  insights: {
+    get: () => ipcRenderer.invoke('insights:get')
+  },
+
   // --- Plaid (Phase 4.6 — bank Link flow) ---
   plaid: {
     getStatus: () => ipcRenderer.invoke('plaid:get-status'),

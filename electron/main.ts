@@ -11,6 +11,7 @@ import { registerBackupHandlers } from './ipc/backup'
 import { registerClaudeHandlers } from './ipc/claude'
 import { registerFinanceHandlers } from './ipc/finance'
 import { registerHabitsHandlers } from './ipc/habits'
+import { registerInsightsHandlers } from './ipc/insights'
 import { registerKnowledgeHandlers } from './ipc/knowledge'
 import { registerMonthlyRollupHandlers } from './ipc/monthly-rollup'
 import { registerMorningBriefHandlers } from './ipc/morning-brief'
@@ -149,6 +150,7 @@ app.whenReady().then(async () => {
   registerMonthlyRollupHandlers(ipcMain)
   registerQuickCaptureHandlers(ipcMain)
   registerObsidianHandlers(ipcMain)
+  registerInsightsHandlers(ipcMain)
 
   // Toggle content protection when navigating to/from vault
   ipcMain.on('vault:set-content-protection', (_event, enabled: boolean) => {

@@ -12,6 +12,7 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { MorningBrief } from '../components/MorningBrief'
+import { ProactiveInsights } from '../components/ProactiveInsights'
 import { cn, formatRelative, formatTime, todayISO } from '../lib/utils'
 
 interface DashStat {
@@ -176,6 +177,9 @@ export default function Dashboard(): JSX.Element {
 
       {/* Morning Brief — one glanceable digest of what matters today */}
       <MorningBrief />
+
+      {/* Proactive insights — local-only nudges (Phase 7 Track E) */}
+      <ProactiveInsights />
 
       {/* Stats row */}
       <div className="grid grid-cols-4 gap-4 mb-8">

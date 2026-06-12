@@ -494,6 +494,18 @@ declare global {
         ): Promise<{ success: boolean; looksLikeVault?: boolean; error?: string }>
         clear(): Promise<{ success: boolean }>
       }
+      insights: {
+        get(): Promise<{
+          generatedAt: string
+          insights: Array<{
+            kind: 'spending-anomaly' | 'uncategorized-spend' | 'habit-slippage' | 'stale-notes'
+            severity: 'info' | 'warn'
+            title: string
+            detail: string
+            route: string
+          }>
+        }>
+      }
       plaid: {
         getStatus(): Promise<{
           configured: boolean
