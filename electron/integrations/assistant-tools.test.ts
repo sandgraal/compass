@@ -44,6 +44,19 @@ beforeEach(() => {
       created_at INTEGER NOT NULL, ingested_at INTEGER NOT NULL, resolved_at INTEGER, error TEXT,
       result_ref TEXT, cleared_at INTEGER
     );
+    CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER);
+    CREATE TABLE habits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, icon TEXT, color TEXT,
+      active INTEGER DEFAULT 1, created_at INTEGER
+    );
+    CREATE TABLE habit_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, habit_id INTEGER, date TEXT NOT NULL,
+      completed INTEGER DEFAULT 0
+    );
+    CREATE TABLE knowledge_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
+      category TEXT, last_modified INTEGER, word_count INTEGER DEFAULT 0, auto_updated INTEGER DEFAULT 0
+    );
   `)
 })
 
@@ -59,8 +72,111 @@ describe('ASSISTANT_TOOLS', () => {
     const names = ASSISTANT_TOOLS.map((t) => t.name)
     expect(names).toContain('get_upcoming')
     expect(names).toContain('get_finance_summary')
+    expect(names).toContain('get_week_tasks')
+    expect(names).toContain('get_weekly_goals')
+    expect(names).toContain('get_habit_streaks')
+    expect(names).toContain('get_insights')
     expect(names).toContain('propose_task')
     for (const t of ASSISTANT_TOOLS) expect(t.input_schema.type).toBe('object')
+  })
+})
+
+describe('get_week_tasks', () => {
+  function addTask(date: string, title: string, checked = 0): void {
+    sqlite
+      .prepare(
+        "INSERT INTO checklist_items (list_type, list_date, title, checked, created_at) VALUES ('daily', ?, ?, ?, 0)"
+      )
+      .run(date, title, checked)
+  }
+
+  it('returns the range (default rolling week) with done state, date-ordered', () => {
+    const now = new Date()
+    const ymd = (offsetDays: number): string => {
+      const d = new Date(now.getTime() + offsetDays * 86_400_000)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    }
+    addTask(ymd(2), 'later this week')
+    addTask(ymd(0), 'today done', 1)
+    addTask(ymd(10), 'outside window')
+
+    const res = executeAssistantTool(db(), sqlite, 'get_week_tasks', {})
+    expect(res.ok).toBe(true)
+    const data = (res as { ok: true; data: { tasks: Array<{ title: string; checked: number }> } })
+      .data
+    expect(data.tasks.map((t) => t.title)).toEqual(['today done', 'later this week'])
+  })
+
+  it('rejects bad dates, inverted ranges, and oversized ranges', () => {
+    expect(executeAssistantTool(db(), sqlite, 'get_week_tasks', { from: 'nope' }).ok).toBe(false)
+    expect(
+      executeAssistantTool(db(), sqlite, 'get_week_tasks', { from: '2026-06-15', to: '2026-06-01' })
+        .ok
+    ).toBe(false)
+    expect(
+      executeAssistantTool(db(), sqlite, 'get_week_tasks', { from: '2026-01-01', to: '2026-12-31' })
+        .ok
+    ).toBe(false)
+  })
+})
+
+describe('get_weekly_goals', () => {
+  it('reads the Monday-keyed goals for the week containing the date', () => {
+    // 2026-06-17 is a Wednesday; its week key is Monday 2026-06-15.
+    sqlite
+      .prepare('INSERT INTO app_settings (key, value) VALUES (?, ?)')
+      .run('weekly_goals_2026-06-15', JSON.stringify(['Ship feature', '', 'Run 3x']))
+
+    const res = executeAssistantTool(db(), sqlite, 'get_weekly_goals', { date: '2026-06-17' })
+    expect(res).toEqual({
+      ok: true,
+      data: { weekStart: '2026-06-15', goals: ['Ship feature', 'Run 3x'] }
+    })
+  })
+
+  it('returns empty goals when none stored, and rejects bad dates', () => {
+    const res = executeAssistantTool(db(), sqlite, 'get_weekly_goals', { date: '2026-06-17' })
+    expect(res).toMatchObject({ ok: true, data: { goals: [] } })
+    expect(executeAssistantTool(db(), sqlite, 'get_weekly_goals', { date: 'someday' }).ok).toBe(
+      false
+    )
+  })
+})
+
+describe('get_habit_streaks', () => {
+  it('computes current (today-or-yesterday anchored) and longest streaks for active habits', () => {
+    sqlite.prepare("INSERT INTO habits (name, active) VALUES ('Meditate', 1)").run()
+    sqlite.prepare("INSERT INTO habits (name, active) VALUES ('Retired', 0)").run()
+    const ymd = (offsetDays: number): string => {
+      const d = new Date(Date.now() + offsetDays * 86_400_000)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    }
+    // Yesterday + day before checked; today not yet → current streak 2.
+    for (const off of [-1, -2]) {
+      sqlite
+        .prepare('INSERT INTO habit_entries (habit_id, date, completed) VALUES (1, ?, 1)')
+        .run(ymd(off))
+    }
+
+    const res = executeAssistantTool(db(), sqlite, 'get_habit_streaks', {})
+    expect(res.ok).toBe(true)
+    const data = (res as { ok: true; data: Array<{ name: string; current: number }> }).data
+    expect(data).toHaveLength(1) // inactive habit excluded
+    expect(data[0]).toMatchObject({ name: 'Meditate', current: 2, longest: 2 })
+  })
+})
+
+describe('get_insights', () => {
+  it('surfaces the same detectors as the Dashboard card', () => {
+    const m = today().slice(0, 7)
+    sqlite
+      .prepare('INSERT INTO finance_transactions (date, amount, category) VALUES (?, ?, ?)')
+      .run(`${m}-01`, -150, 'Uncategorized')
+
+    const res = executeAssistantTool(db(), sqlite, 'get_insights', {})
+    expect(res.ok).toBe(true)
+    const data = (res as { ok: true; data: Array<{ kind: string }> }).data
+    expect(data.some((i) => i.kind === 'uncategorized-spend')).toBe(true)
   })
 })
 

@@ -18,7 +18,14 @@ import { randomUUID } from 'node:crypto'
 import type BetterSqlite3 from 'better-sqlite3'
 import { and, asc, eq, gte, lte } from 'drizzle-orm'
 import type { getDb } from '../db/client'
-import { calendarEvents, checklistItems, claudeProposals, financeAccounts } from '../db/schema'
+import {
+  appSettings,
+  calendarEvents,
+  checklistItems,
+  claudeProposals,
+  financeAccounts
+} from '../db/schema'
+import { buildInsights } from '../ipc/insights'
 
 type Db = ReturnType<typeof getDb>
 type RawSqlite = BetterSqlite3.Database
@@ -76,6 +83,46 @@ export const ASSISTANT_TOOLS = [
       },
       additionalProperties: false
     }
+  },
+  {
+    name: 'get_week_tasks',
+    description:
+      'Read daily-checklist tasks across a date range (default: today through 6 days ahead — a rolling week; max 31 days). Includes done/undone state per task. Use this for weekly planning instead of guessing. Read-only.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Start date YYYY-MM-DD (default today)' },
+        to: { type: 'string', description: 'End date YYYY-MM-DD inclusive (default today+6)' }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'get_weekly_goals',
+    description:
+      "Read the user's weekly goals for the week containing the given date (weeks start Monday; default this week). Read-only.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        date: {
+          type: 'string',
+          description: 'Any YYYY-MM-DD inside the target week (default today)'
+        }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'get_habit_streaks',
+    description:
+      'Read each active habit with its current streak (consecutive days, ending today or yesterday) and longest streak. Read-only.',
+    input_schema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
+    name: 'get_insights',
+    description:
+      "Read Compass's proactive insights — spending anomalies, uncategorized-spend buildup, habit slippage, stale notes (same data as the Dashboard 'Worth a look' card). Useful context when planning. Read-only.",
+    input_schema: { type: 'object', properties: {}, additionalProperties: false }
   },
   {
     name: 'propose_task',
@@ -216,6 +263,100 @@ function getFinanceSummary(db: Db, sqlite: RawSqlite, input: Record<string, unkn
   }
 }
 
+const MAX_WEEK_TASK_RANGE_DAYS = 31
+
+function getWeekTasks(db: Db, input: Record<string, unknown>): unknown {
+  const now = new Date()
+  const from = str(input.from) || localYmd(now)
+  const to = str(input.to) || localYmd(new Date(now.getTime() + 6 * DAY_MS))
+  if (!isRealYmd(from) || !isRealYmd(to)) return { error: 'from/to must be real YYYY-MM-DD dates' }
+  if (to < from) return { error: 'to must be on or after from' }
+  const days =
+    (new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime()) / DAY_MS + 1
+  if (days > MAX_WEEK_TASK_RANGE_DAYS) {
+    return { error: `range too large — max ${MAX_WEEK_TASK_RANGE_DAYS} days` }
+  }
+  const tasks = db
+    .select({
+      listDate: checklistItems.listDate,
+      title: checklistItems.title,
+      checked: checklistItems.checked,
+      category: checklistItems.category,
+      source: checklistItems.source
+    })
+    .from(checklistItems)
+    .where(
+      and(
+        eq(checklistItems.listType, 'daily'),
+        gte(checklistItems.listDate, from),
+        lte(checklistItems.listDate, to)
+      )
+    )
+    .orderBy(asc(checklistItems.listDate), asc(checklistItems.sortOrder))
+    .all()
+  return { from, to, tasks }
+}
+
+/** Monday of the week containing the given local day — matches Weekly.tsx's weekKey. */
+function mondayOf(ymd: string): string {
+  const d = new Date(`${ymd}T00:00:00`)
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+  return localYmd(d)
+}
+
+function getWeeklyGoals(db: Db, input: Record<string, unknown>): unknown {
+  const date = str(input.date) || localYmd()
+  if (!isRealYmd(date)) return { error: 'date must be a real YYYY-MM-DD date' }
+  const weekStart = mondayOf(date)
+  const row = db
+    .select({ value: appSettings.value })
+    .from(appSettings)
+    .where(eq(appSettings.key, `weekly_goals_${weekStart}`))
+    .get()
+  let goals: string[] = []
+  try {
+    const parsed: unknown = row?.value ? JSON.parse(row.value) : []
+    if (Array.isArray(parsed)) {
+      goals = parsed.filter((g): g is string => typeof g === 'string' && g.trim() !== '')
+    }
+  } catch {
+    /* malformed stored JSON → treat as no goals */
+  }
+  return { weekStart, goals }
+}
+
+function getHabitStreaks(sqlite: RawSqlite): unknown {
+  // Mirrors mcp/compass-mcp's compass_habit_streaks (same local-day semantics
+  // as src/lib/habit-streaks.ts): current streak may end today OR yesterday so
+  // an as-yet-unchecked today doesn't read as broken.
+  const habits = sqlite
+    .prepare('SELECT id, name FROM habits WHERE active = 1 ORDER BY id')
+    .all() as Array<{ id: number; name: string }>
+  const entryStmt = sqlite.prepare(
+    'SELECT date FROM habit_entries WHERE habit_id = ? AND completed = 1'
+  )
+  return habits.map((h) => {
+    const days = new Set((entryStmt.all(h.id) as Array<{ date: string }>).map((r) => r.date))
+    let current = 0
+    const cursor = new Date()
+    if (!days.has(localYmd(cursor))) cursor.setDate(cursor.getDate() - 1)
+    while (days.has(localYmd(cursor))) {
+      current++
+      cursor.setDate(cursor.getDate() - 1)
+    }
+    let longest = 0
+    let run = 0
+    let prev: number | null = null
+    for (const d of [...days].sort()) {
+      const t = new Date(`${d}T00:00:00Z`).getTime()
+      run = prev !== null && t - prev === DAY_MS ? run + 1 : 1
+      if (run > longest) longest = run
+      prev = t
+    }
+    return { name: h.name, current, longest }
+  })
+}
+
 function proposeTask(db: Db, input: Record<string, unknown>): unknown {
   const title = str(input.title)
   if (!title) return { error: 'title is required' }
@@ -262,6 +403,20 @@ export function executeAssistantTool(
         return { ok: true, data: getUpcoming(db, input) }
       case 'get_finance_summary':
         return { ok: true, data: getFinanceSummary(db, sqlite, input) }
+      case 'get_week_tasks': {
+        const res = getWeekTasks(db, input) as Record<string, unknown>
+        if ('error' in res) return { ok: false, error: String(res.error) }
+        return { ok: true, data: res }
+      }
+      case 'get_weekly_goals': {
+        const res = getWeeklyGoals(db, input) as Record<string, unknown>
+        if ('error' in res) return { ok: false, error: String(res.error) }
+        return { ok: true, data: res }
+      }
+      case 'get_habit_streaks':
+        return { ok: true, data: getHabitStreaks(sqlite) }
+      case 'get_insights':
+        return { ok: true, data: buildInsights(db).insights }
       case 'propose_task': {
         const res = proposeTask(db, input) as Record<string, unknown>
         if ('error' in res) return { ok: false, error: String(res.error) }
