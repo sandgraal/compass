@@ -12,6 +12,7 @@ import {
   syncEvents
 } from '../db/schema'
 import { readAppleCalendars } from '../integrations/apple-calendar'
+import { syncNotion } from '../integrations/notion'
 import { readVaultPathSetting, syncObsidian } from '../integrations/obsidian'
 import { syncAllPlaid } from '../integrations/plaid/sync'
 import {
@@ -47,7 +48,13 @@ type SyncResultInternal = SyncResult & {
   githubSuggestionInputs?: GitHubInputItem[]
 }
 
-const SUPPORTED_SYNC_SERVICES = new Set(['google', 'github', 'apple-calendar', 'obsidian'])
+const SUPPORTED_SYNC_SERVICES = new Set([
+  'google',
+  'github',
+  'apple-calendar',
+  'obsidian',
+  'notion'
+])
 
 function normalizeSupportedSyncService(service: unknown): string | null {
   if (typeof service !== 'string') return null
@@ -757,6 +764,7 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     if (service === 'github') return toPublicSyncResult(await syncGitHub(win))
     if (service === 'apple-calendar') return syncAppleCalendar(win)
     if (service === 'obsidian') return syncObsidian(win)
+    if (service === 'notion') return syncNotion(win)
     if (service === 'plaid') {
       const results = await syncAllPlaid()
       // Aggregate across every connected Item: `success` is true ONLY when
@@ -793,10 +801,13 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
       toPublicSyncResult(githubResult),
       toPublicSyncResult(appleResult)
     ]
-    // Obsidian only joins the fan-out once a vault is configured — an
+    // Obsidian/Notion only join the fan-out once configured — an
     // unconfigured bridge would just add a noisy "Not connected" row.
     if (readVaultPathSetting()) {
       results.push(toPublicSyncResult(await syncObsidian(win)))
+    }
+    if (loadToken('notion')) {
+      results.push(toPublicSyncResult(await syncNotion(win)))
     }
     return results
   })

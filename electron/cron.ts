@@ -5,6 +5,7 @@ import { schedulePlaidDailySync, stopPlaidDailySync } from './cron-plaid'
 import { getDb, getRawSqlite } from './db/client'
 import { appSettings, integrations } from './db/schema'
 import { captureSnapshots } from './integrations/finance-snapshot'
+import { syncNotion } from './integrations/notion'
 import { syncObsidian } from './integrations/obsidian'
 import {
   computeLowCashAlert,
@@ -117,6 +118,8 @@ function runSyncForService(service: string): void {
     void syncAppleCalendar(win)
   } else if (service === 'obsidian') {
     void syncObsidian(win)
+  } else if (service === 'notion') {
+    void syncNotion(win)
   }
 }
 
