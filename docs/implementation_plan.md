@@ -339,7 +339,7 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 - [ ] **Plaid Investments / holdings** (M) — *folds in the deferred Plaid Investments item* — only if retirement net-worth goes beyond manual edits.
 
 ### Track F — Polish & reach
-- [ ] **Theming / customization** (S).
+- [x] **Theming / customization** (S) — **shipped 2026-06-12.** The `.light` palette + Settings buttons predated this; what shipped is making them real: the saved `theme` preference (dark/light/system) is now restored at launch and OS-theme changes only apply while the preference is 'system' (previously the OS always won, silently reverting an explicit choice), plus **6 accent presets** (indigo default, violet, emerald, amber, rose, sky) persisted as `accentColor` and applied as inline `--primary`/`--accent`/`--ring` overrides per resolved theme (default accent clears the overrides so the stylesheet stays the source of truth; light-hued accents keep a dark foreground in both themes for contrast). Pure helpers in `src/lib/theme.ts` (`resolveTheme`, `accentVars`); store holds preference + OS theme + accent and owns DOM application. 6 unit tests.
 - [ ] **Mobile-responsive layouts** (M) — prerequisite for the companion.
 - [ ] **Accessibility pass** (M) — extends the in-flight Phase 6.4 a11y work to a full WCAG sweep.
 
