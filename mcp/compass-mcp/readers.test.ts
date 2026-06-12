@@ -1,0 +1,116 @@
+/**
+ * Tests for the expanded-MCP-surface readers (Phase 7 Track C): range
+ * normalization/validation and the two query helpers against a real
+ * in-memory SQLite mirroring the app schema's relevant columns.
+ */
+import Database from 'better-sqlite3'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import {
+  MAX_RECENT_NOTES,
+  MAX_TASK_RANGE_DAYS,
+  normalizeTaskRange,
+  readRecentNotes,
+  readTasksRange
+} from './readers.js'
+
+let db: Database.Database
+
+beforeEach(() => {
+  db = new Database(':memory:')
+  db.exec(`
+    CREATE TABLE checklist_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      list_type TEXT NOT NULL,
+      list_date TEXT NOT NULL,
+      title TEXT NOT NULL,
+      category TEXT DEFAULT 'personal',
+      checked INTEGER DEFAULT 0,
+      sort_order INTEGER DEFAULT 0,
+      source TEXT DEFAULT 'manual'
+    );
+    CREATE TABLE knowledge_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      path TEXT NOT NULL UNIQUE,
+      title TEXT NOT NULL,
+      last_modified INTEGER,
+      word_count INTEGER DEFAULT 0
+    );
+  `)
+})
+
+afterEach(() => {
+  db.close()
+})
+
+const NOW = new Date('2026-06-15T12:00:00')
+
+describe('normalizeTaskRange', () => {
+  it('defaults to a rolling week from today', () => {
+    expect(normalizeTaskRange(undefined, undefined, NOW)).toEqual({
+      ok: true,
+      from: '2026-06-15',
+      to: '2026-06-21'
+    })
+  })
+
+  it('rejects malformed dates, inverted ranges, and oversized ranges', () => {
+    expect(normalizeTaskRange('june 1', undefined, NOW).ok).toBe(false)
+    expect(normalizeTaskRange('2026-06-15', '2026-06-10', NOW).ok).toBe(false)
+    const big = normalizeTaskRange('2026-01-01', '2026-12-31', NOW)
+    expect(big).toMatchObject({
+      ok: false,
+      error: expect.stringContaining(`${MAX_TASK_RANGE_DAYS}`)
+    })
+  })
+})
+
+describe('readTasksRange', () => {
+  function addTask(date: string, title: string, checked = 0, listType = 'daily'): void {
+    db.prepare(
+      'INSERT INTO checklist_items (list_type, list_date, title, checked) VALUES (?, ?, ?, ?)'
+    ).run(listType, date, title, checked)
+  }
+
+  it('returns daily tasks in the range ordered by date, excluding other list types', () => {
+    addTask('2026-06-16', 'tomorrow')
+    addTask('2026-06-15', 'today done', 1)
+    addTask('2026-06-22', 'next week')
+    addTask('2026-06-15', 'weekly item', 0, 'weekly')
+
+    const rows = readTasksRange(db, '2026-06-15', '2026-06-21')
+    expect(rows.map((r) => r.title)).toEqual(['today done', 'tomorrow'])
+    expect(rows[0].listDate).toBe('2026-06-15')
+  })
+
+  it('filters out checked tasks when includeChecked is false', () => {
+    addTask('2026-06-15', 'done', 1)
+    addTask('2026-06-15', 'open', 0)
+    const rows = readTasksRange(db, '2026-06-15', '2026-06-15', false)
+    expect(rows.map((r) => r.title)).toEqual(['open'])
+  })
+})
+
+describe('readRecentNotes', () => {
+  function addNote(path: string, title: string, lastModified: number | null): void {
+    db.prepare('INSERT INTO knowledge_files (path, title, last_modified) VALUES (?, ?, ?)').run(
+      path,
+      title,
+      lastModified
+    )
+  }
+
+  it('returns newest-first, skips never-modified rows, and caps the limit', () => {
+    addNote('a.md', 'Oldest', 1000)
+    addNote('b.md', 'Newest', 3000)
+    addNote('c.md', 'Middle', 2000)
+    addNote('d.md', 'No timestamp', null)
+
+    const rows = readRecentNotes(db, 2)
+    expect(rows.map((r) => r.title)).toEqual(['Newest', 'Middle'])
+
+    // Pathological limits clamp instead of throwing.
+    expect(readRecentNotes(db, 9999)).toHaveLength(3)
+    expect(readRecentNotes(db, -5)).toHaveLength(1)
+    expect(MAX_RECENT_NOTES).toBe(50)
+  })
+})

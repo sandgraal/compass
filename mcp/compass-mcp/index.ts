@@ -32,6 +32,7 @@ import Database from 'better-sqlite3'
 import { REPO_ONLY_TOOLS, filterToolsForBundle, isBundled } from './bundle-mode.js'
 import { DAY_MS, localYm, localYmd } from './dates.js'
 import { PROPOSE_TOOLS, appendProposal, buildProposal, makeProposal } from './proposals.js'
+import { normalizeTaskRange, readRecentNotes, readTasksRange } from './readers.js'
 
 // Mirror electron/paths.ts — but we open the DB read-only. Honor the same
 // opt-in COMPASS_HOME override so E2E / screenshot / test tooling can point
@@ -199,6 +200,36 @@ const TOOLS = [
       additionalProperties: false
     }
   },
+  {
+    name: 'compass_tasks',
+    description:
+      'Daily-checklist tasks across a date range (default: today through 6 days ahead — a rolling week). Use this for week-oriented planning instead of repeated compass_today_tasks calls. Max 31 days. Read-only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Start date YYYY-MM-DD (default today)' },
+        to: { type: 'string', description: 'End date YYYY-MM-DD inclusive (default today+6)' },
+        includeChecked: {
+          type: 'boolean',
+          default: true,
+          description: 'Set false to return only unfinished tasks'
+        }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'compass_recent_notes',
+    description:
+      'Most recently modified knowledge-base notes (paths + titles + timestamps only — use compass_read_knowledge_file for contents). Read-only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'integer', minimum: 1, maximum: 50, default: 10 }
+      },
+      additionalProperties: false
+    }
+  },
   // Propose-write tools — enqueue to the Claude Inbox, never mutate directly.
   ...PROPOSE_TOOLS
 ]
@@ -230,6 +261,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           'SELECT id, title, body, category, checked, source FROM checklist_items WHERE list_type = ? AND list_date = ? ORDER BY sort_order'
         )
         .all('daily', today)
+      db.close()
+      return textResult(JSON.stringify(rows, null, 2))
+    }
+
+    if (name === 'compass_tasks') {
+      const range = normalizeTaskRange(args?.from, args?.to)
+      if (!range.ok) return errorResult(range.error)
+      const db = openDb()
+      if (!db) return errorResult('Compass DB not found — is the app installed?')
+      const rows = readTasksRange(db, range.from, range.to, args?.includeChecked !== false)
+      db.close()
+      return textResult(JSON.stringify({ from: range.from, to: range.to, tasks: rows }, null, 2))
+    }
+
+    if (name === 'compass_recent_notes') {
+      const db = openDb()
+      if (!db) return errorResult('Compass DB not found — is the app installed?')
+      const rows = readRecentNotes(db, Number(args?.limit ?? 10))
       db.close()
       return textResult(JSON.stringify(rows, null, 2))
     }

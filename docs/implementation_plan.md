@@ -325,7 +325,7 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 ### Track C — Platform & API
 - [ ] **Plugin / extension API** (XL) — let the community ship integrations; sandboxed.
 - [ ] **Integrations marketplace** (L) — discover + install plugins in-app.
-- [ ] **Webhooks + expanded MCP surface** (M) — build on the existing `mcp/compass-mcp` server (already exposes commits/tests/integration health) for richer agent + automation access.
+- [~] **Webhooks + expanded MCP surface** (M) — **MCP-surface half shipped 2026-06-12:** `compass_tasks` (daily-checklist reads across a date range, default rolling week, 31-day cap, optional unfinished-only filter — closes the week-read gap the plan-my-week / weekly-review skills documented) and `compass_recent_notes` (latest-touched knowledge files, titles/paths only — bodies stay behind `compass_read_knowledge_file`). Query helpers in `mcp/compass-mcp/readers.ts` (pure over an injected sqlite handle; 5 unit tests); both tools work in bundled (`.mcpb`) mode. **Webhooks half still open.**
 - [ ] **Zapier / Make connector** (M). (opt-in cloud)
 
 ### Track D — Sync & reach (opt-in cloud)
