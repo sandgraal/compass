@@ -189,7 +189,9 @@ export function mirrorMarkdownTree(
           rmSync(full, { force: true })
           result.removed++
         } catch (err) {
-          result.errors.push({ path: full, message: (err as Error).message })
+          // Relative path: consistent with the copy-phase entries, and keeps
+          // absolute local paths out of sync_events.errors.
+          result.errors.push({ path: relative(dstRoot, full), message: (err as Error).message })
         }
       }
     }

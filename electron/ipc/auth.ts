@@ -657,7 +657,9 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
 
       return { success: true, workspace }
     } catch (err) {
-      return { error: (err as Error).message }
+      // Non-Error throws (e.g. a re-thrown string) must still produce a
+      // string error, or the renderer gets `{ error: undefined }`.
+      return { error: err instanceof Error ? err.message : String(err) }
     }
   })
 

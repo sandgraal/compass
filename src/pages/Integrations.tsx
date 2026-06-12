@@ -156,7 +156,7 @@ export default function Integrations(): JSX.Element {
   // credentials pattern from earlier PRs.
   const [plaidSecretInput, setPlaidSecretInput] = useState<string | null>(null)
   // Obsidian vault bridge. Status mirrors `window.api.obsidian.getStatus()`;
-  // the path input follows the same null-= -collapsed convention as the
+  // the path input follows the same null-=-collapsed convention as the
   // PAT / Plaid-secret forms above.
   const [obsidianStatus, setObsidianStatus] = useState<{
     configured: boolean
