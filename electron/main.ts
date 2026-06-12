@@ -11,6 +11,7 @@ import { registerBackupHandlers } from './ipc/backup'
 import { registerClaudeHandlers } from './ipc/claude'
 import { registerFinanceHandlers } from './ipc/finance'
 import { registerHabitsHandlers } from './ipc/habits'
+import { registerInsightsHandlers } from './ipc/insights'
 import { registerKnowledgeHandlers } from './ipc/knowledge'
 import { registerMonthlyRollupHandlers } from './ipc/monthly-rollup'
 import { registerMorningBriefHandlers } from './ipc/morning-brief'
@@ -97,7 +98,7 @@ function createWindow(): void {
         responseHeaders: {
           ...details.responseHeaders,
           'Content-Security-Policy': [
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://gmail.googleapis.com https://api.github.com https://oauth2.googleapis.com https://github.com https://accounts.google.com https://api.notion.com; frame-src 'none'; object-src 'none'"
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://gmail.googleapis.com https://api.github.com https://oauth2.googleapis.com https://github.com https://accounts.google.com; frame-src 'none'; object-src 'none'"
           ]
         }
       })
@@ -149,6 +150,7 @@ app.whenReady().then(async () => {
   registerMonthlyRollupHandlers(ipcMain)
   registerQuickCaptureHandlers(ipcMain)
   registerObsidianHandlers(ipcMain)
+  registerInsightsHandlers(ipcMain)
 
   // Toggle content protection when navigating to/from vault
   ipcMain.on('vault:set-content-protection', (_event, enabled: boolean) => {
