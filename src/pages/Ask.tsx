@@ -259,7 +259,7 @@ export default function Ask(): JSX.Element {
         {!hasKey ? (
           <NoKeyEmptyState />
         ) : turns.length === 0 ? (
-          <FirstTurnEmptyState onPick={(q) => setDraft(q)} />
+          <FirstTurnEmptyState onPick={(q) => setDraft(q)} agentMode={agentMode} />
         ) : (
           <div className="max-w-3xl mx-auto space-y-6">
             {turns.map((t) => (
@@ -379,21 +379,41 @@ const STARTER_PROMPTS = [
   'What are my current health-related action items?'
 ]
 
-function FirstTurnEmptyState({ onPick }: { onPick: (q: string) => void }): JSX.Element {
+// Agent-mode starters lean on the tool loop (Phase 7 Track E realized via 8.5):
+// the plan-my-week flow reads week tasks + calendar + goals + habits and
+// proposes per-day tasks into the Claude Inbox.
+const AGENT_STARTER_PROMPTS = [
+  'Plan my week — look at my tasks, calendar, goals, and habits, then propose a balanced set of daily tasks.',
+  'What should I focus on today, given everything on my plate?',
+  'Anything worth a look in my insights? Suggest follow-up tasks.',
+  'How are my finances trending this month?'
+]
+
+function FirstTurnEmptyState({
+  onPick,
+  agentMode
+}: {
+  onPick: (q: string) => void
+  agentMode: boolean
+}): JSX.Element {
+  const prompts = agentMode ? AGENT_STARTER_PROMPTS : STARTER_PROMPTS
   return (
     <div className="max-w-2xl mx-auto py-12 space-y-6">
       <div className="text-center">
         <div className="w-14 h-14 rounded-full bg-secondary flex items-center justify-center mx-auto mb-4 text-primary">
           <MessageSquare size={26} />
         </div>
-        <h2 className="text-base font-semibold text-foreground">Ask anything about your notes</h2>
+        <h2 className="text-base font-semibold text-foreground">
+          {agentMode ? 'Ask the agent about your week' : 'Ask anything about your notes'}
+        </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Compass finds the relevant snippets, hands them to the model, and cites the source notes
-          inline. Try one of these to start:
+          {agentMode
+            ? 'Claude reads your tasks, calendar, goals, and habits via tools — and any change it suggests lands in the Claude Inbox for your approval. Try:'
+            : 'Compass finds the relevant snippets, hands them to the model, and cites the source notes inline. Try one of these to start:'}
         </p>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-        {STARTER_PROMPTS.map((p) => (
+        {prompts.map((p) => (
           <button
             key={p}
             type="button"
