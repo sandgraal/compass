@@ -84,11 +84,10 @@ approval.
 Each skill is read-first and routes any change through the proposal → approve
 flow above.
 
-> **Today's MCP read scope:** `compass_upcoming` returns **today's** daily
-> checklist plus the next N days of *calendar events* (and payments due) — it
-> does not yet enumerate a full week of *tasks*. The week-oriented skills work
-> within that: they reason over today's tasks + the week's events, not a
-> complete week-wide task list. Broader task reads are a planned MCP addition.
+> **MCP read scope:** week-oriented skills should use `compass_tasks` (daily
+> checklist across a date range, default today → +6 days, max 31) alongside
+> `compass_recent_calendar`; `compass_upcoming` remains the single-call daily
+> brief, and `compass_recent_notes` lists the latest-touched knowledge files.
 
 ## Requirements
 
