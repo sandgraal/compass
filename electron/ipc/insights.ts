@@ -9,7 +9,7 @@
  * `buildInsights(db, now)` is exported for tests (same pattern as
  * `buildMorningBrief`). Thresholds are exported consts so tests pin them.
  */
-import { and, eq, gte, lt } from 'drizzle-orm'
+import { and, eq, gte, isNull, lt, or } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
 import { financeTransactions, habitEntries, habits, knowledgeFiles } from '../db/schema'
@@ -124,7 +124,8 @@ function detectUncategorizedSpend(db: Db, now: Date): Insight[] {
     .where(
       and(
         gte(financeTransactions.date, since),
-        eq(financeTransactions.category, 'Uncategorized'),
+        // Legacy rows can carry NULL instead of the 'Uncategorized' default.
+        or(eq(financeTransactions.category, 'Uncategorized'), isNull(financeTransactions.category)),
         lt(financeTransactions.amount, 0)
       )
     )
@@ -148,7 +149,9 @@ function detectHabitSlippage(db: Db, now: Date): Insight[] {
 
   const dayMs = 24 * 60 * 60 * 1000
   const weekAgo = localYmd(new Date(now.getTime() - 7 * dayMs))
-  const fourWeeksAgo = localYmd(new Date(now.getTime() - 28 * dayMs))
+  // Exactly 21 prior-window dates: (now-27 … now-7) inclusive under the
+  // gte filter — 28 would make it 22 and inflate the prior rate.
+  const priorStart = localYmd(new Date(now.getTime() - 27 * dayMs))
   const today = localYmd(now)
 
   const insights: Insight[] = []
@@ -157,7 +160,7 @@ function detectHabitSlippage(db: Db, now: Date): Insight[] {
     const entries = db
       .select({ date: habitEntries.date, completed: habitEntries.completed })
       .from(habitEntries)
-      .where(and(eq(habitEntries.habitId, habit.id), gte(habitEntries.date, fourWeeksAgo)))
+      .where(and(eq(habitEntries.habitId, habit.id), gte(habitEntries.date, priorStart)))
       .all()
     let priorDone = 0
     let weekDone = 0

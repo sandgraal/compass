@@ -156,8 +156,8 @@ export default function Integrations(): JSX.Element {
   // credentials pattern from earlier PRs.
   const [plaidSecretInput, setPlaidSecretInput] = useState<string | null>(null)
   // Obsidian vault bridge. Status mirrors `window.api.obsidian.getStatus()`;
-  // the path input follows the same null-=-collapsed convention as the
-  // PAT / Plaid-secret forms above.
+  // the path input follows the same convention as the PAT / Plaid-secret
+  // forms above: null = form collapsed, string = form open with that value.
   const [obsidianStatus, setObsidianStatus] = useState<{
     configured: boolean
     vaultPath: string | null
@@ -165,8 +165,8 @@ export default function Integrations(): JSX.Element {
     error: string | null
   } | null>(null)
   const [obsidianPathInput, setObsidianPathInput] = useState<string | null>(null)
-  // Notion internal-integration token form. Same null-=-collapsed
-  // convention as the GitHub PAT input above.
+  // Notion internal-integration token form. Same convention as the GitHub
+  // PAT input above: null = form collapsed, string = form open.
   const [notionTokenInput, setNotionTokenInput] = useState<string | null>(null)
   const { toast } = useToast()
   const confirm = useConfirm()

@@ -166,6 +166,17 @@ describe('uncategorized spend', () => {
     expect(insight?.detail).toContain('1 transaction')
   })
 
+  it('treats legacy NULL categories as uncategorized', async () => {
+    const { buildInsights } = await import('./insights')
+    sqlite
+      .prepare(
+        'INSERT INTO finance_transactions (hash, date, amount, description, category) VALUES (?, ?, ?, ?, NULL)'
+      )
+      .run('null-cat', '2026-06-01', -150, 'legacy row')
+    const r = buildInsights(db(), NOW)
+    expect(r.insights.find((i) => i.kind === 'uncategorized-spend')?.title).toContain('$150')
+  })
+
   it('stays quiet below both floors', async () => {
     const { buildInsights } = await import('./insights')
     addTxn('2026-06-01', -20, 'Uncategorized')
