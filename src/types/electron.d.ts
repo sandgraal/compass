@@ -135,6 +135,19 @@ declare global {
     dueDate: string | null
   }
 
+  interface LinearIssue {
+    id: number
+    externalId: string
+    identifier: string
+    title: string
+    url: string
+    state: string
+    stateType: string
+    priority: number
+    team: string | null
+    dueDate: string | null
+  }
+
   interface GmailAction {
     id: number
     threadId: string
@@ -288,6 +301,9 @@ declare global {
         connectNotion(
           token: string
         ): Promise<{ success?: boolean; workspace?: string | null; error?: string }>
+        connectLinear(
+          token: string
+        ): Promise<{ success?: boolean; name?: string | null; error?: string }>
         disconnect(service: string): Promise<{ success: boolean }>
         getStatus(): Promise<IntegrationStatus[]>
         getRedirectUris(): Promise<RedirectUris>
@@ -612,6 +628,9 @@ declare global {
       }
       github: {
         getItems(state?: string): Promise<GitHubItem[]>
+      }
+      linear: {
+        getItems(): Promise<LinearIssue[]>
       }
       gmail: {
         getActions(done?: boolean): Promise<GmailAction[]>

@@ -5,6 +5,7 @@ import {
   Calendar,
   Clock,
   GitBranch,
+  Layers,
   Plus,
   RefreshCw,
   Wallet
@@ -38,6 +39,7 @@ export default function Dashboard(): JSX.Element {
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [tasks, setTasks] = useState<ChecklistItem[]>([])
   const [githubItems, setGithubItems] = useState<GitHubItem[]>([])
+  const [linearItems, setLinearItems] = useState<LinearIssue[]>([])
   const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus[]>([])
   const [upcomingPayments, setUpcomingPayments] = useState<UpcomingPayment[]>([])
   const [isSyncing, setIsSyncing] = useState(false)
@@ -63,11 +65,15 @@ export default function Dashboard(): JSX.Element {
       window.api.sync.getSyncStatus(),
       window.api.finance?.getUpcomingPayments
         ? window.api.finance.getUpcomingPayments(14).catch(() => [])
+        : Promise.resolve([]),
+      window.api.linear?.getItems
+        ? window.api.linear.getItems().catch(() => [])
         : Promise.resolve([])
-    ]).then(([checkItems, calEvents, ghItems, gmailItems, integrations, payments]) => {
+    ]).then(([checkItems, calEvents, ghItems, gmailItems, integrations, payments, linItems]) => {
       setTasks(checkItems.slice(0, 5))
       setEvents(calEvents)
       setGithubItems(ghItems.slice(0, 4))
+      setLinearItems((linItems as LinearIssue[]).slice(0, 4))
       setIntegrationStatus(integrations)
       setUpcomingPayments(payments as UpcomingPayment[])
 
@@ -408,6 +414,37 @@ export default function Dashboard(): JSX.Element {
             )}
           </div>
         </div>
+
+        {/* Linear issues — only shown once connected (has synced items) so it
+            doesn't add a permanent empty card for users who don't use Linear. */}
+        {linearItems.length > 0 && (
+          <div className="bg-card border border-border rounded-xl">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Layers size={15} /> Linear
+              </h2>
+              <Link
+                to="/integrations"
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
+              >
+                View all <ArrowRight size={12} />
+              </Link>
+            </div>
+            <div className="divide-y divide-border">
+              {linearItems.map((item) => (
+                <div key={item.id} className="flex items-start gap-3 px-5 py-3">
+                  <span className="text-xs px-1.5 py-0.5 rounded font-mono shrink-0 mt-0.5 bg-indigo-500/20 text-indigo-400">
+                    {item.identifier}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-foreground truncate">{item.title}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5 truncate">{item.state}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Integrations status */}
         <div className="bg-card border border-border rounded-xl">

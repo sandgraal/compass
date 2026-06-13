@@ -79,6 +79,24 @@ export const githubItems = sqliteTable('github_items', {
   syncedAt: integer('synced_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
+// ---- Linear issues (Phase 7 Track B) ----
+// Issues assigned to the user, surfaced alongside GitHub on the dashboard.
+// Separate table (not github_items) so the two sources stay semantically
+// distinct and queryable on their own.
+export const linearIssues = sqliteTable('linear_issues', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  externalId: text('external_id').notNull().unique(), // Linear issue UUID
+  identifier: text('identifier').notNull(), // human key, e.g. 'ENG-123'
+  title: text('title').notNull(),
+  url: text('url').notNull(),
+  state: text('state').notNull(), // workflow state name, e.g. 'In Progress'
+  stateType: text('state_type').notNull(), // 'backlog'|'unstarted'|'started'|'completed'|'canceled'|'triage'
+  priority: integer('priority').notNull().default(0), // 0 none … 1 urgent … 4 low (Linear's scale)
+  team: text('team'), // team key, e.g. 'ENG'
+  dueDate: text('due_date'),
+  syncedAt: integer('synced_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
 // ---- Gmail Actions ----
 export const gmailActions = sqliteTable('gmail_actions', {
   id: integer('id').primaryKey({ autoIncrement: true }),

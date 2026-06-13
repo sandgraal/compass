@@ -75,6 +75,16 @@ const INTEGRATIONS: IntegrationConfig[] = [
     color: 'from-slate-500/20 to-slate-700/20',
     logo: 'N'
   },
+  // Linear uses a personal API key (paste-once, like the GitHub PAT). Active
+  // assigned issues surface alongside GitHub on the dashboard.
+  {
+    id: 'linear',
+    name: 'Linear',
+    description: 'Shows the issues assigned to you alongside GitHub on the dashboard.',
+    scopes: ['issues:read'],
+    color: 'from-indigo-500/20 to-purple-500/20',
+    logo: 'L'
+  },
   {
     id: 'plaid',
     name: 'Plaid',
@@ -94,14 +104,6 @@ const SYNC_INTERVAL_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
 ]
 
 const UPCOMING_INTEGRATIONS: IntegrationConfig[] = [
-  {
-    id: 'linear',
-    name: 'Linear',
-    description: 'Engineering issues and sprint tracking.',
-    scopes: ['issues:read'],
-    color: 'from-violet-500/20 to-purple-500/20',
-    logo: 'L'
-  },
   {
     id: 'slack',
     name: 'Slack',
@@ -168,6 +170,8 @@ export default function Integrations(): JSX.Element {
   // Notion internal-integration token form. Same convention as the GitHub
   // PAT input above: null = form collapsed, string = form open.
   const [notionTokenInput, setNotionTokenInput] = useState<string | null>(null)
+  // Linear personal API key form. Same null = collapsed convention.
+  const [linearKeyInput, setLinearKeyInput] = useState<string | null>(null)
   const { toast } = useToast()
   const confirm = useConfirm()
 
@@ -296,6 +300,11 @@ export default function Integrations(): JSX.Element {
       setObsidianPathInput(obsidianStatus?.vaultPath ?? '')
       return
     }
+    // Linear: paste-once personal API key, like the GitHub PAT.
+    if (service === 'linear') {
+      setLinearKeyInput('')
+      return
+    }
     // Notion: paste-once internal-integration token, like the GitHub PAT.
     if (service === 'notion') {
       setNotionTokenInput('')
@@ -410,6 +419,31 @@ export default function Integrations(): JSX.Element {
       setNotionTokenInput(null)
       await loadStatuses()
       triggerSync('notion')
+    } catch (err) {
+      toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      setConnecting(null)
+    }
+  }
+
+  async function submitLinearKey() {
+    if (typeof linearKeyInput !== 'string') return
+    const token = linearKeyInput.trim()
+    if (!token) {
+      toast('Paste your Linear API key first.', 'error')
+      return
+    }
+    setConnecting('linear')
+    try {
+      const r = await window.api.auth.connectLinear(token)
+      if (r.error) {
+        toast(`Connection failed: ${r.error}`, 'error')
+        return
+      }
+      toast(r.name ? `Connected as ${r.name}.` : 'Linear connected.', 'success')
+      setLinearKeyInput(null)
+      await loadStatuses()
+      triggerSync('linear')
     } catch (err) {
       toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
     } finally {
@@ -1152,6 +1186,61 @@ export default function Integrations(): JSX.Element {
                 </div>
               )}
 
+              {/* Inline Linear API-key form — personal API key, same
+                  paste-once flow as the GitHub PAT. */}
+              {integration.id === 'linear' && !isConnected && linearKeyInput !== null && (
+                <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
+                  <div className="text-xs text-muted-foreground leading-relaxed">
+                    Create a Personal API key in{' '}
+                    <a
+                      href="https://linear.app/settings/api"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary underline underline-offset-2 inline-flex items-center gap-0.5"
+                    >
+                      Linear → Settings → API
+                      <ExternalLink size={10} className="opacity-70" />
+                    </a>
+                    , then paste it here. Compass stores it encrypted on disk and only ever reads
+                    the issues assigned to you.
+                  </div>
+                  <label htmlFor="linear-key-input" className="block text-xs text-muted-foreground">
+                    Linear API key
+                  </label>
+                  <input
+                    id="linear-key-input"
+                    type="password"
+                    placeholder="lin_api_…"
+                    aria-label="Linear personal API key"
+                    value={linearKeyInput}
+                    onChange={(e) => setLinearKeyInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void submitLinearKey()
+                      else if (e.key === 'Escape') setLinearKeyInput(null)
+                    }}
+                    className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void submitLinearKey()}
+                      disabled={connecting === 'linear' || !linearKeyInput.trim()}
+                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
+                    >
+                      <Plug2 size={11} />
+                      {connecting === 'linear' ? 'Connecting…' : 'Connect'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLinearKeyInput(null)}
+                      className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Inline Google credentials form. Replaces the .env workflow
                   with paste-once UX. Saved values are encrypted via safeStorage
                   and never cross the IPC boundary again. */}
@@ -1315,7 +1404,8 @@ export default function Integrations(): JSX.Element {
                   (integration.id === 'google' && googleCredsInput !== null) ||
                   (integration.id === 'plaid' && plaidSecretInput !== null) ||
                   (integration.id === 'obsidian' && obsidianPathInput !== null) ||
-                  (integration.id === 'notion' && notionTokenInput !== null) ? null : (
+                  (integration.id === 'notion' && notionTokenInput !== null) ||
+                  (integration.id === 'linear' && linearKeyInput !== null) ? null : (
                   <button
                     type="button"
                     onClick={() => connect(integration.id)}

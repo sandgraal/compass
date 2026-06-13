@@ -50,11 +50,12 @@ CSP enforced in production builds (no eval, no remote scripts, allowlist for OAu
 | Knowledge — regex / Ollama suggestion pipeline | `electron/knowledge/suggestions.ts`, `electron/knowledge/ollama.ts` |
 | Tray + global shortcut + quick-capture window | `electron/menu-bar.ts`, `src/quickCapture/` |
 | Obsidian vault bridge (two one-way markdown mirrors) | `electron/integrations/obsidian.ts`, `electron/ipc/obsidian.ts` |
+| Linear issues sync (assigned issues → dashboard) | `electron/integrations/linear.ts` (+ `auth:connect-linear` in `electron/ipc/auth.ts`) |
 | Notion import (shared pages → `knowledge-base/notion/`) | `electron/integrations/notion.ts` (+ `auth:connect-notion` in `electron/ipc/auth.ts`) |
 
 ## Database (Drizzle / SQLite via `better-sqlite3`)
 
-20 tables. Lives at `~/Library/Application Support/Compass/.data/compass.db`.
+21 tables. Lives at `~/Library/Application Support/Compass/.data/compass.db`.
 
 | Table | Purpose |
 |---|---|
@@ -64,6 +65,7 @@ CSP enforced in production builds (no eval, no remote scripts, allowlist for OAu
 | `checklist_templates` | User-edited markdown templates per list type. |
 | `calendar_events` | Cached calendar events from any source. |
 | `github_items` | Issues + PRs + project items. |
+| `linear_issues` | Active Linear issues assigned to the user (identifier, state, priority, team). Synced via `syncLinear`; surfaced alongside GitHub on the dashboard. (Phase 7 Track B) |
 | `gmail_actions` | Action items extracted from Gmail. |
 | `drive_files` | Google Drive file index. |
 | `knowledge_files` | Index of `knowledge-base/*.md` files (path, title, word count). |
@@ -99,8 +101,8 @@ Plain markdown files at `~/Library/Application Support/Compass/knowledge-base/<c
 ## IPC handler map (~80 handlers)
 
 Registered in `electron/main.ts`:
-- `registerAuthHandlers` — OAuth flows + paste-once token handlers (`auth:connect-github-pat`; **`auth:connect-notion`** — Notion internal-integration token validated against `/v1/users/me`, encrypted via the standard `saveToken` path; Notion's own page-sharing model is the consent surface)
-- `registerSyncHandlers` — sync trigger, status, event log
+- `registerAuthHandlers` — OAuth flows + paste-once token handlers (`auth:connect-github-pat`; **`auth:connect-notion`** — Notion internal-integration token validated against `/v1/users/me`, encrypted via the standard `saveToken` path; Notion's own page-sharing model is the consent surface; **`auth:connect-linear`** — Linear personal API key validated against the GraphQL `viewer`, encrypted via `saveToken`; the key is sent in the `Authorization` header verbatim, not as a `Bearer` token)
+- `registerSyncHandlers` — sync trigger, status, event log; per-service queries incl. `github:get-items` and **`linear:get-items`** (active assigned Linear issues). `syncLinear` (Phase 7 Track B) is dispatched via `sync:trigger('linear')`, `sync:trigger-all` (only when connected), and the per-integration cron; it upserts assigned non-done issues into `linear_issues` and prunes ones no longer returned. Linear API calls are main-process-only (no renderer CSP widening).
 - `registerKnowledgeHandlers` — file CRUD, search, prev snapshot, suggestions accept/dismiss, **backlinks (Phase 5.3: `knowledge:get-backlinks`)**, **semantic search (Phase 5.9): `knowledge:get-embedding-status`, `knowledge:rebuild-embeddings`, `knowledge:semantic-search`** — backed by `electron/knowledge/embeddings.ts` and a JSON-on-disk index at `.data/knowledge-embeddings.json`
 - `registerVaultHandlers` — entry CRUD, 1Password CSV import, history
 - `registerSettingsHandlers` — get/set/getAll, data export, wipe, **per-integration sync interval**, Ollama detect, quick-capture shortcut

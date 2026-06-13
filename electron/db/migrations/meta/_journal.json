@@ -78,6 +78,13 @@
       "when": 1779563807230,
       "tag": "0010_regular_living_mummy",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1781352971319,
+      "tag": "0011_clever_dark_beast",
+      "breakpoints": true
     }
   ]
 }
