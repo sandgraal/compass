@@ -85,6 +85,16 @@ const INTEGRATIONS: IntegrationConfig[] = [
     color: 'from-indigo-500/20 to-purple-500/20',
     logo: 'L'
   },
+  // Todoist uses a personal API token (paste-once, like the GitHub PAT).
+  // Actionable tasks (overdue or due today) import into today's daily list.
+  {
+    id: 'todoist',
+    name: 'Todoist',
+    description: "Imports tasks due today or overdue into today's daily checklist.",
+    scopes: ['tasks:read'],
+    color: 'from-red-500/20 to-orange-500/20',
+    logo: 'T'
+  },
   {
     id: 'plaid',
     name: 'Plaid',
@@ -172,6 +182,8 @@ export default function Integrations(): JSX.Element {
   const [notionTokenInput, setNotionTokenInput] = useState<string | null>(null)
   // Linear personal API key form. Same null = collapsed convention.
   const [linearKeyInput, setLinearKeyInput] = useState<string | null>(null)
+  // Todoist personal API token form. Same null = collapsed convention.
+  const [todoistKeyInput, setTodoistKeyInput] = useState<string | null>(null)
   const { toast } = useToast()
   const confirm = useConfirm()
 
@@ -303,6 +315,11 @@ export default function Integrations(): JSX.Element {
     // Linear: paste-once personal API key, like the GitHub PAT.
     if (service === 'linear') {
       setLinearKeyInput('')
+      return
+    }
+    // Todoist: paste-once personal API token, like the GitHub PAT.
+    if (service === 'todoist') {
+      setTodoistKeyInput('')
       return
     }
     // Notion: paste-once internal-integration token, like the GitHub PAT.
@@ -444,6 +461,31 @@ export default function Integrations(): JSX.Element {
       setLinearKeyInput(null)
       await loadStatuses()
       triggerSync('linear')
+    } catch (err) {
+      toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      setConnecting(null)
+    }
+  }
+
+  async function submitTodoistKey() {
+    if (typeof todoistKeyInput !== 'string') return
+    const token = todoistKeyInput.trim()
+    if (!token) {
+      toast('Paste your Todoist API token first.', 'error')
+      return
+    }
+    setConnecting('todoist')
+    try {
+      const r = await window.api.auth.connectTodoist(token)
+      if (r.error) {
+        toast(`Connection failed: ${r.error}`, 'error')
+        return
+      }
+      toast('Todoist connected.', 'success')
+      setTodoistKeyInput(null)
+      await loadStatuses()
+      triggerSync('todoist')
     } catch (err) {
       toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
     } finally {
@@ -1241,6 +1283,64 @@ export default function Integrations(): JSX.Element {
                 </div>
               )}
 
+              {/* Inline Todoist API-token form — personal token, same
+                  paste-once flow as the GitHub PAT. */}
+              {integration.id === 'todoist' && !isConnected && todoistKeyInput !== null && (
+                <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
+                  <div className="text-xs text-muted-foreground leading-relaxed">
+                    Copy your API token from{' '}
+                    <a
+                      href="https://todoist.com/app/settings/integrations/developer"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary underline underline-offset-2 inline-flex items-center gap-0.5"
+                    >
+                      Todoist → Settings → Integrations → Developer
+                      <ExternalLink size={10} className="opacity-70" />
+                    </a>
+                    , then paste it here. Compass stores it encrypted on disk and imports tasks due
+                    today or overdue into today's checklist.
+                  </div>
+                  <label
+                    htmlFor="todoist-key-input"
+                    className="block text-xs text-muted-foreground"
+                  >
+                    Todoist API token
+                  </label>
+                  <input
+                    id="todoist-key-input"
+                    type="password"
+                    placeholder="0123456789abcdef…"
+                    aria-label="Todoist API token"
+                    value={todoistKeyInput}
+                    onChange={(e) => setTodoistKeyInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void submitTodoistKey()
+                      else if (e.key === 'Escape') setTodoistKeyInput(null)
+                    }}
+                    className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void submitTodoistKey()}
+                      disabled={connecting === 'todoist' || !todoistKeyInput.trim()}
+                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
+                    >
+                      <Plug2 size={11} />
+                      {connecting === 'todoist' ? 'Connecting…' : 'Connect'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTodoistKeyInput(null)}
+                      className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Inline Google credentials form. Replaces the .env workflow
                   with paste-once UX. Saved values are encrypted via safeStorage
                   and never cross the IPC boundary again. */}
@@ -1405,7 +1505,8 @@ export default function Integrations(): JSX.Element {
                   (integration.id === 'plaid' && plaidSecretInput !== null) ||
                   (integration.id === 'obsidian' && obsidianPathInput !== null) ||
                   (integration.id === 'notion' && notionTokenInput !== null) ||
-                  (integration.id === 'linear' && linearKeyInput !== null) ? null : (
+                  (integration.id === 'linear' && linearKeyInput !== null) ||
+                  (integration.id === 'todoist' && todoistKeyInput !== null) ? null : (
                   <button
                     type="button"
                     onClick={() => connect(integration.id)}

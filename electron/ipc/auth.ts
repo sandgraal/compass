@@ -725,6 +725,59 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     }
   })
 
+  // Todoist personal API token (Phase 7 Track B). Paste-once, like the GitHub
+  // PAT: validate the format, prove it works against the REST API, encrypt to
+  // disk, flip the integrations row. Todoist personal tokens are Bearer tokens.
+  ipcMain.handle('auth:connect-todoist', async (_event, token: string) => {
+    if (typeof token !== 'string') {
+      return { error: 'Token must be a string.' }
+    }
+    const trimmed = token.trim()
+    // Todoist personal API tokens are 40-char hex; keep the check lenient
+    // enough to tolerate format changes but reject obvious garbage.
+    if (!/^[A-Za-z0-9]{20,64}$/.test(trimmed)) {
+      return {
+        error:
+          "That doesn't look like a Todoist API token. Copy your token from Todoist → Settings → Integrations → Developer."
+      }
+    }
+    try {
+      const resp = await fetch('https://api.todoist.com/rest/v2/projects', {
+        headers: { Authorization: `Bearer ${trimmed}` }
+      })
+      if (resp.status === 401 || resp.status === 403) {
+        return { error: 'Todoist rejected the token (auth failed). It may be revoked or mistyped.' }
+      }
+      if (!resp.ok) {
+        return { error: `Todoist responded with HTTP ${resp.status}.` }
+      }
+
+      saveToken('todoist', { access_token: trimmed, auth_method: 'personal-api-token' })
+
+      const db = getDb()
+      db.insert(integrations)
+        .values({
+          service: 'todoist',
+          connectedAt: new Date(),
+          status: 'connected',
+          scopes: JSON.stringify(['tasks:read'])
+        })
+        .onConflictDoUpdate({
+          target: integrations.service,
+          set: {
+            connectedAt: new Date(),
+            status: 'connected',
+            scopes: JSON.stringify(['tasks:read'])
+          }
+        })
+        .run()
+
+      return { success: true }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
   // Validate + store Google OAuth client credentials. Replaces the `.env`
   // workflow with an in-app form: paste once, encrypted to disk, never
   // crosses the IPC boundary again. The OAuth dance (`auth:connect-google`)

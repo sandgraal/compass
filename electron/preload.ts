@@ -41,6 +41,7 @@ const api = {
     connectGitHubWithPAT: (token: string) => ipcRenderer.invoke('auth:connect-github-pat', token),
     connectNotion: (token: string) => ipcRenderer.invoke('auth:connect-notion', token),
     connectLinear: (token: string) => ipcRenderer.invoke('auth:connect-linear', token),
+    connectTodoist: (token: string) => ipcRenderer.invoke('auth:connect-todoist', token),
     disconnect: (service: string) => ipcRenderer.invoke('auth:disconnect', service),
     getStatus: () => ipcRenderer.invoke('auth:get-status'),
     getRedirectUris: () => ipcRenderer.invoke('auth:get-redirect-uris')
