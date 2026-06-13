@@ -40,6 +40,7 @@ const api = {
     connectGitHub: () => ipcRenderer.invoke('auth:connect-github'),
     connectGitHubWithPAT: (token: string) => ipcRenderer.invoke('auth:connect-github-pat', token),
     connectNotion: (token: string) => ipcRenderer.invoke('auth:connect-notion', token),
+    connectLinear: (token: string) => ipcRenderer.invoke('auth:connect-linear', token),
     disconnect: (service: string) => ipcRenderer.invoke('auth:disconnect', service),
     getStatus: () => ipcRenderer.invoke('auth:get-status'),
     getRedirectUris: () => ipcRenderer.invoke('auth:get-redirect-uris')
@@ -205,6 +206,10 @@ const api = {
   },
 
   // --- GitHub Items ---
+  linear: {
+    getItems: () => ipcRenderer.invoke('linear:get-items')
+  },
+
   github: {
     getItems: (state?: string) => ipcRenderer.invoke('github:get-items', state)
   },

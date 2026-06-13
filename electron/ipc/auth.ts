@@ -663,6 +663,68 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     }
   })
 
+  // Linear personal API key (Phase 7 Track B). Paste-once, like the GitHub
+  // PAT: validate the format, prove it works against the GraphQL `viewer`,
+  // encrypt to disk, flip the integrations row. Linear personal keys go in
+  // the Authorization header verbatim (no `Bearer` prefix — that's OAuth).
+  ipcMain.handle('auth:connect-linear', async (_event, token: string) => {
+    if (typeof token !== 'string') {
+      return { error: 'Token must be a string.' }
+    }
+    const trimmed = token.trim()
+    if (!/^lin_api_[A-Za-z0-9]{16,255}$/.test(trimmed)) {
+      return {
+        error:
+          "That doesn't look like a Linear API key. Create a Personal API key (starts with `lin_api_`) in Linear → Settings → Security & access → API."
+      }
+    }
+    try {
+      const resp = await fetch('https://api.linear.app/graphql', {
+        method: 'POST',
+        headers: { Authorization: trimmed, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: '{ viewer { id name } }' })
+      })
+      if (resp.status === 401 || resp.status === 400) {
+        return { error: 'Linear rejected the key (auth failed). It may be revoked or mistyped.' }
+      }
+      if (!resp.ok) {
+        return { error: `Linear responded with HTTP ${resp.status}.` }
+      }
+      const json = (await resp.json()) as {
+        data?: { viewer?: { name?: string } }
+        errors?: Array<{ message: string }>
+      }
+      if (json.errors?.length || !json.data?.viewer) {
+        return { error: 'Linear rejected the key (auth failed). It may be revoked or mistyped.' }
+      }
+      const name = json.data.viewer.name ?? null
+
+      saveToken('linear', { access_token: trimmed, auth_method: 'personal-api-key', name })
+
+      const db = getDb()
+      db.insert(integrations)
+        .values({
+          service: 'linear',
+          connectedAt: new Date(),
+          status: 'connected',
+          scopes: JSON.stringify(['issues:read'])
+        })
+        .onConflictDoUpdate({
+          target: integrations.service,
+          set: {
+            connectedAt: new Date(),
+            status: 'connected',
+            scopes: JSON.stringify(['issues:read'])
+          }
+        })
+        .run()
+
+      return { success: true, name }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
   // Validate + store Google OAuth client credentials. Replaces the `.env`
   // workflow with an in-app form: paste once, encrypted to disk, never
   // crosses the IPC boundary again. The OAuth dance (`auth:connect-google`)

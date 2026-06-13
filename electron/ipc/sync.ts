@@ -9,9 +9,11 @@ import {
   gmailActions,
   integrations,
   knowledgeSuggestions,
+  linearIssues,
   syncEvents
 } from '../db/schema'
 import { readAppleCalendars } from '../integrations/apple-calendar'
+import { syncLinear } from '../integrations/linear'
 import { syncNotion } from '../integrations/notion'
 import { readVaultPathSetting, syncObsidian } from '../integrations/obsidian'
 import { syncAllPlaid } from '../integrations/plaid/sync'
@@ -53,7 +55,8 @@ const SUPPORTED_SYNC_SERVICES = new Set([
   'github',
   'apple-calendar',
   'obsidian',
-  'notion'
+  'notion',
+  'linear'
 ])
 
 function normalizeSupportedSyncService(service: unknown): string | null {
@@ -765,6 +768,7 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     if (service === 'apple-calendar') return syncAppleCalendar(win)
     if (service === 'obsidian') return syncObsidian(win)
     if (service === 'notion') return syncNotion(win)
+    if (service === 'linear') return syncLinear(win)
     if (service === 'plaid') {
       const results = await syncAllPlaid()
       // Aggregate across every connected Item: `success` is true ONLY when
@@ -808,6 +812,9 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     }
     if (loadToken('notion')) {
       results.push(toPublicSyncResult(await syncNotion(win)))
+    }
+    if (loadToken('linear')) {
+      results.push(toPublicSyncResult(await syncLinear(win)))
     }
     return results
   })
@@ -898,6 +905,13 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     const db = getDb()
     const rows = db.select().from(githubItems).all()
     return state ? rows.filter((r) => r.state === state) : rows
+  })
+
+  // Linear issues query (Phase 7 Track B). Active assigned issues only —
+  // syncLinear already drops completed/canceled and prunes unassigned.
+  ipcMain.handle('linear:get-items', () => {
+    const db = getDb()
+    return db.select().from(linearIssues).all()
   })
 
   // Gmail actions query

@@ -114,6 +114,19 @@ function ensureNewTables(sqlite: Database.Database): void {
       error_code TEXT,
       created_at INTEGER
     );
+    CREATE TABLE IF NOT EXISTS linear_issues (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      external_id TEXT NOT NULL UNIQUE,
+      identifier TEXT NOT NULL,
+      title TEXT NOT NULL,
+      url TEXT NOT NULL,
+      state TEXT NOT NULL,
+      state_type TEXT NOT NULL,
+      priority INTEGER NOT NULL DEFAULT 0,
+      team TEXT,
+      due_date TEXT,
+      synced_at INTEGER
+    );
   `)
 
   // Backfill new columns on pre-existing tables (safe no-op when columns already exist).
@@ -381,6 +394,20 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       state TEXT NOT NULL,
       body TEXT,
       labels TEXT,
+      due_date TEXT,
+      synced_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS linear_issues (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      external_id TEXT NOT NULL UNIQUE,
+      identifier TEXT NOT NULL,
+      title TEXT NOT NULL,
+      url TEXT NOT NULL,
+      state TEXT NOT NULL,
+      state_type TEXT NOT NULL,
+      priority INTEGER NOT NULL DEFAULT 0,
+      team TEXT,
       due_date TEXT,
       synced_at INTEGER
     );
