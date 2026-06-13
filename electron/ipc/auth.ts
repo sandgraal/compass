@@ -732,6 +732,12 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     if (typeof token !== 'string') {
       return { error: 'Token must be a string.' }
     }
+    // Bound length BEFORE trim/regex. The renderer is an untrusted boundary;
+    // without this a compromised renderer could send a huge string and force
+    // allocations during trim()/regex. Real tokens are ~40 chars.
+    if (token.length > 256) {
+      return { error: 'Token is too long.' }
+    }
     const trimmed = token.trim()
     // Todoist personal API tokens are 40-char hex; keep the check lenient
     // enough to tolerate format changes but reject obvious garbage.

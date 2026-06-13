@@ -125,6 +125,7 @@ export async function syncTodoist(mainWindow?: BrowserWindow | null): Promise<Sy
     const fresh = new Set(rows.map((r) => r.sourceId))
 
     let imported = 0
+    let updated = 0
     rows.forEach((row, i) => {
       const prior = priorById.get(row.sourceId)
       if (prior) {
@@ -140,6 +141,7 @@ export async function syncTodoist(mainWindow?: BrowserWindow | null): Promise<Sy
             )
           )
           .run()
+        updated++
       } else {
         db.insert(checklistItems)
           .values({
@@ -175,7 +177,9 @@ export async function syncTodoist(mainWindow?: BrowserWindow | null): Promise<Sy
         removed++
       }
     }
-    const recordsUpdated = imported + removed
+    // Count refreshed rows too, so the telemetry reflects all DB writes
+    // (matches Linear/other integrations rather than under-reporting).
+    const recordsUpdated = imported + updated + removed
 
     db.insert(integrations)
       .values({

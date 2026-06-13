@@ -164,7 +164,7 @@ describe('syncTodoist', () => {
     // Next sync: only 'a' remains in Todoist → 'b' is pruned, manual untouched.
     fetchMock.mockResolvedValue(jsonResponse([task({ id: 'a' })]))
     const r = await syncTodoist(null)
-    expect(r.recordsUpdated).toBe(1) // 1 prune (0 new imports)
+    expect(r.recordsUpdated).toBe(2) // 'a' refreshed (1) + 'b' pruned (1)
     const sources = (
       sqlite.prepare('SELECT source, source_id FROM checklist_items').all() as Array<{
         source: string
