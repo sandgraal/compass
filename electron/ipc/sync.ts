@@ -17,6 +17,7 @@ import { syncLinear } from '../integrations/linear'
 import { syncNotion } from '../integrations/notion'
 import { readVaultPathSetting, syncObsidian } from '../integrations/obsidian'
 import { syncAllPlaid } from '../integrations/plaid/sync'
+import { syncTodoist } from '../integrations/todoist'
 import {
   updateCalendarKnowledge,
   updateDriveKnowledge,
@@ -56,7 +57,8 @@ const SUPPORTED_SYNC_SERVICES = new Set([
   'apple-calendar',
   'obsidian',
   'notion',
-  'linear'
+  'linear',
+  'todoist'
 ])
 
 function normalizeSupportedSyncService(service: unknown): string | null {
@@ -769,6 +771,7 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     if (service === 'obsidian') return syncObsidian(win)
     if (service === 'notion') return syncNotion(win)
     if (service === 'linear') return syncLinear(win)
+    if (service === 'todoist') return syncTodoist(win)
     if (service === 'plaid') {
       const results = await syncAllPlaid()
       // Aggregate across every connected Item: `success` is true ONLY when
@@ -815,6 +818,9 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     }
     if (loadToken('linear')) {
       results.push(toPublicSyncResult(await syncLinear(win)))
+    }
+    if (loadToken('todoist')) {
+      results.push(toPublicSyncResult(await syncTodoist(win)))
     }
     return results
   })

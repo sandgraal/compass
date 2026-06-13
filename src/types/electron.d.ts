@@ -304,6 +304,7 @@ declare global {
         connectLinear(
           token: string
         ): Promise<{ success?: boolean; name?: string | null; error?: string }>
+        connectTodoist(token: string): Promise<{ success?: boolean; error?: string }>
         disconnect(service: string): Promise<{ success: boolean }>
         getStatus(): Promise<IntegrationStatus[]>
         getRedirectUris(): Promise<RedirectUris>

@@ -8,6 +8,7 @@ import { captureSnapshots } from './integrations/finance-snapshot'
 import { syncLinear } from './integrations/linear'
 import { syncNotion } from './integrations/notion'
 import { syncObsidian } from './integrations/obsidian'
+import { syncTodoist } from './integrations/todoist'
 import {
   computeLowCashAlert,
   computePriceHikeAlert,
@@ -123,6 +124,8 @@ function runSyncForService(service: string): void {
     void syncNotion(win)
   } else if (service === 'linear') {
     void syncLinear(win)
+  } else if (service === 'todoist') {
+    void syncTodoist(win)
   }
 }
 
