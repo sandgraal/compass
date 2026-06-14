@@ -242,6 +242,60 @@ describe('contacts import / export', () => {
     mockDialog.showOpenDialog.mockResolvedValue({ canceled: true, filePaths: [] })
     expect(await invoke('contacts:import-vcard')).toMatchObject({ canceled: true })
   })
+
+  it('imports a LinkedIn Connections.csv (skips Notes preamble, dedupes on re-import)', async () => {
+    const dir = tmp()
+    const csv = join(dir, 'Connections.csv')
+    writeFileSync(
+      csv,
+      [
+        'Notes:',
+        '"Some preamble line about missing emails."',
+        '',
+        'First Name,Last Name,URL,Email Address,Company,Position,Connected On',
+        'Ada,Lovelace,https://linkedin.com/in/ada,ada@x.com,Analytical Engine,Mathematician,01 Jan 2024'
+      ].join('\n')
+    )
+    mockDialog.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [csv] })
+    expect(await invoke('contacts:import-linkedin')).toMatchObject({ success: true, imported: 1 })
+    expect(await invoke('contacts:import-linkedin')).toMatchObject({ success: true, updated: 1 })
+
+    const [c] = (await invoke('contacts:list')) as ContactGet[]
+    const full = (await invoke('contacts:get', c.id)) as ContactGet
+    expect(full.org).toBe('Analytical Engine')
+    expect(full.relationship).toBe('colleague')
+  })
+
+  it('imports Facebook friends.json', async () => {
+    const dir = tmp()
+    const jsonFile = join(dir, 'friends.json')
+    writeFileSync(
+      jsonFile,
+      JSON.stringify({ friends_v2: [{ name: 'Grace Hopper', timestamp: 1577836800 }] })
+    )
+    mockDialog.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [jsonFile] })
+    expect(await invoke('contacts:import-facebook')).toMatchObject({ success: true, imported: 1 })
+    const [c] = (await invoke('contacts:list')) as ContactGet[]
+    expect(c.displayName).toBe('Grace Hopper')
+  })
+
+  it('imports Google Voice numbers from a Takeout folder of HTML', async () => {
+    const dir = tmp()
+    writeFileSync(
+      join(dir, 'Mom - Text - 2024.html'),
+      '<a class="tel" href="tel:+15550100"><abbr class="fn">Mom</abbr></a>'
+    )
+    writeFileSync(
+      join(dir, '+15550199 - Text - 2024.html'),
+      '<a class="tel" href="tel:+15550199"><abbr class="fn"></abbr></a>'
+    )
+    mockDialog.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [dir] })
+    const res = (await invoke('contacts:import-gvoice')) as ImportRes
+    expect(res).toMatchObject({ success: true, imported: 2 })
+    const names = ((await invoke('contacts:list')) as ContactGet[]).map((c) => c.displayName)
+    expect(names).toContain('Mom')
+    expect(names).toContain('+15550199')
+  })
 })
 
 type ContactGet = {
@@ -249,6 +303,7 @@ type ContactGet = {
   displayName: string
   externalId: string
   org: string | null
+  relationship: string | null
   photo: string | null
   phones: Array<{ type?: string; value: string }>
   emails: Array<{ type?: string; value: string }>

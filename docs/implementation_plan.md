@@ -386,10 +386,10 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
   `src/pages/Export.tsx` (per-domain + Export Everything, unencrypted-PII warning). **Sync:**
   `electron/knowledge/contacts-extractor.ts` regenerates `profile/relationships.md` on every mutation.
   **Tests:** vcard/ics/csv round-trip + contacts/export IPC + extractor (contacts.ts 93% / export.ts 93%).
-- [ ] **9.1 Contacts importers expansion** — Google Contacts live sync (People API; new scope + CSP),
-  macOS Contacts (AddressBook bridge), and archive importers for LinkedIn (`Connections.csv`), Facebook
-  ("Download Your Information"), Google Voice (Takeout). FB/LinkedIn have no friends/connections API —
-  the official data-export archive is the durable, local-first path.
+- **9.1 Contacts importers expansion** — *(in progress)*
+  - [x] **Archive importers** — `electron/lib/archive-importers.ts` (pure parsers) + `contacts:import-{linkedin,facebook,gvoice}` IPC + a "Import from a service" UI row. LinkedIn `Connections.csv` (skips the Notes preamble; maps name/org/title/url/email; `relationship='colleague'`), Facebook `friends.json` (`friends_v2`) + `address_book_v2` (phones), Google Voice Takeout `Voice/Calls/*.html` (hCard tel/fn, deduped by number, file-count + byte capped). FB/LinkedIn have no friends/connections API — the official data export is the durable, local-first path.
+  - [ ] Google Contacts live sync (People API; new OAuth scope + CSP).
+  - [ ] macOS Contacts (local AddressBook bridge).
 - [ ] **9.2 Documents & files store** — `documents` table + real files under `.data/documents/`; attach a
   doc to any record; export = copy files + manifest into the portable folder. Closes the "vault stores
   only metadata" gap; PDF text extraction feeds knowledge search.

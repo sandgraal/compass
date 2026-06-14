@@ -683,6 +683,9 @@ declare global {
         delete(id: number): Promise<{ success: boolean }>
         importVcard(): Promise<ImportResult>
         importCsv(): Promise<ImportResult>
+        importLinkedin(): Promise<ImportResult>
+        importFacebook(): Promise<ImportResult>
+        importGvoice(): Promise<ImportResult>
         exportVcard(ids?: number[]): Promise<ExportResult>
         exportCsv(ids?: number[]): Promise<ExportResult>
       }

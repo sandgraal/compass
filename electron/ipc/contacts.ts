@@ -12,12 +12,18 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { readFileSync, statSync, writeFileSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { eq, like } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
 import { contacts } from '../db/schema'
 import { writeRelationships } from '../knowledge/contacts-extractor'
+import {
+  parseFacebookFriends,
+  parseGoogleVoice,
+  parseLinkedInConnections
+} from '../lib/archive-importers'
 import { parseCSV, serializeCsv } from '../lib/csv'
 import {
   type ContactAddress,
@@ -400,6 +406,48 @@ function dateStamp(): string {
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
+// Google Voice Takeout can hold thousands of conversation HTML files. Bound both
+// the file count and the total bytes read so a huge export can't OOM the main
+// process (self-DoS), mirroring the MAX_IMPORT_BYTES guard on single files.
+const MAX_VOICE_FILES = 5000
+
+function readVoiceHtmlFiles(root: string): Array<{ name: string; content: string }> {
+  const out: Array<{ name: string; content: string }> = []
+  let budget = MAX_IMPORT_BYTES
+  const walk = (dir: string): void => {
+    if (out.length >= MAX_VOICE_FILES || budget <= 0) return
+    let entries: string[]
+    try {
+      entries = readdirSync(dir)
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (out.length >= MAX_VOICE_FILES || budget <= 0) break
+      const full = join(dir, entry)
+      let st: ReturnType<typeof statSync>
+      try {
+        st = statSync(full)
+      } catch {
+        continue
+      }
+      if (st.isDirectory()) {
+        walk(full)
+      } else if (st.isFile() && entry.toLowerCase().endsWith('.html')) {
+        if (st.size > budget) continue
+        budget -= st.size
+        try {
+          out.push({ name: entry, content: readFileSync(full, 'utf-8') })
+        } catch {
+          // unreadable file — skip
+        }
+      }
+    }
+  }
+  walk(root)
+  return out
+}
+
 export function registerContactsHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('contacts:list', (_event, opts?: { search?: string }) => {
     const db = getDb()
@@ -503,6 +551,87 @@ export function registerContactsHandlers(ipcMain: IpcMain): void {
       const inputs = rows.map(csvRowToInput).filter((x): x is ContactInput => x !== null)
       if (inputs.length === 0) return { success: false, error: 'No contacts found in CSV' }
       const { imported, updated } = upsertContacts(inputs)
+      syncRelationships()
+      return { success: true, imported, updated }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  // ── Service data-export archive importers (Phase 9.1) ────────────────────
+  // FB/LinkedIn killed their friends/connections APIs, so we import their
+  // official data-export archives instead — pure local file parsing, upserting
+  // by externalId so re-import dedupes. Google Voice numbers come from the
+  // Takeout `Voice/Calls` HTML.
+
+  ipcMain.handle('contacts:import-linkedin', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: 'Import LinkedIn connections (Connections.csv)',
+      filters: [{ name: 'CSV', extensions: ['csv'] }],
+      properties: ['openFile']
+    })
+    if (canceled || filePaths.length === 0) return { success: false, canceled: true }
+    try {
+      if (statSync(filePaths[0]).size > MAX_IMPORT_BYTES) {
+        return { success: false, error: 'File too large to import (max 50 MB).' }
+      }
+      const parsed = parseLinkedInConnections(readFileSync(filePaths[0], 'utf-8'))
+      if (parsed.length === 0) {
+        return {
+          success: false,
+          error: 'No connections found — is this a LinkedIn Connections.csv?'
+        }
+      }
+      const { imported, updated } = upsertContacts(parsed)
+      syncRelationships()
+      return { success: true, imported, updated }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('contacts:import-facebook', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: 'Import Facebook friends (friends.json)',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      properties: ['openFile']
+    })
+    if (canceled || filePaths.length === 0) return { success: false, canceled: true }
+    try {
+      if (statSync(filePaths[0]).size > MAX_IMPORT_BYTES) {
+        return { success: false, error: 'File too large to import (max 50 MB).' }
+      }
+      const parsed = parseFacebookFriends(readFileSync(filePaths[0], 'utf-8'))
+      if (parsed.length === 0) {
+        return {
+          success: false,
+          error: 'No friends found — pick friends.json from your FB export.'
+        }
+      }
+      const { imported, updated } = upsertContacts(parsed)
+      syncRelationships()
+      return { success: true, imported, updated }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('contacts:import-gvoice', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: 'Import Google Voice contacts (pick your Takeout Voice folder)',
+      properties: ['openDirectory']
+    })
+    if (canceled || filePaths.length === 0) return { success: false, canceled: true }
+    try {
+      const files = readVoiceHtmlFiles(filePaths[0])
+      const parsed = parseGoogleVoice(files)
+      if (parsed.length === 0) {
+        return {
+          success: false,
+          error: 'No numbers found — pick the Voice folder from Google Takeout.'
+        }
+      }
+      const { imported, updated } = upsertContacts(parsed)
       syncRelationships()
       return { success: true, imported, updated }
     } catch (err) {

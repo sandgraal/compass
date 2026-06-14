@@ -264,6 +264,9 @@ const api = {
     delete: (id: number) => ipcRenderer.invoke('contacts:delete', id),
     importVcard: () => ipcRenderer.invoke('contacts:import-vcard'),
     importCsv: () => ipcRenderer.invoke('contacts:import-csv'),
+    importLinkedin: () => ipcRenderer.invoke('contacts:import-linkedin'),
+    importFacebook: () => ipcRenderer.invoke('contacts:import-facebook'),
+    importGvoice: () => ipcRenderer.invoke('contacts:import-gvoice'),
     exportVcard: (ids?: number[]) => ipcRenderer.invoke('contacts:export-vcard', { ids }),
     exportCsv: (ids?: number[]) => ipcRenderer.invoke('contacts:export-csv', { ids })
   },
