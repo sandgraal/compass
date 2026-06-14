@@ -107,10 +107,24 @@ const INTEGRATIONS: IntegrationConfig[] = [
     color: 'from-sky-400/20 to-blue-500/20',
     logo: '✓'
   },
+  // SimpleFIN is the recommended automatic bank-sync path: the USER signs up
+  // with SimpleFIN Bridge ($15/yr) and pastes a one-time setup token — no
+  // developer keys, no business entity, only an encrypted token on disk. Listed
+  // before Plaid because it's the default we steer most users toward.
+  {
+    id: 'simplefin',
+    name: 'SimpleFIN',
+    description:
+      'Recommended: bank + card sync (incl. Amex) via SimpleFIN Bridge. You sign up & hold the keys ($15/yr) — no business or developer keys needed.',
+    scopes: ['accounts:read', 'transactions:read'],
+    color: 'from-emerald-500/20 to-teal-500/20',
+    logo: 'S'
+  },
   {
     id: 'plaid',
     name: 'Plaid',
-    description: 'Bank balances + transactions via Plaid Link. Tokens encrypted on disk.',
+    description:
+      'Advanced: bank sync via your own Plaid developer keys. Most people should use SimpleFIN instead. Tokens encrypted on disk.',
     scopes: ['transactions:read', 'accounts:read'],
     color: 'from-blue-500/20 to-indigo-500/20',
     logo: '$'
@@ -186,6 +200,21 @@ export default function Integrations(): JSX.Element {
     env: 'sandbox' | 'production'
     secret: string
   } | null>(null)
+  // SimpleFIN state. `connections` is the list of claimed SimpleFIN connections
+  // (one per setup token), rendered as sub-rows inside the card — mirrors the
+  // multi-Item Plaid treatment. `tokenInput` is the paste-setup-token form:
+  // null = collapsed, string = open with the current value.
+  const [simplefinConnections, setSimplefinConnections] = useState<
+    Array<{
+      id: number
+      connectionId: string
+      orgName: string
+      orgDomain: string | null
+      lastSyncedAt: number | null
+      errorCode: string | null
+    }>
+  >([])
+  const [simplefinTokenInput, setSimplefinTokenInput] = useState<string | null>(null)
   // Obsidian vault bridge. Status mirrors `window.api.obsidian.getStatus()`;
   // the path input follows the same convention as the PAT / Plaid-secret
   // forms above: null = form collapsed, string = form open with that value.
@@ -231,6 +260,7 @@ export default function Integrations(): JSX.Element {
       })
 
     void loadPlaid()
+    void loadSimplefin()
     void loadObsidian()
 
     // Load persisted sync log from DB on mount
@@ -267,6 +297,9 @@ export default function Integrations(): JSX.Element {
       // Without this, the "Last synced" timestamp on each bank wouldn't
       // update until the user navigated away and back.
       if (d.service === 'plaid') void loadPlaid()
+      // SimpleFIN, like Plaid, keeps lastSyncedAt + errorCode on per-connection
+      // rows, so refresh the connection list on its sync events.
+      if (d.service === 'simplefin') void loadSimplefin()
       if (d.service === 'obsidian') void loadObsidian()
     })
     return unsub
@@ -321,6 +354,12 @@ export default function Integrations(): JSX.Element {
         return
       }
       void connectPlaidBank()
+      return
+    }
+    // SimpleFIN: paste-once setup token (base64). Connect opens the token form;
+    // claiming it stores the encrypted Access URL and runs a first sync.
+    if (service === 'simplefin') {
+      setSimplefinTokenInput('')
       return
     }
     // Obsidian: no OAuth — Connect opens the vault-path form; once a vault
@@ -386,6 +425,18 @@ export default function Integrations(): JSX.Element {
       setPlaidItems(items)
     } catch {
       /* IPC may not be wired in non-electron contexts (Storybook etc.); ignore */
+    }
+  }
+
+  // Refresh the SimpleFIN connection list. Called on mount, after claim /
+  // disconnect, and after every simplefin sync event.
+  async function loadSimplefin(): Promise<void> {
+    const api = typeof window !== 'undefined' ? window.api : undefined
+    if (!api?.simplefin) return
+    try {
+      setSimplefinConnections(await api.simplefin.listConnections())
+    } catch {
+      /* IPC may not be wired in non-electron contexts; ignore */
     }
   }
 
@@ -580,6 +631,49 @@ export default function Integrations(): JSX.Element {
     await window.api.plaid.disconnect(itemId)
     toast(`Disconnected ${institutionName}.`, 'success')
     await loadPlaid()
+  }
+
+  async function submitSimplefinToken() {
+    if (simplefinTokenInput === null) return
+    const token = simplefinTokenInput.trim()
+    if (!token) {
+      toast('Paste your SimpleFIN setup token.', 'error')
+      return
+    }
+    setConnecting('simplefin')
+    try {
+      const r = await window.api.simplefin.claimToken(token)
+      toast(
+        `Connected ${r.orgName || 'SimpleFIN'} — ${r.added} transaction${r.added === 1 ? '' : 's'} imported.`,
+        'success'
+      )
+      setSimplefinTokenInput(null)
+      await loadSimplefin()
+      await loadStatuses()
+    } catch (err) {
+      // The setup token is single-use; a re-paste of a spent token 4xxs here.
+      toast(
+        `Couldn't connect SimpleFIN: ${err instanceof Error ? err.message : String(err)}`,
+        'error'
+      )
+    } finally {
+      setConnecting(null)
+    }
+  }
+
+  async function disconnectSimplefinConnection(connectionId: string, orgName: string) {
+    const label = orgName || 'this connection'
+    const ok = await confirm({
+      title: `Disconnect ${label}?`,
+      description:
+        'SimpleFIN will stop syncing these accounts. Existing transactions stay in Compass. You can reconnect later with a fresh setup token.',
+      confirmLabel: 'Disconnect',
+      destructive: false
+    })
+    if (!ok) return
+    await window.api.simplefin.disconnect(connectionId)
+    toast(`Disconnected ${label}.`, 'success')
+    await loadSimplefin()
   }
 
   // Clear stored Google credentials and reopen the inline form. Used for
@@ -885,9 +979,21 @@ export default function Integrations(): JSX.Element {
           // Plaid's "connected" + "error" come from the per-Item state, not
           // from the singleton `integrations` row — there can be 0 or many
           // Items, and one bad Item shouldn't poison the whole card.
-          const isConnected = integration.id === 'plaid' ? plaidItems.length > 0 : baseIsConnected
+          // Plaid + SimpleFIN are multi-connection: "connected" / "error" come
+          // from the per-connection rows, not the singleton `integrations` row.
+          const isMultiConn = integration.id === 'plaid' || integration.id === 'simplefin'
+          const isConnected =
+            integration.id === 'plaid'
+              ? plaidItems.length > 0
+              : integration.id === 'simplefin'
+                ? simplefinConnections.length > 0
+                : baseIsConnected
           const hasError =
-            integration.id === 'plaid' ? plaidItems.some((i) => i.errorCode) : baseHasError
+            integration.id === 'plaid'
+              ? plaidItems.some((i) => i.errorCode)
+              : integration.id === 'simplefin'
+                ? simplefinConnections.some((c) => c.errorCode)
+                : baseHasError
           const isSyncing = syncing.has(integration.id)
 
           return (
@@ -913,14 +1019,14 @@ export default function Integrations(): JSX.Element {
                           "Connected"). For non-Plaid integrations the
                           original isConnected-wins logic is unchanged. */}
                       {(() => {
-                        const errorWins = hasError && (integration.id === 'plaid' || !isConnected)
+                        const errorWins = hasError && (isMultiConn || !isConnected)
                         return (
                           <>
                             {!errorWins && isConnected && (
                               <CheckCircle2 size={11} className="text-emerald-400" />
                             )}
                             {errorWins && <AlertCircle size={11} className="text-red-400" />}
-                            {!status && integration.id !== 'plaid' && (
+                            {!status && !isMultiConn && (
                               <XCircle size={11} className="text-muted-foreground/40" />
                             )}
                             <span
@@ -934,7 +1040,7 @@ export default function Integrations(): JSX.Element {
                               )}
                             >
                               {errorWins
-                                ? integration.id === 'plaid' && isConnected
+                                ? isMultiConn && isConnected
                                   ? 'Needs attention'
                                   : 'Error'
                                 : isConnected
@@ -1180,6 +1286,109 @@ export default function Integrations(): JSX.Element {
                       >
                         Edit Plaid credentials
                       </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ─── SimpleFIN card body ───────────────────────────────────
+                  Paste-setup-token form (Connect) + connected-connections
+                  list. Simpler than Plaid: no client_id/env/secret, no Link
+                  child window — the user owns the SimpleFIN account. */}
+              {integration.id === 'simplefin' && (
+                <div className="mb-3 space-y-2">
+                  {simplefinTokenInput !== null && (
+                    <div className="p-3 bg-background/40 border border-border rounded-lg space-y-2">
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        You hold the keys with SimpleFIN. Create an account at{' '}
+                        <a
+                          href="https://bridge.simplefin.org"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline"
+                        >
+                          bridge.simplefin.org
+                        </a>{' '}
+                        ($15/yr), link your banks &amp; cards, generate a one-time setup token, and
+                        paste it below. Compass claims it for a read-only access key stored
+                        encrypted on this Mac.
+                      </p>
+                      <label
+                        htmlFor="simplefin-token-input"
+                        className="block text-xs text-muted-foreground"
+                      >
+                        Setup token
+                      </label>
+                      <textarea
+                        id="simplefin-token-input"
+                        placeholder="Paste your SimpleFIN setup token (a long base64 string)"
+                        aria-label="SimpleFIN setup token"
+                        value={simplefinTokenInput}
+                        onChange={(e) => setSimplefinTokenInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') setSimplefinTokenInput(null)
+                        }}
+                        rows={3}
+                        className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40 resize-none"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void submitSimplefinToken()}
+                          disabled={connecting === 'simplefin' || !simplefinTokenInput.trim()}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
+                        >
+                          <Plug2 size={11} />
+                          {connecting === 'simplefin' ? 'Connecting…' : 'Claim & sync'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSimplefinTokenInput(null)}
+                          className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {simplefinTokenInput === null && (
+                    <div className="space-y-1.5">
+                      {simplefinConnections.length === 0 && (
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          Connect to link your banks &amp; cards through SimpleFIN — no business or
+                          developer keys, just a one-time setup token.
+                        </p>
+                      )}
+                      {simplefinConnections.map((conn) => (
+                        <div
+                          key={conn.connectionId}
+                          className="flex items-center justify-between gap-2 px-2 py-1.5 bg-background/40 border border-border rounded text-xs"
+                        >
+                          <div className="min-w-0">
+                            <div className="font-medium text-foreground truncate">
+                              {conn.orgName || 'SimpleFIN connection'}
+                            </div>
+                            <div className="text-muted-foreground">
+                              {conn.errorCode ? (
+                                <span className="text-red-400">{conn.errorCode}</span>
+                              ) : conn.lastSyncedAt ? (
+                                `Last synced ${formatRelative(new Date(conn.lastSyncedAt))}`
+                              ) : (
+                                'Never synced'
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void disconnectSimplefinConnection(conn.connectionId, conn.orgName)
+                            }
+                            className="shrink-0 text-xs px-2 py-1 text-muted-foreground hover:text-destructive transition-colors"
+                          >
+                            Disconnect
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -1587,7 +1796,7 @@ export default function Integrations(): JSX.Element {
                     the card body, NOT this card-level Disconnect. The
                     card-level button is always "Connect bank" so the user
                     can add additional institutions. */}
-                {isConnected && integration.id !== 'plaid' ? (
+                {isConnected && !isMultiConn ? (
                   <button
                     type="button"
                     onClick={() => disconnect(integration.id)}
@@ -1598,6 +1807,7 @@ export default function Integrations(): JSX.Element {
                 ) : (integration.id === 'github' && githubPatInput !== null) ||
                   (integration.id === 'google' && googleCredsInput !== null) ||
                   (integration.id === 'plaid' && plaidSetupInput !== null) ||
+                  (integration.id === 'simplefin' && simplefinTokenInput !== null) ||
                   (integration.id === 'obsidian' && obsidianPathInput !== null) ||
                   (integration.id === 'notion' && notionTokenInput !== null) ||
                   (integration.id === 'linear' && linearKeyInput !== null) ||
@@ -1611,7 +1821,8 @@ export default function Integrations(): JSX.Element {
                     <Plug2 size={11} />
                     {connecting === integration.id
                       ? 'Connecting…'
-                      : integration.id === 'plaid' && plaidItems.length > 0
+                      : (integration.id === 'plaid' && plaidItems.length > 0) ||
+                          (integration.id === 'simplefin' && simplefinConnections.length > 0)
                         ? 'Connect bank'
                         : 'Connect'}
                   </button>

@@ -733,6 +733,27 @@ declare global {
           }>
         >
       }
+      simplefin: {
+        getStatus(): Promise<{ connectionIds: string[] }>
+        claimToken(setupToken: string): Promise<{
+          ok: true
+          connectionId: string
+          orgName: string
+          added: number
+          accountsUpserted: number
+        }>
+        listConnections(): Promise<
+          Array<{
+            id: number
+            connectionId: string
+            orgName: string
+            orgDomain: string | null
+            lastSyncedAt: number | null
+            errorCode: string | null
+          }>
+        >
+        disconnect(connectionId: string): Promise<{ ok: true }>
+      }
       vault: {
         getCategories(): Promise<VaultCategory[]>
         getEntries(category: string): Promise<VaultEntry[]>
@@ -948,6 +969,10 @@ declare global {
             plaidItemId?: number | null
             plaidAccountId?: string | null
             mask?: string | null
+            // Phase 4.7 SimpleFIN linkage. Populated for accounts owned by a
+            // SimpleFIN connection; null for manual / CSV / Plaid accounts.
+            simplefinConnectionId?: number | null
+            simplefinAccountId?: string | null
           }>
         >
         upsertAccount(account: {
