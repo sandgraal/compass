@@ -91,11 +91,20 @@ beforeEach(async () => {
       next_renewal TEXT, payment_account TEXT, cancel_url TEXT, notes TEXT,
       source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER
     );
+    CREATE TABLE assets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      external_id TEXT NOT NULL UNIQUE, type TEXT NOT NULL DEFAULT 'other', name TEXT NOT NULL,
+      value REAL, provider TEXT, reference TEXT, renewal_date TEXT,
+      status TEXT NOT NULL DEFAULT 'active', notes TEXT, created_at INTEGER, updated_at INTEGER
+    );
   `)
   // Seed one row per exported domain.
   sqlite
     .prepare('INSERT INTO subscriptions (external_id, name, cost, cadence) VALUES (?, ?, ?, ?)')
     .run('manual:s1', 'Netflix', 20, 'monthly')
+  sqlite
+    .prepare('INSERT INTO assets (external_id, type, name, value) VALUES (?, ?, ?, ?)')
+    .run('manual:a1', 'property', 'Lake House', 350000)
   sqlite
     .prepare('INSERT INTO contacts (external_id, display_name, emails) VALUES (?, ?, ?)')
     .run('uid-1', 'Ada Lovelace', JSON.stringify([{ value: 'ada@example.com' }]))
@@ -141,6 +150,7 @@ describe('export:export-all', () => {
     expect(existsSync(join(dir, 'calendar.ics'))).toBe(true)
     expect(existsSync(join(dir, 'transactions.csv'))).toBe(true)
     expect(existsSync(join(dir, 'subscriptions.csv'))).toBe(true)
+    expect(existsSync(join(dir, 'assets.csv'))).toBe(true)
     expect(existsSync(join(dir, 'manifest.txt'))).toBe(true)
     expect(existsSync(join(dir, 'knowledge', 'profile', 'relationships.md'))).toBe(true)
     expect(res.knowledgeCount).toBe(1)
@@ -149,6 +159,7 @@ describe('export:export-all', () => {
     expect(readFileSync(join(dir, 'calendar.ics'), 'utf-8')).toContain('SUMMARY:Launch')
     expect(readFileSync(join(dir, 'transactions.csv'), 'utf-8')).toContain('Coffee')
     expect(readFileSync(join(dir, 'subscriptions.csv'), 'utf-8')).toContain('Netflix')
+    expect(readFileSync(join(dir, 'assets.csv'), 'utf-8')).toContain('Lake House')
   })
 
   it('NEVER writes vault data and says so in the manifest', async () => {
