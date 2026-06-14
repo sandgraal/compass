@@ -199,6 +199,21 @@ describe('syncSimplefin — happy path', () => {
     expect(acct.institution).toBe('American Express')
     expect(acct.simplefin_connection_id).toBe(1)
 
+    // Synced transactions are linked to their account (not accountId=null).
+    const acctId = (
+      sqlite
+        .prepare("SELECT id FROM finance_accounts WHERE simplefin_account_id = 'acc-1'")
+        .get() as { id: number }
+    ).id
+    const linked = sqlite
+      .prepare('SELECT count(*) AS n FROM finance_transactions WHERE account_id = ?')
+      .get(acctId) as { n: number }
+    expect(linked.n).toBe(2)
+    const unlinked = sqlite
+      .prepare('SELECT count(*) AS n FROM finance_transactions WHERE account_id IS NULL')
+      .get() as { n: number }
+    expect(unlinked.n).toBe(0)
+
     const conn = sqlite
       .prepare(
         'SELECT last_synced_at, error_code FROM simplefin_connections WHERE connection_id = ?'
