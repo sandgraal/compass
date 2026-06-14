@@ -52,6 +52,12 @@ vi.mock('../integrations/plaid/sync', () => ({
   syncAllPlaid: () => syncAllPlaidMock()
 }))
 
+// SimpleFIN sync — also aggregated in the handler, like Plaid.
+const syncAllSimplefinMock = vi.fn()
+vi.mock('../integrations/simplefin/sync', () => ({
+  syncAllSimplefin: () => syncAllSimplefinMock()
+}))
+
 // cron is lazy-imported by sync:set-interval to break an import cycle.
 const restartCronJobsMock = vi.fn()
 vi.mock('../cron', () => ({ restartCronJobs: restartCronJobsMock }))
@@ -210,6 +216,58 @@ describe('sync:trigger', () => {
       success: false,
       recordsUpdated: 5,
       error: 'item-2: ITEM_LOGIN_REQUIRED'
+    })
+  })
+
+  it('aggregates simplefin results — success only when every connection is clean', async () => {
+    syncAllSimplefinMock.mockResolvedValue([
+      {
+        connectionId: 'conn-1',
+        added: 4,
+        duplicates: 0,
+        accountsUpserted: 1,
+        errorMessage: undefined
+      },
+      {
+        connectionId: 'conn-2',
+        added: 2,
+        duplicates: 3,
+        accountsUpserted: 0,
+        errorMessage: undefined
+      }
+    ])
+    const h = await registerAndGet('sync:trigger')
+    expect(await invoke(h, 'simplefin')).toEqual({
+      service: 'simplefin',
+      success: true,
+      recordsUpdated: 6,
+      error: undefined
+    })
+  })
+
+  it('marks simplefin sync failed and concatenates connection errors', async () => {
+    syncAllSimplefinMock.mockResolvedValue([
+      {
+        connectionId: 'conn-1',
+        added: 5,
+        duplicates: 0,
+        accountsUpserted: 0,
+        errorMessage: undefined
+      },
+      {
+        connectionId: 'conn-2',
+        added: 0,
+        duplicates: 0,
+        accountsUpserted: 0,
+        errorMessage: 'HTTP 403'
+      }
+    ])
+    const h = await registerAndGet('sync:trigger')
+    expect(await invoke(h, 'simplefin')).toEqual({
+      service: 'simplefin',
+      success: false,
+      recordsUpdated: 5,
+      error: 'conn-2: HTTP 403'
     })
   })
 })
