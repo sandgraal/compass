@@ -13,6 +13,11 @@ import {
   forecastOverrides
 } from '../db/schema'
 import { categorize, ingestCsvFolder } from '../integrations/finance'
+import {
+  countDuplicateTransactions,
+  dedupeTransactions,
+  mergeAccounts
+} from '../integrations/finance-cleanup'
 import { type ForecastResult, buildForecast } from '../integrations/finance-forecast'
 import {
   captureSnapshots,
@@ -296,6 +301,22 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     }
     db.delete(financeAccounts).where(eq(financeAccounts.id, id)).run()
     return { success: true }
+  })
+
+  // ── Cleanup tools (Phase 4.7 #4): merge duplicate accounts, dedupe txns ────
+  ipcMain.handle('finance:merge-accounts', (_event, sourceId: number, targetId: number) => {
+    if (!Number.isInteger(sourceId) || !Number.isInteger(targetId)) {
+      throw new Error('finance:merge-accounts: sourceId and targetId must be integers')
+    }
+    return { success: true, ...mergeAccounts(getRawSqlite(), sourceId, targetId) }
+  })
+
+  // Preview when `apply` is falsy (returns `removable`), apply when true
+  // (returns `removed`). Kept as one handler so the UI previews then applies.
+  ipcMain.handle('finance:dedupe-transactions', (_event, opts?: { apply?: boolean }) => {
+    const sqlite = getRawSqlite()
+    if (opts?.apply) return { applied: true as const, removed: dedupeTransactions(sqlite).removed }
+    return { applied: false as const, removable: countDuplicateTransactions(sqlite) }
   })
 
   // ── Debt summary + avalanche projection ───────────────────────────────────

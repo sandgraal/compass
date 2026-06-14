@@ -987,6 +987,13 @@ declare global {
           creditLimit?: number
         }): Promise<{ success: boolean; id: number }>
         deleteAccount(id: number): Promise<{ success: boolean }>
+        mergeAccounts(
+          sourceId: number,
+          targetId: number
+        ): Promise<{ success: boolean; reassigned: number }>
+        dedupeTransactions(opts?: {
+          apply?: boolean
+        }): Promise<{ applied: false; removable: number } | { applied: true; removed: number }>
         getDebtSummary(): Promise<{
           debts: Array<{
             id: number
