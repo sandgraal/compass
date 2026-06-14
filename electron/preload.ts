@@ -1,5 +1,6 @@
 import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer } from 'electron'
+import type { ContactInput } from './ipc/contacts'
 import type { UpdaterStatusPayload } from './ipc/updater'
 
 function isUpdaterStatusPayload(data: unknown): data is UpdaterStatusPayload {
@@ -251,6 +252,28 @@ const api = {
     getEntries: (month: string) => ipcRenderer.invoke('habits:get-entries', month),
     getAllEntries: () => ipcRenderer.invoke('habits:get-all-entries'),
     toggle: (habitId: number, date: string) => ipcRenderer.invoke('habits:toggle', habitId, date)
+  },
+
+  // --- Contacts (Phase 9 — "The Storehouse") ---
+  contacts: {
+    list: (opts?: { search?: string }) => ipcRenderer.invoke('contacts:list', opts),
+    get: (id: number) => ipcRenderer.invoke('contacts:get', id),
+    create: (input: ContactInput) => ipcRenderer.invoke('contacts:create', input),
+    update: (id: number, updates: ContactInput) =>
+      ipcRenderer.invoke('contacts:update', id, updates),
+    delete: (id: number) => ipcRenderer.invoke('contacts:delete', id),
+    importVcard: () => ipcRenderer.invoke('contacts:import-vcard'),
+    importCsv: () => ipcRenderer.invoke('contacts:import-csv'),
+    exportVcard: (ids?: number[]) => ipcRenderer.invoke('contacts:export-vcard', { ids }),
+    exportCsv: (ids?: number[]) => ipcRenderer.invoke('contacts:export-csv', { ids })
+  },
+
+  // --- Universal Export Center (portable, plaintext, re-importable) ---
+  exporter: {
+    calendarIcs: () => ipcRenderer.invoke('calendar:export-ics'),
+    transactionsCsv: () => ipcRenderer.invoke('finance:export-transactions-csv'),
+    knowledgeFolder: () => ipcRenderer.invoke('knowledge:export-folder'),
+    all: () => ipcRenderer.invoke('export:export-all')
   },
 
   // --- Claude Inbox (proposals from the MCP, awaiting human approval) ---

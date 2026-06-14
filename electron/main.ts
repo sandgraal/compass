@@ -9,6 +9,8 @@ import { registerAssistantHandlers } from './ipc/assistant'
 import { registerAuthHandlers } from './ipc/auth'
 import { registerBackupHandlers } from './ipc/backup'
 import { registerClaudeHandlers } from './ipc/claude'
+import { registerContactsHandlers } from './ipc/contacts'
+import { registerExportHandlers } from './ipc/export'
 import { registerFinanceHandlers } from './ipc/finance'
 import { registerHabitsHandlers } from './ipc/habits'
 import { registerInsightsHandlers } from './ipc/insights'
@@ -139,6 +141,8 @@ app.whenReady().then(async () => {
   registerSettingsHandlers(ipcMain)
   registerFinanceHandlers(ipcMain)
   registerHabitsHandlers(ipcMain)
+  registerContactsHandlers(ipcMain)
+  registerExportHandlers(ipcMain)
   registerClaudeHandlers(ipcMain)
   registerUpdaterHandlers(ipcMain)
   registerBackupHandlers(ipcMain)

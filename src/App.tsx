@@ -5,8 +5,10 @@ import { AppLayout } from './components/layout/AppLayout'
 import { isThemePreference } from './lib/theme'
 import Ask from './pages/Ask'
 import ClaudeInbox from './pages/ClaudeInbox'
+import Contacts from './pages/Contacts'
 import Daily from './pages/Daily'
 import Dashboard from './pages/Dashboard'
+import Export from './pages/Export'
 import Finance from './pages/Finance'
 import Integrations from './pages/Integrations'
 import KnowledgeBase from './pages/KnowledgeBase'
@@ -71,7 +73,9 @@ export default function App(): JSX.Element {
           <Route path="monthly" element={<Monthly />} />
           <Route path="knowledge/*" element={<KnowledgeBase />} />
           <Route path="vault" element={<Vault />} />
+          <Route path="contacts" element={<Contacts />} />
           <Route path="finance" element={<Finance />} />
+          <Route path="export" element={<Export />} />
           <Route path="integrations" element={<Integrations />} />
           <Route path="settings" element={<Settings />} />
           <Route path="ask" element={<Ask />} />

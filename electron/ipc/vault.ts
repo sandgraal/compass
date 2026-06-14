@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { type IpcMain, dialog } from 'electron'
 import { decryptBlob, encryptBlob, getOrCreateKey } from '../lib/crypto-vault'
+import { parseCSV } from '../lib/csv'
 import { VAULT_DIR } from '../paths'
 
 // Crypto primitives live in `electron/lib/crypto-vault.ts` so the Plaid
@@ -258,66 +259,4 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
       return { success: false, error: String(err) }
     }
   })
-}
-
-/** Minimal RFC-4180 CSV parser — handles quoted fields with embedded commas/newlines */
-function parseCSV(raw: string): Record<string, string>[] {
-  const normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-  if (!normalized.trim()) return []
-
-  const records: string[][] = []
-  let record: string[] = []
-  let field = ''
-  let inQuotes = false
-
-  for (let i = 0; i < normalized.length; i++) {
-    const char = normalized[i]
-
-    if (char === '"') {
-      if (inQuotes && normalized[i + 1] === '"') {
-        field += '"'
-        i++
-      } else {
-        inQuotes = !inQuotes
-      }
-      continue
-    }
-
-    if (char === ',' && !inQuotes) {
-      record.push(field)
-      field = ''
-      continue
-    }
-
-    if (char === '\n' && !inQuotes) {
-      record.push(field)
-      records.push(record)
-      record = []
-      field = ''
-      continue
-    }
-
-    field += char
-  }
-
-  record.push(field)
-  records.push(record)
-
-  if (records.length < 2) return []
-
-  const headers = records[0]
-  const result: Record<string, string>[] = []
-
-  for (let r = 1; r < records.length; r++) {
-    const vals = records[r]
-    if (vals.length === 1 && !vals[0].trim()) continue
-
-    const row: Record<string, string> = {}
-    headers.forEach((h, i) => {
-      row[h] = vals[i] ?? ''
-    })
-    result.push(row)
-  }
-
-  return result
 }
