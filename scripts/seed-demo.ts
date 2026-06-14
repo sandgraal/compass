@@ -44,8 +44,12 @@ Resolved data dir would have been: ${APP_DATA_DIR}`
 // keys that mismatch local-day readers (the app + the MCP) for non-UTC users.
 const iso = (d: Date): string =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+// Demo-only dedup key. This is a throwaway seed script that populates a FRESH
+// demo DB, so — unlike the production hashTxn in finance.ts — there are no
+// existing rows to migrate and we can use SHA-256 freely (clears the CodeQL
+// weak-crypto flag here outright).
 const hashTxn = (date: string, amount: number, desc: string, account: string): string =>
-  createHash('sha1')
+  createHash('sha256')
     .update(`${date}|${amount.toFixed(2)}|${desc.trim().toLowerCase()}|${account}`)
     .digest('hex')
     .slice(0, 16)
