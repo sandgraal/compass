@@ -344,3 +344,49 @@ export const claudeProposals = sqliteTable('claude_proposals', {
   // survive a clear.
   clearedAt: integer('cleared_at', { mode: 'timestamp_ms' })
 })
+
+// ---- Contacts (Phase 9 — "The Storehouse", Wave 1) ----
+// The structured people/address-book store. Before this, contacts existed only
+// as freeform markdown in `knowledge-base/profile/relationships.md`. This table
+// is the canonical home: queryable (LIKE over `searchBlob`), cross-linkable to
+// calendar attendees + email senders, and round-trippable to vCard/CSV via
+// `electron/lib/vcard.ts` + `electron/lib/csv.ts`.
+//
+// Multi-valued fields (phones/emails/addresses) are JSON-encoded in text columns
+// — the same idiom as `githubItems.labels` / `integrations.scopes`. A normalized
+// child table exists nowhere else in this codebase, and one VCARD block maps to
+// one row, so JSON keeps the model flat without losing vCard fidelity.
+export const contacts = sqliteTable('contacts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  // vCard UID / source-native id / minted uuid. UNIQUE so re-importing the same
+  // export upserts in place instead of duplicating.
+  externalId: text('external_id').notNull().unique(),
+  displayName: text('display_name').notNull(), // vCard FN
+  // vCard N components, kept separate for round-trip fidelity.
+  givenName: text('given_name'),
+  familyName: text('family_name'),
+  middleName: text('middle_name'),
+  prefix: text('prefix'),
+  suffix: text('suffix'),
+  org: text('org'), // vCard ORG
+  jobTitle: text('job_title'), // vCard TITLE
+  // JSON arrays. phones: [{ type, value, pref? }]; emails: [{ type, value, pref? }];
+  // addresses: [{ type, street, city, region, postalCode, country, pref? }].
+  phones: text('phones'),
+  emails: text('emails'),
+  addresses: text('addresses'),
+  birthday: text('birthday'), // ISO 'YYYY-MM-DD' (text — matches finance/habits date idiom)
+  url: text('url'),
+  relationship: text('relationship'), // 'friend' | 'family' | 'colleague' | ... (free text)
+  notes: text('notes'),
+  // vCard PHOTO as a data URI. Size-capped at import. NEVER selected in list
+  // queries (only in contacts:get) so the list payload stays light.
+  photo: text('photo'),
+  // 'manual' | 'vcard' | 'csv' | 'macos' | 'google' | 'linkedin' | 'facebook' | 'gvoice'
+  source: text('source').notNull().default('manual'),
+  // Lowercased name + org + emails + phones, recomputed on every write. Powers
+  // the LIKE search in contacts:list without a join or a full-text index.
+  searchBlob: text('search_blob'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
