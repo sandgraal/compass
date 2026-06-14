@@ -18,9 +18,9 @@
  * fails loudly instead of silently routing to production.
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 export type PlaidClientEnv = 'sandbox' | 'production'
 
@@ -90,4 +90,28 @@ export function readPlaidConfig(path: string = DEFAULT_CONFIG_PATH): PlaidConfig
   }
 
   return { clientId, env: envRaw as PlaidClientEnv }
+}
+
+/**
+ * Write the non-secret Plaid config (`PLAID_CLIENT_ID` + `PLAID_ENV`) to
+ * `path`, creating the parent directory if needed. The client_id is the public
+ * half of the credential pair, so plaintext on disk is acceptable (the secret
+ * still lives encrypted in the vault). Lets the renderer configure Plaid from
+ * an in-app form instead of the user hand-editing the file. `path` is
+ * override-able for tests.
+ */
+export function writePlaidConfig(
+  clientId: string,
+  env: PlaidClientEnv,
+  path: string = DEFAULT_CONFIG_PATH
+): void {
+  const trimmed = clientId.trim()
+  if (trimmed.length === 0) {
+    throw new Error('writePlaidConfig: PLAID_CLIENT_ID must not be empty')
+  }
+  if (!VALID_ENVS.has(env)) {
+    throw new Error(`writePlaidConfig: invalid env '${env}'. Expected 'sandbox' or 'production'.`)
+  }
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, `PLAID_CLIENT_ID=${trimmed}\nPLAID_ENV=${env}\n`, 'utf8')
 }
