@@ -160,14 +160,21 @@ export default function Contacts(): JSX.Element {
     await load(search)
   }
 
-  async function importFrom(kind: 'vcard' | 'csv'): Promise<void> {
+  async function importFrom(
+    kind: 'vcard' | 'csv' | 'linkedin' | 'facebook' | 'gvoice'
+  ): Promise<void> {
     if (!isElectron()) return
     setBusy(true)
     try {
-      const r =
-        kind === 'vcard'
-          ? await window.api.contacts.importVcard()
-          : await window.api.contacts.importCsv()
+      const api = window.api.contacts
+      const fn = {
+        vcard: api.importVcard,
+        csv: api.importCsv,
+        linkedin: api.importLinkedin,
+        facebook: api.importFacebook,
+        gvoice: api.importGvoice
+      }[kind]
+      const r = await fn()
       if (r.canceled) return
       if (r.success) {
         const added = r.imported ?? 0
@@ -286,6 +293,35 @@ export default function Contacts(): JSX.Element {
             disabled={busy}
             title="Export .csv"
           />
+        </div>
+
+        <div className="px-3 pb-3">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1.5 px-0.5">
+            Import from a service
+          </p>
+          <div className="grid grid-cols-3 gap-1.5">
+            <HeaderButton
+              icon={<Building2 size={11} />}
+              label="LinkedIn"
+              onClick={() => importFrom('linkedin')}
+              disabled={busy}
+              title="Import LinkedIn Connections.csv (from 'Get a copy of your data')"
+            />
+            <HeaderButton
+              icon={<Users size={11} />}
+              label="Facebook"
+              onClick={() => importFrom('facebook')}
+              disabled={busy}
+              title="Import friends.json (from 'Download Your Information')"
+            />
+            <HeaderButton
+              icon={<Phone size={11} />}
+              label="Voice"
+              onClick={() => importFrom('gvoice')}
+              disabled={busy}
+              title="Import Google Voice numbers (pick your Takeout Voice folder)"
+            />
+          </div>
         </div>
       </div>
 
