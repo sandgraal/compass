@@ -282,6 +282,11 @@ const api = {
     exportCsv: (ids?: number[]) => ipcRenderer.invoke('contacts:export-csv', { ids })
   },
 
+  // --- Storehouse overview (Phase 9.6 — "see ALL my info in one place") ---
+  storehouse: {
+    summary: () => ipcRenderer.invoke('storehouse:summary')
+  },
+
   // --- Household & Assets (Phase 9.5 — owned, editable, exportable) ---
   assets: {
     list: (opts?: { type?: string }) => ipcRenderer.invoke('assets:list', opts),
