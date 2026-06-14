@@ -1,7 +1,17 @@
 import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer } from 'electron'
 import type { ContactInput } from './ipc/contacts'
+import type { SubscriptionInput } from './ipc/subscriptions'
 import type { UpdaterStatusPayload } from './ipc/updater'
+
+type SubscriptionDraft = SubscriptionInput
+type DetectedSubscriptionInput = {
+  merchant: string
+  account: string
+  category?: string | null
+  cadence?: string
+  medianAmount?: number
+}
 
 function isUpdaterStatusPayload(data: unknown): data is UpdaterStatusPayload {
   if (!data || typeof data !== 'object' || !('phase' in data)) return false
@@ -269,6 +279,19 @@ const api = {
     importGvoice: () => ipcRenderer.invoke('contacts:import-gvoice'),
     exportVcard: (ids?: number[]) => ipcRenderer.invoke('contacts:export-vcard', { ids }),
     exportCsv: (ids?: number[]) => ipcRenderer.invoke('contacts:export-csv', { ids })
+  },
+
+  // --- Subscriptions (Phase 9.3 — owned, editable, exportable) ---
+  subscriptions: {
+    list: () => ipcRenderer.invoke('subscriptions:list'),
+    getDetected: () => ipcRenderer.invoke('subscriptions:get-detected'),
+    create: (input: SubscriptionDraft) => ipcRenderer.invoke('subscriptions:create', input),
+    update: (id: number, updates: SubscriptionDraft) =>
+      ipcRenderer.invoke('subscriptions:update', id, updates),
+    delete: (id: number) => ipcRenderer.invoke('subscriptions:delete', id),
+    trackDetected: (detected: DetectedSubscriptionInput) =>
+      ipcRenderer.invoke('subscriptions:track-detected', detected),
+    exportCsv: () => ipcRenderer.invoke('subscriptions:export-csv')
   },
 
   // --- Universal Export Center (portable, plaintext, re-importable) ---

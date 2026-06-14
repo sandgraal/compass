@@ -1,5 +1,6 @@
 import {
   CalendarDays,
+  CreditCard,
   Download,
   FileSpreadsheet,
   Lock,
@@ -137,6 +138,19 @@ export default function Export(): JSX.Element {
               label: 'CSV',
               busy: busy === 'txn',
               onClick: () => run('txn', () => window.api.exporter.transactionsCsv(), 'Transactions')
+            }
+          ]}
+        />
+        <DomainCard
+          icon={<CreditCard size={16} className="text-primary" />}
+          title="Subscriptions"
+          description="Your tracked recurring costs and renewals."
+          actions={[
+            {
+              label: 'CSV',
+              busy: busy === 'subs',
+              onClick: () =>
+                run('subs', () => window.api.subscriptions.exportCsv(), 'Subscriptions')
             }
           ]}
         />

@@ -362,6 +362,54 @@ declare global {
     error?: string
   }
 
+  // --- Subscriptions (Phase 9.3 — "The Storehouse") ---
+  interface SubscriptionRecord {
+    id: number
+    externalId: string
+    name: string
+    cost: number
+    cadence: string
+    category: string | null
+    status: string
+    nextRenewal: string | null
+    paymentAccount: string | null
+    cancelUrl: string | null
+    notes: string | null
+    source: string
+    annualCost: number
+    createdAt: number | null
+    updatedAt: number | null
+  }
+  interface SubscriptionInput {
+    name: string
+    cost?: number
+    cadence?: string
+    category?: string | null
+    status?: string
+    nextRenewal?: string | null
+    paymentAccount?: string | null
+    cancelUrl?: string | null
+    notes?: string | null
+  }
+  interface DetectedSubscription {
+    merchant: string
+    account: string
+    category: string
+    cadence: string
+    medianAmount: number
+    annualCost: number
+    status: string
+    lastSeen: string
+    priceHike: boolean
+    priceHikePct: number
+    tracked: boolean
+  }
+  interface DetectedSubscriptions {
+    totalActiveAnnual: number
+    active: DetectedSubscription[]
+    zombies: DetectedSubscription[]
+  }
+
   interface Window {
     api: {
       auth: {
@@ -688,6 +736,21 @@ declare global {
         importGvoice(): Promise<ImportResult>
         exportVcard(ids?: number[]): Promise<ExportResult>
         exportCsv(ids?: number[]): Promise<ExportResult>
+      }
+      subscriptions: {
+        list(): Promise<SubscriptionRecord[]>
+        getDetected(): Promise<DetectedSubscriptions>
+        create(input: SubscriptionInput): Promise<{ success: boolean; id: number }>
+        update(id: number, updates: SubscriptionInput): Promise<{ success: boolean }>
+        delete(id: number): Promise<{ success: boolean }>
+        trackDetected(detected: {
+          merchant: string
+          account: string
+          category?: string | null
+          cadence?: string
+          medianAmount?: number
+        }): Promise<{ success: boolean; id: number; alreadyTracked?: boolean }>
+        exportCsv(): Promise<ExportResult>
       }
       exporter: {
         calendarIcs(): Promise<ExportResult>

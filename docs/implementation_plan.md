@@ -393,8 +393,7 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 - [ ] **9.2 Documents & files store** — `documents` table + real files under `.data/documents/`; attach a
   doc to any record; export = copy files + manifest into the portable folder. Closes the "vault stores
   only metadata" gap; PDF text extraction feeds knowledge search.
-- [ ] **9.3 Subscriptions → first-class** — promote `auditSubscriptions()` to an editable `subscriptions`
-  table (service, cost, cadence, renewal, payment account), auto-seeded from transactions; CSV export.
+- [x] **9.3 Subscriptions → first-class** — new owned `subscriptions` table (migration `0013`) + `electron/ipc/subscriptions.ts` (CRUD, `get-detected`, `track-detected`, `export-csv`) + `src/pages/Subscriptions.tsx` (editable list, annual total, "Detected — Track" section) + Export Center entry + `subscriptions.csv` in `export:export-all`. The derived `auditSubscriptions()` detector is read-only and untouched (morning-brief price-hike alert still depends on it); detected charges can be materialized into the table (dedup by `external_id`). Manual entries cover subscriptions Compass can't see (cash / annual / another card).
 - [ ] **9.4 Medical records** — `medical_*` tables (conditions, medications, providers, visits,
   immunizations); manual entry + optional Apple Health import; CSV/PDF summary export; secret IDs stay in
   the vault.

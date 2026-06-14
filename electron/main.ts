@@ -23,6 +23,7 @@ import { registerQuickCaptureHandlers } from './ipc/quick-capture'
 import { registerSearchHandlers } from './ipc/search'
 import { registerSettingsHandlers } from './ipc/settings'
 import { registerSpotlightHandlers, startKnowledgeMirrorWatcher } from './ipc/spotlight'
+import { registerSubscriptionsHandlers } from './ipc/subscriptions'
 import { registerSyncHandlers } from './ipc/sync'
 import { initAutoUpdater, registerUpdaterHandlers, scheduleUpdateChecks } from './ipc/updater'
 import { registerVaultHandlers } from './ipc/vault'
@@ -143,6 +144,7 @@ app.whenReady().then(async () => {
   registerHabitsHandlers(ipcMain)
   registerContactsHandlers(ipcMain)
   registerExportHandlers(ipcMain)
+  registerSubscriptionsHandlers(ipcMain)
   registerClaudeHandlers(ipcMain)
   registerUpdaterHandlers(ipcMain)
   registerBackupHandlers(ipcMain)

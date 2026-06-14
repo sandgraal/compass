@@ -5,6 +5,7 @@ import {
   CalendarDays,
   CalendarRange,
   CheckSquare,
+  CreditCard,
   DollarSign,
   Download,
   FileText,
@@ -189,6 +190,14 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       icon: <Users size={15} />,
       action: () => nav('/contacts'),
       keywords: ['people', 'address book', 'phone', 'vcard', 'friends', 'family']
+    },
+    {
+      id: 'subscriptions',
+      label: 'Subscriptions',
+      description: 'Track recurring costs & renewals',
+      icon: <CreditCard size={15} />,
+      action: () => nav('/subscriptions'),
+      keywords: ['subscriptions', 'recurring', 'renewals', 'bills', 'memberships', 'cancel']
     },
     {
       id: 'export',
