@@ -351,3 +351,70 @@ describe('syncSimplefin — sync window', () => {
     expect(windows[1]).toBe(30)
   })
 })
+
+describe('syncSimplefin — account matching (#1)', () => {
+  // A SimpleFIN account whose name carries a last-4, used for matching.
+  const matchableFixture = (): SimplefinAccountsResponse => ({
+    errors: [],
+    accounts: [
+      {
+        id: 'acc-1',
+        name: 'Platinum Card (2001)',
+        currency: 'USD',
+        balance: '-500.00',
+        'balance-date': 1_718_452_800,
+        org: { name: 'American Express', domain: 'example.com' },
+        transactions: [
+          { id: 'tx-1', posted: 1_718_452_800, amount: '-42.50', description: 'Coffee' }
+        ]
+      }
+    ]
+  })
+
+  it('adopts an existing unlinked account on institution + last-4 instead of duplicating', async () => {
+    // Pre-existing manual account the user named, no SimpleFIN/Plaid link.
+    sqlite
+      .prepare(
+        "INSERT INTO finance_accounts (name, type, is_debt, institution, asset_class, mask) VALUES ('My Amex', 'credit', 1, 'American Express', 'liability', '2001')"
+      )
+      .run()
+    const before = (
+      sqlite.prepare('SELECT count(*) AS n FROM finance_accounts').get() as { n: number }
+    ).n
+
+    const { syncSimplefin } = await import('./sync')
+    const res = await syncSimplefin('conn-1', { fetchAccountsFn: async () => matchableFixture() })
+
+    expect(res.accountsLinked).toBe(1)
+    expect(res.accountsUpserted).toBe(0) // no new row created
+    const after = (
+      sqlite.prepare('SELECT count(*) AS n FROM finance_accounts').get() as { n: number }
+    ).n
+    expect(after).toBe(before) // adopted, not duplicated
+
+    const adopted = sqlite
+      .prepare(
+        "SELECT name, simplefin_account_id, simplefin_connection_id FROM finance_accounts WHERE institution='American Express'"
+      )
+      .get() as {
+      name: string
+      simplefin_account_id: string | null
+      simplefin_connection_id: number | null
+    }
+    expect(adopted.name).toBe('My Amex') // user's name preserved
+    expect(adopted.simplefin_account_id).toBe('acc-1') // now linked
+    expect(adopted.simplefin_connection_id).toBe(1)
+    // The transaction is linked to the adopted account.
+    const linked = sqlite
+      .prepare('SELECT count(*) AS n FROM finance_transactions WHERE account_id IS NOT NULL')
+      .get() as { n: number }
+    expect(linked.n).toBe(1)
+  })
+
+  it('creates a new account when no existing account matches', async () => {
+    const { syncSimplefin } = await import('./sync')
+    const res = await syncSimplefin('conn-1', { fetchAccountsFn: async () => matchableFixture() })
+    expect(res.accountsLinked).toBe(0)
+    expect(res.accountsUpserted).toBe(1)
+  })
+})

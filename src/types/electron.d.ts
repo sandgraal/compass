@@ -741,6 +741,7 @@ declare global {
           orgName: string
           added: number
           accountsUpserted: number
+          accountsLinked: number
         }>
         listConnections(): Promise<
           Array<{

@@ -643,8 +643,10 @@ export default function Integrations(): JSX.Element {
     setConnecting('simplefin')
     try {
       const r = await window.api.simplefin.claimToken(token)
+      const linkedNote =
+        r.accountsLinked > 0 ? ` · ${r.accountsLinked} matched to existing accounts` : ''
       toast(
-        `Connected ${r.orgName || 'SimpleFIN'} — ${r.added} transaction${r.added === 1 ? '' : 's'} imported.`,
+        `Connected ${r.orgName || 'SimpleFIN'} — ${r.added} transaction${r.added === 1 ? '' : 's'} imported${linkedNote}.`,
         'success'
       )
       setSimplefinTokenInput(null)
