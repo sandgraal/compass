@@ -243,6 +243,15 @@ export async function syncSimplefin(
   const tagged = tagTax(tagGeoAndPurpose(categorize(allRaw, rules)))
 
   // 8. Insert. The hash UNIQUE constraint is the entire idempotency guard.
+  //    The loop pairs tagged[i] with rawAccountIds[i] by index, which assumes
+  //    the categorize/geo/tax pipeline preserves order AND length. Assert it so
+  //    a future filtering/reordering change fails fast here instead of silently
+  //    mis-linking transactions to the wrong account.
+  if (tagged.length !== rawAccountIds.length) {
+    throw new Error(
+      `SimpleFIN sync: tag pipeline changed row count (${tagged.length} tagged vs ${rawAccountIds.length} account ids) — account linkage would be wrong`
+    )
+  }
   let added = 0
   let duplicates = 0
   for (let i = 0; i < tagged.length; i++) {
