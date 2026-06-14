@@ -225,7 +225,9 @@ export async function syncThings(
   try {
     const dbPath = opts?.dbPath ?? resolveThingsDbPath(opts?.root)
     if (!dbPath) {
-      throw new Error('Things 3 database not found. Is Things installed on this Mac?')
+      throw new Error(
+        'Things 3 database not found. The Things integration is macOS-only and requires the Things app to be installed.'
+      )
     }
     const rows = normalizeThingsTasks(readThingsTasks(dbPath), today)
 

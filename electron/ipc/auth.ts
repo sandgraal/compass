@@ -5,7 +5,7 @@ import { URL } from 'node:url'
 import { eq } from 'drizzle-orm'
 import { BrowserWindow, type IpcMain, safeStorage } from 'electron'
 import { getDb } from '../db/client'
-import { checklistItems, integrations } from '../db/schema'
+import { integrations } from '../db/schema'
 import { DATA_DIR } from '../paths'
 
 const TOKEN_KEY_PREFIX = 'compass_token_'
@@ -844,13 +844,11 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
       .set({ status: 'disconnected', lastSyncedAt: null })
       .where(eq(integrations.service, service))
       .run()
-    // Things imports live in the daily checklist (no token, no own table), so
-    // disconnect must clean them up — syncThings self-gates after disconnect
-    // and would otherwise never prune them. Other services' synced data is kept
-    // (per the disconnect copy) because it lives in dedicated tables.
-    if (service === 'things') {
-      db.delete(checklistItems).where(eq(checklistItems.source, 'things')).run()
-    }
+    // Note: imported items (Things/Todoist daily-checklist rows, etc.) are
+    // intentionally left in place on disconnect — the disconnect dialog
+    // promises "your synced data will remain", and syncThings self-gates on a
+    // disconnected row so they won't be refreshed or re-imported until the
+    // user reconnects.
     return { success: true }
   })
 

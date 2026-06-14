@@ -843,10 +843,16 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
       results.push(toPublicSyncResult(await syncTodoist(win)))
     }
     // Things is local + tokenless — it joins the fan-out only once the user has
-    // connected it (an integration row exists), so machines without Things
-    // don't get a noisy "not found" row. syncThings still self-gates on a
-    // disconnected row.
-    if (getIntegrationId(getDb(), 'things') != null) {
+    // connected it AND hasn't disconnected. A `disconnected` row (e.g. after a
+    // disconnect, or one seeded by set-interval before connecting) would make
+    // syncThings self-gate and return a noisy "Not connected" failure, so skip
+    // it — matching the token providers, which only join when connected.
+    const thingsRow = getDb()
+      .select({ status: integrations.status })
+      .from(integrations)
+      .where(eq(integrations.service, 'things'))
+      .get()
+    if (thingsRow && thingsRow.status !== 'disconnected') {
       results.push(toPublicSyncResult(await syncThings(win)))
     }
     return results

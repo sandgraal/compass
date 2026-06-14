@@ -851,6 +851,18 @@ describe('sync:trigger-all', () => {
     expect(syncThingsMock).toHaveBeenCalledOnce()
   })
 
+  it('excludes things from the fan-out when its row is disconnected (no noisy failure)', async () => {
+    loadTokenMock.mockReturnValue(null)
+    readAppleCalendarsMock.mockReturnValue([])
+    sqlite
+      .prepare("INSERT INTO integrations (service, status) VALUES ('things', 'disconnected')")
+      .run()
+    const h = await registerAndGet('sync:trigger-all')
+    const out = (await invoke(h)) as Array<Record<string, unknown>>
+    expect(out.map((r) => r.service).sort()).toEqual(['apple-calendar', 'github', 'google'])
+    expect(syncThingsMock).not.toHaveBeenCalled()
+  })
+
   it('does NOT call extractors when every provider fails (nothing to extract from)', async () => {
     loadTokenMock.mockReturnValue(null)
     readAppleCalendarsMock.mockImplementation(() => {
