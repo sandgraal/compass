@@ -284,6 +284,175 @@ declare global {
     resultRef: string | null
   }
 
+  // --- Contacts (Phase 9 — "The Storehouse") ---
+  interface ContactPhone {
+    type?: string
+    value: string
+    pref?: boolean
+  }
+  interface ContactEmail {
+    type?: string
+    value: string
+    pref?: boolean
+  }
+  interface ContactAddress {
+    type?: string
+    street?: string
+    city?: string
+    region?: string
+    postalCode?: string
+    country?: string
+    pref?: boolean
+  }
+  interface ContactRecord {
+    id: number
+    externalId: string
+    displayName: string
+    givenName: string | null
+    familyName: string | null
+    middleName: string | null
+    prefix: string | null
+    suffix: string | null
+    org: string | null
+    jobTitle: string | null
+    phones: ContactPhone[]
+    emails: ContactEmail[]
+    addresses: ContactAddress[]
+    birthday: string | null
+    url: string | null
+    relationship: string | null
+    notes: string | null
+    photo: string | null
+    source: string
+    createdAt: number | null
+    updatedAt: number | null
+  }
+  interface ContactInput {
+    externalId?: string
+    displayName: string
+    givenName?: string | null
+    familyName?: string | null
+    middleName?: string | null
+    prefix?: string | null
+    suffix?: string | null
+    org?: string | null
+    jobTitle?: string | null
+    phones?: ContactPhone[]
+    emails?: ContactEmail[]
+    addresses?: ContactAddress[]
+    birthday?: string | null
+    url?: string | null
+    relationship?: string | null
+    notes?: string | null
+    photo?: string | null
+    source?: string
+  }
+  type ImportResult = {
+    success: boolean
+    imported?: number
+    updated?: number
+    canceled?: boolean
+    error?: string
+  }
+  type ExportResult = {
+    success: boolean
+    path?: string
+    count?: number
+    canceled?: boolean
+    error?: string
+  }
+
+  // --- Subscriptions (Phase 9.3 — "The Storehouse") ---
+  interface SubscriptionRecord {
+    id: number
+    externalId: string
+    name: string
+    cost: number
+    cadence: string
+    category: string | null
+    status: string
+    nextRenewal: string | null
+    paymentAccount: string | null
+    cancelUrl: string | null
+    notes: string | null
+    source: string
+    annualCost: number
+    createdAt: number | null
+    updatedAt: number | null
+  }
+  interface SubscriptionInput {
+    name: string
+    cost?: number
+    cadence?: string
+    category?: string | null
+    status?: string
+    nextRenewal?: string | null
+    paymentAccount?: string | null
+    cancelUrl?: string | null
+    notes?: string | null
+  }
+  interface DetectedSubscription {
+    merchant: string
+    account: string
+    category: string
+    cadence: string
+    medianAmount: number
+    annualCost: number
+    status: string
+    lastSeen: string
+    priceHike: boolean
+    priceHikePct: number
+    tracked: boolean
+  }
+  interface DetectedSubscriptions {
+    totalActiveAnnual: number
+    active: DetectedSubscription[]
+    zombies: DetectedSubscription[]
+  }
+
+  // --- Household & Assets (Phase 9.5 — "The Storehouse") ---
+  interface AssetRecord {
+    id: number
+    externalId: string
+    type: string
+    name: string
+    value: number | null
+    provider: string | null
+    reference: string | null
+    renewalDate: string | null
+    status: string
+    notes: string | null
+    createdAt: number | null
+    updatedAt: number | null
+  }
+  interface AssetInput {
+    type?: string
+    name: string
+    value?: number | null
+    provider?: string | null
+    reference?: string | null
+    renewalDate?: string | null
+    status?: string
+    notes?: string | null
+  }
+
+  // --- Storehouse overview (Phase 9.6) ---
+  interface StorehouseSummary {
+    contacts: { count: number }
+    subscriptions: { activeCount: number; annualTotal: number }
+    assets: {
+      count: number
+      totalValue: number
+      byType: Array<{ type: string; count: number; value: number }>
+    }
+    upcomingRenewals: Array<{
+      source: 'subscription' | 'asset'
+      name: string
+      date: string
+      daysUntil: number
+    }>
+  }
+
   interface Window {
     api: {
       auth: {
@@ -526,10 +695,13 @@ declare global {
       plaid: {
         getStatus(): Promise<{
           configured: boolean
+          hasConfig: boolean
           env: 'sandbox' | 'production' | null
+          clientId: string | null
           hasSecret: boolean
           linkedItemIds: string[]
         }>
+        setConfig(clientId: string, env: 'sandbox' | 'production'): Promise<{ ok: true }>
         setSecret(env: 'sandbox' | 'production', secret: string): Promise<{ ok: true }>
         startLink(): Promise<
           | {
@@ -560,6 +732,27 @@ declare global {
             errorCode: string | null
           }>
         >
+      }
+      simplefin: {
+        getStatus(): Promise<{ connectionIds: string[] }>
+        claimToken(setupToken: string): Promise<{
+          ok: true
+          connectionId: string
+          orgName: string
+          added: number
+          accountsUpserted: number
+        }>
+        listConnections(): Promise<
+          Array<{
+            id: number
+            connectionId: string
+            orgName: string
+            orgDomain: string | null
+            lastSyncedAt: number | null
+            errorCode: string | null
+          }>
+        >
+        disconnect(connectionId: string): Promise<{ ok: true }>
       }
       vault: {
         getCategories(): Promise<VaultCategory[]>
@@ -593,6 +786,58 @@ declare global {
         getEntries(month: string): Promise<Record<number, Record<string, boolean>>>
         getAllEntries(): Promise<Record<number, Record<string, boolean>>>
         toggle(habitId: number, date: string): Promise<{ success: boolean; completed: boolean }>
+      }
+      contacts: {
+        list(opts?: { search?: string }): Promise<ContactRecord[]>
+        get(id: number): Promise<ContactRecord | null>
+        create(input: ContactInput): Promise<{ success: boolean; id: number }>
+        update(id: number, updates: ContactInput): Promise<{ success: boolean }>
+        delete(id: number): Promise<{ success: boolean }>
+        importVcard(): Promise<ImportResult>
+        importCsv(): Promise<ImportResult>
+        importLinkedin(): Promise<ImportResult>
+        importFacebook(): Promise<ImportResult>
+        importGvoice(): Promise<ImportResult>
+        exportVcard(ids?: number[]): Promise<ExportResult>
+        exportCsv(ids?: number[]): Promise<ExportResult>
+      }
+      storehouse: {
+        summary(): Promise<StorehouseSummary>
+      }
+      assets: {
+        list(opts?: { type?: string }): Promise<AssetRecord[]>
+        create(input: AssetInput): Promise<{ success: boolean; id: number }>
+        update(id: number, updates: AssetInput): Promise<{ success: boolean }>
+        delete(id: number): Promise<{ success: boolean }>
+        exportCsv(): Promise<ExportResult>
+      }
+      subscriptions: {
+        list(): Promise<SubscriptionRecord[]>
+        getDetected(): Promise<DetectedSubscriptions>
+        create(input: SubscriptionInput): Promise<{ success: boolean; id: number }>
+        update(id: number, updates: SubscriptionInput): Promise<{ success: boolean }>
+        delete(id: number): Promise<{ success: boolean }>
+        trackDetected(detected: {
+          merchant: string
+          account: string
+          category?: string | null
+          cadence?: string
+          medianAmount?: number
+        }): Promise<{ success: boolean; id: number; alreadyTracked?: boolean }>
+        exportCsv(): Promise<ExportResult>
+      }
+      exporter: {
+        calendarIcs(): Promise<ExportResult>
+        transactionsCsv(): Promise<ExportResult>
+        knowledgeFolder(): Promise<ExportResult>
+        all(): Promise<{
+          success: boolean
+          path?: string
+          files?: string[]
+          knowledgeCount?: number
+          canceled?: boolean
+          error?: string
+        }>
       }
       claude: {
         listProposals(status?: string): Promise<ClaudeProposal[]>
@@ -724,6 +969,10 @@ declare global {
             plaidItemId?: number | null
             plaidAccountId?: string | null
             mask?: string | null
+            // Phase 4.7 SimpleFIN linkage. Populated for accounts owned by a
+            // SimpleFIN connection; null for manual / CSV / Plaid accounts.
+            simplefinConnectionId?: number | null
+            simplefinAccountId?: string | null
           }>
         >
         upsertAccount(account: {

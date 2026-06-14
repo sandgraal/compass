@@ -173,6 +173,18 @@ export const financeAccounts = sqliteTable('finance_accounts', {
   // Last 4 digits of the account number — Plaid returns this as `mask`.
   // Surfaced in the Accounts UI badge; intentionally never the full number.
   mask: text('mask'),
+  // SimpleFIN linkage (Phase 4.7). When set, this account is owned by a
+  // SimpleFIN connection — its balance is refreshed by the SimpleFIN sync
+  // loop instead of by CSV ingest. Mirrors the Plaid linkage above and is
+  // independent of it: an account belongs to at most one provider. Both
+  // nullable so manual / CSV / Plaid / SimpleFIN accounts all coexist.
+  simplefinConnectionId: integer('simplefin_connection_id').references(
+    (): AnySQLiteColumn => simplefinConnections.id
+  ),
+  // SimpleFIN's per-connection unique account `id` (from GET /accounts).
+  // Used as the JOIN key when normalizing transactions and as the upsert
+  // key so a daily re-pull refreshes the same row instead of duplicating it.
+  simplefinAccountId: text('simplefin_account_id'),
   // ISO 'YYYY-MM-DD'. Surfaced as a "Payments Due" reminder on the Dashboard
   // when within the next 14 days. Populated from PDF statement metadata.
   paymentDueDate: text('payment_due_date'),
@@ -239,6 +251,36 @@ export const plaidItems = sqliteTable('plaid_items', {
   lastSyncedAt: integer('last_synced_at', { mode: 'timestamp_ms' }),
   // Plaid error code (e.g. `ITEM_LOGIN_REQUIRED`). When non-null, the
   // Integrations card surfaces a "re-authenticate" CTA.
+  errorCode: text('error_code'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
+// ---- SimpleFIN connections (Phase 4.7) ----
+// One row per claimed SimpleFIN Bridge Setup Token. SimpleFIN has no
+// "item_id" — a single Access URL can front many orgs/accounts — so we mint
+// our own stable `connectionId` (randomUUID) at claim time. The Access URL
+// itself (which embeds HTTP Basic credentials) is encrypted in
+// .vault/simplefin.enc keyed by `connectionId` — NEVER in SQLite. The columns
+// here are non-secret metadata the sync loop and UI need.
+//
+// Deliberate divergence from `plaidItems`: NO `cursor` column. SimpleFIN is a
+// date-windowed pull (GET /accounts?start-date=…), not a cursor-paginated
+// delta. Idempotency comes entirely from the `hash` UNIQUE constraint on
+// finance_transactions — re-pulling the same window inserts nothing new.
+export const simplefinConnections = sqliteTable('simplefin_connections', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  // Locally-minted stable key (randomUUID). UNIQUE so a re-claim updates the
+  // existing row rather than creating a duplicate.
+  connectionId: text('connection_id').notNull().unique(),
+  // org.name from the first account's `org` block (e.g. "American Express").
+  // Display only; used to build the `sourceFile` token.
+  orgName: text('org_name').notNull().default(''),
+  // org.domain (e.g. "americanexpress.com"). Optional; display only.
+  orgDomain: text('org_domain'),
+  lastSyncedAt: integer('last_synced_at', { mode: 'timestamp_ms' }),
+  // Last error surfaced by SimpleFIN (a non-empty `errors[]` entry) or a fetch
+  // failure (e.g. 403 after the user revoked the Access URL). When non-null,
+  // the Integrations card prompts the user to re-claim a fresh Setup Token.
   errorCode: text('error_code'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
@@ -343,4 +385,100 @@ export const claudeProposals = sqliteTable('claude_proposals', {
   // proposal as a fresh pending one. Dedup is by `proposalId`, so the row must
   // survive a clear.
   clearedAt: integer('cleared_at', { mode: 'timestamp_ms' })
+})
+
+// ---- Contacts (Phase 9 — "The Storehouse", Wave 1) ----
+// The structured people/address-book store. Before this, contacts existed only
+// as freeform markdown in `knowledge-base/profile/relationships.md`. This table
+// is the canonical home: queryable (LIKE over `searchBlob`), cross-linkable to
+// calendar attendees + email senders, and round-trippable to vCard/CSV via
+// `electron/lib/vcard.ts` + `electron/lib/csv.ts`.
+//
+// Multi-valued fields (phones/emails/addresses) are JSON-encoded in text columns
+// — the same idiom as `githubItems.labels` / `integrations.scopes`. A normalized
+// child table exists nowhere else in this codebase, and one VCARD block maps to
+// one row, so JSON keeps the model flat without losing vCard fidelity.
+export const contacts = sqliteTable('contacts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  // vCard UID / source-native id / minted uuid. UNIQUE so re-importing the same
+  // export upserts in place instead of duplicating.
+  externalId: text('external_id').notNull().unique(),
+  displayName: text('display_name').notNull(), // vCard FN
+  // vCard N components, kept separate for round-trip fidelity.
+  givenName: text('given_name'),
+  familyName: text('family_name'),
+  middleName: text('middle_name'),
+  prefix: text('prefix'),
+  suffix: text('suffix'),
+  org: text('org'), // vCard ORG
+  jobTitle: text('job_title'), // vCard TITLE
+  // JSON arrays. phones: [{ type, value, pref? }]; emails: [{ type, value, pref? }];
+  // addresses: [{ type, street, city, region, postalCode, country, pref? }].
+  phones: text('phones'),
+  emails: text('emails'),
+  addresses: text('addresses'),
+  birthday: text('birthday'), // ISO 'YYYY-MM-DD' (text — matches finance/habits date idiom)
+  url: text('url'),
+  relationship: text('relationship'), // 'friend' | 'family' | 'colleague' | ... (free text)
+  notes: text('notes'),
+  // vCard PHOTO as a data URI. Size-capped at import. NEVER selected in list
+  // queries (only in contacts:get) so the list payload stays light.
+  photo: text('photo'),
+  // 'manual' | 'vcard' | 'csv' | 'macos' | 'google' | 'linkedin' | 'facebook' | 'gvoice'
+  source: text('source').notNull().default('manual'),
+  // Lowercased name + org + emails + phones, recomputed on every write. Powers
+  // the LIKE search in contacts:list without a join or a full-text index.
+  searchBlob: text('search_blob'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
+// ---- Subscriptions (Phase 9.3 — "The Storehouse") ----
+// First-class, user-OWNED subscription records. Distinct from the *derived*
+// `auditSubscriptions()` detector (electron/integrations/finance-subscriptions.ts),
+// which infers recurring charges from the transaction ledger and stays untouched
+// (the morning-brief price-hike alert depends on it). This table is what the user
+// curates: subscriptions Compass can't see (cash/annual/another card), edits to
+// detected ones (true cost, renewal date, cancel URL), and a place to mark things
+// cancelled. Detected rows can be "tracked" into here; `externalId` dedupes
+// (`detected:<merchant>::<account>` for materialized rows, `manual:<uuid>` else).
+export const subscriptions = sqliteTable('subscriptions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  externalId: text('external_id').notNull().unique(),
+  name: text('name').notNull(),
+  cost: real('cost').notNull().default(0), // per-cadence amount (positive)
+  cadence: text('cadence').notNull().default('monthly'), // weekly|biweekly|monthly|quarterly|semi-annual|yearly
+  category: text('category'),
+  status: text('status').notNull().default('active'), // active|paused|cancelled
+  nextRenewal: text('next_renewal'), // ISO 'YYYY-MM-DD'
+  paymentAccount: text('payment_account'),
+  cancelUrl: text('cancel_url'),
+  notes: text('notes'),
+  source: text('source').notNull().default('manual'), // 'manual' | 'detected'
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
+// ---- Household & Assets (Phase 9.5 — "The Storehouse") ----
+// The things you OWN and the policies/memberships around them: houses & other
+// property and their value, vehicles, insurance, memberships, warranties, pets.
+// One flat table with a `type` discriminator (same pragmatic approach as the
+// vault's category list) keeps the model simple while covering the spread.
+// `reference` holds NON-secret identifiers (policy #, VIN, membership #);
+// anything truly sensitive stays in the encrypted vault. `renewalDate` powers
+// "renews/expires soon" surfacing.
+export const assets = sqliteTable('assets', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  externalId: text('external_id').notNull().unique(), // 'manual:<uuid>'
+  // 'insurance' | 'vehicle' | 'property' | 'membership' | 'warranty' | 'pet' | 'other'
+  type: text('type').notNull().default('other'),
+  name: text('name').notNull(),
+  value: real('value'), // current worth / coverage amount (nullable)
+  provider: text('provider'), // insurer / dealer / club / manufacturer
+  reference: text('reference'), // policy # / VIN / membership # — NON-secret
+  renewalDate: text('renewal_date'), // ISO 'YYYY-MM-DD' — renewal / expiry
+  status: text('status').notNull().default('active'), // active | expired | sold | cancelled
+  notes: text('notes'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })

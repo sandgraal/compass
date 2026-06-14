@@ -69,6 +69,7 @@ import {
   knowledgeFiles,
   knowledgeSuggestions,
   plaidItems,
+  simplefinConnections,
   syncEvents
 } from '../db/schema'
 import { getOrCreateKey } from '../lib/crypto-vault'
@@ -164,6 +165,7 @@ function collectBundle(): Bundle {
     financeBalanceSnapshots: db.select().from(financeBalanceSnapshots).all(),
     forecastOverrides: db.select().from(forecastOverrides).all(),
     plaidItems: db.select().from(plaidItems).all(),
+    simplefinConnections: db.select().from(simplefinConnections).all(),
     budgetRules: db.select().from(budgetRules).all(),
     categorizationRules: db.select().from(categorizationRules).all(),
     habits: db.select().from(habits).all(),
@@ -348,6 +350,7 @@ function applyRestore(bundle: Bundle): {
     financeBalanceSnapshots,
     forecastOverrides,
     plaidItems,
+    simplefinConnections,
     budgetRules,
     categorizationRules,
     habits,
@@ -407,6 +410,7 @@ function applyRestore(bundle: Bundle): {
       'categorizationRules',
       'financeAccounts',
       'plaidItems',
+      'simplefinConnections',
       'integrations',
       'habits',
       'appSettings'
@@ -418,6 +422,7 @@ function applyRestore(bundle: Bundle): {
     const insertOrder: Array<keyof typeof TABLES> = [
       'integrations',
       'plaidItems',
+      'simplefinConnections',
       'habits',
       'financeAccounts',
       'checklistTemplates',

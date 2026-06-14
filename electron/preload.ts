@@ -1,6 +1,18 @@
 import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer } from 'electron'
+import type { AssetInput } from './ipc/assets'
+import type { ContactInput } from './ipc/contacts'
+import type { SubscriptionInput } from './ipc/subscriptions'
 import type { UpdaterStatusPayload } from './ipc/updater'
+
+type SubscriptionDraft = SubscriptionInput
+type DetectedSubscriptionInput = {
+  merchant: string
+  account: string
+  category?: string | null
+  cadence?: string
+  medianAmount?: number
+}
 
 function isUpdaterStatusPayload(data: unknown): data is UpdaterStatusPayload {
   if (!data || typeof data !== 'object' || !('phase' in data)) return false
@@ -147,11 +159,21 @@ const api = {
   // --- Plaid (Phase 4.6 — bank Link flow) ---
   plaid: {
     getStatus: () => ipcRenderer.invoke('plaid:get-status'),
+    setConfig: (clientId: string, env: 'sandbox' | 'production') =>
+      ipcRenderer.invoke('plaid:set-config', clientId, env),
     setSecret: (env: 'sandbox' | 'production', secret: string) =>
       ipcRenderer.invoke('plaid:set-secret', env, secret),
     startLink: () => ipcRenderer.invoke('plaid:start-link'),
     disconnect: (itemId: string) => ipcRenderer.invoke('plaid:disconnect', itemId),
     listItems: () => ipcRenderer.invoke('plaid:list-items')
+  },
+
+  // --- SimpleFIN (Phase 4.7 — user-owned bank sync) ---
+  simplefin: {
+    getStatus: () => ipcRenderer.invoke('simplefin:get-status'),
+    claimToken: (setupToken: string) => ipcRenderer.invoke('simplefin:claim-token', setupToken),
+    listConnections: () => ipcRenderer.invoke('simplefin:list-connections'),
+    disconnect: (connectionId: string) => ipcRenderer.invoke('simplefin:disconnect', connectionId)
   },
 
   // --- Vault (Sensitive Data) ---
@@ -249,6 +271,58 @@ const api = {
     getEntries: (month: string) => ipcRenderer.invoke('habits:get-entries', month),
     getAllEntries: () => ipcRenderer.invoke('habits:get-all-entries'),
     toggle: (habitId: number, date: string) => ipcRenderer.invoke('habits:toggle', habitId, date)
+  },
+
+  // --- Contacts (Phase 9 — "The Storehouse") ---
+  contacts: {
+    list: (opts?: { search?: string }) => ipcRenderer.invoke('contacts:list', opts),
+    get: (id: number) => ipcRenderer.invoke('contacts:get', id),
+    create: (input: ContactInput) => ipcRenderer.invoke('contacts:create', input),
+    update: (id: number, updates: ContactInput) =>
+      ipcRenderer.invoke('contacts:update', id, updates),
+    delete: (id: number) => ipcRenderer.invoke('contacts:delete', id),
+    importVcard: () => ipcRenderer.invoke('contacts:import-vcard'),
+    importCsv: () => ipcRenderer.invoke('contacts:import-csv'),
+    importLinkedin: () => ipcRenderer.invoke('contacts:import-linkedin'),
+    importFacebook: () => ipcRenderer.invoke('contacts:import-facebook'),
+    importGvoice: () => ipcRenderer.invoke('contacts:import-gvoice'),
+    exportVcard: (ids?: number[]) => ipcRenderer.invoke('contacts:export-vcard', { ids }),
+    exportCsv: (ids?: number[]) => ipcRenderer.invoke('contacts:export-csv', { ids })
+  },
+
+  // --- Storehouse overview (Phase 9.6 — "see ALL my info in one place") ---
+  storehouse: {
+    summary: () => ipcRenderer.invoke('storehouse:summary')
+  },
+
+  // --- Household & Assets (Phase 9.5 — owned, editable, exportable) ---
+  assets: {
+    list: (opts?: { type?: string }) => ipcRenderer.invoke('assets:list', opts),
+    create: (input: AssetInput) => ipcRenderer.invoke('assets:create', input),
+    update: (id: number, updates: AssetInput) => ipcRenderer.invoke('assets:update', id, updates),
+    delete: (id: number) => ipcRenderer.invoke('assets:delete', id),
+    exportCsv: () => ipcRenderer.invoke('assets:export-csv')
+  },
+
+  // --- Subscriptions (Phase 9.3 — owned, editable, exportable) ---
+  subscriptions: {
+    list: () => ipcRenderer.invoke('subscriptions:list'),
+    getDetected: () => ipcRenderer.invoke('subscriptions:get-detected'),
+    create: (input: SubscriptionDraft) => ipcRenderer.invoke('subscriptions:create', input),
+    update: (id: number, updates: SubscriptionDraft) =>
+      ipcRenderer.invoke('subscriptions:update', id, updates),
+    delete: (id: number) => ipcRenderer.invoke('subscriptions:delete', id),
+    trackDetected: (detected: DetectedSubscriptionInput) =>
+      ipcRenderer.invoke('subscriptions:track-detected', detected),
+    exportCsv: () => ipcRenderer.invoke('subscriptions:export-csv')
+  },
+
+  // --- Universal Export Center (portable, plaintext, re-importable) ---
+  exporter: {
+    calendarIcs: () => ipcRenderer.invoke('calendar:export-ics'),
+    transactionsCsv: () => ipcRenderer.invoke('finance:export-transactions-csv'),
+    knowledgeFolder: () => ipcRenderer.invoke('knowledge:export-folder'),
+    all: () => ipcRenderer.invoke('export:export-all')
   },
 
   // --- Claude Inbox (proposals from the MCP, awaiting human approval) ---

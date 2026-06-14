@@ -4,14 +4,19 @@ import CommandPalette from './components/CommandPalette'
 import { AppLayout } from './components/layout/AppLayout'
 import { isThemePreference } from './lib/theme'
 import Ask from './pages/Ask'
+import Assets from './pages/Assets'
 import ClaudeInbox from './pages/ClaudeInbox'
+import Contacts from './pages/Contacts'
 import Daily from './pages/Daily'
 import Dashboard from './pages/Dashboard'
+import Export from './pages/Export'
 import Finance from './pages/Finance'
 import Integrations from './pages/Integrations'
 import KnowledgeBase from './pages/KnowledgeBase'
 import Monthly from './pages/Monthly'
 import Settings from './pages/Settings'
+import Storehouse from './pages/Storehouse'
+import Subscriptions from './pages/Subscriptions'
 import Vault from './pages/Vault'
 import Weekly from './pages/Weekly'
 import { useAppStore } from './store/appStore'
@@ -71,7 +76,12 @@ export default function App(): JSX.Element {
           <Route path="monthly" element={<Monthly />} />
           <Route path="knowledge/*" element={<KnowledgeBase />} />
           <Route path="vault" element={<Vault />} />
+          <Route path="contacts" element={<Contacts />} />
           <Route path="finance" element={<Finance />} />
+          <Route path="subscriptions" element={<Subscriptions />} />
+          <Route path="assets" element={<Assets />} />
+          <Route path="storehouse" element={<Storehouse />} />
+          <Route path="export" element={<Export />} />
           <Route path="integrations" element={<Integrations />} />
           <Route path="settings" element={<Settings />} />
           <Route path="ask" element={<Ask />} />

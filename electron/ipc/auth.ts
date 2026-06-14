@@ -844,6 +844,11 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
       .set({ status: 'disconnected', lastSyncedAt: null })
       .where(eq(integrations.service, service))
       .run()
+    // Note: imported items (Things/Todoist daily-checklist rows, etc.) are
+    // intentionally left in place on disconnect — the disconnect dialog
+    // promises "your synced data will remain", and syncThings self-gates on a
+    // disconnected row so they won't be refreshed or re-imported until the
+    // user reconnects.
     return { success: true }
   })
 

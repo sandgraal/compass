@@ -31,7 +31,9 @@ import {
 } from 'electron'
 import { getDb } from '../db/client'
 import { plaidItems } from '../db/schema'
-import { PlaidNotConfiguredError, isPlaidConfigured } from '../integrations/plaid/client'
+import { PlaidNotConfiguredError } from '../integrations/plaid/client'
+import { readPlaidConfig, writePlaidConfig } from '../integrations/plaid/config'
+import { describePlaidFailure } from '../integrations/plaid/errors'
 import {
   type ExchangeResult,
   LINK_CSP,
@@ -55,8 +57,13 @@ type StartLinkResult =
   | { ok: false; cancelled: false; errorCode: string | null; errorMessage: string | null }
 
 export type PlaidStatus = {
+  /** Fully ready to Link: client_id + env + secret all present. */
   configured: boolean
+  /** client_id + env present (the non-secret config file exists & is valid). */
+  hasConfig: boolean
   env: PlaidEnv | null
+  /** The configured client_id (public half — safe to show), or null. */
+  clientId: string | null
   hasSecret: boolean
   linkedItemIds: string[]
 }
@@ -76,13 +83,43 @@ export type PlaidItemSummary = {
 
 export function registerPlaidHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('plaid:get-status', (): PlaidStatus => {
-    const { configured, env } = isPlaidConfigured()
+    let clientId: string | null = null
+    let env: PlaidEnv | null = null
+    try {
+      const cfg = readPlaidConfig()
+      if (cfg) {
+        clientId = cfg.clientId
+        env = cfg.env
+      }
+    } catch {
+      // Malformed config file (missing client_id / bad env) → treat as
+      // needs-setup so the renderer shows the in-app setup form rather than
+      // surfacing a hard error.
+    }
+    const hasConfig = clientId !== null && env !== null
+    const hasSecret = env !== null && getPlaidSecret(env) !== null
     return {
-      configured,
+      configured: hasConfig && hasSecret,
+      hasConfig,
       env,
-      hasSecret: env !== null && getPlaidSecret(env) !== null,
+      clientId,
+      hasSecret,
       linkedItemIds: listItemIds()
     }
+  })
+
+  // Store the non-secret Plaid config (client_id + environment). Paired with
+  // plaid:set-secret, this lets the renderer configure Plaid entirely in-app —
+  // no hand-editing ~/.config/compass/plaid.env.
+  ipcMain.handle('plaid:set-config', (_e, clientId: unknown, env: unknown): { ok: true } => {
+    if (typeof clientId !== 'string' || clientId.trim().length === 0) {
+      throw new Error('plaid:set-config: clientId must be a non-empty string')
+    }
+    if (env !== 'sandbox' && env !== 'production') {
+      throw new Error("plaid:set-config: env must be 'sandbox' or 'production'")
+    }
+    writePlaidConfig(clientId, env)
+    return { ok: true }
   })
 
   ipcMain.handle('plaid:set-secret', (_e, env: unknown, secret: unknown): { ok: true } => {
@@ -104,8 +141,11 @@ export function registerPlaidHandlers(ipcMain: IpcMain): void {
       if (err instanceof PlaidNotConfiguredError) {
         return { ok: false, cancelled: false, errorCode: err.reason, errorMessage: err.message }
       }
-      const message = err instanceof Error ? err.message : String(err)
-      return { ok: false, cancelled: false, errorCode: 'LINK_START_FAILED', errorMessage: message }
+      // A 400/4xx from /link/token/create is an axios error whose `.message` is
+      // just "Request failed with status code 400" — surface Plaid's real
+      // error_code/error_message (e.g. INVALID_API_KEYS) so the user can act.
+      const { errorCode, errorMessage } = describePlaidFailure(err, 'LINK_START_FAILED')
+      return { ok: false, cancelled: false, errorCode, errorMessage }
     }
   })
 
@@ -236,8 +276,10 @@ export async function runLinkFlow(linkToken: string): Promise<StartLinkResult> {
       if (!url.startsWith(LINK_CALLBACK_SCHEME)) return
       details.preventDefault()
       handleCallback(url).then(finish, (err) => {
-        const message = err instanceof Error ? err.message : String(err)
-        finish({ ok: false, cancelled: false, errorCode: 'EXCHANGE_FAILED', errorMessage: message })
+        // The exchange (/item/public_token/exchange) can also 4xx; surface the
+        // Plaid error body rather than the bare axios message.
+        const { errorCode, errorMessage } = describePlaidFailure(err, 'EXCHANGE_FAILED')
+        finish({ ok: false, cancelled: false, errorCode, errorMessage })
       })
     }
 

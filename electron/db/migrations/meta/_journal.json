@@ -85,6 +85,34 @@
       "when": 1781352971319,
       "tag": "0011_clever_dark_beast",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1781456211334,
+      "tag": "0012_lyrical_thing",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1781459762401,
+      "tag": "0013_stiff_tattoo",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1781460709421,
+      "tag": "0014_tiresome_wild_child",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1781462455387,
+      "tag": "0015_famous_sentinel",
+      "breakpoints": true
     }
   ]
 }

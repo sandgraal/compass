@@ -87,6 +87,18 @@ vi.mock('../integrations/plaid/client', async () => {
   }
 })
 
+// plaid:get-status reads the config file via readPlaidConfig; plaid:set-config
+// writes it via writePlaidConfig. Mock both so tests never touch the real
+// ~/.config/compass/plaid.env on the host.
+const readPlaidConfigMock = vi.fn<() => { clientId: string; env: 'sandbox' | 'production' } | null>(
+  () => null
+)
+const writePlaidConfigMock = vi.fn()
+vi.mock('../integrations/plaid/config', () => ({
+  readPlaidConfig: () => readPlaidConfigMock(),
+  writePlaidConfig: (...args: unknown[]) => writePlaidConfigMock(...args)
+}))
+
 const { handleCallback, registerPlaidHandlers } = await import('./plaid')
 
 beforeEach(() => {
@@ -97,6 +109,8 @@ beforeEach(() => {
   getPlaidSecretMock.mockReset().mockReturnValue(null)
   listItemIdsMock.mockReset().mockReturnValue([])
   isPlaidConfiguredMock.mockReset().mockReturnValue({ configured: false, env: null })
+  readPlaidConfigMock.mockReset().mockReturnValue(null)
+  writePlaidConfigMock.mockReset()
   createLinkTokenMock.mockReset()
   dbDeleteSpy.mockReset()
   plaidItemsRows = []
@@ -201,15 +215,23 @@ function makeFakeIpc(): { ipc: IpcMain; handlers: Map<string, Handler> } {
 }
 
 describe('registerPlaidHandlers — plaid:get-status', () => {
-  it('reports configured=false and no env when nothing is set up', async () => {
+  it('reports nothing set up when there is no config file', async () => {
+    readPlaidConfigMock.mockReturnValue(null)
     const { ipc, handlers } = makeFakeIpc()
     registerPlaidHandlers(ipc)
     const status = await invoke(handlers.get('plaid:get-status')!)
-    expect(status).toEqual({ configured: false, env: null, hasSecret: false, linkedItemIds: [] })
+    expect(status).toEqual({
+      configured: false,
+      hasConfig: false,
+      env: null,
+      clientId: null,
+      hasSecret: false,
+      linkedItemIds: []
+    })
   })
 
-  it('reports configured=true with the env + linked items when set up', async () => {
-    isPlaidConfiguredMock.mockReturnValue({ configured: true, env: 'sandbox' })
+  it('reports configured=true with client_id/env/items when fully set up', async () => {
+    readPlaidConfigMock.mockReturnValue({ clientId: 'cid', env: 'sandbox' })
     getPlaidSecretMock.mockReturnValue('secret')
     listItemIdsMock.mockReturnValue(['item-a', 'item-b'])
 
@@ -218,24 +240,72 @@ describe('registerPlaidHandlers — plaid:get-status', () => {
     const status = await invoke(handlers.get('plaid:get-status')!)
     expect(status).toEqual({
       configured: true,
+      hasConfig: true,
       env: 'sandbox',
+      clientId: 'cid',
       hasSecret: true,
       linkedItemIds: ['item-a', 'item-b']
     })
   })
 
-  it('hasSecret=false when env is set but secret is missing', async () => {
-    isPlaidConfiguredMock.mockReturnValue({ configured: false, env: 'sandbox' })
+  it('hasConfig=true but configured=false when the secret is missing', async () => {
+    readPlaidConfigMock.mockReturnValue({ clientId: 'cid', env: 'sandbox' })
     getPlaidSecretMock.mockReturnValue(null)
 
     const { ipc, handlers } = makeFakeIpc()
     registerPlaidHandlers(ipc)
     const status = (await invoke(handlers.get('plaid:get-status')!)) as {
+      configured: boolean
+      hasConfig: boolean
       hasSecret: boolean
       env: string | null
+      clientId: string | null
     }
-    expect(status.hasSecret).toBe(false)
-    expect(status.env).toBe('sandbox')
+    expect(status).toMatchObject({
+      configured: false,
+      hasConfig: true,
+      hasSecret: false,
+      env: 'sandbox',
+      clientId: 'cid'
+    })
+  })
+
+  it('treats a malformed config file as needs-setup (no throw to renderer)', async () => {
+    readPlaidConfigMock.mockImplementation(() => {
+      throw new Error('Plaid config is missing PLAID_CLIENT_ID')
+    })
+    const { ipc, handlers } = makeFakeIpc()
+    registerPlaidHandlers(ipc)
+    const status = (await invoke(handlers.get('plaid:get-status')!)) as { hasConfig: boolean }
+    expect(status.hasConfig).toBe(false)
+  })
+})
+
+describe('registerPlaidHandlers — plaid:set-config', () => {
+  it('rejects an empty client_id without writing', async () => {
+    const { ipc, handlers } = makeFakeIpc()
+    registerPlaidHandlers(ipc)
+    await expect(invoke(handlers.get('plaid:set-config')!, '   ', 'sandbox')).rejects.toThrow(
+      /clientId/
+    )
+    expect(writePlaidConfigMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects an invalid env without writing', async () => {
+    const { ipc, handlers } = makeFakeIpc()
+    registerPlaidHandlers(ipc)
+    await expect(invoke(handlers.get('plaid:set-config')!, 'cid', 'development')).rejects.toThrow(
+      /sandbox.*production/i
+    )
+    expect(writePlaidConfigMock).not.toHaveBeenCalled()
+  })
+
+  it('writes a valid client_id + env', async () => {
+    const { ipc, handlers } = makeFakeIpc()
+    registerPlaidHandlers(ipc)
+    const out = await invoke(handlers.get('plaid:set-config')!, 'cid-123', 'production')
+    expect(writePlaidConfigMock).toHaveBeenCalledWith('cid-123', 'production')
+    expect(out).toEqual({ ok: true })
   })
 })
 
@@ -316,6 +386,39 @@ describe('registerPlaidHandlers — plaid:start-link (error paths)', () => {
       errorCode: 'LINK_START_FAILED',
       errorMessage: 'socket hang up'
     })
+  })
+
+  it('surfaces the real Plaid error_code/message from an axios 400 (the Connect-time 400)', async () => {
+    // The plaid SDK throws axios-style errors: the actionable diagnosis lives
+    // in err.response.data, not err.message ("Request failed with status code
+    // 400"). The handler must dig it out so the user sees INVALID_API_KEYS.
+    createLinkTokenMock.mockRejectedValueOnce({
+      message: 'Request failed with status code 400',
+      response: {
+        status: 400,
+        data: {
+          error_type: 'INVALID_INPUT',
+          error_code: 'INVALID_API_KEYS',
+          error_message: 'invalid client_id or secret provided',
+          display_message: null,
+          request_id: 'req-123'
+        }
+      }
+    })
+    const { ipc, handlers } = makeFakeIpc()
+    registerPlaidHandlers(ipc)
+
+    const out = (await invoke(handlers.get('plaid:start-link')!)) as {
+      ok: boolean
+      cancelled: boolean
+      errorCode: string
+      errorMessage: string
+    }
+    expect(out.ok).toBe(false)
+    expect(out.errorCode).toBe('INVALID_API_KEYS')
+    expect(out.errorMessage).toContain('invalid client_id or secret provided')
+    // and the actionable env/secret hint is appended
+    expect(out.errorMessage).toMatch(/sandbox|production|environment/i)
   })
 })
 

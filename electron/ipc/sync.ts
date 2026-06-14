@@ -17,6 +17,8 @@ import { syncLinear } from '../integrations/linear'
 import { syncNotion } from '../integrations/notion'
 import { readVaultPathSetting, syncObsidian } from '../integrations/obsidian'
 import { syncAllPlaid } from '../integrations/plaid/sync'
+import { syncAllSimplefin } from '../integrations/simplefin/sync'
+import { syncThings } from '../integrations/things'
 import { syncTodoist } from '../integrations/todoist'
 import {
   updateCalendarKnowledge,
@@ -58,7 +60,8 @@ const SUPPORTED_SYNC_SERVICES = new Set([
   'obsidian',
   'notion',
   'linear',
-  'todoist'
+  'todoist',
+  'things'
 ])
 
 function normalizeSupportedSyncService(service: unknown): string | null {
@@ -297,8 +300,12 @@ function serviceLabelFor(service: string): string {
       return 'GitHub'
     case 'apple-calendar':
       return 'Apple Calendar'
+    case 'things':
+      return 'Things'
     case 'plaid':
       return 'Plaid'
+    case 'simplefin':
+      return 'SimpleFIN'
     default:
       return service
   }
@@ -772,6 +779,22 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     if (service === 'notion') return syncNotion(win)
     if (service === 'linear') return syncLinear(win)
     if (service === 'todoist') return syncTodoist(win)
+    if (service === 'things') {
+      // Things is local + tokenless: Connect (and manual refresh) come through
+      // here, so flip the opt-in flag on before syncing. Disconnect sets the
+      // row to 'disconnected' and syncThings self-gates on that, so this is
+      // what re-enables a reconnect. (Cron calls syncThings directly and
+      // stays gated.)
+      const db = getDb()
+      db.insert(integrations)
+        .values({ service: 'things', status: 'connected', connectedAt: new Date() })
+        .onConflictDoUpdate({
+          target: integrations.service,
+          set: { status: 'connected', errorMessage: null }
+        })
+        .run()
+      return syncThings(win)
+    }
     if (service === 'plaid') {
       const results = await syncAllPlaid()
       // Aggregate across every connected Item: `success` is true ONLY when
@@ -788,6 +811,31 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
         success: errors.length === 0,
         recordsUpdated: totalRecords,
         error: errors.length > 0 ? errors.join('; ') : undefined
+      }
+    }
+    if (service === 'simplefin') {
+      // Multi-connection, like Plaid: `success` is true only when every
+      // connection synced cleanly; per-connection errors are concatenated so
+      // the UI can show which one failed. We emit `sync:update` (the cron path
+      // doesn't) so the renderer clears the card spinner and refreshes the
+      // connection list — see the onSyncUpdate handler in Integrations.tsx.
+      const results = await syncAllSimplefin()
+      const totalRecords = results.reduce((n, r) => n + r.added, 0)
+      const errors = results
+        .filter((r) => r.errorMessage)
+        .map((r) => `${r.connectionId}: ${r.errorMessage}`)
+      const error = errors.length > 0 ? errors.join('; ') : undefined
+      win?.webContents.send('sync:update', {
+        service: 'simplefin',
+        status: errors.length === 0 ? 'success' : 'error',
+        recordsUpdated: totalRecords,
+        error
+      })
+      return {
+        service: 'simplefin',
+        success: errors.length === 0,
+        recordsUpdated: totalRecords,
+        error
       }
     }
     return { error: 'Unknown service' }
@@ -821,6 +869,19 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     }
     if (loadToken('todoist')) {
       results.push(toPublicSyncResult(await syncTodoist(win)))
+    }
+    // Things is local + tokenless — it joins the fan-out only once the user has
+    // connected it AND hasn't disconnected. A `disconnected` row (e.g. after a
+    // disconnect, or one seeded by set-interval before connecting) would make
+    // syncThings self-gate and return a noisy "Not connected" failure, so skip
+    // it — matching the token providers, which only join when connected.
+    const thingsRow = getDb()
+      .select({ status: integrations.status })
+      .from(integrations)
+      .where(eq(integrations.service, 'things'))
+      .get()
+    if (thingsRow && thingsRow.status !== 'disconnected') {
+      results.push(toPublicSyncResult(await syncThings(win)))
     }
     return results
   })

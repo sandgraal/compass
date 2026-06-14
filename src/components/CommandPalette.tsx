@@ -5,10 +5,14 @@ import {
   CalendarDays,
   CalendarRange,
   CheckSquare,
+  CreditCard,
   DollarSign,
+  Download,
   FileText,
   FolderOpen,
+  Home,
   Inbox,
+  Layers,
   LayoutDashboard,
   LineChart,
   Plug,
@@ -19,6 +23,7 @@ import {
   ShieldCheck,
   Sparkles,
   TrendingUp,
+  Users,
   Wallet
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -102,6 +107,14 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       keywords: ['home', 'today']
     },
     {
+      id: 'storehouse',
+      label: 'Your Storehouse',
+      description: 'See all your info in one place',
+      icon: <Layers size={15} />,
+      action: () => nav('/storehouse'),
+      keywords: ['storehouse', 'overview', 'everything', 'all my info', 'summary']
+    },
+    {
       id: 'daily',
       label: 'Daily',
       description: 'Daily checklist',
@@ -179,6 +192,48 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       icon: <ShieldCheck size={15} />,
       action: () => nav('/vault'),
       keywords: ['secure', 'passwords', 'credentials', 'financial']
+    },
+    {
+      id: 'contacts',
+      label: 'Contacts',
+      description: 'People, addresses & phone numbers',
+      icon: <Users size={15} />,
+      action: () => nav('/contacts'),
+      keywords: ['people', 'address book', 'phone', 'vcard', 'friends', 'family']
+    },
+    {
+      id: 'subscriptions',
+      label: 'Subscriptions',
+      description: 'Track recurring costs & renewals',
+      icon: <CreditCard size={15} />,
+      action: () => nav('/subscriptions'),
+      keywords: ['subscriptions', 'recurring', 'renewals', 'bills', 'memberships', 'cancel']
+    },
+    {
+      id: 'assets',
+      label: 'Household & Assets',
+      description: 'Property, vehicles, insurance, warranties',
+      icon: <Home size={15} />,
+      action: () => nav('/assets'),
+      keywords: [
+        'assets',
+        'house',
+        'property',
+        'vehicle',
+        'car',
+        'insurance',
+        'warranty',
+        'pet',
+        'value'
+      ]
+    },
+    {
+      id: 'export',
+      label: 'Export & Portability',
+      description: 'Export your data in standard formats',
+      icon: <Download size={15} />,
+      action: () => nav('/export'),
+      keywords: ['export', 'vcard', 'ics', 'csv', 'portable', 'own your data', 'backup']
     },
     {
       id: 'finance',

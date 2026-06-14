@@ -56,7 +56,7 @@ CSP enforced in production builds (no eval, no remote scripts, allowlist for OAu
 
 ## Database (Drizzle / SQLite via `better-sqlite3`)
 
-21 tables. Lives at `~/Library/Application Support/Compass/.data/compass.db`.
+23 tables. Lives at `~/Library/Application Support/Compass/.data/compass.db`.
 
 | Table | Purpose |
 |---|---|
@@ -72,8 +72,9 @@ CSP enforced in production builds (no eval, no remote scripts, allowlist for OAu
 | `knowledge_files` | Index of `knowledge-base/*.md` files (path, title, word count). |
 | `knowledge_suggestions` | Pending edits proposed by the regex / Ollama suggestion pipeline (Phase 2.7). |
 | `app_settings` | Key/value (`syncInterval`, `theme`, weekly goals JSON, `quickCaptureShortcut`, etc.). |
-| `finance_accounts` | Bank, credit, investment, debt accounts. Phase 4 added columns: `assetClass` (Phase 4.4 net-worth bucket), `paymentDayOfMonth` (Phase 4.5 forecast), `plaidItemId` + `plaidAccountId` + `mask` (Phase 4.6 Plaid linkage; indexed via `idx_finance_accounts_plaid`), `institution`, `paymentDueDate`. |
+| `finance_accounts` | Bank, credit, investment, debt accounts. Phase 4 added columns: `assetClass` (Phase 4.4 net-worth bucket), `paymentDayOfMonth` (Phase 4.5 forecast), `plaidItemId` + `plaidAccountId` + `mask` (Phase 4.6 Plaid linkage; indexed via `idx_finance_accounts_plaid`), `simplefinConnectionId` + `simplefinAccountId` (Phase 4.7 SimpleFIN linkage; indexed via `idx_finance_accounts_simplefin`), `institution`, `paymentDueDate`. An account belongs to at most one provider; all provider columns are nullable so manual / CSV / Plaid / SimpleFIN accounts coexist. |
 | `plaid_items` | One row per connected Plaid Item (institution). Cursor for `/transactions/sync` pagination, last sync timestamp, error code surface. Access tokens live in `.vault/plaid.enc` — NEVER here. (Phase 4.6) |
+| `simplefin_connections` | One row per claimed SimpleFIN Bridge setup token. Locally-minted `connectionId` (no `cursor` — SimpleFIN is a date-windowed pull, idempotent via the `finance_transactions.hash` UNIQUE constraint), `orgName`/`orgDomain`, last sync, error code. The Access URL (embeds HTTP Basic creds) lives in `.vault/simplefin.enc` — NEVER here. (Phase 4.7) |
 | `finance_transactions` | Hashed for dedup. Phase 4.2 promoted `geo` + `purpose` from `notes` tokens to **indexed** columns (`idx_..._geo`, `idx_..._geo_purpose`, `idx_..._geo_date`); Phase 4.3 added the **indexed** `(taxYear, taxTag)` pair for year-end aggregation. |
 | `finance_balance_snapshots` | Per-(account, day) balance for net-worth trajectory + delta queries. Source = `manual` / `inferred` / `plaid`. (Phase 4.4) |
 | `forecast_overrides` | User skip / shift / override edits to the auto-projected cash-flow stream. UNIQUE on `(account_id, date, label)`. (Phase 4.5) |
@@ -82,6 +83,9 @@ CSP enforced in production builds (no eval, no remote scripts, allowlist for OAu
 | `habits` | User-defined habits with icon + color. |
 | `habit_entries` | Per-habit-per-day completion (boolean). |
 | `claude_proposals` | Claude Inbox queue (Phase 8.2). Proposals the read-only MCP appended to `.data/claude-inbox.jsonl`, ingested here (dedup by MCP `proposal_id`) with `status` (`pending`/`approved`/`rejected`/`failed`); approve applies via validated write logic. Migration `0010`. |
+| `contacts` | Phase 9 "Storehouse" address book. The structured home for people/addresses/phones (was freeform `profile/relationships.md`). Multi-valued `phones`/`emails`/`addresses` are JSON-in-text; `external_id` UNIQUE is the vCard-UID upsert key; `search_blob` powers the LIKE search. Migration `0011`. |
+| `subscriptions` | Phase 9.3 "Storehouse" — user-OWNED subscription records (manual + materialized-from-detected). Distinct from the *derived* `auditSubscriptions()` detector (which stays untouched so the morning-brief price-hike alert keeps working). `external_id` UNIQUE (`manual:<uuid>` / `detected:<merchant>::<account>`) dedupes a tracked detection. Migration `0013`. |
+| `assets` | Phase 9.5 "Storehouse" — household & assets inventory (property + value, vehicles, insurance, memberships, warranties, pets) via a `type` discriminator. `reference` holds NON-secret identifiers (policy #/VIN/member #); secrets stay in the vault. `renewal_date` powers "renews soon". Migration `0014`. |
 
 ## Vault (encrypted, NOT in SQLite)
 
@@ -108,7 +112,14 @@ Registered in `electron/main.ts`:
 - `registerVaultHandlers` — entry CRUD, 1Password CSV import, history
 - `registerSettingsHandlers` — get/set/getAll, data export, wipe, **per-integration sync interval**, Ollama detect, quick-capture shortcut
 - `registerFinanceHandlers` — txns, accounts, debt summary, budget, rules, **geo summary, tax summary + override (Phase 4.3), net-worth snapshot/trajectory + capture + manual balance (Phase 4.4), forecast + override CRUD (Phase 4.5), tax-pack export (Phase 5.4: `finance:export-tax-pack`)**
+- `registerPlaidHandlers` (Phase 4.6) — `plaid:get-status` (`{ configured, hasConfig, env, clientId, hasSecret, linkedItemIds }`), **`plaid:set-config`** (writes the non-secret `client_id` + environment to `~/.config/compass/plaid.env` — the in-app setup form, so users never hand-edit a file), `plaid:set-secret` (encrypts the per-env secret into `.vault/plaid.enc`), `plaid:start-link` (opens the Link child window; surfaces Plaid's real `error_code`/`error_message` via `electron/integrations/plaid/errors.ts` instead of the bare axios "status code 400"), `plaid:disconnect`, `plaid:list-items`. The renderer Integrations card opens a combined Client-ID/environment/secret setup form on Connect when not configured, and an "Edit Plaid credentials" affordance to fix a wrong client_id/secret (the `INVALID_API_KEYS` case).
+- `registerSimplefinHandlers` (Phase 4.7) — the **recommended** bank/card sync for distributed users, since the *user* (not the developer) owns the data relationship: no business entity, no per-developer quota, no OAuth Link window. `simplefin:get-status` (`{ connectionIds }`), `simplefin:claim-token` (base64 setup token → `POST` claim URL → encrypted Access URL in `.vault/simplefin.enc` → first sync; returns metadata, never the URL), `simplefin:list-connections`, `simplefin:disconnect` (tombstones the vault entry, unlinks owned accounts, deletes the row). Daily sync is `electron/cron-simplefin.ts` (06:00 local, like Plaid); the sync (`electron/integrations/simplefin/sync.ts`) is a date-windowed `/accounts` pull normalized to the shared `RawTxn` pipeline — no sign flip (SimpleFIN is already credit-positive), idempotent via the hash UNIQUE constraint. Powered by MX (Amex + 16k+ institutions). Plaid is retained as an "Advanced / bring-your-own-keys" option.
 - `registerHabitsHandlers` — habit CRUD + toggle entries
+- `registerContactsHandlers` — Phase 9 "Storehouse" contacts: `contacts:list` (LIKE over `search_blob`), `:get`, `:create`, `:update`, `:delete`, `:import-vcard` / `:import-csv` (upsert by `external_id`, dedupe on re-import), `:export-vcard` / `:export-csv`, plus the Phase 9.1 service archive importers `:import-linkedin` (Connections.csv), `:import-facebook` (friends.json / address_book_v2), `:import-gvoice` (Takeout `Voice/Calls/*.html`). vCard/CSV codecs are hand-rolled in `electron/lib/{vcard,csv}.ts`; the archive parsers in `electron/lib/archive-importers.ts` (pure, no network — FB/LinkedIn killed their APIs, so the official data export is the durable path); every mutation regenerates `profile/relationships.md` via `electron/knowledge/contacts-extractor.ts`. Vault never touched.
+- `registerSubscriptionsHandlers` — Phase 9.3 owned subscriptions: `subscriptions:list` / `:create` / `:update` / `:delete`, `:get-detected` (reads the live `auditSubscriptions` detector read-only and flags which charges are already tracked), `:track-detected` (materializes a detected charge into the table, idempotent by `external_id`), `:export-csv`. Does NOT modify `finance-subscriptions.ts` / `morning-brief.ts` — the price-hike alert keeps its detector. `buildSubscriptionsCsv()` is shared with the Export Center.
+- `registerAssetsHandlers` — Phase 9.5 household & assets: `assets:list` (optional `type` filter, grouped by type then value), `:create` / `:update` / `:delete`, `:export-csv`. One flat `assets` table with a `type` discriminator (insurance/vehicle/property/membership/warranty/pet/other); non-secret identifiers in `reference` (secrets stay in the vault). `buildAssetsCsv()` is shared with the Export Center.
+- `registerStorehouseHandlers` — Phase 9.6 overview: `storehouse:summary` is a READ-ONLY aggregator (`buildStorehouseSummary(db, today)`, pure + date-injected for testability) over the owned domains — contacts count, active subscriptions count + annualized total, assets count + value + by-type, and the renewals coming up in the next 60 days (subscriptions + assets). No writes; no finance/vault internals.
+- `registerExportHandlers` — Universal Export Center (Phase 9): `calendar:export-ics`, `finance:export-transactions-csv`, `knowledge:export-folder`, and `export:export-all` (now also bundles `subscriptions.csv`) (one folder of `contacts.vcf` + `contacts.csv` + `calendar.ics` + `transactions.csv` + `knowledge/` + `manifest.txt`). Plaintext, portable, re-importable — the counterpart to the encrypted `backup.ts`. **Deliberately excludes the vault** (no `VAULT_DIR`/crypto reads); every handler writes only via the OS save/folder dialog.
 - `registerClaudeHandlers` — Claude Inbox (Phase 8.2): `claude:list-proposals` (ingests `.data/claude-inbox.jsonl`, dedup by MCP `proposal_id`), `claude:approve-proposal` (re-validates the LLM-written payload, then applies via the same write logic — `safeJoin` path-safety, shared `TAX_TAGS` whitelist, list-type domain, strict booleans — recording `approved`+`resultRef` or `failed`+error), `claude:reject-proposal`, `claude:clear-resolved` (**soft**-clears — stamps `cleared_at` so the row drops out of the inbox but survives for dedup, since the append-only JSONL is never truncated). The vault is never touched.
 - `registerUpdaterHandlers` — `updater:check`, `updater:install-and-restart`; pushes `updater:status` events to renderer
 - `registerCompassUrlScheme` (in `electron/url-scheme.ts`) — registers the `compass://` protocol handler (`capture`, `open/<page>`, `search`); routes URLs from `open-url` (macOS) and `second-instance` (Win/Linux) into IPC events the renderer consumes. `electron/integrations/apple-calendar.ts` adds `syncAppleCalendar` (Phase 5.7) which is dispatched from `sync.ts` for the `apple-calendar` service.
@@ -134,8 +145,13 @@ Pattern: every IPC handler lives in `electron/ipc/<domain>.ts`, is exposed throu
 | `/monthly` | `src/pages/Monthly.tsx` |
 | `/knowledge` | `src/pages/KnowledgeBase.tsx` |
 | `/vault` | `src/pages/Vault.tsx` (with `setContentProtection` while mounted) |
+| `/contacts` | `src/pages/Contacts.tsx` (Phase 9 — address book; vCard/CSV import + export) |
+| `/subscriptions` | `src/pages/Subscriptions.tsx` (Phase 9.3 — owned subscriptions + "track detected" + CSV) |
+| `/assets` | `src/pages/Assets.tsx` (Phase 9.5 — household & assets inventory grouped by type + CSV) |
+| `/storehouse` | `src/pages/Storehouse.tsx` (Phase 9.6 — read-only "see ALL my info in one place" overview) |
 | `/integrations` | `src/pages/Integrations.tsx` |
 | `/finance` | `src/pages/Finance.tsx` |
+| `/export` | `src/pages/Export.tsx` (Phase 9 — Universal Export Center; portable plaintext exports) |
 | `/settings` | `src/pages/Settings.tsx` |
 | `/ask` | `src/pages/Ask.tsx` (Phase 5.12 RAG assistant) |
 | `/claude-inbox` | `src/pages/ClaudeInbox.tsx` (Phase 8.2 — review/approve Claude proposals) |

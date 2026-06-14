@@ -4,13 +4,18 @@ import {
   CalendarDays,
   CalendarRange,
   Circle,
+  CreditCard,
+  Download,
+  Home,
   Inbox,
+  Layers,
   LayoutDashboard,
   Plug2,
   Settings,
   ShieldCheck,
   Sparkles,
-  TrendingUp
+  TrendingUp,
+  Users
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
@@ -71,6 +76,7 @@ export function Sidebar(): JSX.Element {
 
   const NAV: NavItem[] = [
     { label: 'Dashboard', to: '/dashboard', icon: <LayoutDashboard size={18} /> },
+    { label: 'Storehouse', to: '/storehouse', icon: <Layers size={18} /> },
     { label: 'Daily', to: '/daily', icon: <CalendarDays size={18} /> },
     { label: 'Weekly', to: '/weekly', icon: <CalendarRange size={18} /> },
     { label: 'Monthly', to: '/monthly', icon: <CalendarCheck size={18} /> },
@@ -78,6 +84,9 @@ export function Sidebar(): JSX.Element {
     { label: 'Ask Compass', to: '/ask', icon: <Sparkles size={18} /> },
     { label: 'Claude Inbox', to: '/claude-inbox', icon: <Inbox size={18} /> },
     { label: 'Vault', to: '/vault', icon: <ShieldCheck size={18} /> },
+    { label: 'Contacts', to: '/contacts', icon: <Users size={18} /> },
+    { label: 'Subscriptions', to: '/subscriptions', icon: <CreditCard size={18} /> },
+    { label: 'Household & Assets', to: '/assets', icon: <Home size={18} /> },
     { label: 'Finance', to: '/finance', icon: <TrendingUp size={18} /> },
     {
       label: 'Integrations',
@@ -85,6 +94,7 @@ export function Sidebar(): JSX.Element {
       icon: <Plug2 size={18} />,
       badge: inboxCount > 0 ? inboxCount : undefined
     },
+    { label: 'Export', to: '/export', icon: <Download size={18} /> },
     { label: 'Settings', to: '/settings', icon: <Settings size={18} /> }
   ]
 

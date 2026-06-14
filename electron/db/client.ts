@@ -114,6 +114,15 @@ function ensureNewTables(sqlite: Database.Database): void {
       error_code TEXT,
       created_at INTEGER
     );
+    CREATE TABLE IF NOT EXISTS simplefin_connections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      connection_id TEXT NOT NULL UNIQUE,
+      org_name TEXT NOT NULL DEFAULT '',
+      org_domain TEXT,
+      last_synced_at INTEGER,
+      error_code TEXT,
+      created_at INTEGER
+    );
     CREATE TABLE IF NOT EXISTS linear_issues (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       external_id TEXT NOT NULL UNIQUE,
@@ -270,6 +279,24 @@ function ensureNewTables(sqlite: Database.Database): void {
   try {
     sqlite.exec(
       'CREATE INDEX IF NOT EXISTS idx_finance_accounts_plaid ON finance_accounts(plaid_item_id, plaid_account_id)'
+    )
+  } catch {
+    /* ignore */
+  }
+  // Phase 4.7 — SimpleFIN linkage columns + lookup index. The
+  // `simplefin_connections` table is created in the CREATE TABLE block above;
+  // here we thread the FK columns onto legacy `finance_accounts` rows. Both
+  // nullable so manual / CSV / Plaid / SimpleFIN accounts coexist.
+  ensureColumn(
+    sqlite,
+    'finance_accounts',
+    'simplefin_connection_id',
+    'INTEGER REFERENCES simplefin_connections(id)'
+  )
+  ensureColumn(sqlite, 'finance_accounts', 'simplefin_account_id', 'TEXT')
+  try {
+    sqlite.exec(
+      'CREATE INDEX IF NOT EXISTS idx_finance_accounts_simplefin ON finance_accounts(simplefin_account_id)'
     )
   } catch {
     /* ignore */
@@ -469,6 +496,8 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       plaid_item_id INTEGER REFERENCES plaid_items(id),
       plaid_account_id TEXT,
       mask TEXT,
+      simplefin_connection_id INTEGER REFERENCES simplefin_connections(id),
+      simplefin_account_id TEXT,
       updated_at INTEGER
     );
 
@@ -478,6 +507,16 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       institution_id TEXT NOT NULL,
       institution_name TEXT NOT NULL,
       cursor TEXT,
+      last_synced_at INTEGER,
+      error_code TEXT,
+      created_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS simplefin_connections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      connection_id TEXT NOT NULL UNIQUE,
+      org_name TEXT NOT NULL DEFAULT '',
+      org_domain TEXT,
       last_synced_at INTEGER,
       error_code TEXT,
       created_at INTEGER
