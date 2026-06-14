@@ -255,12 +255,38 @@ describe('syncSimplefin — happy path', () => {
   })
 })
 
-describe('syncSimplefin — errors', () => {
-  it('records SimpleFIN errors[] on the connection row + integrations status', async () => {
+describe('syncSimplefin — warnings vs errors', () => {
+  it('treats errors[] as a non-fatal warning when data still came back', async () => {
     const { syncSimplefin } = await import('./sync')
     const res = await syncSimplefin('conn-1', {
       fetchAccountsFn: async () =>
-        fixture({ errors: ['Connection to American Express needs attention'] })
+        fixture({ errors: ['Requested date range exceeds recommended range of 45 days.'] })
+    })
+    // Accounts came back → sync succeeded; the warning must NOT read as a failure.
+    expect(res.errorMessage).toBeUndefined()
+    expect(res.added).toBe(2)
+    const conn = sqlite
+      .prepare('SELECT error_code FROM simplefin_connections WHERE connection_id = ?')
+      .get('conn-1') as { error_code: string | null }
+    expect(conn.error_code).toBeNull() // not flagged red / "needs attention"
+    const integ = sqlite
+      .prepare("SELECT status FROM integrations WHERE service = 'simplefin'")
+      .get() as { status: string }
+    expect(integ.status).toBe('connected')
+    // ...but it's still recorded in the Sync Log for visibility.
+    const ev = sqlite.prepare('SELECT errors FROM sync_events ORDER BY id DESC LIMIT 1').get() as {
+      errors: string | null
+    }
+    expect(ev.errors).toMatch(/warning: .*recommended range/)
+  })
+
+  it('flags a hard failure (no accounts returned + errors) as an error', async () => {
+    const { syncSimplefin } = await import('./sync')
+    const res = await syncSimplefin('conn-1', {
+      fetchAccountsFn: async () => ({
+        errors: ['Connection to American Express needs attention'],
+        accounts: []
+      })
     })
     expect(res.errorMessage).toMatch(/needs attention/)
     const conn = sqlite
@@ -292,5 +318,21 @@ describe('syncSimplefin — errors', () => {
       .prepare('SELECT error_code FROM simplefin_connections WHERE connection_id = ?')
       .get('conn-1') as { error_code: string | null }
     expect(conn.error_code).toMatch(/HTTP 403/)
+  })
+})
+
+describe('syncSimplefin — sync window', () => {
+  it('requests ~90 days on first connect and ~30 on subsequent syncs', async () => {
+    const { syncSimplefin } = await import('./sync')
+    const windows: number[] = []
+    const fetchAccountsFn = async (o: { startDate: number; endDate: number }) => {
+      windows.push(Math.round((o.endDate - o.startDate) / 86_400))
+      return fixture()
+    }
+    const now = new Date(1_718_452_800_000) // fixed instant
+    await syncSimplefin('conn-1', { fetchAccountsFn, now }) // lastSyncedAt null → first sync
+    await syncSimplefin('conn-1', { fetchAccountsFn, now }) // lastSyncedAt now set → incremental
+    expect(windows[0]).toBe(90)
+    expect(windows[1]).toBe(30)
   })
 })

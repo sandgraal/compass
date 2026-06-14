@@ -22,9 +22,19 @@ export const SIMPLEFIN_BRIDGE_HOST = 'bridge.simplefin.org'
 export const SIMPLEFIN_BETA_BRIDGE_HOST = 'beta-bridge.simplefin.org'
 
 /**
- * How many days of history each sync requests. SimpleFIN serves up to ~90 days
- * per linked account. Re-pulling the full window on every daily run is safe and
- * intentional: the `hash` UNIQUE constraint on finance_transactions dedupes any
- * row we've already seen, so a cursorless re-pull inserts nothing new.
+ * How many days of history to request on the FIRST sync of a connection — we
+ * want as much backfill as the bridge will serve (up to ~90 days). Some strict
+ * institutions (e.g. USAA via MX) emit a non-fatal "exceeds recommended range
+ * of 45 days" warning at 90; that's a one-time cost on first connect for the
+ * benefit of more history, and the data still comes back.
  */
 export const SIMPLEFIN_LOOKBACK_DAYS = 90
+
+/**
+ * How many days each SUBSEQUENT sync requests. Syncs run daily, so 30 days is a
+ * generous overlap that still catches late-posting / backdated transactions —
+ * and it stays under every institution's recommended range, so the recurring
+ * sync doesn't trip the 45-day warning. The `hash` UNIQUE constraint dedupes
+ * the overlap, so re-pulling is a no-op.
+ */
+export const SIMPLEFIN_INCREMENTAL_LOOKBACK_DAYS = 30
