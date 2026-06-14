@@ -82,6 +82,7 @@ CSP enforced in production builds (no eval, no remote scripts, allowlist for OAu
 | `habits` | User-defined habits with icon + color. |
 | `habit_entries` | Per-habit-per-day completion (boolean). |
 | `claude_proposals` | Claude Inbox queue (Phase 8.2). Proposals the read-only MCP appended to `.data/claude-inbox.jsonl`, ingested here (dedup by MCP `proposal_id`) with `status` (`pending`/`approved`/`rejected`/`failed`); approve applies via validated write logic. Migration `0010`. |
+| `contacts` | Phase 9 "Storehouse" address book. The structured home for people/addresses/phones (was freeform `profile/relationships.md`). Multi-valued `phones`/`emails`/`addresses` are JSON-in-text; `external_id` UNIQUE is the vCard-UID upsert key; `search_blob` powers the LIKE search. Migration `0011`. |
 
 ## Vault (encrypted, NOT in SQLite)
 
@@ -109,6 +110,8 @@ Registered in `electron/main.ts`:
 - `registerSettingsHandlers` — get/set/getAll, data export, wipe, **per-integration sync interval**, Ollama detect, quick-capture shortcut
 - `registerFinanceHandlers` — txns, accounts, debt summary, budget, rules, **geo summary, tax summary + override (Phase 4.3), net-worth snapshot/trajectory + capture + manual balance (Phase 4.4), forecast + override CRUD (Phase 4.5), tax-pack export (Phase 5.4: `finance:export-tax-pack`)**
 - `registerHabitsHandlers` — habit CRUD + toggle entries
+- `registerContactsHandlers` — Phase 9 "Storehouse" contacts: `contacts:list` (LIKE over `search_blob`), `:get`, `:create`, `:update`, `:delete`, `:import-vcard` / `:import-csv` (upsert by `external_id`, dedupe on re-import), `:export-vcard` / `:export-csv`. vCard/CSV codecs are hand-rolled in `electron/lib/{vcard,csv}.ts`; every mutation regenerates `profile/relationships.md` via `electron/knowledge/contacts-extractor.ts`. Vault never touched.
+- `registerExportHandlers` — Universal Export Center (Phase 9): `calendar:export-ics`, `finance:export-transactions-csv`, `knowledge:export-folder`, and `export:export-all` (one folder of `contacts.vcf` + `contacts.csv` + `calendar.ics` + `transactions.csv` + `knowledge/` + `manifest.txt`). Plaintext, portable, re-importable — the counterpart to the encrypted `backup.ts`. **Deliberately excludes the vault** (no `VAULT_DIR`/crypto reads); every handler writes only via the OS save/folder dialog.
 - `registerClaudeHandlers` — Claude Inbox (Phase 8.2): `claude:list-proposals` (ingests `.data/claude-inbox.jsonl`, dedup by MCP `proposal_id`), `claude:approve-proposal` (re-validates the LLM-written payload, then applies via the same write logic — `safeJoin` path-safety, shared `TAX_TAGS` whitelist, list-type domain, strict booleans — recording `approved`+`resultRef` or `failed`+error), `claude:reject-proposal`, `claude:clear-resolved` (**soft**-clears — stamps `cleared_at` so the row drops out of the inbox but survives for dedup, since the append-only JSONL is never truncated). The vault is never touched.
 - `registerUpdaterHandlers` — `updater:check`, `updater:install-and-restart`; pushes `updater:status` events to renderer
 - `registerCompassUrlScheme` (in `electron/url-scheme.ts`) — registers the `compass://` protocol handler (`capture`, `open/<page>`, `search`); routes URLs from `open-url` (macOS) and `second-instance` (Win/Linux) into IPC events the renderer consumes. `electron/integrations/apple-calendar.ts` adds `syncAppleCalendar` (Phase 5.7) which is dispatched from `sync.ts` for the `apple-calendar` service.
@@ -134,8 +137,10 @@ Pattern: every IPC handler lives in `electron/ipc/<domain>.ts`, is exposed throu
 | `/monthly` | `src/pages/Monthly.tsx` |
 | `/knowledge` | `src/pages/KnowledgeBase.tsx` |
 | `/vault` | `src/pages/Vault.tsx` (with `setContentProtection` while mounted) |
+| `/contacts` | `src/pages/Contacts.tsx` (Phase 9 — address book; vCard/CSV import + export) |
 | `/integrations` | `src/pages/Integrations.tsx` |
 | `/finance` | `src/pages/Finance.tsx` |
+| `/export` | `src/pages/Export.tsx` (Phase 9 — Universal Export Center; portable plaintext exports) |
 | `/settings` | `src/pages/Settings.tsx` |
 | `/ask` | `src/pages/Ask.tsx` (Phase 5.12 RAG assistant) |
 | `/claude-inbox` | `src/pages/ClaudeInbox.tsx` (Phase 8.2 — review/approve Claude proposals) |

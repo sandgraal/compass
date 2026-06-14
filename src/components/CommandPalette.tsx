@@ -6,6 +6,7 @@ import {
   CalendarRange,
   CheckSquare,
   DollarSign,
+  Download,
   FileText,
   FolderOpen,
   Inbox,
@@ -19,6 +20,7 @@ import {
   ShieldCheck,
   Sparkles,
   TrendingUp,
+  Users,
   Wallet
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -179,6 +181,22 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       icon: <ShieldCheck size={15} />,
       action: () => nav('/vault'),
       keywords: ['secure', 'passwords', 'credentials', 'financial']
+    },
+    {
+      id: 'contacts',
+      label: 'Contacts',
+      description: 'People, addresses & phone numbers',
+      icon: <Users size={15} />,
+      action: () => nav('/contacts'),
+      keywords: ['people', 'address book', 'phone', 'vcard', 'friends', 'family']
+    },
+    {
+      id: 'export',
+      label: 'Export & Portability',
+      description: 'Export your data in standard formats',
+      icon: <Download size={15} />,
+      action: () => nav('/export'),
+      keywords: ['export', 'vcard', 'ics', 'csv', 'portable', 'own your data', 'backup']
     },
     {
       id: 'finance',

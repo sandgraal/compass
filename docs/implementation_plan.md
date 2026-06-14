@@ -364,6 +364,52 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 
 ---
 
+## Phase 9 — "The Storehouse": ingest everything, own it forever, export it anywhere
+
+> **Goal:** deliver on Compass's founding promise — the one local place that holds *all* of your data
+> (people, documents, medical, household assets, plus the finance/net-worth half that already exists),
+> owned by you, never lost if a service shuts down, and **exportable at will** in standard re-importable
+> formats. Full vision + roadmap in [`the-original-plan-for-delightful-cocoa.md`](../.claude/plans/the-original-plan-for-delightful-cocoa.md).
+> Each wave reuses the same spine: **new SQLite table → `lib/` format codec → 3-file IPC → page →
+> Export Center entry → knowledge extractor → tests → security review (vault never exported in plaintext).**
+
+- [x] **9.0 Contacts domain + Universal Export Center (Wave 1)** — the flagship vertical slice proving
+  the *ingest → own → export* loop. **Data:** `contacts` table (migration `0011`; multi-valued
+  phones/emails/addresses as JSON-in-text, `external_id` UNIQUE upsert key, `search_blob` LIKE search).
+  **Codecs (no new deps):** `electron/lib/vcard.ts` (parse+serialize vCard 3.0/4.0), `electron/lib/ics.ts`
+  (serializer, inverse of the Apple-Calendar parser), shared `electron/lib/csv.ts` (extracted from
+  `vault.ts` + `serializeCsv`). **IPC:** `electron/ipc/contacts.ts` (CRUD + vCard/CSV import upserting by
+  `external_id` + export) and `electron/ipc/export.ts` (`calendar:export-ics`,
+  `finance:export-transactions-csv`, `knowledge:export-folder`, `export:export-all` → portable folder +
+  manifest, **vault excluded**). **UI:** `src/pages/Contacts.tsx` (list/detail/edit/import/export) +
+  `src/pages/Export.tsx` (per-domain + Export Everything, unencrypted-PII warning). **Sync:**
+  `electron/knowledge/contacts-extractor.ts` regenerates `profile/relationships.md` on every mutation.
+  **Tests:** vcard/ics/csv round-trip + contacts/export IPC + extractor (contacts.ts 93% / export.ts 93%).
+- [ ] **9.1 Contacts importers expansion** — Google Contacts live sync (People API; new scope + CSP),
+  macOS Contacts (AddressBook bridge), and archive importers for LinkedIn (`Connections.csv`), Facebook
+  ("Download Your Information"), Google Voice (Takeout). FB/LinkedIn have no friends/connections API —
+  the official data-export archive is the durable, local-first path.
+- [ ] **9.2 Documents & files store** — `documents` table + real files under `.data/documents/`; attach a
+  doc to any record; export = copy files + manifest into the portable folder. Closes the "vault stores
+  only metadata" gap; PDF text extraction feeds knowledge search.
+- [ ] **9.3 Subscriptions → first-class** — promote `auditSubscriptions()` to an editable `subscriptions`
+  table (service, cost, cadence, renewal, payment account), auto-seeded from transactions; CSV export.
+- [ ] **9.4 Medical records** — `medical_*` tables (conditions, medications, providers, visits,
+  immunizations); manual entry + optional Apple Health import; CSV/PDF summary export; secret IDs stay in
+  the vault.
+- [ ] **9.5 Household & assets** — `assets` domain (insurance auto/home/life, vehicles w/ VIN, property,
+  memberships, warranties w/ expiry, pets) with renewal reminders via the Morning Brief; surfaces value
+  alongside finance net worth.
+- [ ] **9.6 Storehouse Dashboard** — the founding "see ALL my info in one place" view: net worth +
+  assets + contacts + documents + subscriptions + upcoming renewals on one screen.
+- [ ] **9.7 Reverse connectors** — where standards exist, write back (e.g. push contacts to a CardDAV
+  server), completing two-way portability.
+
+> Build order: 9.0 (shipped) → 9.1/9.2/9.3 (independent, reuse the spine) → 9.4/9.5 → 9.6 (depends on the
+> domains existing) → 9.7. Each wave is its own PR(s) with tests + a `security-auditor` pass on any export path.
+
+---
+
 ## Backlog (deferred, considered but out of scope this round)
 
 ## Phase 5 — Strategic-review follow-ups (May 2026)

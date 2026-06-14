@@ -284,6 +284,84 @@ declare global {
     resultRef: string | null
   }
 
+  // --- Contacts (Phase 9 — "The Storehouse") ---
+  interface ContactPhone {
+    type?: string
+    value: string
+    pref?: boolean
+  }
+  interface ContactEmail {
+    type?: string
+    value: string
+    pref?: boolean
+  }
+  interface ContactAddress {
+    type?: string
+    street?: string
+    city?: string
+    region?: string
+    postalCode?: string
+    country?: string
+    pref?: boolean
+  }
+  interface ContactRecord {
+    id: number
+    externalId: string
+    displayName: string
+    givenName: string | null
+    familyName: string | null
+    middleName: string | null
+    prefix: string | null
+    suffix: string | null
+    org: string | null
+    jobTitle: string | null
+    phones: ContactPhone[]
+    emails: ContactEmail[]
+    addresses: ContactAddress[]
+    birthday: string | null
+    url: string | null
+    relationship: string | null
+    notes: string | null
+    photo: string | null
+    source: string
+    createdAt: number | null
+    updatedAt: number | null
+  }
+  interface ContactInput {
+    externalId?: string
+    displayName: string
+    givenName?: string | null
+    familyName?: string | null
+    middleName?: string | null
+    prefix?: string | null
+    suffix?: string | null
+    org?: string | null
+    jobTitle?: string | null
+    phones?: ContactPhone[]
+    emails?: ContactEmail[]
+    addresses?: ContactAddress[]
+    birthday?: string | null
+    url?: string | null
+    relationship?: string | null
+    notes?: string | null
+    photo?: string | null
+    source?: string
+  }
+  type ImportResult = {
+    success: boolean
+    imported?: number
+    updated?: number
+    canceled?: boolean
+    error?: string
+  }
+  type ExportResult = {
+    success: boolean
+    path?: string
+    count?: number
+    canceled?: boolean
+    error?: string
+  }
+
   interface Window {
     api: {
       auth: {
@@ -593,6 +671,30 @@ declare global {
         getEntries(month: string): Promise<Record<number, Record<string, boolean>>>
         getAllEntries(): Promise<Record<number, Record<string, boolean>>>
         toggle(habitId: number, date: string): Promise<{ success: boolean; completed: boolean }>
+      }
+      contacts: {
+        list(opts?: { search?: string }): Promise<ContactRecord[]>
+        get(id: number): Promise<ContactRecord | null>
+        create(input: ContactInput): Promise<{ success: boolean; id: number }>
+        update(id: number, updates: ContactInput): Promise<{ success: boolean }>
+        delete(id: number): Promise<{ success: boolean }>
+        importVcard(): Promise<ImportResult>
+        importCsv(): Promise<ImportResult>
+        exportVcard(ids?: number[]): Promise<ExportResult>
+        exportCsv(ids?: number[]): Promise<ExportResult>
+      }
+      exporter: {
+        calendarIcs(): Promise<ExportResult>
+        transactionsCsv(): Promise<ExportResult>
+        knowledgeFolder(): Promise<ExportResult>
+        all(): Promise<{
+          success: boolean
+          path?: string
+          files?: string[]
+          knowledgeCount?: number
+          canceled?: boolean
+          error?: string
+        }>
       }
       claude: {
         listProposals(status?: string): Promise<ClaudeProposal[]>
