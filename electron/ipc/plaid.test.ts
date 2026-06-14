@@ -317,6 +317,39 @@ describe('registerPlaidHandlers — plaid:start-link (error paths)', () => {
       errorMessage: 'socket hang up'
     })
   })
+
+  it('surfaces the real Plaid error_code/message from an axios 400 (the Connect-time 400)', async () => {
+    // The plaid SDK throws axios-style errors: the actionable diagnosis lives
+    // in err.response.data, not err.message ("Request failed with status code
+    // 400"). The handler must dig it out so the user sees INVALID_API_KEYS.
+    createLinkTokenMock.mockRejectedValueOnce({
+      message: 'Request failed with status code 400',
+      response: {
+        status: 400,
+        data: {
+          error_type: 'INVALID_INPUT',
+          error_code: 'INVALID_API_KEYS',
+          error_message: 'invalid client_id or secret provided',
+          display_message: null,
+          request_id: 'req-123'
+        }
+      }
+    })
+    const { ipc, handlers } = makeFakeIpc()
+    registerPlaidHandlers(ipc)
+
+    const out = (await invoke(handlers.get('plaid:start-link')!)) as {
+      ok: boolean
+      cancelled: boolean
+      errorCode: string
+      errorMessage: string
+    }
+    expect(out.ok).toBe(false)
+    expect(out.errorCode).toBe('INVALID_API_KEYS')
+    expect(out.errorMessage).toContain('invalid client_id or secret provided')
+    // and the actionable env/secret hint is appended
+    expect(out.errorMessage).toMatch(/sandbox|production|environment/i)
+  })
 })
 
 // ─── plaid:list-items (Phase 4.6 PR 5) ───────────────────────────────────────
