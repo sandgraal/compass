@@ -67,6 +67,7 @@ vi.mock('electron', () => ({
 
 // Plaid sync — unused here but imported by sync.ts.
 vi.mock('../integrations/plaid/sync', () => ({ syncAllPlaid: vi.fn() }))
+vi.mock('../integrations/simplefin/sync', () => ({ syncAllSimplefin: vi.fn() }))
 
 // Things sync — local importer; mocked so the dispatch/gate is exercised without
 // touching the real Things database on the host.

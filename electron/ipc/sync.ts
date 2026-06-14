@@ -17,6 +17,7 @@ import { syncLinear } from '../integrations/linear'
 import { syncNotion } from '../integrations/notion'
 import { readVaultPathSetting, syncObsidian } from '../integrations/obsidian'
 import { syncAllPlaid } from '../integrations/plaid/sync'
+import { syncAllSimplefin } from '../integrations/simplefin/sync'
 import { syncThings } from '../integrations/things'
 import { syncTodoist } from '../integrations/todoist'
 import {
@@ -303,6 +304,8 @@ function serviceLabelFor(service: string): string {
       return 'Things'
     case 'plaid':
       return 'Plaid'
+    case 'simplefin':
+      return 'SimpleFIN'
     default:
       return service
   }
@@ -808,6 +811,31 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
         success: errors.length === 0,
         recordsUpdated: totalRecords,
         error: errors.length > 0 ? errors.join('; ') : undefined
+      }
+    }
+    if (service === 'simplefin') {
+      // Multi-connection, like Plaid: `success` is true only when every
+      // connection synced cleanly; per-connection errors are concatenated so
+      // the UI can show which one failed. We emit `sync:update` (the cron path
+      // doesn't) so the renderer clears the card spinner and refreshes the
+      // connection list — see the onSyncUpdate handler in Integrations.tsx.
+      const results = await syncAllSimplefin()
+      const totalRecords = results.reduce((n, r) => n + r.added, 0)
+      const errors = results
+        .filter((r) => r.errorMessage)
+        .map((r) => `${r.connectionId}: ${r.errorMessage}`)
+      const error = errors.length > 0 ? errors.join('; ') : undefined
+      win?.webContents.send('sync:update', {
+        service: 'simplefin',
+        status: errors.length === 0 ? 'success' : 'error',
+        recordsUpdated: totalRecords,
+        error
+      })
+      return {
+        service: 'simplefin',
+        success: errors.length === 0,
+        recordsUpdated: totalRecords,
+        error
       }
     }
     return { error: 'Unknown service' }
