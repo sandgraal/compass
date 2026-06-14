@@ -95,6 +95,18 @@ const INTEGRATIONS: IntegrationConfig[] = [
     color: 'from-red-500/20 to-orange-500/20',
     logo: 'T'
   },
+  // Things 3 is local-file based like Apple Calendar — no OAuth, no token. We
+  // read the local Things database read-only and import today's/overdue to-dos
+  // into the daily checklist. Connect just kicks off the first sync.
+  {
+    id: 'things',
+    name: 'Things 3',
+    description:
+      "Local read of your Things 3 to-dos — today's and overdue tasks into the daily checklist. No cloud.",
+    scopes: ['local:sqlite'],
+    color: 'from-sky-400/20 to-blue-500/20',
+    logo: '✓'
+  },
   {
     id: 'plaid',
     name: 'Plaid',
@@ -329,9 +341,9 @@ export default function Integrations(): JSX.Element {
     }
     setConnecting(service)
     try {
-      // Apple Calendar is local-file based — no OAuth, just kick off a
-      // sync which will create the integration row on first success.
-      if (service === 'apple-calendar') {
+      // Apple Calendar and Things are local-file based — no OAuth, just kick
+      // off a sync which will create the integration row on first success.
+      if (service === 'apple-calendar' || service === 'things') {
         const r = await window.api.sync.triggerSync(service)
         if (r && 'error' in r && r.error) {
           toast(`Sync failed: ${r.error}`, 'error')
