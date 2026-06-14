@@ -68,6 +68,13 @@ vi.mock('electron', () => ({
 // Plaid sync — unused here but imported by sync.ts.
 vi.mock('../integrations/plaid/sync', () => ({ syncAllPlaid: vi.fn() }))
 
+// Things sync — local importer; mocked so the dispatch/gate is exercised without
+// touching the real Things database on the host.
+const syncThingsMock = vi.fn()
+vi.mock('../integrations/things', () => ({
+  syncThings: (...args: unknown[]) => syncThingsMock(...args)
+}))
+
 // cron — lazy-imported by `sync:set-interval`; harmless stub.
 vi.mock('../cron', () => ({ restartCronJobs: vi.fn() }))
 
@@ -795,6 +802,20 @@ describe('sync:trigger — provider branches', () => {
     const result = await invoke(h, 'apple-calendar')
     expect(result).toEqual({ service: 'apple-calendar', success: true, recordsUpdated: 0 })
   })
+
+  it('dispatches "things" to syncThings and flips the opt-in flag to connected', async () => {
+    syncThingsMock.mockResolvedValue({ service: 'things', success: true, recordsUpdated: 2 })
+    const h = await registerAndGet('sync:trigger')
+    const result = await invoke(h, 'things')
+    expect(result).toEqual({ service: 'things', success: true, recordsUpdated: 2 })
+    expect(syncThingsMock).toHaveBeenCalledOnce()
+    // Connect / manual refresh flips the row to connected before syncing — this
+    // is what re-enables a reconnect after disconnect (syncThings self-gates on
+    // a 'disconnected' row).
+    expect(
+      sqlite.prepare("SELECT status FROM integrations WHERE service='things'").get()
+    ).toMatchObject({ status: 'connected' })
+  })
 })
 
 // ── sync:trigger-all ────────────────────────────────────────────────────────
@@ -812,6 +833,34 @@ describe('sync:trigger-all', () => {
     for (const r of out) {
       expect(r).not.toHaveProperty('githubSuggestionInputs')
     }
+  })
+
+  it('includes things in the fan-out only once it is connected (a row exists)', async () => {
+    loadTokenMock.mockReturnValue(null) // google + github early-return
+    readAppleCalendarsMock.mockReturnValue([])
+    seedIntegration('things')
+    syncThingsMock.mockResolvedValue({ service: 'things', success: true, recordsUpdated: 1 })
+    const h = await registerAndGet('sync:trigger-all')
+    const out = (await invoke(h)) as Array<Record<string, unknown>>
+    expect(out.map((r) => r.service).sort()).toEqual([
+      'apple-calendar',
+      'github',
+      'google',
+      'things'
+    ])
+    expect(syncThingsMock).toHaveBeenCalledOnce()
+  })
+
+  it('excludes things from the fan-out when its row is disconnected (no noisy failure)', async () => {
+    loadTokenMock.mockReturnValue(null)
+    readAppleCalendarsMock.mockReturnValue([])
+    sqlite
+      .prepare("INSERT INTO integrations (service, status) VALUES ('things', 'disconnected')")
+      .run()
+    const h = await registerAndGet('sync:trigger-all')
+    const out = (await invoke(h)) as Array<Record<string, unknown>>
+    expect(out.map((r) => r.service).sort()).toEqual(['apple-calendar', 'github', 'google'])
+    expect(syncThingsMock).not.toHaveBeenCalled()
   })
 
   it('does NOT call extractors when every provider fails (nothing to extract from)', async () => {

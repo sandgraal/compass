@@ -32,6 +32,7 @@ import {
 import { getDb } from '../db/client'
 import { plaidItems } from '../db/schema'
 import { PlaidNotConfiguredError, isPlaidConfigured } from '../integrations/plaid/client'
+import { describePlaidFailure } from '../integrations/plaid/errors'
 import {
   type ExchangeResult,
   LINK_CSP,
@@ -104,8 +105,11 @@ export function registerPlaidHandlers(ipcMain: IpcMain): void {
       if (err instanceof PlaidNotConfiguredError) {
         return { ok: false, cancelled: false, errorCode: err.reason, errorMessage: err.message }
       }
-      const message = err instanceof Error ? err.message : String(err)
-      return { ok: false, cancelled: false, errorCode: 'LINK_START_FAILED', errorMessage: message }
+      // A 400/4xx from /link/token/create is an axios error whose `.message` is
+      // just "Request failed with status code 400" — surface Plaid's real
+      // error_code/error_message (e.g. INVALID_API_KEYS) so the user can act.
+      const { errorCode, errorMessage } = describePlaidFailure(err, 'LINK_START_FAILED')
+      return { ok: false, cancelled: false, errorCode, errorMessage }
     }
   })
 
@@ -236,8 +240,10 @@ export async function runLinkFlow(linkToken: string): Promise<StartLinkResult> {
       if (!url.startsWith(LINK_CALLBACK_SCHEME)) return
       details.preventDefault()
       handleCallback(url).then(finish, (err) => {
-        const message = err instanceof Error ? err.message : String(err)
-        finish({ ok: false, cancelled: false, errorCode: 'EXCHANGE_FAILED', errorMessage: message })
+        // The exchange (/item/public_token/exchange) can also 4xx; surface the
+        // Plaid error body rather than the bare axios message.
+        const { errorCode, errorMessage } = describePlaidFailure(err, 'EXCHANGE_FAILED')
+        finish({ ok: false, cancelled: false, errorCode, errorMessage })
       })
     }
 
