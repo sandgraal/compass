@@ -1030,7 +1030,7 @@ export default function Integrations(): JSX.Element {
                         <a
                           href="https://dashboard.plaid.com/developers/keys"
                           target="_blank"
-                          rel="noreferrer"
+                          rel="noopener noreferrer"
                           className="text-primary hover:underline"
                         >
                           the Plaid dashboard
