@@ -49,6 +49,7 @@ export type SimplefinClaimResult = {
   orgName: string
   added: number
   accountsUpserted: number
+  accountsLinked: number
 }
 
 export function registerSimplefinHandlers(ipcMain: IpcMain): void {
@@ -110,15 +111,17 @@ export function registerSimplefinHandlers(ipcMain: IpcMain): void {
       // connection is valid and the daily cron will retry).
       let added = 0
       let accountsUpserted = 0
+      let accountsLinked = 0
       try {
         const result = await syncSimplefin(connectionId)
         added = result.added
         accountsUpserted = result.accountsUpserted
+        accountsLinked = result.accountsLinked
       } catch {
         // non-fatal
       }
 
-      return { ok: true, connectionId, orgName, added, accountsUpserted }
+      return { ok: true, connectionId, orgName, added, accountsUpserted, accountsLinked }
     }
   )
 

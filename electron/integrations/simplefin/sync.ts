@@ -31,7 +31,7 @@
  * re-classification in the Accounts UI is never clobbered.
  */
 
-import { eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 import { getDb } from '../../db/client'
 import {
   categorizationRules,
@@ -48,6 +48,7 @@ import { tagTax } from '../finance-tax'
 import { classifySimplefinAccount } from './classify'
 import { type SimplefinAccountsResponse, fetchAccounts } from './client'
 import { SIMPLEFIN_INCREMENTAL_LOOKBACK_DAYS, SIMPLEFIN_LOOKBACK_DAYS } from './config'
+import { findAccountMatch } from './match'
 import { normalizeSimplefinAccount } from './normalize'
 import { getAccessUrl } from './vault'
 
@@ -60,7 +61,10 @@ export type SimplefinSyncResult = {
   connectionId: string
   added: number
   duplicates: number
+  /** New finance_accounts rows created for SimpleFIN accounts. */
   accountsUpserted: number
+  /** Existing unlinked accounts adopted via institution+last-4 match (#1). */
+  accountsLinked: number
   errorMessage?: string
 }
 
@@ -84,7 +88,7 @@ export async function syncSimplefin(
   opts?: { fetchAccountsFn?: FetchAccountsFn; now?: Date }
 ): Promise<SimplefinSyncResult> {
   const db = getDb()
-  const base = { connectionId, added: 0, duplicates: 0, accountsUpserted: 0 }
+  const base = { connectionId, added: 0, duplicates: 0, accountsUpserted: 0, accountsLinked: 0 }
 
   // 1. Connection row (its PK is the FK we stamp onto finance_accounts;
   //    lastSyncedAt picks the first-sync-vs-incremental window below).
@@ -162,6 +166,7 @@ export async function syncSimplefin(
   // linked to their account (per-account views + account-scoped dedup).
   const idMap = new Map<string, number>()
   let accountsUpserted = 0
+  let accountsLinked = 0
   for (const acct of response.accounts) {
     const orgName = acct.org?.name ?? ''
     const balanceNum = Number.parseFloat(acct.balance)
@@ -192,25 +197,67 @@ export async function syncSimplefin(
         .run()
       nameMap.set(acct.id, existing.name)
       idMap.set(acct.id, existing.id)
-    } else {
-      const cls = classifySimplefinAccount(displayName, orgName)
-      const res = db
-        .insert(financeAccounts)
-        .values({
-          name: displayName,
-          type: cls.type,
-          isDebt: cls.isDebt,
-          institution: orgName,
-          assetClass: cls.assetClass,
-          balance: cls.isDebt ? Math.abs(balance) : balance,
-          simplefinConnectionId: conn.id,
-          simplefinAccountId: acct.id
-        })
-        .run()
-      accountsUpserted++
-      nameMap.set(acct.id, displayName)
-      idMap.set(acct.id, Number(res.lastInsertRowid))
+      continue
     }
+    // No prior SimpleFIN link. Before creating a (likely duplicate) row, try to
+    // ADOPT an existing UNLINKED account that matches by institution + last-4.
+    const candidates = db
+      .select({
+        id: financeAccounts.id,
+        name: financeAccounts.name,
+        institution: financeAccounts.institution,
+        mask: financeAccounts.mask
+      })
+      .from(financeAccounts)
+      .where(
+        and(
+          isNull(financeAccounts.simplefinAccountId),
+          isNull(financeAccounts.simplefinConnectionId),
+          isNull(financeAccounts.plaidItemId)
+        )
+      )
+      .all()
+    const matchId = findAccountMatch({ name: displayName, orgName }, candidates)
+    if (matchId !== null) {
+      // Adopt it: attach the SimpleFIN linkage + refresh balance, but KEEP the
+      // user's existing name / type / assetClass / isDebt.
+      const cur = db
+        .select({ name: financeAccounts.name, isDebt: financeAccounts.isDebt })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, matchId))
+        .get()
+      db.update(financeAccounts)
+        .set({
+          simplefinAccountId: acct.id,
+          simplefinConnectionId: conn.id,
+          balance: cur?.isDebt ? Math.abs(balance) : balance,
+          updatedAt: new Date()
+        })
+        .where(eq(financeAccounts.id, matchId))
+        .run()
+      accountsLinked++
+      nameMap.set(acct.id, cur?.name ?? displayName)
+      idMap.set(acct.id, matchId)
+      continue
+    }
+    // No confident match — create a new account.
+    const cls = classifySimplefinAccount(displayName, orgName)
+    const res = db
+      .insert(financeAccounts)
+      .values({
+        name: displayName,
+        type: cls.type,
+        isDebt: cls.isDebt,
+        institution: orgName,
+        assetClass: cls.assetClass,
+        balance: cls.isDebt ? Math.abs(balance) : balance,
+        simplefinConnectionId: conn.id,
+        simplefinAccountId: acct.id
+      })
+      .run()
+    accountsUpserted++
+    nameMap.set(acct.id, displayName)
+    idMap.set(acct.id, Number(res.lastInsertRowid))
   }
   const accountNameFor = (id: string): string => nameMap.get(id) ?? `SimpleFIN ·${id.slice(-4)}`
 
@@ -320,6 +367,7 @@ export async function syncSimplefin(
     added,
     duplicates,
     accountsUpserted,
+    accountsLinked,
     errorMessage: connError ?? undefined
   }
 }
