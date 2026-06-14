@@ -3,12 +3,13 @@
  *
  * The SimpleFIN counterpart to `plaid/sync.ts`, but simpler — there is no
  * cursor and no `/transactions/sync` delta. Each run GETs `<accessUrl>/accounts`
- * for the last `SIMPLEFIN_LOOKBACK_DAYS`, upserts the account rows, normalizes
- * every transaction to Compass's shared `RawTxn` shape, runs the same
- * categorize / geo / tax pipeline the CSV + Plaid paths use, and inserts with
+ * for a trailing date window (a wide backfill on first connect, a lighter
+ * overlap after — see step 3), upserts the account rows, normalizes every
+ * transaction to Compass's shared `RawTxn` shape, runs the same categorize /
+ * geo / tax pipeline the CSV + Plaid paths use, and inserts with
  * `ON CONFLICT DO NOTHING`.
  *
- * IDEMPOTENCY: there is no resume state. Re-pulling the same 90-day window every
+ * IDEMPOTENCY: there is no resume state. Re-pulling an overlapping window every
  * day is safe **entirely** because the `hash` UNIQUE constraint on
  * finance_transactions makes a re-seen row a no-op (counted as a duplicate).
  * This is the whole story — the sync test runs twice and asserts the second
@@ -46,7 +47,7 @@ import { tagGeoAndPurpose } from '../finance-geo'
 import { tagTax } from '../finance-tax'
 import { classifySimplefinAccount } from './classify'
 import { type SimplefinAccountsResponse, fetchAccounts } from './client'
-import { SIMPLEFIN_LOOKBACK_DAYS } from './config'
+import { SIMPLEFIN_INCREMENTAL_LOOKBACK_DAYS, SIMPLEFIN_LOOKBACK_DAYS } from './config'
 import { normalizeSimplefinAccount } from './normalize'
 import { getAccessUrl } from './vault'
 
@@ -85,9 +86,10 @@ export async function syncSimplefin(
   const db = getDb()
   const base = { connectionId, added: 0, duplicates: 0, accountsUpserted: 0 }
 
-  // 1. Connection row (its PK is the FK we stamp onto finance_accounts).
+  // 1. Connection row (its PK is the FK we stamp onto finance_accounts;
+  //    lastSyncedAt picks the first-sync-vs-incremental window below).
   const conn = db
-    .select({ id: simplefinConnections.id })
+    .select({ id: simplefinConnections.id, lastSyncedAt: simplefinConnections.lastSyncedAt })
     .from(simplefinConnections)
     .where(eq(simplefinConnections.connectionId, connectionId))
     .get()
@@ -114,10 +116,16 @@ export async function syncSimplefin(
     fetchAccountsFn = (o) => fetchAccounts(accessUrl, o)
   }
 
-  // 3. Date window: the trailing SIMPLEFIN_LOOKBACK_DAYS up to now.
+  // 3. Date window: a wide backfill on first connect, a lighter overlap after.
+  //    The narrower incremental window stays under institutions' recommended
+  //    range (avoiding the "exceeds 45 days" warning) and is cheaper; dedup
+  //    makes the overlap a no-op.
+  const lookbackDays = conn.lastSyncedAt
+    ? SIMPLEFIN_INCREMENTAL_LOOKBACK_DAYS
+    : SIMPLEFIN_LOOKBACK_DAYS
   const now = opts?.now ?? new Date()
   const endDate = Math.floor(now.getTime() / 1000)
-  const startDate = endDate - SIMPLEFIN_LOOKBACK_DAYS * 86_400
+  const startDate = endDate - lookbackDays * 86_400
 
   // integrations.id for sync_events — looked up once. May be null if the
   // connection was created before the integrations row (it isn't, in practice;
@@ -253,37 +261,43 @@ export async function syncSimplefin(
   // 9. CR ATM split (only if we added rows), mirroring the Plaid + CSV paths.
   if (added > 0) applyAtmSplit(db)
 
-  // 10. Record outcome. SimpleFIN's top-level `errors[]` (e.g. a stale
-  //     connection that needs re-auth at the bridge) sticks on the connection
-  //     row + integrations status so the UI can prompt a re-claim.
-  const responseErrors = response.errors.length > 0 ? response.errors.join('; ') : null
+  // 10. Record outcome. SimpleFIN's top-level `errors[]` mixes genuine failures
+  //     with non-fatal warnings (e.g. USAA's "exceeds recommended range of 45
+  //     days"). The reliable signal of a real failure is "no accounts came
+  //     back" — if we DID get data, the sync succeeded and any errors[] are
+  //     warnings: log them to the Sync Log, but DON'T flag the connection red /
+  //     flip the integration to 'error' (that's the "needs attention" UI). Only
+  //     an empty-accounts response with errors is a hard failure that should
+  //     surface as an error + drive the cron's "failed" notification.
+  const messages = response.errors
+  const hardFailure = response.accounts.length === 0 && messages.length > 0
+  const connError = hardFailure ? messages.join('; ').slice(0, 200) : null
   db.update(simplefinConnections)
-    .set({
-      lastSyncedAt: new Date(),
-      errorCode: responseErrors ? responseErrors.slice(0, 200) : null
-    })
+    .set({ lastSyncedAt: new Date(), errorCode: connError })
     .where(eq(simplefinConnections.connectionId, connectionId))
     .run()
   db.update(integrations)
     .set({
       lastSyncedAt: new Date(),
-      status: responseErrors ? 'error' : 'connected',
-      errorMessage: responseErrors
+      status: hardFailure ? 'error' : 'connected',
+      errorMessage: connError
     })
     .where(eq(integrations.service, 'simplefin'))
     .run()
-  const errorLog = [
-    ...(responseErrors ? [responseErrors] : []),
+  // Warnings + per-row normalize errors go to the Sync Log (visible, not
+  // alarming); a hard failure's messages are already on the connection row.
+  const eventLog = [
+    ...(hardFailure ? messages : messages.map((m) => `warning: ${m}`)),
     ...allErrors.map((e) => `${e.transactionId}: ${e.message}`)
   ]
-  writeSyncEvent(integrationId, added, errorLog.length > 0 ? JSON.stringify(errorLog) : null)
+  writeSyncEvent(integrationId, added, eventLog.length > 0 ? JSON.stringify(eventLog) : null)
 
   return {
     connectionId,
     added,
     duplicates,
     accountsUpserted,
-    errorMessage: responseErrors ?? undefined
+    errorMessage: connError ?? undefined
   }
 }
 
