@@ -140,8 +140,10 @@ function countTxns(): number {
 function fixture(over?: {
   balance?: string
   accountName?: string
+  orgName?: string
   errors?: string[]
 }): SimplefinAccountsResponse {
+  const orgName = over?.orgName ?? 'American Express'
   return {
     errors: over?.errors ?? [],
     accounts: [
@@ -151,7 +153,7 @@ function fixture(over?: {
         currency: 'USD',
         balance: over?.balance ?? '-1234.56',
         'balance-date': 1_718_452_800,
-        org: { name: 'American Express', domain: 'americanexpress.com' },
+        org: { name: orgName, domain: 'example.com' },
         transactions: [
           { id: 'tx-1', posted: 1_718_452_800, amount: '-42.50', description: 'Blue Bottle' },
           { id: 'tx-2', posted: 1_718_452_800, amount: '1000.00', description: 'Payroll' }
@@ -180,8 +182,20 @@ describe('syncSimplefin — happy path', () => {
 
     const acct = sqlite
       .prepare('SELECT * FROM finance_accounts WHERE simplefin_account_id = ?')
-      .get('acc-1') as { balance: number; institution: string; simplefin_connection_id: number }
-    expect(acct.balance).toBeCloseTo(-1234.56)
+      .get('acc-1') as {
+      balance: number
+      institution: string
+      simplefin_connection_id: number
+      is_debt: number
+      asset_class: string
+      type: string
+    }
+    // "Platinum Card" / "American Express" classifies as a credit card → debt /
+    // liability, and the owed balance is stored positive (|−1234.56|).
+    expect(acct.type).toBe('credit')
+    expect(acct.is_debt).toBe(1)
+    expect(acct.asset_class).toBe('liability')
+    expect(acct.balance).toBeCloseTo(1234.56)
     expect(acct.institution).toBe('American Express')
     expect(acct.simplefin_connection_id).toBe(1)
 
@@ -219,7 +233,25 @@ describe('syncSimplefin — happy path', () => {
       .prepare('SELECT name, balance FROM finance_accounts WHERE simplefin_account_id = ?')
       .get('acc-1') as { name: string; balance: number }
     expect(acct.name).toBe('My Amex') // user rename survives
-    expect(acct.balance).toBeCloseTo(-250) // balance refreshed
+    // Card → debt account, so the refreshed owed balance is stored positive.
+    expect(acct.balance).toBeCloseTo(250)
+  })
+
+  it('classifies a plain checking account as a spending asset (balance unchanged)', async () => {
+    const { syncSimplefin } = await import('./sync')
+    await syncSimplefin('conn-1', {
+      fetchAccountsFn: async () =>
+        fixture({ accountName: 'Everyday Checking', orgName: 'Local Bank', balance: '4200.00' })
+    })
+    const acct = sqlite
+      .prepare(
+        'SELECT type, is_debt, asset_class, balance FROM finance_accounts WHERE simplefin_account_id = ?'
+      )
+      .get('acc-1') as { type: string; is_debt: number; asset_class: string; balance: number }
+    expect(acct.type).toBe('checking')
+    expect(acct.is_debt).toBe(0)
+    expect(acct.asset_class).toBe('spending')
+    expect(acct.balance).toBeCloseTo(4200) // asset balance stored as-is
   })
 })
 
