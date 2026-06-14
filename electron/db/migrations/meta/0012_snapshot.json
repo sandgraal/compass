@@ -166,9 +166,7 @@
       "indexes": {
         "calendar_events_external_id_unique": {
           "name": "calendar_events_external_id_unique",
-          "columns": [
-            "external_id"
-          ],
+          "columns": ["external_id"],
           "isUnique": true
         }
       },
@@ -365,9 +363,7 @@
       "indexes": {
         "checklist_templates_list_type_unique": {
           "name": "checklist_templates_list_type_unique",
-          "columns": [
-            "list_type"
-          ],
+          "columns": ["list_type"],
           "isUnique": true
         }
       },
@@ -469,9 +465,7 @@
       "indexes": {
         "claude_proposals_proposal_id_unique": {
           "name": "claude_proposals_proposal_id_unique",
-          "columns": [
-            "proposal_id"
-          ],
+          "columns": ["proposal_id"],
           "isUnique": true
         }
       },
@@ -642,9 +636,7 @@
       "indexes": {
         "contacts_external_id_unique": {
           "name": "contacts_external_id_unique",
-          "columns": [
-            "external_id"
-          ],
+          "columns": ["external_id"],
           "isUnique": true
         }
       },
@@ -716,9 +708,7 @@
       "indexes": {
         "drive_files_external_id_unique": {
           "name": "drive_files_external_id_unique",
-          "columns": [
-            "external_id"
-          ],
+          "columns": ["external_id"],
           "isUnique": true
         }
       },
@@ -863,12 +853,8 @@
           "name": "finance_accounts_plaid_item_id_plaid_items_id_fk",
           "tableFrom": "finance_accounts",
           "tableTo": "plaid_items",
-          "columnsFrom": [
-            "plaid_item_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["plaid_item_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -922,12 +908,8 @@
           "name": "finance_balance_snapshots_account_id_finance_accounts_id_fk",
           "tableFrom": "finance_balance_snapshots",
           "tableTo": "finance_accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1059,9 +1041,7 @@
       "indexes": {
         "finance_transactions_hash_unique": {
           "name": "finance_transactions_hash_unique",
-          "columns": [
-            "hash"
-          ],
+          "columns": ["hash"],
           "isUnique": true
         }
       },
@@ -1070,12 +1050,8 @@
           "name": "finance_transactions_account_id_finance_accounts_id_fk",
           "tableFrom": "finance_transactions",
           "tableTo": "finance_accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1150,12 +1126,8 @@
           "name": "forecast_overrides_account_id_finance_accounts_id_fk",
           "tableFrom": "forecast_overrides",
           "tableTo": "finance_accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1248,9 +1220,7 @@
       "indexes": {
         "github_items_external_id_unique": {
           "name": "github_items_external_id_unique",
-          "columns": [
-            "external_id"
-          ],
+          "columns": ["external_id"],
           "isUnique": true
         }
       },
@@ -1337,9 +1307,7 @@
       "indexes": {
         "gmail_actions_thread_id_unique": {
           "name": "gmail_actions_thread_id_unique",
-          "columns": [
-            "thread_id"
-          ],
+          "columns": ["thread_id"],
           "isUnique": true
         }
       },
@@ -1387,12 +1355,8 @@
           "name": "habit_entries_habit_id_habits_id_fk",
           "tableFrom": "habit_entries",
           "tableTo": "habits",
-          "columnsFrom": [
-            "habit_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["habit_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1520,9 +1484,7 @@
       "indexes": {
         "integrations_service_unique": {
           "name": "integrations_service_unique",
-          "columns": [
-            "service"
-          ],
+          "columns": ["service"],
           "isUnique": true
         }
       },
@@ -1589,9 +1551,7 @@
       "indexes": {
         "knowledge_files_path_unique": {
           "name": "knowledge_files_path_unique",
-          "columns": [
-            "path"
-          ],
+          "columns": ["path"],
           "isUnique": true
         }
       },
@@ -1766,9 +1726,7 @@
       "indexes": {
         "linear_issues_external_id_unique": {
           "name": "linear_issues_external_id_unique",
-          "columns": [
-            "external_id"
-          ],
+          "columns": ["external_id"],
           "isUnique": true
         }
       },
@@ -1840,9 +1798,7 @@
       "indexes": {
         "plaid_items_item_id_unique": {
           "name": "plaid_items_item_id_unique",
-          "columns": [
-            "item_id"
-          ],
+          "columns": ["item_id"],
           "isUnique": true
         }
       },
@@ -1897,12 +1853,8 @@
           "name": "sync_events_integration_id_integrations_id_fk",
           "tableFrom": "sync_events",
           "tableTo": "integrations",
-          "columnsFrom": [
-            "integration_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["integration_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }

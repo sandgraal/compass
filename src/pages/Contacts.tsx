@@ -453,15 +453,12 @@ function ContactDetail({ contact }: { contact: ContactRecord }): JSX.Element {
       )}
       {contact.addresses.length > 0 && (
         <DetailGroup icon={<MapPin size={14} />} title="Address">
-          {contact.addresses.map((a, i) => (
-            <DetailRow
-              key={i}
-              label={a.type}
-              value={[a.street, a.city, a.region, a.postalCode, a.country]
-                .filter(Boolean)
-                .join(', ')}
-            />
-          ))}
+          {contact.addresses.map((a) => {
+            const value = [a.street, a.city, a.region, a.postalCode, a.country]
+              .filter(Boolean)
+              .join(', ')
+            return <DetailRow key={`${a.type ?? ''}|${value}`} label={a.type} value={value} />
+          })}
         </DetailGroup>
       )}
       {contact.birthday && (
@@ -768,6 +765,7 @@ function RowEditor<T>({
       </div>
       <div className="space-y-2">
         {items.map((item, idx) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: positional editor rows; controlled inputs keep values correct across add/remove
           <div key={idx} className="flex items-start gap-2">
             {render(item, (next) => onChange(items.map((it, i) => (i === idx ? next : it))))}
             <button

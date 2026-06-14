@@ -110,6 +110,30 @@ describe('parseVCard', () => {
     expect(c.photo).toBe('data:image/png;base64,aGVsbG8=')
   })
 
+  it('does NOT treat ENCODING=8bit as base64 (token match, not substring)', () => {
+    const card = [
+      'BEGIN:VCARD',
+      'VERSION:3.0',
+      'FN:EightBit',
+      'PHOTO;ENCODING=8bit:not-base64-data',
+      'END:VCARD'
+    ].join('\r\n')
+    const [c] = parseVCard(card)
+    expect(c.photo).toBeUndefined()
+  })
+
+  it('ignores a non-image PHOTO data URI', () => {
+    const card = [
+      'BEGIN:VCARD',
+      'VERSION:3.0',
+      'FN:Sneaky',
+      'PHOTO;VALUE=uri:data:text/html;base64,PHNjcmlwdD4=',
+      'END:VCARD'
+    ].join('\r\n')
+    const [c] = parseVCard(card)
+    expect(c.photo).toBeUndefined()
+  })
+
   it('drops a wholly empty ADR', () => {
     const card = [
       'BEGIN:VCARD',

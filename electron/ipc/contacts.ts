@@ -176,6 +176,9 @@ function toStorage(input: ContactInput) {
   const displayName = clamp(input.displayName, MAX_TEXT) || 'Unnamed Contact'
   const org = clamp(input.org, MAX_TEXT)
   let photo = input.photo ?? null
+  // Renderer input is untrusted: only persist image data URIs or http(s) URLs —
+  // never `data:text/html;…` or other arbitrary strings.
+  if (photo && !/^data:image\//i.test(photo) && !/^https?:\/\//i.test(photo)) photo = null
   if (photo && photo.length > MAX_PHOTO_CHARS) photo = null
   return {
     displayName,
@@ -305,7 +308,10 @@ export function csvRowToInput(row: Record<string, string>): ContactInput | null 
   const birthday = pick(row, ['birthday', 'birth date'])
 
   // CSV has no stable UID → mint a deterministic key so re-import dedupes.
-  const keyBasis = `${displayName}|${emails[0]?.value ?? ''}`.toLowerCase()
+  // Fold in email, phone, and org so two different people who share a name
+  // (and have no email) don't collide onto the same row.
+  const keyBasis =
+    `${displayName}|${emails[0]?.value ?? ''}|${phones[0]?.value ?? ''}|${org}`.toLowerCase()
   return {
     externalId: `csv:${keyBasis}`,
     displayName,

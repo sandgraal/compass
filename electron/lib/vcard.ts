@@ -314,8 +314,10 @@ export function parseVCard(raw: string): ParsedContact[] {
           current.relationship = unescapeText(prop.value).trim() || undefined
         break
       case 'PHOTO': {
-        const enc = (prop.params.ENCODING ?? []).join('')
-        if (enc.includes('b') || enc.includes('base64')) {
+        // Match the base64 token exactly — vCard 3.0 uses `b`, MIME/4.0 uses
+        // `base64`. A substring test would wrongly treat `8bit` as base64.
+        const encs = prop.params.ENCODING ?? []
+        if (encs.includes('b') || encs.includes('base64')) {
           const type = (prop.params.TYPE ?? ['jpeg'])[0] || 'jpeg'
           current.photo = `data:image/${type};base64,${prop.value.replace(/\s+/g, '')}`
         } else if (/^data:image\//i.test(prop.value) || /^https?:/i.test(prop.value)) {

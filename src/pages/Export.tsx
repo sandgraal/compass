@@ -20,7 +20,7 @@ export default function Export(): JSX.Element {
   const { toast } = useToast()
 
   async function run(key: string, fn: () => Promise<ExportResult>, label: string): Promise<void> {
-    if (!isElectron()) return
+    if (!isElectron() || busy !== null) return // guard against overlapping exports
     setBusy(key)
     try {
       const r = await fn()
@@ -38,7 +38,7 @@ export default function Export(): JSX.Element {
   }
 
   async function exportAll(): Promise<void> {
-    if (!isElectron()) return
+    if (!isElectron() || busy !== null) return // guard against overlapping exports
     setBusy('all')
     try {
       const r = await window.api.exporter.all()

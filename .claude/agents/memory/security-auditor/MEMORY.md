@@ -30,7 +30,7 @@ _(empty — no accepted risks yet)_
 
 > Findings that keep coming back. If the same regression appears in multiple PRs, write a note about *why* (lint rule missing, no test, easy to forget).
 
-- **No file-size cap before `readFileSync` on user-picked files (run 2026-06-14):** Both `contacts:import-vcard` (with `multiSelections`) and `contacts:import-csv` call `readFileSync` without checking file size first. A user who picks a multi-GB file will OOM the main process. This pattern is likely to recur as new importers are added. Fix: add `statSync` size check (e.g. 50 MB limit) before reading. Track as a low-severity recurring pattern.
+- **File-size cap before `readFileSync` on user-picked files — RESOLVED in PR #176 (run 2026-06-14):** `contacts:import-vcard` (incl. `multiSelections`) and `contacts:import-csv` now `statSync(...).size > MAX_IMPORT_BYTES` (50 MB) before reading and bail out otherwise. Keep the pattern in mind for *future* importers (Google Contacts / archive importers in Wave 1.1+): every new `readFileSync` on a user-picked file should size-check first.
 
 ## Threat-model deltas
 
@@ -46,9 +46,9 @@ _(empty — no accepted risks yet)_
 
 **Scope:** `electron/ipc/export.ts`, `electron/ipc/contacts.ts`, `electron/lib/vcard.ts`, `electron/lib/ics.ts`, `electron/lib/csv.ts`, `electron/knowledge/contacts-extractor.ts`, `electron/preload.ts` (contacts: and exporter: namespaces)
 
-**Top findings:**
-1. (medium) `contacts:import-vcard` + `contacts:import-csv` call `readFileSync` without a file-size check; a multi-GB file will OOM the main process. `multiSelections` on vCard import compounds this.
-2. (low) `contacts:list` search string has no length bound before passing to drizzle `like()`. Not SQL-injectable (parameterized), but an unbounded string causes a full-table scan. Low risk given local-only deployment.
-3. (low) `vCard PHOTO` parser accepts any `data:` URI MIME type without restriction. Stored as a string; not currently rendered in the UI. Risk is low but worth sanitizing to `data:image/…` only at parse time.
+**Top findings (all ADDRESSED in PR #176 before merge):**
+1. (medium) `contacts:import-vcard` + `contacts:import-csv` `readFileSync` without a file-size check → multi-GB OOM. **Fixed:** `statSync` 50 MB (`MAX_IMPORT_BYTES`) guard before read.
+2. (low) `contacts:list` search string had no length bound before drizzle `like()` (parameterized → not injectable, just a full-table scan). **Fixed:** clamped to `MAX_SEARCH_CHARS` (200).
+3. (low) `vCard PHOTO` parser accepted any `data:` URI MIME type. **Fixed:** parser only accepts `data:image/…` (and base64 detection now matches the `b`/`base64` token exactly, not the substring `b` in `8bit`); `toStorage` also rejects non-`data:image/`/non-`http(s)` photo strings from the renderer.
 
-**Status: advisory** (no blockers; no vault leakage; all writes go through native OS dialog)
+**Status: resolved** (no blockers; no vault leakage; all writes go through native OS dialog; the three advisories above were fixed in-PR)

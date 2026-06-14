@@ -148,6 +148,22 @@ describe('contacts CRUD', () => {
     const got = (await invoke('contacts:get', id)) as ContactGet
     expect(got.photo).toBeNull()
   })
+
+  it('rejects a non-image photo string (only data:image or http(s))', async () => {
+    const bad = (await invoke('contacts:create', {
+      displayName: 'XSS',
+      photo: 'data:text/html;base64,PHNjcmlwdD4='
+    })) as { id: number }
+    expect(((await invoke('contacts:get', bad.id)) as ContactGet).photo).toBeNull()
+
+    const ok = (await invoke('contacts:create', {
+      displayName: 'Linked',
+      photo: 'https://example.com/me.jpg'
+    })) as { id: number }
+    expect(((await invoke('contacts:get', ok.id)) as ContactGet).photo).toBe(
+      'https://example.com/me.jpg'
+    )
+  })
 })
 
 describe('contacts import / export', () => {
@@ -194,6 +210,16 @@ describe('contacts import / export', () => {
     expect(full.org).toBe('Bletchley')
     expect(full.emails).toEqual([{ value: 'alan@example.com' }])
     expect(full.phones).toEqual([{ value: '+1 555 1936' }])
+  })
+
+  it('does NOT collide two same-named, email-less CSV rows (phone disambiguates)', async () => {
+    const dir = tmp()
+    const csv = join(dir, 'dupes.csv')
+    writeFileSync(csv, 'Name,Phone 1 - Value\nJohn Smith,+1 555 0001\nJohn Smith,+1 555 0002\n')
+    mockDialog.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [csv] })
+    const res = (await invoke('contacts:import-csv')) as ImportRes
+    expect(res).toMatchObject({ success: true, imported: 2 })
+    expect((await invoke('contacts:list')) as ContactGet[]).toHaveLength(2)
   })
 
   it('exports contacts to a vCard file the parser can read back', async () => {
