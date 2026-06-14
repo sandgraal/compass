@@ -32,6 +32,8 @@ function makeDb(): ReturnType<typeof drizzle<typeof schema>> {
       plaid_item_id INTEGER,
       plaid_account_id TEXT,
       mask TEXT,
+      simplefin_connection_id INTEGER,
+      simplefin_account_id TEXT,
       updated_at INTEGER
     );
   `)

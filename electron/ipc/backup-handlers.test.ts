@@ -248,7 +248,7 @@ describe('backup:create handler', () => {
     expect(res.success).toBe(true)
     expect(res.path).toBe(outPath)
     expect(res.size).toBeGreaterThan(0)
-    expect(res.stats.tables).toBe(20)
+    expect(res.stats.tables).toBe(21)
     expect(res.stats.knowledgeFiles).toBe(1)
     expect(res.stats.vaultFiles).toBe(1)
     // File actually exists with the v2 magic header.

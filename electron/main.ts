@@ -23,6 +23,7 @@ import { registerPlaidHandlers } from './ipc/plaid'
 import { registerQuickCaptureHandlers } from './ipc/quick-capture'
 import { registerSearchHandlers } from './ipc/search'
 import { registerSettingsHandlers } from './ipc/settings'
+import { registerSimplefinHandlers } from './ipc/simplefin'
 import { registerSpotlightHandlers, startKnowledgeMirrorWatcher } from './ipc/spotlight'
 import { registerStorehouseHandlers } from './ipc/storehouse'
 import { registerSubscriptionsHandlers } from './ipc/subscriptions'
@@ -103,7 +104,7 @@ function createWindow(): void {
         responseHeaders: {
           ...details.responseHeaders,
           'Content-Security-Policy': [
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://gmail.googleapis.com https://api.github.com https://oauth2.googleapis.com https://github.com https://accounts.google.com; frame-src 'none'; object-src 'none'"
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://gmail.googleapis.com https://api.github.com https://oauth2.googleapis.com https://github.com https://accounts.google.com https://bridge.simplefin.org https://beta-bridge.simplefin.org; frame-src 'none'; object-src 'none'"
           ]
         }
       })
@@ -155,6 +156,7 @@ app.whenReady().then(async () => {
   registerSearchHandlers(ipcMain)
   registerSpotlightHandlers(ipcMain)
   registerPlaidHandlers(ipcMain)
+  registerSimplefinHandlers(ipcMain)
   registerMorningBriefHandlers(ipcMain)
   registerWeeklyReviewHandlers(ipcMain)
   registerMonthlyRollupHandlers(ipcMain)

@@ -132,7 +132,9 @@ beforeEach(() => {
       payment_day_of_month INTEGER,
       plaid_item_id INTEGER,
       plaid_account_id TEXT,
-      mask TEXT
+      mask TEXT,
+      simplefin_connection_id INTEGER,
+      simplefin_account_id TEXT
     );
     CREATE TABLE gmail_actions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

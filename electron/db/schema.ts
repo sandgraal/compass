@@ -173,6 +173,18 @@ export const financeAccounts = sqliteTable('finance_accounts', {
   // Last 4 digits of the account number — Plaid returns this as `mask`.
   // Surfaced in the Accounts UI badge; intentionally never the full number.
   mask: text('mask'),
+  // SimpleFIN linkage (Phase 4.7). When set, this account is owned by a
+  // SimpleFIN connection — its balance is refreshed by the SimpleFIN sync
+  // loop instead of by CSV ingest. Mirrors the Plaid linkage above and is
+  // independent of it: an account belongs to at most one provider. Both
+  // nullable so manual / CSV / Plaid / SimpleFIN accounts all coexist.
+  simplefinConnectionId: integer('simplefin_connection_id').references(
+    (): AnySQLiteColumn => simplefinConnections.id
+  ),
+  // SimpleFIN's per-connection unique account `id` (from GET /accounts).
+  // Used as the JOIN key when normalizing transactions and as the upsert
+  // key so a daily re-pull refreshes the same row instead of duplicating it.
+  simplefinAccountId: text('simplefin_account_id'),
   // ISO 'YYYY-MM-DD'. Surfaced as a "Payments Due" reminder on the Dashboard
   // when within the next 14 days. Populated from PDF statement metadata.
   paymentDueDate: text('payment_due_date'),
@@ -239,6 +251,36 @@ export const plaidItems = sqliteTable('plaid_items', {
   lastSyncedAt: integer('last_synced_at', { mode: 'timestamp_ms' }),
   // Plaid error code (e.g. `ITEM_LOGIN_REQUIRED`). When non-null, the
   // Integrations card surfaces a "re-authenticate" CTA.
+  errorCode: text('error_code'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
+// ---- SimpleFIN connections (Phase 4.7) ----
+// One row per claimed SimpleFIN Bridge Setup Token. SimpleFIN has no
+// "item_id" — a single Access URL can front many orgs/accounts — so we mint
+// our own stable `connectionId` (randomUUID) at claim time. The Access URL
+// itself (which embeds HTTP Basic credentials) is encrypted in
+// .vault/simplefin.enc keyed by `connectionId` — NEVER in SQLite. The columns
+// here are non-secret metadata the sync loop and UI need.
+//
+// Deliberate divergence from `plaidItems`: NO `cursor` column. SimpleFIN is a
+// date-windowed pull (GET /accounts?start-date=…), not a cursor-paginated
+// delta. Idempotency comes entirely from the `hash` UNIQUE constraint on
+// finance_transactions — re-pulling the same window inserts nothing new.
+export const simplefinConnections = sqliteTable('simplefin_connections', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  // Locally-minted stable key (randomUUID). UNIQUE so a re-claim updates the
+  // existing row rather than creating a duplicate.
+  connectionId: text('connection_id').notNull().unique(),
+  // org.name from the first account's `org` block (e.g. "American Express").
+  // Display only; used to build the `sourceFile` token.
+  orgName: text('org_name').notNull().default(''),
+  // org.domain (e.g. "americanexpress.com"). Optional; display only.
+  orgDomain: text('org_domain'),
+  lastSyncedAt: integer('last_synced_at', { mode: 'timestamp_ms' }),
+  // Last error surfaced by SimpleFIN (a non-empty `errors[]` entry) or a fetch
+  // failure (e.g. 403 after the user revoked the Access URL). When non-null,
+  // the Integrations card prompts the user to re-claim a fresh Setup Token.
   errorCode: text('error_code'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
