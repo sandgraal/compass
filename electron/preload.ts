@@ -364,6 +364,10 @@ const api = {
       creditLimit?: number
     }) => ipcRenderer.invoke('finance:upsert-account', account),
     deleteAccount: (id: number) => ipcRenderer.invoke('finance:delete-account', id),
+    mergeAccounts: (sourceId: number, targetId: number) =>
+      ipcRenderer.invoke('finance:merge-accounts', sourceId, targetId),
+    dedupeTransactions: (opts?: { apply?: boolean }) =>
+      ipcRenderer.invoke('finance:dedupe-transactions', opts),
     getDebtSummary: () => ipcRenderer.invoke('finance:get-debt-summary'),
     getUpcomingPayments: (daysAhead?: number) =>
       ipcRenderer.invoke('finance:get-upcoming-payments', daysAhead),

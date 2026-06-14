@@ -689,7 +689,12 @@ export default function Finance(): JSX.Element {
       )}
 
       {tab === 'accounts' && (
-        <AccountsTab accounts={accounts} onSave={saveAccount} onDelete={deleteAccount} />
+        <AccountsTab
+          accounts={accounts}
+          onSave={saveAccount}
+          onDelete={deleteAccount}
+          onReload={refresh}
+        />
       )}
 
       {tab === 'rules' && (
@@ -2442,7 +2447,8 @@ function emptyAccountForm(): AccountFormState {
 function AccountsTab({
   accounts,
   onSave,
-  onDelete
+  onDelete,
+  onReload
 }: {
   accounts: Account[]
   onSave: (account: {
@@ -2456,7 +2462,13 @@ function AccountsTab({
     creditLimit?: number
   }) => Promise<void>
   onDelete: (id: number) => Promise<void>
+  onReload: () => void | Promise<void>
 }): JSX.Element {
+  const { toast: cleanupToast } = useToast()
+  const cleanupConfirm = useConfirm()
+  const [mergeSource, setMergeSource] = useState<number | ''>('')
+  const [mergeTarget, setMergeTarget] = useState<number | ''>('')
+  const [cleaning, setCleaning] = useState(false)
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<AccountFormState>(emptyAccountForm())
@@ -2560,6 +2572,69 @@ function AccountsTab({
       // toast surfaced by parent
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function runDedupe(): Promise<void> {
+    setCleaning(true)
+    try {
+      const preview = await window.api.finance.dedupeTransactions()
+      if (preview.applied) return
+      if (preview.removable === 0) {
+        cleanupToast('No duplicate transactions found.', 'info')
+        return
+      }
+      const ok = await cleanupConfirm({
+        title: `Remove ${preview.removable} duplicate transaction${preview.removable === 1 ? '' : 's'}?`,
+        description:
+          'Collapses transactions that share the same date, amount, and normalized description — keeping the SimpleFIN copy. Transfer legs and genuinely different charges are left alone. This cannot be undone.',
+        confirmLabel: 'Remove duplicates',
+        destructive: true
+      })
+      if (!ok) return
+      const res = await window.api.finance.dedupeTransactions({ apply: true })
+      if (res.applied) {
+        cleanupToast(
+          `Removed ${res.removed} duplicate transaction${res.removed === 1 ? '' : 's'}.`,
+          'success'
+        )
+        await onReload()
+      }
+    } catch (err) {
+      cleanupToast(`Dedupe failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      setCleaning(false)
+    }
+  }
+
+  async function runMerge(): Promise<void> {
+    if (mergeSource === '' || mergeTarget === '' || mergeSource === mergeTarget) {
+      cleanupToast('Pick two different accounts to merge.', 'error')
+      return
+    }
+    const src = accounts.find((a) => a.id === mergeSource)
+    const tgt = accounts.find((a) => a.id === mergeTarget)
+    const ok = await cleanupConfirm({
+      title: `Merge "${src?.name}" into "${tgt?.name}"?`,
+      description: `All transactions from "${src?.name}" move to "${tgt?.name}", then "${src?.name}" is deleted. If "${src?.name}" was the SimpleFIN-linked account, that link moves to "${tgt?.name}". This cannot be undone.`,
+      confirmLabel: 'Merge',
+      destructive: true
+    })
+    if (!ok) return
+    setCleaning(true)
+    try {
+      const res = await window.api.finance.mergeAccounts(mergeSource, mergeTarget)
+      cleanupToast(
+        `Merged — ${res.reassigned} transaction${res.reassigned === 1 ? '' : 's'} moved.`,
+        'success'
+      )
+      setMergeSource('')
+      setMergeTarget('')
+      await onReload()
+    } catch (err) {
+      cleanupToast(`Merge failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      setCleaning(false)
     }
   }
 
@@ -2776,6 +2851,74 @@ function AccountsTab({
           </table>
         )}
       </div>
+
+      {!showForm && accounts.length > 0 && (
+        <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+          <div>
+            <h4 className="text-sm font-semibold">Clean up duplicates</h4>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Connecting an aggregator after importing CSVs can leave duplicate accounts or
+              transactions. These tools fix that safely.
+            </p>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs text-muted-foreground">
+              Remove transactions that are the same charge (same date, amount &amp; description),
+              keeping the synced copy. Transfer legs are left alone.
+            </div>
+            <button
+              type="button"
+              onClick={() => void runDedupe()}
+              disabled={cleaning}
+              className="shrink-0 text-sm px-3 py-1.5 border border-border hover:border-primary text-foreground rounded-lg transition-colors disabled:opacity-50"
+            >
+              Find duplicate transactions
+            </button>
+          </div>
+          <div className="flex flex-wrap items-end gap-2 border-t border-border pt-4">
+            <label className="text-xs text-muted-foreground flex flex-col gap-1">
+              Merge this account…
+              <select
+                value={mergeSource}
+                onChange={(e) => setMergeSource(e.target.value ? Number(e.target.value) : '')}
+                className="bg-secondary border border-border rounded-lg px-2 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="">Select…</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-muted-foreground flex flex-col gap-1">
+              …into (keep)
+              <select
+                value={mergeTarget}
+                onChange={(e) => setMergeTarget(e.target.value ? Number(e.target.value) : '')}
+                className="bg-secondary border border-border rounded-lg px-2 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="">Select…</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => void runMerge()}
+              disabled={
+                cleaning || mergeSource === '' || mergeTarget === '' || mergeSource === mergeTarget
+              }
+              className="text-sm px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
+            >
+              Merge
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
