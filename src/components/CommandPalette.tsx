@@ -12,6 +12,7 @@ import {
   FolderOpen,
   Home,
   Inbox,
+  Layers,
   LayoutDashboard,
   LineChart,
   Plug,
@@ -104,6 +105,14 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       icon: <LayoutDashboard size={15} />,
       action: () => nav('/'),
       keywords: ['home', 'today']
+    },
+    {
+      id: 'storehouse',
+      label: 'Your Storehouse',
+      description: 'See all your info in one place',
+      icon: <Layers size={15} />,
+      action: () => nav('/storehouse'),
+      keywords: ['storehouse', 'overview', 'everything', 'all my info', 'summary']
     },
     {
       id: 'daily',

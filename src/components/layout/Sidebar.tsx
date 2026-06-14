@@ -8,6 +8,7 @@ import {
   Download,
   Home,
   Inbox,
+  Layers,
   LayoutDashboard,
   Plug2,
   Settings,
@@ -75,6 +76,7 @@ export function Sidebar(): JSX.Element {
 
   const NAV: NavItem[] = [
     { label: 'Dashboard', to: '/dashboard', icon: <LayoutDashboard size={18} /> },
+    { label: 'Storehouse', to: '/storehouse', icon: <Layers size={18} /> },
     { label: 'Daily', to: '/daily', icon: <CalendarDays size={18} /> },
     { label: 'Weekly', to: '/weekly', icon: <CalendarRange size={18} /> },
     { label: 'Monthly', to: '/monthly', icon: <CalendarCheck size={18} /> },

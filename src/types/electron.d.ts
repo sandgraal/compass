@@ -436,6 +436,23 @@ declare global {
     notes?: string | null
   }
 
+  // --- Storehouse overview (Phase 9.6) ---
+  interface StorehouseSummary {
+    contacts: { count: number }
+    subscriptions: { activeCount: number; annualTotal: number }
+    assets: {
+      count: number
+      totalValue: number
+      byType: Array<{ type: string; count: number; value: number }>
+    }
+    upcomingRenewals: Array<{
+      source: 'subscription' | 'asset'
+      name: string
+      date: string
+      daysUntil: number
+    }>
+  }
+
   interface Window {
     api: {
       auth: {
@@ -762,6 +779,9 @@ declare global {
         importGvoice(): Promise<ImportResult>
         exportVcard(ids?: number[]): Promise<ExportResult>
         exportCsv(ids?: number[]): Promise<ExportResult>
+      }
+      storehouse: {
+        summary(): Promise<StorehouseSummary>
       }
       assets: {
         list(opts?: { type?: string }): Promise<AssetRecord[]>

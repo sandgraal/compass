@@ -15,6 +15,7 @@ import Integrations from './pages/Integrations'
 import KnowledgeBase from './pages/KnowledgeBase'
 import Monthly from './pages/Monthly'
 import Settings from './pages/Settings'
+import Storehouse from './pages/Storehouse'
 import Subscriptions from './pages/Subscriptions'
 import Vault from './pages/Vault'
 import Weekly from './pages/Weekly'
@@ -79,6 +80,7 @@ export default function App(): JSX.Element {
           <Route path="finance" element={<Finance />} />
           <Route path="subscriptions" element={<Subscriptions />} />
           <Route path="assets" element={<Assets />} />
+          <Route path="storehouse" element={<Storehouse />} />
           <Route path="export" element={<Export />} />
           <Route path="integrations" element={<Integrations />} />
           <Route path="settings" element={<Settings />} />

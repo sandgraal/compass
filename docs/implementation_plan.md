@@ -403,8 +403,11 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
   soon" highlight) + route/sidebar/⌘K + Export Center card + `assets.csv` in `export:export-all`.
   Non-secret identifiers in `reference`; secrets stay in the vault. *Follow-up:* renewal reminders via the
   Morning Brief, and surfacing asset value alongside finance net worth.
-- [ ] **9.6 Storehouse Dashboard** — the founding "see ALL my info in one place" view: net worth +
-  assets + contacts + documents + subscriptions + upcoming renewals on one screen.
+- [x] **9.6 Storehouse overview** — the founding "see ALL my info in one place" view. `electron/ipc/storehouse.ts`
+  (`storehouse:summary` = pure `buildStorehouseSummary(db, today)`) + `src/pages/Storehouse.tsx` (route
+  `/storehouse`, sidebar + ⌘K): tiles for contacts / subscriptions (annual) / assets (value), assets-by-type,
+  and upcoming renewals (subscriptions + assets, next 60 days), with deep links to each domain + Export + Vault.
+  Read-only aggregator. *Grows as more domains land* (documents, medical, finance net worth — follow-ups).
 - [ ] **9.7 Reverse connectors** — where standards exist, write back (e.g. push contacts to a CardDAV
   server), completing two-way portability.
 
