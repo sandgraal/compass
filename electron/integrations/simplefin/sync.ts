@@ -158,6 +158,9 @@ export async function syncSimplefin(
   //    For DEBT accounts the stored balance is the positive amount owed (schema
   //    convention; see finance-snapshot.ts), so we store |balance|.
   const nameMap = new Map<string, string>()
+  // simplefinAccountId → finance_accounts.id, so the transactions below can be
+  // linked to their account (per-account views + account-scoped dedup).
+  const idMap = new Map<string, number>()
   let accountsUpserted = 0
   for (const acct of response.accounts) {
     const orgName = acct.org?.name ?? ''
@@ -188,9 +191,11 @@ export async function syncSimplefin(
         .where(eq(financeAccounts.id, existing.id))
         .run()
       nameMap.set(acct.id, existing.name)
+      idMap.set(acct.id, existing.id)
     } else {
       const cls = classifySimplefinAccount(displayName, orgName)
-      db.insert(financeAccounts)
+      const res = db
+        .insert(financeAccounts)
         .values({
           name: displayName,
           type: cls.type,
@@ -204,16 +209,24 @@ export async function syncSimplefin(
         .run()
       accountsUpserted++
       nameMap.set(acct.id, displayName)
+      idMap.set(acct.id, Number(res.lastInsertRowid))
     }
   }
   const accountNameFor = (id: string): string => nameMap.get(id) ?? `SimpleFIN ·${id.slice(-4)}`
 
-  // 6. Normalize every account's transactions to RawTxn.
+  // 6. Normalize every account's transactions to RawTxn, remembering which
+  //    finance_accounts.id each one belongs to (parallel to allRaw, preserved
+  //    through the order-stable categorize/tag pipeline below).
   const allRaw: RawTxn[] = []
+  const rawAccountIds: Array<number | null> = []
   const allErrors: Array<{ transactionId: string; message: string }> = []
   for (const acct of response.accounts) {
+    const accountId = idMap.get(acct.id) ?? null
     const { ok, errors } = normalizeSimplefinAccount(acct, accountNameFor)
-    allRaw.push(...ok)
+    for (const r of ok) {
+      allRaw.push(r)
+      rawAccountIds.push(accountId)
+    }
     allErrors.push(...errors)
   }
 
@@ -230,9 +243,19 @@ export async function syncSimplefin(
   const tagged = tagTax(tagGeoAndPurpose(categorize(allRaw, rules)))
 
   // 8. Insert. The hash UNIQUE constraint is the entire idempotency guard.
+  //    The loop pairs tagged[i] with rawAccountIds[i] by index, which assumes
+  //    the categorize/geo/tax pipeline preserves order AND length. Assert it so
+  //    a future filtering/reordering change fails fast here instead of silently
+  //    mis-linking transactions to the wrong account.
+  if (tagged.length !== rawAccountIds.length) {
+    throw new Error(
+      `SimpleFIN sync: tag pipeline changed row count (${tagged.length} tagged vs ${rawAccountIds.length} account ids) — account linkage would be wrong`
+    )
+  }
   let added = 0
   let duplicates = 0
-  for (const t of tagged) {
+  for (let i = 0; i < tagged.length; i++) {
+    const t = tagged[i]
     const res = db
       .insert(financeTransactions)
       .values({
@@ -240,7 +263,7 @@ export async function syncSimplefin(
         date: t.date,
         amount: t.amount,
         description: t.description,
-        accountId: null,
+        accountId: rawAccountIds[i],
         category: t.category ?? 'Uncategorized',
         subcategory: t.subcategory,
         notes: t.notes,
