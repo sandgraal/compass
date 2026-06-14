@@ -148,6 +148,8 @@ const api = {
   // --- Plaid (Phase 4.6 — bank Link flow) ---
   plaid: {
     getStatus: () => ipcRenderer.invoke('plaid:get-status'),
+    setConfig: (clientId: string, env: 'sandbox' | 'production') =>
+      ipcRenderer.invoke('plaid:set-config', clientId, env),
     setSecret: (env: 'sandbox' | 'production', secret: string) =>
       ipcRenderer.invoke('plaid:set-secret', env, secret),
     startLink: () => ipcRenderer.invoke('plaid:start-link'),

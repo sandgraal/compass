@@ -163,7 +163,9 @@ export default function Integrations(): JSX.Element {
   // loaded; we render a loading placeholder for one tick.
   const [plaidStatus, setPlaidStatus] = useState<{
     configured: boolean
+    hasConfig: boolean
     env: 'sandbox' | 'production' | null
+    clientId: string | null
     hasSecret: boolean
   } | null>(null)
   const [plaidItems, setPlaidItems] = useState<
@@ -176,9 +178,14 @@ export default function Integrations(): JSX.Element {
       errorCode: string | null
     }>
   >([])
-  // Inline "set secret" form for Plaid. Mirrors the GitHub PAT / Google
-  // credentials pattern from earlier PRs.
-  const [plaidSecretInput, setPlaidSecretInput] = useState<string | null>(null)
+  // Inline Plaid setup form (client_id + environment + secret), shown on
+  // Connect when Plaid isn't fully configured, and re-openable to fix wrong
+  // credentials. null = collapsed. Replaces the old hand-edit-a-file flow.
+  const [plaidSetupInput, setPlaidSetupInput] = useState<{
+    clientId: string
+    env: 'sandbox' | 'production'
+    secret: string
+  } | null>(null)
   // Obsidian vault bridge. Status mirrors `window.api.obsidian.getStatus()`;
   // the path input follows the same convention as the PAT / Plaid-secret
   // forms above: null = form collapsed, string = form open with that value.
@@ -295,12 +302,10 @@ export default function Integrations(): JSX.Element {
     // Plaid:
     //   - Status not yet loaded → kick off the load + bail. Without this
     //     guard, an early click reads `plaidStatus?.configured` as
-    //     undefined and falsely toasts "SDK not configured".
-    //   - SDK not configured (~/.config/compass/plaid.env missing) → noop
-    //     with a toast pointing at docs; the file is currently dev-only,
-    //     a UI for it is a future PR (parallel to the Google credentials work).
-    //   - Secret missing → open the inline secret form.
-    //   - Otherwise → start Plaid Link (the child window flow from PR 3).
+    //     undefined and opens the form against stale state.
+    //   - Not fully configured (no client_id/env, or no secret) → open the
+    //     in-app setup form, prefilling any client_id/env we already have.
+    //   - Otherwise → start Plaid Link (the child window flow).
     if (service === 'plaid') {
       if (plaidStatus === null) {
         toast('Loading Plaid status — try again in a moment.', 'info')
@@ -308,11 +313,11 @@ export default function Integrations(): JSX.Element {
         return
       }
       if (!plaidStatus.configured) {
-        toast('Plaid SDK not configured. See docs/finance/plaid-integration.md.', 'error')
-        return
-      }
-      if (!plaidStatus.hasSecret) {
-        setPlaidSecretInput('')
+        setPlaidSetupInput({
+          clientId: plaidStatus.clientId ?? '',
+          env: plaidStatus.env ?? 'sandbox',
+          secret: ''
+        })
         return
       }
       void connectPlaidBank()
@@ -373,7 +378,9 @@ export default function Integrations(): JSX.Element {
       const [status, items] = await Promise.all([api.plaid.getStatus(), api.plaid.listItems()])
       setPlaidStatus({
         configured: status.configured,
+        hasConfig: status.hasConfig,
         env: status.env,
+        clientId: status.clientId,
         hasSecret: status.hasSecret
       })
       setPlaidItems(items)
@@ -505,25 +512,33 @@ export default function Integrations(): JSX.Element {
     }
   }
 
-  async function submitPlaidSecret() {
-    if (typeof plaidSecretInput !== 'string') return
-    const secret = plaidSecretInput.trim()
-    if (!secret) {
-      toast('Paste your Plaid secret first.', 'error')
+  async function submitPlaidSetup() {
+    if (plaidSetupInput === null) return
+    const clientId = plaidSetupInput.clientId.trim()
+    const secret = plaidSetupInput.secret.trim()
+    const env = plaidSetupInput.env
+    if (!clientId) {
+      toast('Enter your Plaid Client ID.', 'error')
       return
     }
-    if (!plaidStatus?.env) {
-      toast('Plaid env not configured (~/.config/compass/plaid.env missing).', 'error')
+    if (!secret) {
+      toast('Paste your Plaid secret.', 'error')
       return
     }
     setConnecting('plaid')
     try {
-      await window.api.plaid.setSecret(plaidStatus.env, secret)
-      toast('Plaid secret saved.', 'success')
-      setPlaidSecretInput(null)
+      await window.api.plaid.setConfig(clientId, env)
+      await window.api.plaid.setSecret(env, secret)
+      toast('Plaid credentials saved.', 'success')
+      setPlaidSetupInput(null)
       await loadPlaid()
+      // Credentials are in place — proceed straight to the bank picker.
+      await connectPlaidBank()
     } catch (err) {
-      toast(`Couldn't save secret: ${err instanceof Error ? err.message : String(err)}`, 'error')
+      toast(
+        `Couldn't save Plaid setup: ${err instanceof Error ? err.message : String(err)}`,
+        'error'
+      )
     } finally {
       setConnecting(null)
     }
@@ -1003,52 +1018,97 @@ export default function Integrations(): JSX.Element {
                   outer Connect button noop+toasts if it isn't. */}
               {integration.id === 'plaid' && plaidStatus && (
                 <div className="mb-3 space-y-2">
-                  {!plaidStatus.configured && (
-                    <div className="text-xs text-muted-foreground p-3 bg-background/40 border border-border rounded-lg leading-relaxed">
-                      Plaid SDK not configured. Create{' '}
-                      <code className="bg-secondary px-1 py-0.5 rounded font-mono">
-                        ~/.config/compass/plaid.env
-                      </code>{' '}
-                      with <code className="font-mono">PLAID_CLIENT_ID</code> +{' '}
-                      <code className="font-mono">PLAID_ENV</code> (
-                      <code className="font-mono">sandbox</code> or{' '}
-                      <code className="font-mono">production</code>) and relaunch.
-                    </div>
-                  )}
-                  {plaidStatus.configured && plaidSecretInput !== null && (
+                  {/* In-app setup form (client_id + environment + secret).
+                      Opened by the Connect button when not fully configured,
+                      and re-openable via "Edit credentials" to fix a wrong
+                      client_id/secret — replaces hand-editing plaid.env. */}
+                  {plaidSetupInput !== null && (
                     <div className="p-3 bg-background/40 border border-border rounded-lg space-y-2">
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Compass uses your own Plaid developer keys. Get a free Client ID + Secret
+                        from{' '}
+                        <a
+                          href="https://dashboard.plaid.com/developers/keys"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline"
+                        >
+                          the Plaid dashboard
+                        </a>{' '}
+                        (Sandbox is instant; Production needs Plaid approval).
+                      </p>
+                      <label
+                        htmlFor="plaid-client-id"
+                        className="block text-xs text-muted-foreground"
+                      >
+                        Client ID
+                      </label>
+                      <input
+                        id="plaid-client-id"
+                        type="text"
+                        placeholder="e.g. 5f1a2b3c4d5e6f7a8b9c0d1e"
+                        aria-label="Plaid Client ID"
+                        value={plaidSetupInput.clientId}
+                        onChange={(e) =>
+                          setPlaidSetupInput((p) => (p ? { ...p, clientId: e.target.value } : p))
+                        }
+                        className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+                      />
+                      <label htmlFor="plaid-env" className="block text-xs text-muted-foreground">
+                        Environment
+                      </label>
+                      <select
+                        id="plaid-env"
+                        aria-label="Plaid environment"
+                        value={plaidSetupInput.env}
+                        onChange={(e) =>
+                          setPlaidSetupInput((p) =>
+                            p ? { ...p, env: e.target.value as 'sandbox' | 'production' } : p
+                          )
+                        }
+                        className="w-full text-xs px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                      >
+                        <option value="sandbox">Sandbox (test data)</option>
+                        <option value="production">Production (real banks)</option>
+                      </select>
                       <label
                         htmlFor="plaid-secret-input"
                         className="block text-xs text-muted-foreground"
                       >
-                        Plaid secret ({plaidStatus.env})
+                        {plaidSetupInput.env} Secret
                       </label>
                       <input
                         id="plaid-secret-input"
                         type="password"
-                        placeholder="Paste your Plaid Sandbox Secret here"
+                        placeholder={`Paste your Plaid ${plaidSetupInput.env} secret`}
                         aria-label="Plaid API secret"
-                        value={plaidSecretInput}
-                        onChange={(e) => setPlaidSecretInput(e.target.value)}
+                        value={plaidSetupInput.secret}
+                        onChange={(e) =>
+                          setPlaidSetupInput((p) => (p ? { ...p, secret: e.target.value } : p))
+                        }
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') void submitPlaidSecret()
-                          else if (e.key === 'Escape') setPlaidSecretInput(null)
+                          if (e.key === 'Enter') void submitPlaidSetup()
+                          else if (e.key === 'Escape') setPlaidSetupInput(null)
                         }}
                         className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
                       />
                       <div className="flex gap-2">
                         <button
                           type="button"
-                          onClick={() => void submitPlaidSecret()}
-                          disabled={connecting === 'plaid' || !plaidSecretInput.trim()}
+                          onClick={() => void submitPlaidSetup()}
+                          disabled={
+                            connecting === 'plaid' ||
+                            !plaidSetupInput.clientId.trim() ||
+                            !plaidSetupInput.secret.trim()
+                          }
                           className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
                         >
                           <Plug2 size={11} />
-                          {connecting === 'plaid' ? 'Saving…' : 'Save secret'}
+                          {connecting === 'plaid' ? 'Saving…' : 'Save & connect'}
                         </button>
                         <button
                           type="button"
-                          onClick={() => setPlaidSecretInput(null)}
+                          onClick={() => setPlaidSetupInput(null)}
                           className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
                         >
                           Cancel
@@ -1056,9 +1116,17 @@ export default function Integrations(): JSX.Element {
                       </div>
                     </div>
                   )}
-                  {/* Connected Items list. Always shown when the secret is
-                      configured AND the secret form isn't open. */}
-                  {plaidStatus.configured && plaidStatus.hasSecret && plaidSecretInput === null && (
+                  {/* Not set up and the form isn't open → one-line nudge; the
+                      card's Connect button opens the setup form. */}
+                  {!plaidStatus.configured && plaidSetupInput === null && (
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Connect to set up Plaid with your own (free) Plaid developer keys — no files
+                      to edit.
+                    </p>
+                  )}
+                  {/* Connected Items list. Shown when fully configured AND the
+                      setup form isn't open. */}
+                  {plaidStatus.configured && plaidSetupInput === null && (
                     <div className="space-y-1.5">
                       {plaidItems.length === 0 && (
                         <p className="text-xs text-muted-foreground">No banks connected yet.</p>
@@ -1097,6 +1165,21 @@ export default function Integrations(): JSX.Element {
                           </button>
                         </div>
                       ))}
+                      {/* Re-open the setup form to fix a wrong client_id /
+                          secret (the cause of an INVALID_API_KEYS 400). */}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPlaidSetupInput({
+                            clientId: plaidStatus.clientId ?? '',
+                            env: plaidStatus.env ?? 'sandbox',
+                            secret: ''
+                          })
+                        }
+                        className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        Edit Plaid credentials
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1514,7 +1597,7 @@ export default function Integrations(): JSX.Element {
                   </button>
                 ) : (integration.id === 'github' && githubPatInput !== null) ||
                   (integration.id === 'google' && googleCredsInput !== null) ||
-                  (integration.id === 'plaid' && plaidSecretInput !== null) ||
+                  (integration.id === 'plaid' && plaidSetupInput !== null) ||
                   (integration.id === 'obsidian' && obsidianPathInput !== null) ||
                   (integration.id === 'notion' && notionTokenInput !== null) ||
                   (integration.id === 'linear' && linearKeyInput !== null) ||

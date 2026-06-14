@@ -604,10 +604,13 @@ declare global {
       plaid: {
         getStatus(): Promise<{
           configured: boolean
+          hasConfig: boolean
           env: 'sandbox' | 'production' | null
+          clientId: string | null
           hasSecret: boolean
           linkedItemIds: string[]
         }>
+        setConfig(clientId: string, env: 'sandbox' | 'production'): Promise<{ ok: true }>
         setSecret(env: 'sandbox' | 'production', secret: string): Promise<{ ok: true }>
         startLink(): Promise<
           | {
