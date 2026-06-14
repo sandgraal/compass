@@ -3,6 +3,7 @@ import {
   CreditCard,
   Download,
   FileSpreadsheet,
+  Home,
   Lock,
   Package,
   ShieldAlert,
@@ -151,6 +152,18 @@ export default function Export(): JSX.Element {
               busy: busy === 'subs',
               onClick: () =>
                 run('subs', () => window.api.subscriptions.exportCsv(), 'Subscriptions')
+            }
+          ]}
+        />
+        <DomainCard
+          icon={<Home size={16} className="text-primary" />}
+          title="Household & assets"
+          description="Property, vehicles, insurance, warranties and their value."
+          actions={[
+            {
+              label: 'CSV',
+              busy: busy === 'assets',
+              onClick: () => run('assets', () => window.api.assets.exportCsv(), 'Assets')
             }
           ]}
         />

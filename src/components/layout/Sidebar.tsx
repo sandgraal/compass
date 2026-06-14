@@ -6,6 +6,7 @@ import {
   Circle,
   CreditCard,
   Download,
+  Home,
   Inbox,
   LayoutDashboard,
   Plug2,
@@ -83,6 +84,7 @@ export function Sidebar(): JSX.Element {
     { label: 'Vault', to: '/vault', icon: <ShieldCheck size={18} /> },
     { label: 'Contacts', to: '/contacts', icon: <Users size={18} /> },
     { label: 'Subscriptions', to: '/subscriptions', icon: <CreditCard size={18} /> },
+    { label: 'Household & Assets', to: '/assets', icon: <Home size={18} /> },
     { label: 'Finance', to: '/finance', icon: <TrendingUp size={18} /> },
     {
       label: 'Integrations',

@@ -19,6 +19,7 @@ import { calendarEvents, financeAccounts, financeTransactions } from '../db/sche
 import { serializeCsv } from '../lib/csv'
 import { serializeIcs } from '../lib/ics'
 import { KNOWLEDGE_DIR } from '../paths'
+import { buildAssetsCsv } from './assets'
 import { buildContactsCsv, buildContactsVcf } from './contacts'
 import { buildSubscriptionsCsv } from './subscriptions'
 
@@ -186,11 +187,13 @@ export function registerExportHandlers(ipcMain: IpcMain): void {
       const ics = buildCalendarIcs()
       const txnCsv = buildTransactionsCsv()
       const subsCsv = buildSubscriptionsCsv()
+      const assetsCsv = buildAssetsCsv()
       writeFileSync(join(root, 'contacts.vcf'), vcf, 'utf-8')
       writeFileSync(join(root, 'contacts.csv'), contactsCsv, 'utf-8')
       writeFileSync(join(root, 'calendar.ics'), ics, 'utf-8')
       writeFileSync(join(root, 'transactions.csv'), txnCsv, 'utf-8')
       writeFileSync(join(root, 'subscriptions.csv'), subsCsv, 'utf-8')
+      writeFileSync(join(root, 'assets.csv'), assetsCsv, 'utf-8')
       const knowledgeCount = copyKnowledgeInto(join(root, 'knowledge'))
 
       const manifest = [
@@ -205,6 +208,7 @@ export function registerExportHandlers(ipcMain: IpcMain): void {
         '  calendar.ics       — iCalendar (import into any calendar app)',
         '  transactions.csv   — full finance ledger',
         '  subscriptions.csv  — tracked subscriptions',
+        '  assets.csv         — household & assets (property, vehicles, insurance…)',
         `  knowledge/         — ${knowledgeCount} markdown note(s)`,
         '',
         'NOT included: the encrypted vault (passwords, IDs, account numbers).',
@@ -221,6 +225,7 @@ export function registerExportHandlers(ipcMain: IpcMain): void {
           'calendar.ics',
           'transactions.csv',
           'subscriptions.csv',
+          'assets.csv',
           'manifest.txt'
         ],
         knowledgeCount

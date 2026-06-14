@@ -10,6 +10,7 @@ import {
   Download,
   FileText,
   FolderOpen,
+  Home,
   Inbox,
   LayoutDashboard,
   LineChart,
@@ -198,6 +199,24 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       icon: <CreditCard size={15} />,
       action: () => nav('/subscriptions'),
       keywords: ['subscriptions', 'recurring', 'renewals', 'bills', 'memberships', 'cancel']
+    },
+    {
+      id: 'assets',
+      label: 'Household & Assets',
+      description: 'Property, vehicles, insurance, warranties',
+      icon: <Home size={15} />,
+      action: () => nav('/assets'),
+      keywords: [
+        'assets',
+        'house',
+        'property',
+        'vehicle',
+        'car',
+        'insurance',
+        'warranty',
+        'pet',
+        'value'
+      ]
     },
     {
       id: 'export',

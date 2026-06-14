@@ -416,3 +416,27 @@ export const subscriptions = sqliteTable('subscriptions', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
+
+// ---- Household & Assets (Phase 9.5 — "The Storehouse") ----
+// The things you OWN and the policies/memberships around them: houses & other
+// property and their value, vehicles, insurance, memberships, warranties, pets.
+// One flat table with a `type` discriminator (same pragmatic approach as the
+// vault's category list) keeps the model simple while covering the spread.
+// `reference` holds NON-secret identifiers (policy #, VIN, membership #);
+// anything truly sensitive stays in the encrypted vault. `renewalDate` powers
+// "renews/expires soon" surfacing.
+export const assets = sqliteTable('assets', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  externalId: text('external_id').notNull().unique(), // 'manual:<uuid>'
+  // 'insurance' | 'vehicle' | 'property' | 'membership' | 'warranty' | 'pet' | 'other'
+  type: text('type').notNull().default('other'),
+  name: text('name').notNull(),
+  value: real('value'), // current worth / coverage amount (nullable)
+  provider: text('provider'), // insurer / dealer / club / manufacturer
+  reference: text('reference'), // policy # / VIN / membership # — NON-secret
+  renewalDate: text('renewal_date'), // ISO 'YYYY-MM-DD' — renewal / expiry
+  status: text('status').notNull().default('active'), // active | expired | sold | cancelled
+  notes: text('notes'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})

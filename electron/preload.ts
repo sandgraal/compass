@@ -1,5 +1,6 @@
 import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer } from 'electron'
+import type { AssetInput } from './ipc/assets'
 import type { ContactInput } from './ipc/contacts'
 import type { SubscriptionInput } from './ipc/subscriptions'
 import type { UpdaterStatusPayload } from './ipc/updater'
@@ -279,6 +280,15 @@ const api = {
     importGvoice: () => ipcRenderer.invoke('contacts:import-gvoice'),
     exportVcard: (ids?: number[]) => ipcRenderer.invoke('contacts:export-vcard', { ids }),
     exportCsv: (ids?: number[]) => ipcRenderer.invoke('contacts:export-csv', { ids })
+  },
+
+  // --- Household & Assets (Phase 9.5 — owned, editable, exportable) ---
+  assets: {
+    list: (opts?: { type?: string }) => ipcRenderer.invoke('assets:list', opts),
+    create: (input: AssetInput) => ipcRenderer.invoke('assets:create', input),
+    update: (id: number, updates: AssetInput) => ipcRenderer.invoke('assets:update', id, updates),
+    delete: (id: number) => ipcRenderer.invoke('assets:delete', id),
+    exportCsv: () => ipcRenderer.invoke('assets:export-csv')
   },
 
   // --- Subscriptions (Phase 9.3 — owned, editable, exportable) ---

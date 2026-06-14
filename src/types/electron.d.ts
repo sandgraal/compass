@@ -410,6 +410,32 @@ declare global {
     zombies: DetectedSubscription[]
   }
 
+  // --- Household & Assets (Phase 9.5 — "The Storehouse") ---
+  interface AssetRecord {
+    id: number
+    externalId: string
+    type: string
+    name: string
+    value: number | null
+    provider: string | null
+    reference: string | null
+    renewalDate: string | null
+    status: string
+    notes: string | null
+    createdAt: number | null
+    updatedAt: number | null
+  }
+  interface AssetInput {
+    type?: string
+    name: string
+    value?: number | null
+    provider?: string | null
+    reference?: string | null
+    renewalDate?: string | null
+    status?: string
+    notes?: string | null
+  }
+
   interface Window {
     api: {
       auth: {
@@ -736,6 +762,13 @@ declare global {
         importGvoice(): Promise<ImportResult>
         exportVcard(ids?: number[]): Promise<ExportResult>
         exportCsv(ids?: number[]): Promise<ExportResult>
+      }
+      assets: {
+        list(opts?: { type?: string }): Promise<AssetRecord[]>
+        create(input: AssetInput): Promise<{ success: boolean; id: number }>
+        update(id: number, updates: AssetInput): Promise<{ success: boolean }>
+        delete(id: number): Promise<{ success: boolean }>
+        exportCsv(): Promise<ExportResult>
       }
       subscriptions: {
         list(): Promise<SubscriptionRecord[]>

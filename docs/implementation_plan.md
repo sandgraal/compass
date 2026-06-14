@@ -397,9 +397,12 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 - [ ] **9.4 Medical records** — `medical_*` tables (conditions, medications, providers, visits,
   immunizations); manual entry + optional Apple Health import; CSV/PDF summary export; secret IDs stay in
   the vault.
-- [ ] **9.5 Household & assets** — `assets` domain (insurance auto/home/life, vehicles w/ VIN, property,
-  memberships, warranties w/ expiry, pets) with renewal reminders via the Morning Brief; surfaces value
-  alongside finance net worth.
+- [x] **9.5 Household & assets** — `assets` table (migration `0014`) with a `type` discriminator
+  (insurance/vehicle/property/membership/warranty/pet/other) + `electron/ipc/assets.ts` (CRUD, `export-csv`,
+  shared `buildAssetsCsv`) + `src/pages/Assets.tsx` (grouped by type, value subtotals + total, "renews
+  soon" highlight) + route/sidebar/⌘K + Export Center card + `assets.csv` in `export:export-all`.
+  Non-secret identifiers in `reference`; secrets stay in the vault. *Follow-up:* renewal reminders via the
+  Morning Brief, and surfacing asset value alongside finance net worth.
 - [ ] **9.6 Storehouse Dashboard** — the founding "see ALL my info in one place" view: net worth +
   assets + contacts + documents + subscriptions + upcoming renewals on one screen.
 - [ ] **9.7 Reverse connectors** — where standards exist, write back (e.g. push contacts to a CardDAV

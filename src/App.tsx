@@ -4,6 +4,7 @@ import CommandPalette from './components/CommandPalette'
 import { AppLayout } from './components/layout/AppLayout'
 import { isThemePreference } from './lib/theme'
 import Ask from './pages/Ask'
+import Assets from './pages/Assets'
 import ClaudeInbox from './pages/ClaudeInbox'
 import Contacts from './pages/Contacts'
 import Daily from './pages/Daily'
@@ -77,6 +78,7 @@ export default function App(): JSX.Element {
           <Route path="contacts" element={<Contacts />} />
           <Route path="finance" element={<Finance />} />
           <Route path="subscriptions" element={<Subscriptions />} />
+          <Route path="assets" element={<Assets />} />
           <Route path="export" element={<Export />} />
           <Route path="integrations" element={<Integrations />} />
           <Route path="settings" element={<Settings />} />
