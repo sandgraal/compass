@@ -76,8 +76,24 @@ export const parseDate = (s: string): string => {
   throw new Error(`Unrecognized date: ${s}`)
 }
 
+/**
+ * Content-addressed **dedup key** for `finance_transactions.hash` (the UNIQUE
+ * column). The SHA-1 here is NOT a security primitive — there is no secret, no
+ * signature, no auth; collision-resistance against an adversary is not the
+ * threat model. It exists only so the same real transaction, seen again (CSV
+ * re-scan, Plaid/SimpleFIN re-sync), maps to the same key and dedupes.
+ *
+ * CodeQL's `js/weak-cryptographic-algorithm` flags it as crypto-on-sensitive-
+ * data — a verified false positive for this usage. It is deliberately NOT
+ * upgraded to SHA-256: the `account` argument is not persisted per row
+ * (`finance_transactions.accountId` is null for synced rows), so existing
+ * hashes cannot be recomputed — changing the algorithm would make every
+ * already-stored transaction miss its own row on the next sync and re-insert as
+ * a duplicate (and merge same-day/amount/description transfers). Suppressed
+ * inline rather than risk a personal-finance app's transaction history.
+ */
 export const hashTxn = (date: string, amount: number, desc: string, account: string): string =>
-  createHash('sha1')
+  createHash('sha1') // codeql[js/weak-cryptographic-algorithm] -- non-crypto content-dedup key; see above
     .update(`${date}|${amount.toFixed(2)}|${desc.trim().toLowerCase()}|${account}`)
     .digest('hex')
     .slice(0, 16)
