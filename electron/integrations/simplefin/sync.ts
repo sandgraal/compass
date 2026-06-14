@@ -22,9 +22,11 @@
  *     Sync Log UI.
  *
  * Account classification: SimpleFIN's base `/accounts` payload has no
- * standardized account-type field, so newly-linked accounts default to a
- * 'checking' / 'spending' account. Balances are refreshed every sync, but the
- * `name` / `type` / `assetClass` are preserved after first link so a user's
+ * standardized account-type field, so on first link we classify by name + org
+ * keywords (see classify.ts) — a card/loan becomes a credit/liability so an
+ * Amex doesn't sit on the asset side of net-worth. Balances are refreshed every
+ * sync (debt balances stored positive = owed), but `name` / `type` /
+ * `assetClass` / `isDebt` are set only on first insert so a user's later
  * re-classification in the Accounts UI is never clobbered.
  */
 
@@ -42,6 +44,7 @@ import { type RawTxn, categorize } from '../finance'
 import { applyAtmSplit } from '../finance-atm-split'
 import { tagGeoAndPurpose } from '../finance-geo'
 import { tagTax } from '../finance-tax'
+import { classifySimplefinAccount } from './classify'
 import { type SimplefinAccountsResponse, fetchAccounts } from './client'
 import { SIMPLEFIN_LOOKBACK_DAYS } from './config'
 import { normalizeSimplefinAccount } from './normalize'
@@ -142,8 +145,10 @@ export async function syncSimplefin(
   }
 
   // 5. Upsert accounts + build the account-name lookup. Balance is refreshed
-  //    every sync; name/type/assetClass are set only on first insert so user
-  //    edits survive.
+  //    every sync; name/type/assetClass are classified on first insert only, so
+  //    a user's later re-classification in the Accounts UI is never clobbered.
+  //    For DEBT accounts the stored balance is the positive amount owed (schema
+  //    convention; see finance-snapshot.ts), so we store |balance|.
   const nameMap = new Map<string, string>()
   let accountsUpserted = 0
   for (const acct of response.accounts) {
@@ -153,14 +158,21 @@ export async function syncSimplefin(
     const displayName =
       (acct.name ?? '').trim() || `${orgName || 'SimpleFIN'} ·${acct.id.slice(-4)}`
     const existing = db
-      .select({ id: financeAccounts.id, name: financeAccounts.name })
+      .select({
+        id: financeAccounts.id,
+        name: financeAccounts.name,
+        isDebt: financeAccounts.isDebt
+      })
       .from(financeAccounts)
       .where(eq(financeAccounts.simplefinAccountId, acct.id))
       .get()
     if (existing) {
+      // Respect the account's current debt classification (which the user may
+      // have changed) when deciding the balance sign.
+      const storedBalance = existing.isDebt ? Math.abs(balance) : balance
       db.update(financeAccounts)
         .set({
-          balance,
+          balance: storedBalance,
           institution: orgName,
           simplefinConnectionId: conn.id,
           updatedAt: new Date()
@@ -169,13 +181,15 @@ export async function syncSimplefin(
         .run()
       nameMap.set(acct.id, existing.name)
     } else {
+      const cls = classifySimplefinAccount(displayName, orgName)
       db.insert(financeAccounts)
         .values({
           name: displayName,
-          type: 'checking',
+          type: cls.type,
+          isDebt: cls.isDebt,
           institution: orgName,
-          assetClass: 'spending',
-          balance,
+          assetClass: cls.assetClass,
+          balance: cls.isDebt ? Math.abs(balance) : balance,
           simplefinConnectionId: conn.id,
           simplefinAccountId: acct.id
         })
