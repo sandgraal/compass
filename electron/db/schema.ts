@@ -390,3 +390,29 @@ export const contacts = sqliteTable('contacts', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
+
+// ---- Subscriptions (Phase 9.3 — "The Storehouse") ----
+// First-class, user-OWNED subscription records. Distinct from the *derived*
+// `auditSubscriptions()` detector (electron/integrations/finance-subscriptions.ts),
+// which infers recurring charges from the transaction ledger and stays untouched
+// (the morning-brief price-hike alert depends on it). This table is what the user
+// curates: subscriptions Compass can't see (cash/annual/another card), edits to
+// detected ones (true cost, renewal date, cancel URL), and a place to mark things
+// cancelled. Detected rows can be "tracked" into here; `externalId` dedupes
+// (`detected:<merchant>::<account>` for materialized rows, `manual:<uuid>` else).
+export const subscriptions = sqliteTable('subscriptions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  externalId: text('external_id').notNull().unique(),
+  name: text('name').notNull(),
+  cost: real('cost').notNull().default(0), // per-cadence amount (positive)
+  cadence: text('cadence').notNull().default('monthly'), // weekly|biweekly|monthly|quarterly|semi-annual|yearly
+  category: text('category'),
+  status: text('status').notNull().default('active'), // active|paused|cancelled
+  nextRenewal: text('next_renewal'), // ISO 'YYYY-MM-DD'
+  paymentAccount: text('payment_account'),
+  cancelUrl: text('cancel_url'),
+  notes: text('notes'),
+  source: text('source').notNull().default('manual'), // 'manual' | 'detected'
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})

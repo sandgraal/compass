@@ -20,6 +20,7 @@ import { serializeCsv } from '../lib/csv'
 import { serializeIcs } from '../lib/ics'
 import { KNOWLEDGE_DIR } from '../paths'
 import { buildContactsCsv, buildContactsVcf } from './contacts'
+import { buildSubscriptionsCsv } from './subscriptions'
 
 // ─── Pure builders (also called by export:export-all) ─────────────────────────
 
@@ -184,10 +185,12 @@ export function registerExportHandlers(ipcMain: IpcMain): void {
       const contactsCsv = buildContactsCsv()
       const ics = buildCalendarIcs()
       const txnCsv = buildTransactionsCsv()
+      const subsCsv = buildSubscriptionsCsv()
       writeFileSync(join(root, 'contacts.vcf'), vcf, 'utf-8')
       writeFileSync(join(root, 'contacts.csv'), contactsCsv, 'utf-8')
       writeFileSync(join(root, 'calendar.ics'), ics, 'utf-8')
       writeFileSync(join(root, 'transactions.csv'), txnCsv, 'utf-8')
+      writeFileSync(join(root, 'subscriptions.csv'), subsCsv, 'utf-8')
       const knowledgeCount = copyKnowledgeInto(join(root, 'knowledge'))
 
       const manifest = [
@@ -201,6 +204,7 @@ export function registerExportHandlers(ipcMain: IpcMain): void {
         '  contacts.csv       — spreadsheet-friendly contact list',
         '  calendar.ics       — iCalendar (import into any calendar app)',
         '  transactions.csv   — full finance ledger',
+        '  subscriptions.csv  — tracked subscriptions',
         `  knowledge/         — ${knowledgeCount} markdown note(s)`,
         '',
         'NOT included: the encrypted vault (passwords, IDs, account numbers).',
@@ -211,7 +215,14 @@ export function registerExportHandlers(ipcMain: IpcMain): void {
       return {
         success: true,
         path: root,
-        files: ['contacts.vcf', 'contacts.csv', 'calendar.ics', 'transactions.csv', 'manifest.txt'],
+        files: [
+          'contacts.vcf',
+          'contacts.csv',
+          'calendar.ics',
+          'transactions.csv',
+          'subscriptions.csv',
+          'manifest.txt'
+        ],
         knowledgeCount
       }
     } catch (err) {
