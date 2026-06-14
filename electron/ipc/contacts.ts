@@ -12,7 +12,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { lstatSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { eq, like } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
@@ -425,10 +425,16 @@ function readVoiceHtmlFiles(root: string): Array<{ name: string; content: string
     for (const entry of entries) {
       if (out.length >= MAX_VOICE_FILES || budget <= 0) break
       const full = join(dir, entry)
-      let st: ReturnType<typeof statSync>
+      let st: ReturnType<typeof lstatSync>
       try {
-        st = statSync(full)
+        // lstat (not stat) so we DON'T follow symlinks — a symlinked directory
+        // pointing back at a parent would otherwise cause infinite recursion /
+        // a main-process hang. Symlinks are simply skipped.
+        st = lstatSync(full)
       } catch {
+        continue
+      }
+      if (st.isSymbolicLink()) {
         continue
       }
       if (st.isDirectory()) {

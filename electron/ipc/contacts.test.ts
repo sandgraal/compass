@@ -6,7 +6,7 @@
  * so the vCard/CSV codecs are exercised end-to-end through the handlers.
  */
 
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
@@ -295,6 +295,20 @@ describe('contacts import / export', () => {
     const names = ((await invoke('contacts:list')) as ContactGet[]).map((c) => c.displayName)
     expect(names).toContain('Mom')
     expect(names).toContain('+15550199')
+  })
+
+  it('does not follow symlinks in the Google Voice folder (no infinite recursion)', async () => {
+    const dir = tmp()
+    writeFileSync(
+      join(dir, 'Mom - Text.html'),
+      '<a class="tel" href="tel:+15550100"><abbr class="fn">Mom</abbr></a>'
+    )
+    // A symlink pointing back at its own directory is a cycle if followed —
+    // the walker must skip it (lstat) rather than recurse forever.
+    symlinkSync(dir, join(dir, 'loop'))
+    mockDialog.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [dir] })
+    const res = (await invoke('contacts:import-gvoice')) as ImportRes
+    expect(res).toMatchObject({ success: true, imported: 1 })
   })
 })
 
