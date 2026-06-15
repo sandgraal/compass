@@ -21,6 +21,7 @@ import { registerMorningBriefHandlers } from './ipc/morning-brief'
 import { registerObsidianHandlers } from './ipc/obsidian'
 import { registerPlaidHandlers } from './ipc/plaid'
 import { registerQuickCaptureHandlers } from './ipc/quick-capture'
+import { registerRecordsHandlers } from './ipc/records'
 import { registerSearchHandlers } from './ipc/search'
 import { registerSettingsHandlers } from './ipc/settings'
 import { registerSimplefinHandlers } from './ipc/simplefin'
@@ -150,6 +151,7 @@ app.whenReady().then(async () => {
   registerSubscriptionsHandlers(ipcMain)
   registerAssetsHandlers(ipcMain)
   registerStorehouseHandlers(ipcMain)
+  registerRecordsHandlers(ipcMain)
   registerClaudeHandlers(ipcMain)
   registerUpdaterHandlers(ipcMain)
   registerBackupHandlers(ipcMain)

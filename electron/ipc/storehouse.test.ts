@@ -34,6 +34,11 @@ beforeEach(() => {
       name TEXT NOT NULL, value REAL, provider TEXT, reference TEXT, renewal_date TEXT,
       status TEXT NOT NULL DEFAULT 'active', notes TEXT, created_at INTEGER, updated_at INTEGER
     );
+    CREATE TABLE records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, type TEXT NOT NULL,
+      occurred_at INTEGER, title TEXT NOT NULL, body TEXT, payload TEXT,
+      dedup_hash TEXT NOT NULL UNIQUE, provenance TEXT, ingested_at INTEGER
+    );
   `)
 })
 

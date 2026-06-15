@@ -1,5 +1,5 @@
 import { electronAPI } from '@electron-toolkit/preload'
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AssetInput } from './ipc/assets'
 import type { ContactInput } from './ipc/contacts'
 import type { SubscriptionInput } from './ipc/subscriptions'
@@ -293,6 +293,15 @@ const api = {
   // --- Storehouse overview (Phase 9.6 — "see ALL my info in one place") ---
   storehouse: {
     summary: () => ipcRenderer.invoke('storehouse:summary')
+  },
+
+  // --- Records / Timeline (Phase 10.1 — the Drop Zone) ---
+  records: {
+    list: (opts?: { source?: string; type?: string; limit?: number; offset?: number }) =>
+      ipcRenderer.invoke('records:list', opts),
+    importFiles: () => ipcRenderer.invoke('records:import'),
+    importPaths: (paths: string[]) => ipcRenderer.invoke('records:import-paths', paths),
+    pathsForFiles: (files: File[]) => files.map((f) => webUtils.getPathForFile(f))
   },
 
   // --- Household & Assets (Phase 9.5 — owned, editable, exportable) ---

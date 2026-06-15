@@ -5,6 +5,7 @@ import {
   CalendarDays,
   CalendarRange,
   CheckSquare,
+  Clock,
   CreditCard,
   DollarSign,
   Download,
@@ -113,6 +114,14 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       icon: <Layers size={15} />,
       action: () => nav('/storehouse'),
       keywords: ['storehouse', 'overview', 'everything', 'all my info', 'summary']
+    },
+    {
+      id: 'timeline',
+      label: 'Timeline',
+      description: 'Import data exports onto your timeline',
+      icon: <Clock size={15} />,
+      action: () => nav('/timeline'),
+      keywords: ['timeline', 'import', 'records', 'history', 'drop', 'netflix', 'spotify']
     },
     {
       id: 'daily',

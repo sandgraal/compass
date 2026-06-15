@@ -21,6 +21,7 @@ import { serializeIcs } from '../lib/ics'
 import { KNOWLEDGE_DIR } from '../paths'
 import { buildAssetsCsv } from './assets'
 import { buildContactsCsv, buildContactsVcf } from './contacts'
+import { buildRecordsCsv } from './records'
 import { buildSubscriptionsCsv } from './subscriptions'
 
 // ─── Pure builders (also called by export:export-all) ─────────────────────────
@@ -188,12 +189,14 @@ export function registerExportHandlers(ipcMain: IpcMain): void {
       const txnCsv = buildTransactionsCsv()
       const subsCsv = buildSubscriptionsCsv()
       const assetsCsv = buildAssetsCsv()
+      const recordsCsv = buildRecordsCsv()
       writeFileSync(join(root, 'contacts.vcf'), vcf, 'utf-8')
       writeFileSync(join(root, 'contacts.csv'), contactsCsv, 'utf-8')
       writeFileSync(join(root, 'calendar.ics'), ics, 'utf-8')
       writeFileSync(join(root, 'transactions.csv'), txnCsv, 'utf-8')
       writeFileSync(join(root, 'subscriptions.csv'), subsCsv, 'utf-8')
       writeFileSync(join(root, 'assets.csv'), assetsCsv, 'utf-8')
+      writeFileSync(join(root, 'records.csv'), recordsCsv, 'utf-8')
       const knowledgeCount = copyKnowledgeInto(join(root, 'knowledge'))
 
       const manifest = [
@@ -209,6 +212,7 @@ export function registerExportHandlers(ipcMain: IpcMain): void {
         '  transactions.csv   — full finance ledger',
         '  subscriptions.csv  — tracked subscriptions',
         '  assets.csv         — household & assets (property, vehicles, insurance…)',
+        '  records.csv        — imported data exports on your unified timeline',
         `  knowledge/         — ${knowledgeCount} markdown note(s)`,
         '',
         'NOT included: the encrypted vault (passwords, IDs, account numbers).',
@@ -226,6 +230,7 @@ export function registerExportHandlers(ipcMain: IpcMain): void {
           'transactions.csv',
           'subscriptions.csv',
           'assets.csv',
+          'records.csv',
           'manifest.txt'
         ],
         knowledgeCount

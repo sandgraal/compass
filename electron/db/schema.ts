@@ -346,6 +346,27 @@ export const habitEntries = sqliteTable('habit_entries', {
   completed: integer('completed', { mode: 'boolean' }).default(false)
 })
 
+// ---- Records / Timeline (Phase 10 — "The Acquisition Engine", Wave 10.1) ----
+// One append-only, polymorphic event log. Anything the Drop Zone ingests from a
+// data export (Netflix history, Spotify history, any dated CSV/JSON) lands here as
+// a typed event on a unified timeline. `payload` keeps the full original row as
+// JSON (the same JSON-in-text idiom as contacts/githubItems); `dedupHash` is the
+// content-addressed UNIQUE key (mirrors `financeTransactions.hash`) so re-importing
+// the same export upserts in place instead of duplicating. Typed projections come
+// later; for now everything is queried straight off this table.
+export const records = sqliteTable('records', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  source: text('source').notNull(), // recognizer id: 'netflix' | 'spotify' | 'generic'
+  type: text('type').notNull(), // event kind: 'watch' | 'listen' | 'event'
+  occurredAt: integer('occurred_at', { mode: 'timestamp_ms' }), // when it happened (nullable)
+  title: text('title').notNull(), // timeline display string
+  body: text('body'), // optional secondary line (e.g. "23 min")
+  payload: text('payload'), // full original row as JSON
+  dedupHash: text('dedup_hash').notNull().unique(), // content-addressed dedup key
+  provenance: text('provenance'), // import filename / batch
+  ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
 // ---- Knowledge Suggestions ----
 export const knowledgeSuggestions = sqliteTable('knowledge_suggestions', {
   id: integer('id').primaryKey({ autoIncrement: true }),
