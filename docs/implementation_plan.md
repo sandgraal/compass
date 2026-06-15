@@ -423,6 +423,45 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 
 ---
 
+## Phase 10 — "The Acquisition Engine": go out and get everything you have a right to
+
+> **Goal:** the next horizon beyond Phase 9. Phase 9 proved the *ingest → own → export* spine for domains you
+> put in or import from a file; Phase 10 goes *out* to **acquire everything you have a legal right to** —
+> credit reports, health records (FHIR), tax/earnings history, the big platform takeouts — via four
+> ingestion modes (**LIVE** API · **EXPORT** bulk archive · **RIGHTS** legally-owed disclosure · **CRED**
+> portal automation), and folds it into one owned, queryable life timeline. Full vision, source catalog,
+> architecture, and guardrails: [`storehouse-roadmap.md`](storehouse-roadmap.md).
+>
+> Reuses Phase 9's spine; **CRED generalizes the SimpleFIN "the user (not the developer) owns the data
+> relationship" decision.** Every source registers with the Universal Export Center (9.0); the vault is never
+> exported in plaintext; the assistant/MCP see summaries only.
+
+- [ ] **10.1 The acquisition spine** — the **Drop Zone** (universal archive import + format-recognizer
+  registry, generalizing `electron/lib/{vcard,ics,csv,archive-importers}.ts` + the finance CSV/PDF importers)
+  + the unified **`records`/timeline store** (migration `0015`, dedup via a `hash` UNIQUE like
+  `finance_transactions`) + a basic **Timeline** page. *Everything else hangs off this — build first.*
+- [ ] **10.2 Financial & credit completeness** — credit reports (AnnualCreditReport / FCRA), brokerage &
+  retirement holdings (SnapTrade or Plaid Investments), IRS/tax transcripts, crypto. Extends Phase 4.
+- [ ] **10.3 Health & medical** — Apple Health `export.xml` → FHIR / Blue Button patient access (evaluate
+  self-hosted Fasten Health) → genetics → wearables. Feeds the Phase 9.4 `medical_*` tables.
+- [ ] **10.4 Digital footprint & comms** — the big takeouts (Google/Meta/X/LinkedIn/Amazon/Spotify), browser
+  history, iMessage (`chat.db`), email archive. Heavy reuse of `archive-importers.ts`.
+- [ ] **10.5 Government & official + Data-Rights Concierge** — SSA, IRS, property/court/travel records,
+  data-broker file disclosures + opt-outs, and the **request → track → ingest** workflow (reuses the Morning
+  Brief scheduler).
+- [ ] **10.6 Credential-Based Aggregation Engine** — the **Portal Automation Sandbox** (extends the Plaid
+  Link child-window bridge): opt-in, vault-backed (`portal-credentials`), isolated, assisted-login for MFA.
+  Cross-cutting + riskiest → **last**.
+- [ ] **10.7 Advanced leverage** — rich unified timeline, cross-source insights (sleep vs. spending, "on this
+  day"), Ask-Compass-over-everything (extends the Phase 5.9 semantic index + Phase 8.5 agent tools), combined
+  dashboards. *(Basic timeline + Ask-over-it ship incrementally from 10.1.)*
+
+> Build order: 10.1 (spine) → 10.2 / 10.3 / 10.4 (independent, parallelizable) → 10.5 → 10.6 (gated) → 10.7
+> (delivered incrementally throughout). Each wave is its own PR(s) with tests + a `security-auditor` pass on
+> any new credential or export path.
+
+---
+
 ## Backlog (deferred, considered but out of scope this round)
 
 ## Phase 5 — Strategic-review follow-ups (May 2026)

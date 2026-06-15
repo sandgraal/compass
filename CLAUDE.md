@@ -13,6 +13,7 @@ All user data stays on disk; only OAuth tokens leave the machine (and only to Go
 
 ## Pointers (do not duplicate the content here — go read these)
 - Master plan + checklist → [`docs/implementation_plan.md`](docs/implementation_plan.md)
+- Storehouse / data-acquisition roadmap (Phase 10) → [`docs/storehouse-roadmap.md`](docs/storehouse-roadmap.md)
 - Architecture, IPC map, security model → [`docs/architecture.md`](docs/architecture.md)
 - TS/React style + IPC + toast patterns → [`docs/conventions.md`](docs/conventions.md)
 - Adding a new integration → [`docs/integrations.md`](docs/integrations.md)
