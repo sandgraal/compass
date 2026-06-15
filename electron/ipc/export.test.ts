@@ -97,6 +97,11 @@ beforeEach(async () => {
       value REAL, provider TEXT, reference TEXT, renewal_date TEXT,
       status TEXT NOT NULL DEFAULT 'active', notes TEXT, created_at INTEGER, updated_at INTEGER
     );
+    CREATE TABLE records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, type TEXT NOT NULL,
+      occurred_at INTEGER, title TEXT NOT NULL, body TEXT, payload TEXT,
+      dedup_hash TEXT NOT NULL UNIQUE, provenance TEXT, ingested_at INTEGER
+    );
   `)
   // Seed one row per exported domain.
   sqlite
@@ -105,6 +110,11 @@ beforeEach(async () => {
   sqlite
     .prepare('INSERT INTO assets (external_id, type, name, value) VALUES (?, ?, ?, ?)')
     .run('manual:a1', 'property', 'Lake House', 350000)
+  sqlite
+    .prepare(
+      "INSERT INTO records (source, type, occurred_at, title, dedup_hash) VALUES ('netflix', 'watch', ?, ?, ?)"
+    )
+    .run(Date.UTC(2026, 0, 2), 'The Matrix', 'rh1')
   sqlite
     .prepare('INSERT INTO contacts (external_id, display_name, emails) VALUES (?, ?, ?)')
     .run('uid-1', 'Ada Lovelace', JSON.stringify([{ value: 'ada@example.com' }]))
@@ -160,6 +170,8 @@ describe('export:export-all', () => {
     expect(readFileSync(join(dir, 'transactions.csv'), 'utf-8')).toContain('Coffee')
     expect(readFileSync(join(dir, 'subscriptions.csv'), 'utf-8')).toContain('Netflix')
     expect(readFileSync(join(dir, 'assets.csv'), 'utf-8')).toContain('Lake House')
+    expect(existsSync(join(dir, 'records.csv'))).toBe(true)
+    expect(readFileSync(join(dir, 'records.csv'), 'utf-8')).toContain('The Matrix')
   })
 
   it('NEVER writes vault data and says so in the manifest', async () => {

@@ -15,7 +15,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
 import type * as schema from '../db/schema'
-import { assets, contacts, subscriptions } from '../db/schema'
+import { assets, contacts, records, subscriptions } from '../db/schema'
 import { annualizeCost } from './subscriptions'
 
 const RENEWAL_HORIZON_DAYS = 60
@@ -28,6 +28,7 @@ export interface StorehouseSummary {
     totalValue: number
     byType: Array<{ type: string; count: number; value: number }>
   }
+  records: { count: number }
   upcomingRenewals: Array<{
     source: 'subscription' | 'asset'
     name: string
@@ -55,6 +56,7 @@ export function buildStorehouseSummary(
   today: Date
 ): StorehouseSummary {
   const contactRows = db.select({ id: contacts.id }).from(contacts).all()
+  const recordRows = db.select({ id: records.id }).from(records).all()
 
   const subRows = db.select().from(subscriptions).all()
   const activeSubs = subRows.filter((s) => s.status === 'active')
@@ -100,6 +102,7 @@ export function buildStorehouseSummary(
     contacts: { count: contactRows.length },
     subscriptions: { activeCount: activeSubs.length, annualTotal },
     assets: { count: assetRows.length, totalValue, byType },
+    records: { count: recordRows.length },
     upcomingRenewals: renewals
   }
 }

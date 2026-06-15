@@ -17,6 +17,7 @@ import Monthly from './pages/Monthly'
 import Settings from './pages/Settings'
 import Storehouse from './pages/Storehouse'
 import Subscriptions from './pages/Subscriptions'
+import Timeline from './pages/Timeline'
 import Vault from './pages/Vault'
 import Weekly from './pages/Weekly'
 import { useAppStore } from './store/appStore'
@@ -81,6 +82,7 @@ export default function App(): JSX.Element {
           <Route path="subscriptions" element={<Subscriptions />} />
           <Route path="assets" element={<Assets />} />
           <Route path="storehouse" element={<Storehouse />} />
+          <Route path="timeline" element={<Timeline />} />
           <Route path="export" element={<Export />} />
           <Route path="integrations" element={<Integrations />} />
           <Route path="settings" element={<Settings />} />

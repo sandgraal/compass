@@ -437,6 +437,33 @@ declare global {
   }
 
   // --- Storehouse overview (Phase 9.6) ---
+  interface TimelineRecord {
+    id: number
+    source: string
+    type: string
+    occurredAt: number | null
+    title: string
+    body: string | null
+    payload: string | null
+    provenance: string | null
+    ingestedAt: number | null
+  }
+
+  interface RecordsImportResult {
+    success: boolean
+    canceled?: boolean
+    error?: string
+    imported: number
+    duplicates: number
+    perFile: Array<{
+      file: string
+      recognizer: string | null
+      imported: number
+      duplicates: number
+    }>
+    unrecognized: string[]
+  }
+
   interface StorehouseSummary {
     contacts: { count: number }
     subscriptions: { activeCount: number; annualTotal: number }
@@ -445,6 +472,7 @@ declare global {
       totalValue: number
       byType: Array<{ type: string; count: number; value: number }>
     }
+    records: { count: number }
     upcomingRenewals: Array<{
       source: 'subscription' | 'asset'
       name: string
@@ -804,6 +832,17 @@ declare global {
       }
       storehouse: {
         summary(): Promise<StorehouseSummary>
+      }
+      records: {
+        list(opts?: {
+          source?: string
+          type?: string
+          limit?: number
+          offset?: number
+        }): Promise<TimelineRecord[]>
+        importFiles(): Promise<RecordsImportResult>
+        importPaths(paths: string[]): Promise<RecordsImportResult>
+        pathsForFiles(files: File[]): string[]
       }
       assets: {
         list(opts?: { type?: string }): Promise<AssetRecord[]>
