@@ -438,7 +438,7 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 
 - [ ] **10.1 The acquisition spine** — the **Drop Zone** (universal archive import + format-recognizer
   registry, generalizing `electron/lib/{vcard,ics,csv,archive-importers}.ts` + the finance CSV/PDF importers)
-  + the unified **`records`/timeline store** (migration `0015`, dedup via a `hash` UNIQUE like
+  + the unified **`records`/timeline store** (migration `0016`, dedup via a `hash` UNIQUE like
   `finance_transactions`) + a basic **Timeline** page. *Everything else hangs off this — build first.*
 - [ ] **10.2 Financial & credit completeness** — credit reports (AnnualCreditReport / FCRA), brokerage &
   retirement holdings (SnapTrade or Plaid Investments), IRS/tax transcripts, crypto. Extends Phase 4.
