@@ -69,7 +69,7 @@ the long tail, add **one append-only typed event log**:
 `records { id, source, type, occurredAt, payload (JSON), dedupHash UNIQUE, provenance }` — plus typed
 projections for the heavy hitters. This is what makes cross-source leverage possible: "watched X," "ran 5k,"
 "bought Y," "lab result Z," "entered the country on D" all share a spine and a timeline. Dedup mirrors the
-proven `finance_transactions.hash` UNIQUE idempotency. Next migration is `0015` (assets took `0014`).
+proven `finance_transactions.hash` UNIQUE idempotency. Next migration is `0016` (assets took `0014`, SimpleFIN took `0015`).
 
 ### C. The Data-Rights Concierge
 For RIGHTS sources, a guided **request → track → ingest** workflow that knows each mechanism
