@@ -80,7 +80,7 @@
     "recharts": "^3.8.1",
     "tailwind-merge": "^2.5.4",
     "tailwindcss-animate": "^1.0.7",
-    "vite": "^6.4.2",
+    "vite": "^6.4.3",
     "yauzl": "^3.4.0",
     "zustand": "^5.0.2"
   },
