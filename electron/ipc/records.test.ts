@@ -156,3 +156,24 @@ describe('buildRecordsCsv', () => {
     expect(csv).toContain('netflix')
   })
 })
+
+describe('records:import-paths — Apple Health (streaming)', () => {
+  it('aggregates a health export and dedupes on re-import', async () => {
+    const xml = fixture(
+      'export.xml',
+      [
+        '<HealthData>',
+        '<Record type="HKQuantityTypeIdentifierStepCount" startDate="2026-01-02 08:00:00 -0700" endDate="2026-01-02 08:05:00 -0700" value="2000"/>',
+        '<Workout workoutActivityType="HKWorkoutActivityTypeWalking" duration="20" durationUnit="min" startDate="2026-01-02 09:00:00 -0700" endDate="2026-01-02 09:20:00 -0700"/>',
+        '</HealthData>'
+      ].join('\n')
+    )
+    const r1 = (await invoke('records:import-paths', [xml])) as ImportResult
+    expect(r1.perFile[0].recognizer).toBe('apple-health')
+    expect(r1.imported).toBe(2) // 1 daily steps rollup + 1 workout
+
+    const r2 = (await invoke('records:import-paths', [xml])) as ImportResult
+    expect(r2.imported).toBe(0)
+    expect(r2.duplicates).toBe(2)
+  })
+})

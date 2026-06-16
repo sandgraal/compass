@@ -11,7 +11,7 @@
  * to the MCP/assistant in 10.1 (a unified timeline is sensitive) — summaries only.
  */
 
-import { readFileSync, statSync } from 'node:fs'
+import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
 import { basename, extname } from 'node:path'
 import { type SQL, and, desc, eq } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
@@ -19,10 +19,23 @@ import { getDb } from '../db/client'
 import { records } from '../db/schema'
 import { updateRecordsKnowledge } from '../knowledge/records-extractor'
 import { serializeCsv } from '../lib/csv'
-import { type RecordInput, hashRecord, recognize } from '../lib/recognizers'
+import { type RecordInput, hashRecord, recognize, recognizeStream } from '../lib/recognizers'
 
 const MAX_IMPORT_BYTES = 50 * 1024 * 1024 // 50 MB — matches the contacts/finance guard
+const MAX_STREAM_BYTES = 2 * 1024 ** 3 // 2 GB — streaming recognizers (e.g. Apple Health export.xml)
 const MAX_FILES = 50
+
+/** Read the first `bytes` of a file without loading the whole thing (head-sniff for detection). */
+function readHead(path: string, bytes: number): string {
+  const fd = openSync(path, 'r')
+  try {
+    const buf = Buffer.allocUnsafe(bytes)
+    const n = readSync(fd, buf, 0, bytes, 0)
+    return buf.toString('utf-8', 0, n)
+  } finally {
+    closeSync(fd)
+  }
+}
 
 export interface RecordsImportResult {
   success: boolean
@@ -75,7 +88,7 @@ function insertRecords(inputs: RecordInput[], provenance: string): { imported: n
 }
 
 /** Core ingest shared by the dialog + drag-drop handlers. */
-function ingestFiles(paths: string[]): RecordsImportResult {
+async function ingestFiles(paths: string[]): Promise<RecordsImportResult> {
   const perFile: RecordsImportResult['perFile'] = []
   const unrecognized: string[] = []
   let imported = 0
@@ -84,25 +97,48 @@ function ingestFiles(paths: string[]): RecordsImportResult {
   for (const fp of paths) {
     const name = basename(fp)
     try {
-      if (statSync(fp).size > MAX_IMPORT_BYTES) {
+      const size = statSync(fp).size
+      const ext = extname(name).slice(1).toLowerCase()
+      // Small files: read fully (text recognizers need the whole string). Large files:
+      // read only a head for detection — a streaming recognizer reads the rest itself.
+      const text = size <= MAX_IMPORT_BYTES ? readFileSync(fp, 'utf-8').replace(/^﻿/, '') : null
+      const head = (text ?? readHead(fp, 65536)).slice(0, 65536).replace(/^﻿/, '')
+
+      let inputs: RecordInput[] | null = null
+      let recognizer: string | null = null
+
+      const sr = recognizeStream({ name, ext, head })
+      if (sr) {
+        if (size > MAX_STREAM_BYTES) {
+          unrecognized.push(`${name} (too large, max 2 GB)`)
+          perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
+          continue
+        }
+        inputs = await sr.parseStream(fp)
+        recognizer = sr.id
+      } else if (text != null) {
+        const rec = recognize({ name, ext, text })
+        if (rec) {
+          inputs = rec.parse({ name, ext, text })
+          recognizer = rec.id
+        }
+      } else {
+        // Big file no streaming recognizer claimed — we won't read it into memory.
         unrecognized.push(`${name} (too large, max 50 MB)`)
         perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
         continue
       }
-      const text = readFileSync(fp, 'utf-8').replace(/^﻿/, '')
-      const ext = extname(name).slice(1).toLowerCase()
-      const rec = recognize({ name, ext, text })
-      if (!rec) {
+
+      if (inputs == null) {
         unrecognized.push(name)
         perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
         continue
       }
-      const inputs = rec.parse({ name, ext, text })
       const { imported: imp } = insertRecords(inputs, name)
       const dup = inputs.length - imp
       imported += imp
       duplicates += dup
-      perFile.push({ file: name, recognizer: rec.id, imported: imp, duplicates: dup })
+      perFile.push({ file: name, recognizer, imported: imp, duplicates: dup })
     } catch (err) {
       unrecognized.push(`${name} (${String(err)})`)
       perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
@@ -176,10 +212,13 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
     return ingestFiles(filePaths.slice(0, MAX_FILES))
   })
 
-  ipcMain.handle('records:import-paths', (_event, paths: string[]): RecordsImportResult => {
-    if (!Array.isArray(paths) || paths.length === 0) {
-      return { success: false, error: 'No files provided', ...EMPTY }
+  ipcMain.handle(
+    'records:import-paths',
+    async (_event, paths: string[]): Promise<RecordsImportResult> => {
+      if (!Array.isArray(paths) || paths.length === 0) {
+        return { success: false, error: 'No files provided', ...EMPTY }
+      }
+      return ingestFiles(paths.filter((p) => typeof p === 'string').slice(0, MAX_FILES))
     }
-    return ingestFiles(paths.filter((p) => typeof p === 'string').slice(0, MAX_FILES))
-  })
+  )
 }
