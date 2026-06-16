@@ -211,3 +211,19 @@ describe('records:import-paths — Email mbox (streaming)', () => {
     expect(r2.duplicates).toBe(2)
   })
 })
+
+describe('records:import-paths — Google Takeout (.zip container)', () => {
+  it('unwraps a Takeout zip and routes entries through the recognizers', async () => {
+    const zip = join(process.cwd(), 'electron', 'lib', '__fixtures__', 'takeout-sample.zip')
+    const r1 = (await invoke('records:import-paths', [zip])) as ImportResult
+    expect(r1.imported).toBe(3) // 2 emails (mbox) + 1 youtube watch
+    const recognizers = r1.perFile.map((f) => f.recognizer)
+    expect(recognizers).toContain('email')
+    expect(recognizers).toContain('youtube')
+    expect(r1.unrecognized.join(' ')).toContain('photo.jpg') // binary skipped, not extracted
+
+    const r2 = (await invoke('records:import-paths', [zip])) as ImportResult
+    expect(r2.imported).toBe(0)
+    expect(r2.duplicates).toBe(3)
+  })
+})
