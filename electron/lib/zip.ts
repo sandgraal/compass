@@ -19,8 +19,8 @@ import { basename, extname, join } from 'node:path'
 import yauzl from 'yauzl'
 
 const INGESTABLE = new Set(['csv', 'json', 'xml', 'mbox', 'txt', 'html', 'htm'])
-const MAX_ZIP_ENTRIES = 5000
-const MAX_ZIP_TOTAL = 5 * 1024 ** 3 // 5 GB uncompressed across the archive (zip-bomb guard)
+const MAX_ZIP_ENTRIES = 50000 // total entries ENUMERATED before we bail (high-entry-count bomb guard)
+const MAX_ZIP_TOTAL = 5 * 1024 ** 3 // 5 GB uncompressed extracted across the archive (bomb guard)
 const MAX_ENTRY_BYTES = 2 * 1024 ** 3 // per-entry uncompressed cap
 
 export interface ZipResult {
@@ -59,7 +59,8 @@ export async function forEachZipEntry(
 ): Promise<ZipResult> {
   const skipped: string[] = []
   const tmpDir = mkdtempSync(join(tmpdir(), 'compass-zip-'))
-  let count = 0
+  let enumerated = 0 // every entry walked — bounds how far we read a high-entry-count bomb
+  let extracted = 0
   let total = 0
   const zip = await openZip(zipPath)
 
@@ -69,6 +70,11 @@ export async function forEachZipEntry(
       zip.on('entry', (entry: yauzl.Entry) => {
         void (async () => {
           try {
+            if (++enumerated > MAX_ZIP_ENTRIES) {
+              skipped.push(`(stopped — over ${MAX_ZIP_ENTRIES} entries)`)
+              resolve() // bail without enumerating the rest of the archive
+              return
+            }
             const name = entry.fileName
             const ext = extname(name).slice(1).toLowerCase()
             if (name.endsWith('/')) {
@@ -77,12 +83,13 @@ export async function forEachZipEntry(
               skipped.push(basename(name))
             } else if (entry.uncompressedSize > MAX_ENTRY_BYTES) {
               skipped.push(`${basename(name)} (too large)`)
-            } else if (count >= MAX_ZIP_ENTRIES || total + entry.uncompressedSize > MAX_ZIP_TOTAL) {
-              skipped.push(`${basename(name)} (archive limit)`)
+            } else if (total + entry.uncompressedSize > MAX_ZIP_TOTAL) {
+              skipped.push(`${basename(name)} (archive size limit)`)
             } else {
-              count++
               total += entry.uncompressedSize
-              const tmpPath = join(tmpDir, `${count}-${basename(name)}`)
+              // Temp name is OURS (a counter) — never the archive's path, which could
+              // carry invalid/hostile characters. The real name goes to onEntry.
+              const tmpPath = join(tmpDir, `e${++extracted}`)
               await extractEntry(zip, entry, tmpPath)
               try {
                 await onEntry(basename(name), tmpPath)

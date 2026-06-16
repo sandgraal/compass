@@ -107,10 +107,9 @@ async function ingestPath(fp: string, name: string, ctx: IngestCtx, depth: numbe
   try {
     const size = statSync(fp).size
     const ext = extname(name).slice(1).toLowerCase()
-    // Small files: read fully (text recognizers need the whole string). Large files:
-    // read only a head for detection — a streaming recognizer reads the rest itself.
-    const text = size <= MAX_IMPORT_BYTES ? readFileSync(fp, 'utf-8').replace(/^﻿/, '') : null
-    const head = (text ?? readHead(fp, 65536)).slice(0, 65536).replace(/^﻿/, '')
+    // Sniff a head first (cheap) so a ZIP is detected WITHOUT reading the whole
+    // archive into a string — it's unwrapped + streamed instead.
+    const head = readHead(fp, 65536).replace(/^﻿/, '')
 
     // ZIP container — unwrap and route each entry through this same dispatch.
     if (isZip(ext, head) && depth < MAX_ZIP_DEPTH) {
@@ -120,6 +119,9 @@ async function ingestPath(fp: string, name: string, ctx: IngestCtx, depth: numbe
       for (const s of skipped) ctx.unrecognized.push(`${name} ▸ ${s}`)
       return
     }
+
+    // Not a zip: small files get a full read so the text recognizers can use it.
+    const text = size <= MAX_IMPORT_BYTES ? readFileSync(fp, 'utf-8').replace(/^﻿/, '') : null
 
     let inputs: RecordInput[] | null = null
     let recognizer: string | null = null
