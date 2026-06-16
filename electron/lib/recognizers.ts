@@ -15,6 +15,7 @@
 import { createHash } from 'node:crypto'
 import { parseAppleHealth } from './apple-health'
 import { parseCSV } from './csv'
+import { parseMbox } from './mbox'
 
 export type RecordInput = {
   source: string
@@ -245,7 +246,14 @@ const appleHealth: StreamingRecognizer = {
   parseStream: parseAppleHealth
 }
 
-export const STREAM_RECOGNIZERS: StreamingRecognizer[] = [appleHealth]
+const email: StreamingRecognizer = {
+  id: 'email',
+  label: 'Email archive',
+  detectHead: (f) => f.ext === 'mbox' || /^From \S+ .*\d{4}/m.test(f.head.slice(0, 4096)),
+  parseStream: parseMbox
+}
+
+export const STREAM_RECOGNIZERS: StreamingRecognizer[] = [appleHealth, email]
 
 /** First streaming recognizer that claims this file (by head sniff), or null. */
 export function recognizeStream(f: StreamHead): StreamingRecognizer | null {

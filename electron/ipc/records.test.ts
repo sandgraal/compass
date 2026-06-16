@@ -179,3 +179,35 @@ describe('records:import-paths — Apple Health (streaming)', () => {
     expect(r2.duplicates).toBe(2)
   })
 })
+
+describe('records:import-paths — Email mbox (streaming)', () => {
+  it('imports an mbox and dedupes on re-import', async () => {
+    const mbox = fixture(
+      'All mail.mbox',
+      [
+        'From 1@mx Mon Jan 02 08:00:00 +0000 2026',
+        'Date: Mon, 2 Jan 2026 08:00:00 +0000',
+        'From: Alice <alice@example.com>',
+        'Subject: Hello',
+        'Message-ID: <m1@example.com>',
+        '',
+        'body one',
+        '',
+        'From 2@mx Tue Jan 03 09:00:00 +0000 2026',
+        'Date: Tue, 3 Jan 2026 09:00:00 +0000',
+        'From: Bob <bob@example.com>',
+        'Subject: Hi',
+        'Message-ID: <m2@example.com>',
+        '',
+        'body two'
+      ].join('\n')
+    )
+    const r1 = (await invoke('records:import-paths', [mbox])) as ImportResult
+    expect(r1.perFile[0].recognizer).toBe('email')
+    expect(r1.imported).toBe(2)
+
+    const r2 = (await invoke('records:import-paths', [mbox])) as ImportResult
+    expect(r2.imported).toBe(0)
+    expect(r2.duplicates).toBe(2)
+  })
+})
