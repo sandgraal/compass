@@ -1,4 +1,4 @@
-import { Clock, FileText, Film, Music, Upload } from 'lucide-react'
+import { Activity, Clock, FileText, Film, Music, Upload } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useToast } from '../components/ui/Toast'
 import { cn } from '../lib/utils'
@@ -8,6 +8,7 @@ const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
 const SOURCE_META: Record<string, { label: string; icon: JSX.Element }> = {
   netflix: { label: 'Netflix', icon: <Film size={13} /> },
   spotify: { label: 'Spotify', icon: <Music size={13} /> },
+  'apple-health': { label: 'Apple Health', icon: <Activity size={13} /> },
   generic: { label: 'Imported', icon: <FileText size={13} /> }
 }
 function sourceMeta(s: string): { label: string; icon: JSX.Element } {

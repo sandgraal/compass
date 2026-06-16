@@ -13,6 +13,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { parseAppleHealth } from './apple-health'
 import { parseCSV } from './csv'
 
 export type RecordInput = {
@@ -215,6 +216,43 @@ export function recognize(f: RecognizerFile): Recognizer | null {
     RECOGNIZERS.find((rec) => {
       try {
         return rec.detect(f)
+      } catch {
+        return false
+      }
+    }) ?? null
+  )
+}
+
+// ── Streaming recognizers (Phase 10.3) ────────────────────────────────────────
+// For sources too large to read into a string and too dense to store 1:1 — e.g.
+// Apple Health `export.xml` (100s of MB, millions of samples). These DETECT on a
+// small head sample and PARSE by streaming the file path themselves (the parser
+// aggregates). The Drop Zone tries these BEFORE the text recognizers.
+
+export type StreamHead = { name: string; ext: string; head: string }
+
+export type StreamingRecognizer = {
+  id: string
+  label: string
+  detectHead: (f: StreamHead) => boolean
+  parseStream: (path: string) => Promise<RecordInput[]>
+}
+
+const appleHealth: StreamingRecognizer = {
+  id: 'apple-health',
+  label: 'Apple Health',
+  detectHead: (f) => f.name.toLowerCase() === 'export.xml' || f.head.includes('<HealthData'),
+  parseStream: parseAppleHealth
+}
+
+export const STREAM_RECOGNIZERS: StreamingRecognizer[] = [appleHealth]
+
+/** First streaming recognizer that claims this file (by head sniff), or null. */
+export function recognizeStream(f: StreamHead): StreamingRecognizer | null {
+  return (
+    STREAM_RECOGNIZERS.find((rec) => {
+      try {
+        return rec.detectHead(f)
       } catch {
         return false
       }

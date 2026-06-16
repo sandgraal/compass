@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { RECOGNIZERS, hashRecord, parseWhen, recognize } from './recognizers'
+import { RECOGNIZERS, hashRecord, parseWhen, recognize, recognizeStream } from './recognizers'
 
 const netflixCsv = 'Title,Date\nThe Matrix,1/2/26\nInception,12/25/25\n'
 const spotifyBasic = JSON.stringify([
@@ -105,5 +105,17 @@ describe('recognize dispatch', () => {
   it('returns null for an unrecognized payload', () => {
     expect(recognize(file('weird.json', '{"not":"an array"}'))).toBeNull()
     expect(recognize(file('notes.txt', 'hello world'))).toBeNull()
+  })
+})
+
+describe('apple health (streaming) recognizer', () => {
+  it('detects export.xml by name or a <HealthData> head', () => {
+    expect(
+      recognizeStream({ name: 'export.xml', ext: 'xml', head: '<?xml version="1.0"?>' })?.id
+    ).toBe('apple-health')
+    expect(
+      recognizeStream({ name: 'foo.xml', ext: 'xml', head: '<HealthData locale="en_US">' })?.id
+    ).toBe('apple-health')
+    expect(recognizeStream({ name: 'other.xml', ext: 'xml', head: '<rss></rss>' })).toBeNull()
   })
 })
