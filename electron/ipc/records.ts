@@ -20,6 +20,7 @@ import { records } from '../db/schema'
 import { updateRecordsKnowledge } from '../knowledge/records-extractor'
 import { serializeCsv } from '../lib/csv'
 import { type RecordInput, hashRecord, recognize, recognizeStream } from '../lib/recognizers'
+import { forEachZipEntry } from '../lib/zip'
 
 const MAX_IMPORT_BYTES = 50 * 1024 * 1024 // 50 MB — matches the contacts/finance guard
 const MAX_STREAM_BYTES = 2 * 1024 ** 3 // 2 GB — streaming recognizers (e.g. Apple Health export.xml)
@@ -87,72 +88,100 @@ function insertRecords(inputs: RecordInput[], provenance: string): { imported: n
   return { imported }
 }
 
+const MAX_ZIP_DEPTH = 1 // unwrap a Takeout .zip, but not zips-within-zips (bomb guard)
+
+interface IngestCtx {
+  perFile: RecordsImportResult['perFile']
+  unrecognized: string[]
+  imported: number
+  duplicates: number
+}
+
+/** Detect a ZIP archive (Google Takeout etc.) by extension or local-file-header magic. */
+function isZip(ext: string, head: string): boolean {
+  return ext === 'zip' || head.startsWith('PK\x03\x04')
+}
+
+/** Resolve one file: a ZIP unwraps + recurses; anything else routes through the recognizers. */
+async function ingestPath(fp: string, name: string, ctx: IngestCtx, depth: number): Promise<void> {
+  try {
+    const size = statSync(fp).size
+    const ext = extname(name).slice(1).toLowerCase()
+    // Sniff a head first (cheap) so a ZIP is detected WITHOUT reading the whole
+    // archive into a string — it's unwrapped + streamed instead.
+    const head = readHead(fp, 65536).replace(/^﻿/, '')
+
+    // ZIP container — unwrap and route each entry through this same dispatch.
+    if (isZip(ext, head) && depth < MAX_ZIP_DEPTH) {
+      const { skipped } = await forEachZipEntry(fp, (entryName, tmpPath) =>
+        ingestPath(tmpPath, entryName, ctx, depth + 1)
+      )
+      for (const s of skipped) ctx.unrecognized.push(`${name} ▸ ${s}`)
+      return
+    }
+
+    // Not a zip: small files get a full read so the text recognizers can use it.
+    const text = size <= MAX_IMPORT_BYTES ? readFileSync(fp, 'utf-8').replace(/^﻿/, '') : null
+
+    let inputs: RecordInput[] | null = null
+    let recognizer: string | null = null
+
+    const sr = recognizeStream({ name, ext, head })
+    if (sr) {
+      if (size > MAX_STREAM_BYTES) {
+        ctx.unrecognized.push(`${name} (too large, max 2 GB)`)
+        ctx.perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
+        return
+      }
+      inputs = await sr.parseStream(fp)
+      recognizer = sr.id
+    } else if (text != null) {
+      const rec = recognize({ name, ext, text })
+      if (rec) {
+        inputs = rec.parse({ name, ext, text })
+        recognizer = rec.id
+      }
+    } else {
+      // Big file no streaming recognizer claimed — we won't read it into memory.
+      ctx.unrecognized.push(`${name} (too large, max 50 MB)`)
+      ctx.perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
+      return
+    }
+
+    if (inputs == null) {
+      ctx.unrecognized.push(name)
+      ctx.perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
+      return
+    }
+    const { imported: imp } = insertRecords(inputs, name)
+    const dup = inputs.length - imp
+    ctx.imported += imp
+    ctx.duplicates += dup
+    ctx.perFile.push({ file: name, recognizer, imported: imp, duplicates: dup })
+  } catch (err) {
+    ctx.unrecognized.push(`${name} (${String(err)})`)
+    ctx.perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
+  }
+}
+
 /** Core ingest shared by the dialog + drag-drop handlers. */
 async function ingestFiles(paths: string[]): Promise<RecordsImportResult> {
-  const perFile: RecordsImportResult['perFile'] = []
-  const unrecognized: string[] = []
-  let imported = 0
-  let duplicates = 0
-
-  for (const fp of paths) {
-    const name = basename(fp)
-    try {
-      const size = statSync(fp).size
-      const ext = extname(name).slice(1).toLowerCase()
-      // Small files: read fully (text recognizers need the whole string). Large files:
-      // read only a head for detection — a streaming recognizer reads the rest itself.
-      const text = size <= MAX_IMPORT_BYTES ? readFileSync(fp, 'utf-8').replace(/^﻿/, '') : null
-      const head = (text ?? readHead(fp, 65536)).slice(0, 65536).replace(/^﻿/, '')
-
-      let inputs: RecordInput[] | null = null
-      let recognizer: string | null = null
-
-      const sr = recognizeStream({ name, ext, head })
-      if (sr) {
-        if (size > MAX_STREAM_BYTES) {
-          unrecognized.push(`${name} (too large, max 2 GB)`)
-          perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
-          continue
-        }
-        inputs = await sr.parseStream(fp)
-        recognizer = sr.id
-      } else if (text != null) {
-        const rec = recognize({ name, ext, text })
-        if (rec) {
-          inputs = rec.parse({ name, ext, text })
-          recognizer = rec.id
-        }
-      } else {
-        // Big file no streaming recognizer claimed — we won't read it into memory.
-        unrecognized.push(`${name} (too large, max 50 MB)`)
-        perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
-        continue
-      }
-
-      if (inputs == null) {
-        unrecognized.push(name)
-        perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
-        continue
-      }
-      const { imported: imp } = insertRecords(inputs, name)
-      const dup = inputs.length - imp
-      imported += imp
-      duplicates += dup
-      perFile.push({ file: name, recognizer, imported: imp, duplicates: dup })
-    } catch (err) {
-      unrecognized.push(`${name} (${String(err)})`)
-      perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
-    }
-  }
-
-  if (imported > 0) {
+  const ctx: IngestCtx = { perFile: [], unrecognized: [], imported: 0, duplicates: 0 }
+  for (const fp of paths) await ingestPath(fp, basename(fp), ctx, 0)
+  if (ctx.imported > 0) {
     try {
       updateRecordsKnowledge()
     } catch {
       /* knowledge refresh is best-effort */
     }
   }
-  return { success: true, imported, duplicates, perFile, unrecognized }
+  return {
+    success: true,
+    imported: ctx.imported,
+    duplicates: ctx.duplicates,
+    perFile: ctx.perFile,
+    unrecognized: ctx.unrecognized
+  }
 }
 
 const CSV_HEADERS = ['occurred_at', 'source', 'type', 'title', 'body']
@@ -204,8 +233,8 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
 
   ipcMain.handle('records:import', async (): Promise<RecordsImportResult> => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: 'Import a data export (CSV / JSON / XML / mbox)',
-      filters: [{ name: 'Data exports', extensions: ['csv', 'json', 'xml', 'mbox'] }],
+      title: 'Import a data export (CSV / JSON / XML / mbox / zip)',
+      filters: [{ name: 'Data exports', extensions: ['csv', 'json', 'xml', 'mbox', 'zip'] }],
       properties: ['openFile', 'multiSelections']
     })
     if (canceled || filePaths.length === 0) return { success: false, canceled: true, ...EMPTY }

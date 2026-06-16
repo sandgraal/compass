@@ -209,7 +209,47 @@ const genericTimeline: Recognizer = {
   }
 }
 
-export const RECOGNIZERS: Recognizer[] = [netflix, spotify, genericTimeline]
+// ── YouTube watch history (Takeout watch-history.json) ────────────────────────
+type YouTubeRow = {
+  header?: string
+  title?: string
+  titleUrl?: string
+  time?: string
+  subtitles?: Array<{ name?: string }>
+}
+const youtube: Recognizer = {
+  id: 'youtube',
+  label: 'YouTube history',
+  detect: (f) => {
+    if (f.ext !== 'json' && !/watch-history/i.test(f.name)) return false
+    const first = safeJsonArray(f.text)[0] as YouTubeRow | undefined
+    return (
+      !!first &&
+      typeof first.title === 'string' &&
+      typeof first.time === 'string' &&
+      (typeof first.titleUrl === 'string' || first.header === 'YouTube')
+    )
+  },
+  parse: (f) => {
+    const out: RecordInput[] = []
+    for (const r of safeJsonArray(f.text) as YouTubeRow[]) {
+      if (!r.time || !r.title) continue
+      const when = Date.parse(r.time)
+      out.push({
+        source: 'youtube',
+        type: 'watch',
+        occurredAt: Number.isNaN(when) ? null : when,
+        title: r.title.replace(/^Watched /, ''),
+        body: r.subtitles?.[0]?.name,
+        payload: r,
+        naturalKey: r.titleUrl || `${r.time}|${r.title}`
+      })
+    }
+    return out
+  }
+}
+
+export const RECOGNIZERS: Recognizer[] = [netflix, spotify, youtube, genericTimeline]
 
 /** First recognizer that claims this file (specific → generic), or null. */
 export function recognize(f: RecognizerFile): Recognizer | null {

@@ -135,3 +135,28 @@ describe('email (mbox streaming) recognizer', () => {
     expect(recognizeStream({ name: 'notes.txt', ext: 'txt', head: 'hello world' })).toBeNull()
   })
 })
+
+describe('youtube recognizer', () => {
+  it('detects + parses watch-history.json', () => {
+    const f = file(
+      'watch-history.json',
+      JSON.stringify([
+        {
+          header: 'YouTube',
+          title: 'Watched Cool Video',
+          titleUrl: 'https://youtu.be/abc',
+          subtitles: [{ name: 'Cool Channel' }],
+          time: '2026-01-04T10:00:00Z'
+        }
+      ])
+    )
+    expect(recognize(f)?.id).toBe('youtube')
+    const out = RECOGNIZERS.find((r) => r.id === 'youtube')?.parse(f) ?? []
+    expect(out[0]).toMatchObject({
+      source: 'youtube',
+      type: 'watch',
+      title: 'Cool Video',
+      body: 'Cool Channel'
+    })
+  })
+})

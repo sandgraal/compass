@@ -81,6 +81,7 @@
     "tailwind-merge": "^2.5.4",
     "tailwindcss-animate": "^1.0.7",
     "vite": "^6.4.2",
+    "yauzl": "^3.4.0",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
@@ -95,6 +96,7 @@
     "@types/node-cron": "^3.0.11",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/yauzl": "^3.4.0",
     "@vitejs/plugin-react": "^4.3.4",
     "@vitest/coverage-v8": "^4.1.8",
     "autoprefixer": "^10.4.20",
