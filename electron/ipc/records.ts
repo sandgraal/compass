@@ -204,8 +204,8 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
 
   ipcMain.handle('records:import', async (): Promise<RecordsImportResult> => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: 'Import a data export (CSV / JSON)',
-      filters: [{ name: 'Data exports', extensions: ['csv', 'json'] }],
+      title: 'Import a data export (CSV / JSON / XML)',
+      filters: [{ name: 'Data exports', extensions: ['csv', 'json', 'xml'] }],
       properties: ['openFile', 'multiSelections']
     })
     if (canceled || filePaths.length === 0) return { success: false, canceled: true, ...EMPTY }
@@ -215,10 +215,13 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(
     'records:import-paths',
     async (_event, paths: string[]): Promise<RecordsImportResult> => {
-      if (!Array.isArray(paths) || paths.length === 0) {
+      const files = Array.isArray(paths)
+        ? paths.filter((p) => typeof p === 'string').slice(0, MAX_FILES)
+        : []
+      if (files.length === 0) {
         return { success: false, error: 'No files provided', ...EMPTY }
       }
-      return ingestFiles(paths.filter((p) => typeof p === 'string').slice(0, MAX_FILES))
+      return ingestFiles(files)
     }
   )
 }

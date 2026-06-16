@@ -107,9 +107,11 @@ describe('records:import-paths', () => {
     expect(res.unrecognized).toContain('junk.json')
   })
 
-  it('rejects a non-array payload arg', async () => {
-    const res = (await invoke('records:import-paths', null)) as { success: boolean }
-    expect(res.success).toBe(false)
+  it('rejects a non-array or all-non-string payload arg', async () => {
+    const nonArray = (await invoke('records:import-paths', null)) as { success: boolean }
+    expect(nonArray.success).toBe(false)
+    const noStrings = (await invoke('records:import-paths', [123, null])) as { success: boolean }
+    expect(noStrings.success).toBe(false)
   })
 })
 
