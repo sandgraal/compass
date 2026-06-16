@@ -119,3 +119,19 @@ describe('apple health (streaming) recognizer', () => {
     expect(recognizeStream({ name: 'other.xml', ext: 'xml', head: '<rss></rss>' })).toBeNull()
   })
 })
+
+describe('email (mbox streaming) recognizer', () => {
+  it('detects .mbox by name or a From-separator head', () => {
+    expect(recognizeStream({ name: 'All mail.mbox', ext: 'mbox', head: 'anything' })?.id).toBe(
+      'email'
+    )
+    expect(
+      recognizeStream({
+        name: 'archive.txt',
+        ext: 'txt',
+        head: 'From 12345@xxx Mon Jan 02 08:00:00 +0000 2026\nDate: ...'
+      })?.id
+    ).toBe('email')
+    expect(recognizeStream({ name: 'notes.txt', ext: 'txt', head: 'hello world' })).toBeNull()
+  })
+})

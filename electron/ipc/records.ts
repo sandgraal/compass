@@ -204,8 +204,8 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
 
   ipcMain.handle('records:import', async (): Promise<RecordsImportResult> => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: 'Import a data export (CSV / JSON / XML)',
-      filters: [{ name: 'Data exports', extensions: ['csv', 'json', 'xml'] }],
+      title: 'Import a data export (CSV / JSON / XML / mbox)',
+      filters: [{ name: 'Data exports', extensions: ['csv', 'json', 'xml', 'mbox'] }],
       properties: ['openFile', 'multiSelections']
     })
     if (canceled || filePaths.length === 0) return { success: false, canceled: true, ...EMPTY }
