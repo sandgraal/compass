@@ -212,7 +212,7 @@ export default function Timeline(): JSX.Element {
                 </span>
                 <span className="text-foreground truncate">{r.title}</span>
                 <span className="ml-auto shrink-0 text-xs text-muted-foreground/70 tabular-nums">
-                  {r.occurredAt ? new Date(r.occurredAt).getFullYear() : ''}
+                  {r.occurredAt ? new Date(r.occurredAt).getUTCFullYear() : ''}
                 </span>
               </div>
             ))}

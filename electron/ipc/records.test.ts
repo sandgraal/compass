@@ -155,25 +155,26 @@ describe('records:list', () => {
 
 describe('records:on-this-day', () => {
   it("returns prior-year records sharing today's month/day, excluding this year", async () => {
-    const now = new Date()
-    const onDay = (y: number) => new Date(y, now.getMonth(), now.getDate(), 12, 0, 0).getTime() // today's month/day, noon
-    const otherDay = new Date(
-      now.getFullYear() - 2,
-      now.getMonth(),
-      now.getDate() + 2,
-      12
-    ).getTime()
-    const ins = sqlite.prepare(
-      'INSERT INTO records (source, type, occurred_at, title, dedup_hash) VALUES (?,?,?,?,?)'
-    )
-    ins.run('netflix', 'watch', onDay(now.getFullYear() - 3), 'Anniversary Movie', 'otd1')
-    ins.run('youtube', 'watch', onDay(now.getFullYear()), 'Today Thing', 'otd2') // current year
-    ins.run('spotify', 'listen', otherDay, 'Wrong Day', 'otd3')
+    // Freeze the clock to a fixed, non-leap-day date: the handler matches against
+    // `new Date()` in UTC, so a real date would be flaky on Feb 29 (prior non-leap
+    // years roll to Mar 1). Fixed UTC fixtures keep it deterministic across zones.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-06-16T12:00:00Z'))
+    try {
+      const ins = sqlite.prepare(
+        'INSERT INTO records (source, type, occurred_at, title, dedup_hash) VALUES (?,?,?,?,?)'
+      )
+      ins.run('netflix', 'watch', Date.parse('2023-06-16T20:00:00Z'), 'Anniversary Movie', 'otd1')
+      ins.run('youtube', 'watch', Date.parse('2026-06-16T09:00:00Z'), 'Today Thing', 'otd2') // this year
+      ins.run('spotify', 'listen', Date.parse('2024-02-10T12:00:00Z'), 'Wrong Day', 'otd3')
 
-    const titles = ((await invoke('records:on-this-day')) as Rec[]).map((r) => r.title)
-    expect(titles).toContain('Anniversary Movie')
-    expect(titles).not.toContain('Today Thing') // current year is excluded
-    expect(titles).not.toContain('Wrong Day') // different month/day
+      const titles = ((await invoke('records:on-this-day')) as Rec[]).map((r) => r.title)
+      expect(titles).toContain('Anniversary Movie')
+      expect(titles).not.toContain('Today Thing') // current year is excluded
+      expect(titles).not.toContain('Wrong Day') // different month/day
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

@@ -277,21 +277,25 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
     }
   )
 
-  // "On this day" recap — records sharing today's LOCAL month + day, from PRIOR
-  // years only (so it resurfaces memories rather than echoing today's imports).
-  // Date math runs in SQL on the ms epoch (÷1000 → seconds for strftime).
+  // "On this day" recap — records sharing today's month + day, from PRIOR years
+  // only (so it resurfaces memories rather than echoing today's imports). Matching
+  // is done in UTC: some date-only imports (e.g. ISO `YYYY-MM-DD`) are stored at UTC
+  // midnight (parseWhen → Date.parse), so UTC matching recovers their source date —
+  // local matching can shift them a day in west-of-UTC zones (and disagree with the
+  // overview's UTC rendering). Date math runs in SQL on the ms epoch (÷1000 →
+  // seconds for strftime, default UTC).
   ipcMain.handle('records:on-this-day', (_event, opts?: { limit?: number }) => {
     const db = getDb()
     const limit = Math.min(Math.max(Math.trunc(opts?.limit ?? 50), 1), 200)
     const now = new Date()
-    const mmdd = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-    const year = String(now.getFullYear())
-    const localMonthDay = sql`strftime('%m-%d', ${records.occurredAt} / 1000, 'unixepoch', 'localtime')`
-    const localYear = sql`strftime('%Y', ${records.occurredAt} / 1000, 'unixepoch', 'localtime')`
+    const mmdd = `${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`
+    const year = String(now.getUTCFullYear())
+    const monthDay = sql`strftime('%m-%d', ${records.occurredAt} / 1000, 'unixepoch')`
+    const yr = sql`strftime('%Y', ${records.occurredAt} / 1000, 'unixepoch')`
     const rows = db
       .select()
       .from(records)
-      .where(sql`${localMonthDay} = ${mmdd} AND ${localYear} <> ${year}`)
+      .where(sql`${monthDay} = ${mmdd} AND ${yr} <> ${year}`)
       .orderBy(desc(records.occurredAt), desc(records.id))
       .limit(limit)
       .all()
