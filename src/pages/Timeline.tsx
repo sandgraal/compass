@@ -9,6 +9,7 @@ import {
   Music,
   Package,
   Search,
+  Sparkles,
   Upload,
   Wallet,
   Youtube
@@ -54,6 +55,7 @@ function fmtTime(ms: number | null): string {
 
 export default function Timeline(): JSX.Element {
   const [items, setItems] = useState<TimelineRecord[]>([])
+  const [onThisDay, setOnThisDay] = useState<TimelineRecord[]>([])
   const [source, setSource] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
@@ -66,11 +68,21 @@ export default function Timeline(): JSX.Element {
     void window.api.records.list({ q: query.trim() || undefined, limit: 500 }).then(setItems)
   }, [query])
 
+  // "On this day" recap (prior years, today's month/day) — independent of search.
+  const loadOnThisDay = useCallback((): void => {
+    if (!isElectron()) return
+    void window.api.records.onThisDay({ limit: 8 }).then(setOnThisDay)
+  }, [])
+
   // Debounced — re-queries as the search text changes (and on first mount).
   useEffect(() => {
     const t = setTimeout(reload, 200)
     return () => clearTimeout(t)
   }, [reload])
+
+  useEffect(() => {
+    loadOnThisDay()
+  }, [loadOnThisDay])
 
   function report(r: RecordsImportResult): void {
     if (r.canceled) return
@@ -84,6 +96,7 @@ export default function Timeline(): JSX.Element {
     if (r.unrecognized.length) parts.push(`${r.unrecognized.length} unrecognized`)
     toast(parts.join(' · ') || 'Nothing to import', r.imported > 0 ? 'success' : 'error')
     reload()
+    loadOnThisDay()
   }
 
   async function pickFiles(): Promise<void> {
@@ -183,6 +196,29 @@ export default function Timeline(): JSX.Element {
           leaves your machine.
         </span>
       </button>
+
+      {/* On this day — a memory from prior years, shown only in the default view */}
+      {query === '' && source === null && onThisDay.length > 0 && (
+        <div className="mb-6 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles size={14} className="text-primary" />
+            <h2 className="text-sm font-semibold text-foreground">On this day</h2>
+          </div>
+          <div className="space-y-1">
+            {onThisDay.map((r) => (
+              <div key={r.id} className="flex items-center gap-2.5 text-sm">
+                <span className="text-muted-foreground shrink-0" title={sourceMeta(r.source).label}>
+                  {sourceMeta(r.source).icon}
+                </span>
+                <span className="text-foreground truncate">{r.title}</span>
+                <span className="ml-auto shrink-0 text-xs text-muted-foreground/70 tabular-nums">
+                  {r.occurredAt ? new Date(r.occurredAt).getFullYear() : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Search */}
       {(items.length > 0 || query) && (

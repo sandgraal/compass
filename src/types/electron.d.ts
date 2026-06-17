@@ -841,6 +841,7 @@ declare global {
           limit?: number
           offset?: number
         }): Promise<TimelineRecord[]>
+        onThisDay(opts?: { limit?: number }): Promise<TimelineRecord[]>
         importFiles(): Promise<RecordsImportResult>
         importPaths(paths: string[]): Promise<RecordsImportResult>
         pathsForFiles(files: File[]): string[]

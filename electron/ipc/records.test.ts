@@ -153,6 +153,30 @@ describe('records:list', () => {
   })
 })
 
+describe('records:on-this-day', () => {
+  it("returns prior-year records sharing today's month/day, excluding this year", async () => {
+    const now = new Date()
+    const onDay = (y: number) => new Date(y, now.getMonth(), now.getDate(), 12, 0, 0).getTime() // today's month/day, noon
+    const otherDay = new Date(
+      now.getFullYear() - 2,
+      now.getMonth(),
+      now.getDate() + 2,
+      12
+    ).getTime()
+    const ins = sqlite.prepare(
+      'INSERT INTO records (source, type, occurred_at, title, dedup_hash) VALUES (?,?,?,?,?)'
+    )
+    ins.run('netflix', 'watch', onDay(now.getFullYear() - 3), 'Anniversary Movie', 'otd1')
+    ins.run('youtube', 'watch', onDay(now.getFullYear()), 'Today Thing', 'otd2') // current year
+    ins.run('spotify', 'listen', otherDay, 'Wrong Day', 'otd3')
+
+    const titles = ((await invoke('records:on-this-day')) as Rec[]).map((r) => r.title)
+    expect(titles).toContain('Anniversary Movie')
+    expect(titles).not.toContain('Today Thing') // current year is excluded
+    expect(titles).not.toContain('Wrong Day') // different month/day
+  })
+})
+
 describe('records:import (dialog)', () => {
   it('imports the chosen files', async () => {
     const p = fixture('NetflixViewingHistory.csv', 'Title,Date\nThe Matrix,1/2/26\n')
