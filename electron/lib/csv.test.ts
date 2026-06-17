@@ -82,6 +82,15 @@ describe('fromHeaderRow', () => {
     expect(parseCSV(out)).toHaveLength(1)
   })
 
+  it('finds the header across CRLF and bare-CR line endings', () => {
+    const rows = ['Title', 'Notes', ',ID,Datetime,Amount (total)', ',1,2026-01-01,$5.00']
+    for (const eol of ['\r\n', '\r', '\n']) {
+      const out = fromHeaderRow(rows.join(eol), 'Datetime', 'Amount (total)')
+      expect(out.startsWith(',ID,Datetime,Amount (total)')).toBe(true)
+      expect(parseCSV(out)).toHaveLength(1)
+    }
+  })
+
   it('returns the text unchanged when the header is line 0 or not found', () => {
     const already = 'a,b\n1,2\n'
     expect(fromHeaderRow(already, 'a', 'b')).toBe(already) // already line 0

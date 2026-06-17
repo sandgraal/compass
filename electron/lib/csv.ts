@@ -96,7 +96,10 @@ export function matchHeader(keys: string[], ...wanted: string[]): string | undef
  * title / notes / account-summary block.
  */
 export function fromHeaderRow(text: string, ...required: string[]): string {
-  const lines = text.split('\n')
+  // Split on any line ending (CRLF / CR / LF) so the header is found in exports
+  // that use \r\n or bare \r — otherwise a \r-only file is one "line" and the
+  // preamble would be mis-parsed as the header.
+  const lines = text.split(/\r\n|\r|\n/)
   const needles = required.map((t) => t.toLowerCase())
   const idx = lines.findIndex((line) => {
     const lower = line.toLowerCase()
