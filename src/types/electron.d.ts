@@ -837,6 +837,7 @@ declare global {
         list(opts?: {
           source?: string
           type?: string
+          q?: string
           limit?: number
           offset?: number
         }): Promise<TimelineRecord[]>
