@@ -115,7 +115,9 @@ export default function Timeline(): JSX.Element {
     }
   }
 
-  const sources = [...new Set(items.map((i) => i.source))].sort()
+  // Sources present in the loaded results, plus the active filter so it stays
+  // clearable even when a search excludes it from those results.
+  const sources = [...new Set([...items.map((i) => i.source), ...(source ? [source] : [])])].sort()
   const shown = source ? items.filter((i) => i.source === source) : items
 
   // Records arrive newest-first, so consecutive same-day rows bucket cleanly.
@@ -201,7 +203,7 @@ export default function Timeline(): JSX.Element {
       )}
 
       {/* Source filter chips */}
-      {sources.length > 1 && (
+      {(sources.length > 1 || source !== null) && (
         <div className="flex flex-wrap gap-1.5 mb-4">
           <Chip active={source === null} onClick={() => setSource(null)}>
             All
@@ -231,7 +233,9 @@ export default function Timeline(): JSX.Element {
             </div>
           )
         ) : (
-          <p className="text-sm text-muted-foreground py-8 text-center">No {source} records.</p>
+          <p className="text-sm text-muted-foreground py-8 text-center">
+            No {source} records{query ? ' match your search' : ''}.
+          </p>
         )
       ) : (
         <div className="space-y-6">
