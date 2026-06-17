@@ -13,13 +13,20 @@
 
 import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
 import { basename, extname } from 'node:path'
+import Database from 'better-sqlite3'
 import { type SQL, and, desc, eq } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
 import { records } from '../db/schema'
 import { updateRecordsKnowledge } from '../knowledge/records-extractor'
 import { serializeCsv } from '../lib/csv'
-import { type RecordInput, hashRecord, recognize, recognizeStream } from '../lib/recognizers'
+import {
+  type RecordInput,
+  hashRecord,
+  recognize,
+  recognizeSqlite,
+  recognizeStream
+} from '../lib/recognizers'
 import { forEachZipEntry } from '../lib/zip'
 
 const MAX_IMPORT_BYTES = 50 * 1024 * 1024 // 50 MB — matches the contacts/finance guard
@@ -117,6 +124,33 @@ async function ingestPath(fp: string, name: string, ctx: IngestCtx, depth: numbe
         ingestPath(tmpPath, entryName, ctx, depth + 1)
       )
       for (const s of skipped) ctx.unrecognized.push(`${name} ▸ ${s}`)
+      return
+    }
+
+    // SQLite database file (browser history, chat.db, …) — open READ-ONLY + query.
+    if (head.startsWith('SQLite format 3')) {
+      let db: Database.Database | null = null
+      try {
+        db = new Database(fp, { readonly: true, fileMustExist: true })
+        const rec = recognizeSqlite(db)
+        if (rec) {
+          const out = rec.parse(db)
+          const { imported: imp } = insertRecords(out, name)
+          ctx.imported += imp
+          ctx.duplicates += out.length - imp
+          ctx.perFile.push({
+            file: name,
+            recognizer: rec.id,
+            imported: imp,
+            duplicates: out.length - imp
+          })
+        } else {
+          ctx.unrecognized.push(name)
+          ctx.perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
+        }
+      } finally {
+        db?.close()
+      }
       return
     }
 
@@ -233,8 +267,12 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
 
   ipcMain.handle('records:import', async (): Promise<RecordsImportResult> => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: 'Import a data export (CSV / JSON / XML / mbox / zip)',
-      filters: [{ name: 'Data exports', extensions: ['csv', 'json', 'xml', 'mbox', 'zip'] }],
+      title: 'Import a data export (CSV / JSON / XML / mbox / zip / sqlite)',
+      filters: [
+        { name: 'Data exports', extensions: ['csv', 'json', 'xml', 'mbox', 'zip', 'sqlite', 'db'] },
+        // Chrome's history DB is the extensionless file `History`, so allow any file.
+        { name: 'All files', extensions: ['*'] }
+      ],
       properties: ['openFile', 'multiSelections']
     })
     if (canceled || filePaths.length === 0) return { success: false, canceled: true, ...EMPTY }
