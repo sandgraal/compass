@@ -269,7 +269,9 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       title: 'Import a data export (CSV / JSON / XML / mbox / zip / sqlite)',
       filters: [
-        { name: 'Data exports', extensions: ['csv', 'json', 'xml', 'mbox', 'zip', 'sqlite', 'db'] }
+        { name: 'Data exports', extensions: ['csv', 'json', 'xml', 'mbox', 'zip', 'sqlite', 'db'] },
+        // Chrome's history DB is the extensionless file `History`, so allow any file.
+        { name: 'All files', extensions: ['*'] }
       ],
       properties: ['openFile', 'multiSelections']
     })
