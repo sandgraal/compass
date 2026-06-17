@@ -19,6 +19,7 @@ import { parseAppleHealth } from './apple-health'
 import { BROWSER_RECOGNIZERS } from './browser-history'
 import { parseCSV } from './csv'
 import { parseWhen } from './dates'
+import { GOODREADS_RECOGNIZER } from './goodreads'
 import { IMESSAGE_RECOGNIZER } from './imessage'
 import { parseMbox } from './mbox'
 import { PAYPAL_RECOGNIZER } from './paypal'
@@ -248,6 +249,7 @@ export const RECOGNIZERS: Recognizer[] = [
   youtube,
   AMAZON_RECOGNIZER,
   PAYPAL_RECOGNIZER,
+  GOODREADS_RECOGNIZER,
   genericTimeline
 ]
 
