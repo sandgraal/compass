@@ -1,5 +1,5 @@
 /**
- * iMessage history recognizer (Phase 10.5 — "The Acquisition Engine").
+ * iMessage history recognizer (Phase 10.6 — "The Acquisition Engine").
  *
  * A dropped `chat.db` (the Messages database) is opened READ-ONLY and aggregated
  * into a daily messaging-activity timeline — one record per (day, conversation),
@@ -35,7 +35,7 @@ function dayMidnight(day: string): number | null {
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime()
 }
 
-type DayRow = { day: string | null; conversation: string; n: number }
+type DayRow = { day: string | null; chatId: number; conversation: string; n: number }
 
 export const IMESSAGE_RECOGNIZER: SqliteRecognizer = {
   id: 'imessage',
@@ -49,6 +49,7 @@ export const IMESSAGE_RECOGNIZER: SqliteRecognizer = {
           // older versions — normalise to seconds, then add the 2001→1970 offset.
           '(CASE WHEN m.date > 1000000000000 THEN m.date / 1000000000 ELSE m.date END) + 978307200, ' +
           "'unixepoch', 'localtime') AS day, " +
+          'c.ROWID AS chatId, ' +
           "COALESCE(c.display_name, c.chat_identifier, '?') AS conversation, " +
           'COUNT(*) AS n ' +
           'FROM message m ' +
@@ -63,14 +64,18 @@ export const IMESSAGE_RECOGNIZER: SqliteRecognizer = {
     const out: RecordInput[] = []
     for (const r of rows) {
       if (!r.day) continue
+      const occurredAt = dayMidnight(r.day)
+      if (occurredAt == null) continue
       const conversation = r.conversation || '?'
       out.push({
         source: 'imessage',
         type: 'messages',
-        occurredAt: dayMidnight(r.day),
+        occurredAt,
         title: `${r.n} message${r.n === 1 ? '' : 's'} with ${conversation}`,
         payload: { day: r.day, conversation, count: r.n },
-        naturalKey: `${r.day}|${conversation}`
+        // Dedup on the chat's stable primary key, not the display label — labels
+        // aren't unique and can be '?', which would collide distinct chats.
+        naturalKey: `${r.day}|${r.chatId}`
       })
     }
     return out
