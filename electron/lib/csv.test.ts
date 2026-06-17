@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { csvEscape, parseCSV, serializeCsv } from './csv'
+import { csvEscape, matchHeader, parseCSV, serializeCsv } from './csv'
 
 describe('parseCSV', () => {
   it('parses headers and rows into keyed objects', () => {
@@ -52,6 +52,24 @@ describe('serializeCsv', () => {
     ]
     const back = parseCSV(serializeCsv(original, ['name', 'phone']))
     expect(back).toEqual(original)
+  })
+})
+
+describe('matchHeader', () => {
+  it('matches case-insensitively and ignores stray whitespace, returning the real key', () => {
+    const keys = [' Order ID ', 'Order Date', ' Product Name ']
+    expect(matchHeader(keys, 'order id')).toBe(' Order ID ') // real (untrimmed) key back
+    expect(matchHeader(keys, 'PRODUCT NAME')).toBe(' Product Name ')
+  })
+
+  it('honors priority order across the wanted names', () => {
+    const keys = ['Item Total', 'Total Owed']
+    // 'Total Owed' is listed first → wins even though 'Item Total' appears earlier.
+    expect(matchHeader(keys, 'Total Owed', 'Item Total')).toBe('Total Owed')
+  })
+
+  it('returns undefined when nothing matches', () => {
+    expect(matchHeader(['a', 'b'], 'Order ID')).toBeUndefined()
   })
 })
 

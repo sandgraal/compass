@@ -295,3 +295,23 @@ describe('records:import-paths — Amazon orders (CSV)', () => {
     expect(r2.duplicates).toBe(3)
   })
 })
+
+describe('records:import-paths — PayPal transactions (CSV)', () => {
+  it('imports a PayPal statement and dedupes on re-import', async () => {
+    const p = fixture(
+      'Download.csv',
+      [
+        'Date,Name,Type,Status,Currency,Gross,Transaction ID',
+        '01/15/2026,Jane Doe,Money Sent,Completed,USD,-25.00,TX-AAA111',
+        '01/22/2026,John Smith,Money Received,Completed,USD,75.00,TX-BBB222'
+      ].join('\n')
+    )
+    const r1 = (await invoke('records:import-paths', [p])) as ImportResult
+    expect(r1.perFile[0].recognizer).toBe('paypal')
+    expect(r1.imported).toBe(2)
+
+    const r2 = (await invoke('records:import-paths', [p])) as ImportResult
+    expect(r2.imported).toBe(0)
+    expect(r2.duplicates).toBe(2)
+  })
+})

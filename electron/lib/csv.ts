@@ -69,6 +69,25 @@ export function parseCSV(raw: string): Record<string, string>[] {
   return result
 }
 
+/**
+ * Find the real header key matching one of `wanted`, comparing case-insensitively
+ * and ignoring stray surrounding whitespace. Tries the wanted names in priority
+ * order (so `matchHeader(keys, 'Total Owed', 'Item Total')` prefers the first that
+ * exists) and returns the actual untrimmed key so callers can index rows by it.
+ *
+ * Shared by the Drop Zone CSV recognizers (Amazon, PayPal, …) so they tolerate the
+ * minor header drift third-party exports produce without each re-rolling the match.
+ */
+export function matchHeader(keys: string[], ...wanted: string[]): string | undefined {
+  const norm = (s: string): string => s.trim().toLowerCase()
+  for (const want of wanted) {
+    const target = norm(want)
+    const hit = keys.find((k) => norm(k) === target)
+    if (hit) return hit
+  }
+  return undefined
+}
+
 /** Escape a single CSV field — quote it when it contains a comma, quote, or newline. */
 export function csvEscape(value: unknown): string {
   if (value == null) return ''

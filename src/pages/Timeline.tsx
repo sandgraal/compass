@@ -9,6 +9,7 @@ import {
   Music,
   Package,
   Upload,
+  Wallet,
   Youtube
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -21,6 +22,7 @@ const SOURCE_META: Record<string, { label: string; icon: JSX.Element }> = {
   netflix: { label: 'Netflix', icon: <Film size={13} /> },
   spotify: { label: 'Spotify', icon: <Music size={13} /> },
   amazon: { label: 'Amazon', icon: <Package size={13} /> },
+  paypal: { label: 'PayPal', icon: <Wallet size={13} /> },
   'apple-health': { label: 'Apple Health', icon: <Activity size={13} /> },
   email: { label: 'Email', icon: <Mail size={13} /> },
   youtube: { label: 'YouTube', icon: <Youtube size={13} /> },

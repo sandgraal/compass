@@ -21,6 +21,7 @@ import { parseCSV } from './csv'
 import { parseWhen } from './dates'
 import { IMESSAGE_RECOGNIZER } from './imessage'
 import { parseMbox } from './mbox'
+import { PAYPAL_RECOGNIZER } from './paypal'
 
 // Re-exported so existing importers keep `import { parseWhen } from './recognizers'`
 // working; the implementation now lives in `./dates` so recognizer files can use it
@@ -246,6 +247,7 @@ export const RECOGNIZERS: Recognizer[] = [
   spotify,
   youtube,
   AMAZON_RECOGNIZER,
+  PAYPAL_RECOGNIZER,
   genericTimeline
 ]
 
