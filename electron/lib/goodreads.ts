@@ -38,20 +38,25 @@ export const GOODREADS_RECOGNIZER: Recognizer = {
     const cRating = matchHeader(keys, 'My Rating')
     const cDateRead = matchHeader(keys, 'Date Read')
     const cDateAdded = matchHeader(keys, 'Date Added')
+    const cShelf = matchHeader(keys, 'Exclusive Shelf')
 
     const out: RecordInput[] = []
     for (const r of rows) {
+      const bookId = cBookId ? r[cBookId].trim() : ''
       const title = cTitle ? r[cTitle].trim() : ''
-      if (!title) continue
+      if (!bookId || !title) continue // every Goodreads row has a stable Book Id + Title
       const author = cAuthor ? r[cAuthor].trim() : ''
       const rating = cRating ? Number(r[cRating]) : 0
       const stars = rating > 0 ? '★'.repeat(rating) : ''
+      // Surface the non-"read" shelves so "want to read" / "currently reading" are
+      // distinguishable on the timeline (a plain `read` book needs no label).
+      const shelf = cShelf ? r[cShelf].trim() : ''
+      const shelfLabel = shelf && shelf !== 'read' ? shelf.replace(/-/g, ' ') : ''
       const by = author ? `by ${author}` : ''
-      const body = [by, stars].filter(Boolean).join(' · ') || undefined
+      const body = [by, stars, shelfLabel].filter(Boolean).join(' · ') || undefined
       // Prefer the finished date; fall back to when it was added (to-read shelf).
       const when =
         parseWhen(cDateRead ? r[cDateRead] : '') ?? parseWhen(cDateAdded ? r[cDateAdded] : '')
-      const bookId = cBookId ? r[cBookId].trim() : ''
       out.push({
         source: 'goodreads',
         type: 'book',
@@ -59,7 +64,9 @@ export const GOODREADS_RECOGNIZER: Recognizer = {
         title,
         body,
         payload: r,
-        naturalKey: bookId || `${title}|${author}`
+        // Book Id is Goodreads' stable per-book key → exact dedup. NOT the shelf: a
+        // book moving to-read → read between exports must dedupe to one record.
+        naturalKey: bookId
       })
     }
     return out

@@ -17,7 +17,8 @@ function file(name: string, text: string): RecognizerFile {
 const EXPORT = [
   'Book Id,Title,Author,My Rating,Average Rating,Number of Pages,Date Read,Date Added,Exclusive Shelf',
   '54493401,Project Hail Mary,Andy Weir,5,4.52,476,2026/01/15,2025/12/01,read',
-  '2767052,The Hunger Games,Suzanne Collins,0,4.33,374,,2026/02/01,to-read'
+  '2767052,The Hunger Games,Suzanne Collins,0,4.33,374,,2026/02/01,to-read',
+  ',Orphan Row,Nobody,3,4.0,100,2026/03/01,2026/03/01,read' // no Book Id → skipped
 ].join('\n')
 
 describe('Goodreads reading-history recognizer', () => {
@@ -35,8 +36,12 @@ describe('Goodreads reading-history recognizer', () => {
     expect(phm?.naturalKey).toBe('54493401') // Book Id
 
     const hg = out.find((r) => r.title === 'The Hunger Games')
-    expect(hg?.body).toBe('by Suzanne Collins') // unrated → no stars
+    expect(hg?.body).toBe('by Suzanne Collins · to read') // unrated; non-read shelf surfaced
     expect(hg?.occurredAt).toBe(Date.parse('2026/02/01')) // falls back to Date Added
+
+    // A row without a Book Id isn't a stable Goodreads book → skipped (no fragile
+    // title|author dedup fallback).
+    expect(out.find((r) => r.title === 'Orphan Row')).toBeUndefined()
   })
 
   it('does not claim a non-Goodreads CSV', () => {
