@@ -227,3 +227,23 @@ describe('records:import-paths — Google Takeout (.zip container)', () => {
     expect(r2.duplicates).toBe(3)
   })
 })
+
+describe('records:import-paths — browser history (SQLite)', () => {
+  it('imports a Chrome History DB and dedupes on re-import', async () => {
+    const dbPath = join(dir, 'History')
+    const h = new Database(dbPath)
+    h.exec('CREATE TABLE urls (id INTEGER PRIMARY KEY, url TEXT, title TEXT)')
+    h.exec('CREATE TABLE visits (id INTEGER PRIMARY KEY, url INTEGER, visit_time INTEGER)')
+    h.prepare('INSERT INTO urls (id, url, title) VALUES (1, ?, ?)').run('https://a.com/p', 'A')
+    h.prepare('INSERT INTO visits (url, visit_time) VALUES (1, ?)').run(13350000000000000)
+    h.close()
+
+    const r1 = (await invoke('records:import-paths', [dbPath])) as ImportResult
+    expect(r1.perFile[0].recognizer).toBe('chrome')
+    expect(r1.imported).toBe(1)
+
+    const r2 = (await invoke('records:import-paths', [dbPath])) as ImportResult
+    expect(r2.imported).toBe(0)
+    expect(r2.duplicates).toBe(1)
+  })
+})

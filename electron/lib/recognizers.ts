@@ -13,7 +13,9 @@
  */
 
 import { createHash } from 'node:crypto'
+import type Database from 'better-sqlite3'
 import { parseAppleHealth } from './apple-health'
+import { BROWSER_RECOGNIZERS } from './browser-history'
 import { parseCSV } from './csv'
 import { parseMbox } from './mbox'
 
@@ -301,6 +303,33 @@ export function recognizeStream(f: StreamHead): StreamingRecognizer | null {
     STREAM_RECOGNIZERS.find((rec) => {
       try {
         return rec.detectHead(f)
+      } catch {
+        return false
+      }
+    }) ?? null
+  )
+}
+
+// ── SQLite-file recognizers (Phase 10.4) ──────────────────────────────────────
+// For sources that ARE a database — a dropped browser-history / chat DB. The Drop
+// Zone opens the file READ-ONLY and each recognizer claims it by checking which
+// tables exist, then queries. (Parsers live in `browser-history.ts`.)
+
+export type SqliteRecognizer = {
+  id: string
+  label: string
+  detect: (db: Database.Database) => boolean
+  parse: (db: Database.Database) => RecordInput[]
+}
+
+export const SQLITE_RECOGNIZERS: SqliteRecognizer[] = [...BROWSER_RECOGNIZERS]
+
+/** First SQLite recognizer that claims this opened DB, or null. */
+export function recognizeSqlite(db: Database.Database): SqliteRecognizer | null {
+  return (
+    SQLITE_RECOGNIZERS.find((rec) => {
+      try {
+        return rec.detect(db)
       } catch {
         return false
       }
