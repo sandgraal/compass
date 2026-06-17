@@ -405,3 +405,26 @@ describe('records:import-paths — Venmo transactions (CSV with preamble)', () =
     expect(r2.duplicates).toBe(2)
   })
 })
+
+describe('records:import-paths — LinkedIn connections (CSV with preamble)', () => {
+  it('skips the Notes preamble, imports connections, and dedupes on re-import', async () => {
+    const p = fixture(
+      'Connections.csv',
+      [
+        'Notes:',
+        '"Some fields may be missing if the member limited visibility."',
+        '',
+        'First Name,Last Name,URL,Email Address,Company,Position,Connected On',
+        'John,Doe,https://www.linkedin.com/in/johndoe,,Acme Inc,Engineer,15 Jan 2026',
+        'Jane,Smith,https://www.linkedin.com/in/janesmith,,Globex,PM,03 Mar 2024'
+      ].join('\n')
+    )
+    const r1 = (await invoke('records:import-paths', [p])) as ImportResult
+    expect(r1.perFile[0].recognizer).toBe('linkedin')
+    expect(r1.imported).toBe(2)
+
+    const r2 = (await invoke('records:import-paths', [p])) as ImportResult
+    expect(r2.imported).toBe(0)
+    expect(r2.duplicates).toBe(2)
+  })
+})

@@ -21,6 +21,7 @@ import { parseCSV } from './csv'
 import { parseWhen } from './dates'
 import { GOODREADS_RECOGNIZER } from './goodreads'
 import { IMESSAGE_RECOGNIZER } from './imessage'
+import { LINKEDIN_RECOGNIZER } from './linkedin'
 import { parseMbox } from './mbox'
 import { PAYPAL_RECOGNIZER } from './paypal'
 import { VENMO_RECOGNIZER } from './venmo'
@@ -252,6 +253,7 @@ export const RECOGNIZERS: Recognizer[] = [
   PAYPAL_RECOGNIZER,
   GOODREADS_RECOGNIZER,
   VENMO_RECOGNIZER,
+  LINKEDIN_RECOGNIZER,
   genericTimeline
 ]
 
