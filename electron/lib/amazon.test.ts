@@ -67,6 +67,22 @@ describe('Amazon order-history recognizer', () => {
     expect(recognize(f)?.id).not.toBe('amazon')
   })
 
+  it('tolerates stray whitespace in header names', () => {
+    // detect() claims this via substring match; the column lookup must trim too.
+    const csv = [
+      ' Order ID , Order Date ,Total Owed,Currency, Product Name ',
+      '777-0007,2026-03-10,9.99,USD,HDMI Adapter'
+    ].join('\n')
+    const f = file('Retail.OrderHistory.3.csv', csv)
+    expect(recognize(f)?.id).toBe('amazon')
+
+    const out = AMAZON_RECOGNIZER.parse(f)
+    expect(out).toHaveLength(1)
+    expect(out[0].title).toBe('HDMI Adapter') // resolved despite padded headers
+    expect(out[0].naturalKey).toBe('777-0007|HDMI Adapter')
+    expect(out[0].body).toBe('9.99 USD')
+  })
+
   it('skips blank rows and drops non-numeric totals', () => {
     const csv = [
       'Order ID,Order Date,Total Owed,Currency,Product Name',

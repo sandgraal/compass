@@ -50,10 +50,12 @@ export const AMAZON_RECOGNIZER: Recognizer = {
   parse: (f) => {
     const rows = parseCSV(f.text)
     if (!rows.length) return []
-    // Resolve the columns once against the actual header casing (stable in Amazon's
-    // exports, but match case-insensitively to be safe across export variants).
+    // Resolve the columns once against the actual header. Match case-insensitively
+    // AND trim — detect() claims the file via a substring regex that tolerates stray
+    // header whitespace, so the column lookup has to tolerate it too or we'd emit
+    // empty products / weak natural keys. Returns the real (untrimmed) key to index by.
     const keyOf = (want: string): string | undefined =>
-      Object.keys(rows[0]).find((k) => k.toLowerCase() === want.toLowerCase())
+      Object.keys(rows[0]).find((k) => k.trim().toLowerCase() === want.toLowerCase())
     const cOrderId = keyOf('Order ID')
     const cDate = keyOf('Order Date')
     const cProduct = keyOf('Product Name') ?? keyOf('Title')
