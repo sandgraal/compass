@@ -279,9 +279,9 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
 
   // "On this day" recap — records sharing today's month + day, from PRIOR years
   // only (so it resurfaces memories rather than echoing today's imports). Matching
-  // is done in UTC: date-only imports are stored at UTC midnight (parseWhen →
-  // Date.parse), so a UTC calendar day recovers their true source date — local
-  // matching would shift them a day in west-of-UTC zones (and disagree with the
+  // is done in UTC: some date-only imports (e.g. ISO `YYYY-MM-DD`) are stored at UTC
+  // midnight (parseWhen → Date.parse), so UTC matching recovers their source date —
+  // local matching can shift them a day in west-of-UTC zones (and disagree with the
   // overview's UTC rendering). Date math runs in SQL on the ms epoch (÷1000 →
   // seconds for strftime, default UTC).
   ipcMain.handle('records:on-this-day', (_event, opts?: { limit?: number }) => {
