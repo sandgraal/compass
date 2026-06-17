@@ -362,3 +362,23 @@ describe('records:import-paths — PayPal transactions (CSV)', () => {
     expect(r2.duplicates).toBe(2)
   })
 })
+
+describe('records:import-paths — Goodreads books (CSV)', () => {
+  it('imports a Goodreads library export and dedupes on re-import', async () => {
+    const p = fixture(
+      'goodreads_library_export.csv',
+      [
+        'Book Id,Title,Author,My Rating,Date Read,Date Added,Exclusive Shelf',
+        '54493401,Project Hail Mary,Andy Weir,5,2026/01/15,2025/12/01,read',
+        '2767052,The Hunger Games,Suzanne Collins,0,,2026/02/01,to-read'
+      ].join('\n')
+    )
+    const r1 = (await invoke('records:import-paths', [p])) as ImportResult
+    expect(r1.perFile[0].recognizer).toBe('goodreads')
+    expect(r1.imported).toBe(2)
+
+    const r2 = (await invoke('records:import-paths', [p])) as ImportResult
+    expect(r2.imported).toBe(0)
+    expect(r2.duplicates).toBe(2)
+  })
+})
