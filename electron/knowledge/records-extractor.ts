@@ -5,10 +5,11 @@
  * `timeline/overview.md` so the knowledge base (and Ask Compass) reflects what's
  * on the unified timeline.
  *
- * SECURITY: this is a SUMMARY only — counts by source, the date span, and a few
- * recent titles. A unified life-timeline can hold sensitive events, so the full
- * per-record detail is deliberately NOT dumped into the knowledge base (and thus
- * not into the semantic index / MCP). Per-record exposure is a later opt-in.
+ * SECURITY: this is a SUMMARY only — counts by source/type/year, the date span,
+ * a few recent titles, and an "on this day" recap. A unified life-timeline can
+ * hold sensitive events, so the full per-record detail is deliberately NOT dumped
+ * into the knowledge base (and thus not into the semantic index / MCP). Per-record
+ * exposure is a later opt-in.
  */
 
 import { getDb } from '../db/client'
@@ -23,8 +24,15 @@ export interface RecordSummaryRow {
   title: string
 }
 
-/** Build the `timeline/overview.md` content from the full record list. */
-export function buildRecordsOverviewMarkdown(rows: RecordSummaryRow[], stamp: string): string {
+/**
+ * Build the `timeline/overview.md` content from the full record list. `now`, when
+ * provided, drives the "on this day" recap (records sharing today's month + day).
+ */
+export function buildRecordsOverviewMarkdown(
+  rows: RecordSummaryRow[],
+  stamp: string,
+  now?: Date
+): string {
   const lines: string[] = [
     '# Timeline Overview',
     '',
@@ -40,14 +48,19 @@ export function buildRecordsOverviewMarkdown(rows: RecordSummaryRow[], stamp: st
   }
 
   const bySource = new Map<string, number>()
+  const byType = new Map<string, number>()
+  const byYear = new Map<number, number>()
   let minTs = Number.POSITIVE_INFINITY
   let maxTs = Number.NEGATIVE_INFINITY
   for (const r of rows) {
     bySource.set(r.source, (bySource.get(r.source) ?? 0) + 1)
+    byType.set(r.type, (byType.get(r.type) ?? 0) + 1)
     if (r.occurredAt) {
       const t = r.occurredAt.getTime()
       if (t < minTs) minTs = t
       if (t > maxTs) maxTs = t
+      const y = r.occurredAt.getFullYear()
+      byYear.set(y, (byYear.get(y) ?? 0) + 1)
     }
   }
 
@@ -57,11 +70,22 @@ export function buildRecordsOverviewMarkdown(rows: RecordSummaryRow[], stamp: st
     lines.push(`**Span:** ${day(minTs)} → ${day(maxTs)}`, '')
   }
 
-  lines.push('## By source', '')
-  for (const [source, count] of [...bySource.entries()].sort((a, b) => b[1] - a[1])) {
-    lines.push(`- **${source}** — ${count}`)
+  // Shared "## Heading\n- **label** — count" block for the breakdown sections.
+  const countList = (heading: string, entries: Array<[string, number]>): void => {
+    lines.push(heading, '')
+    for (const [label, count] of entries) lines.push(`- **${label}** — ${count}`)
+    lines.push('')
   }
-  lines.push('')
+  const byCountDesc = (a: [string, number], b: [string, number]): number => b[1] - a[1]
+
+  countList('## By source', [...bySource.entries()].sort(byCountDesc))
+  countList('## By type', [...byType.entries()].sort(byCountDesc))
+  if (byYear.size) {
+    const years: Array<[string, number]> = [...byYear.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([y, c]) => [String(y), c])
+    countList('## By year', years)
+  }
 
   const recent = rows
     .filter((r) => r.occurredAt)
@@ -75,6 +99,24 @@ export function buildRecordsOverviewMarkdown(rows: RecordSummaryRow[], stamp: st
       )
     }
     lines.push('')
+  }
+
+  if (now) {
+    const m = now.getMonth()
+    const d = now.getDate()
+    const onThisDay = rows
+      .filter(
+        (r) => r.occurredAt != null && r.occurredAt.getMonth() === m && r.occurredAt.getDate() === d
+      )
+      .sort((a, b) => (b.occurredAt as Date).getTime() - (a.occurredAt as Date).getTime())
+    if (onThisDay.length) {
+      const label = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
+      lines.push(`## On this day (${label})`, '')
+      for (const r of onThisDay.slice(0, 15)) {
+        lines.push(`- ${(r.occurredAt as Date).getFullYear()} — ${r.title} _(${r.source})_`)
+      }
+      lines.push('')
+    }
   }
 
   return `${lines.join('\n')}\n`
@@ -92,9 +134,10 @@ export function updateRecordsKnowledge(): void {
     })
     .from(records)
     .all()
+  const now = new Date()
   updateKnowledgeFile(
     KNOWLEDGE_DIR,
     'timeline/overview.md',
-    buildRecordsOverviewMarkdown(rows, new Date().toLocaleString())
+    buildRecordsOverviewMarkdown(rows, now.toLocaleString(), now)
   )
 }

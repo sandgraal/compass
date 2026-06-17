@@ -39,8 +39,41 @@ describe('buildRecordsOverviewMarkdown', () => {
     expect(md).toContain('**Span:** 2026-01-02 → 2026-02-10')
     expect(md).toContain('## By source')
     expect(md).toContain('**spotify** — 2')
+    expect(md).toContain('## By type')
+    expect(md).toContain('**listen** — 2')
+    expect(md).toContain('## By year')
+    expect(md).toContain('**2026** — 2') // both dated records fall in 2026
     expect(md).toContain('## Most recent')
     expect(md).toContain('Track A')
+  })
+
+  it('renders an "On this day" recap scoped to the reference month/day', () => {
+    const now = new Date(2026, 5, 16, 12, 0, 0) // Jun 16, 2026 (local)
+    const md = buildRecordsOverviewMarkdown(
+      [
+        {
+          source: 'netflix',
+          type: 'watch',
+          occurredAt: new Date(2022, 5, 16, 20, 0, 0), // same Jun 16, prior year
+          title: 'Old Movie'
+        },
+        { source: 'spotify', type: 'listen', occurredAt: new Date(2026, 1, 10), title: 'Track A' }
+      ],
+      'now',
+      now
+    )
+    expect(md).toContain('## On this day (June 16)')
+    const section = md.slice(md.indexOf('## On this day'))
+    expect(section).toContain('2022 — Old Movie')
+    expect(section).not.toContain('Track A') // Feb 10 is not June 16
+  })
+
+  it('omits the "On this day" recap when no reference date is given', () => {
+    const md = buildRecordsOverviewMarkdown(
+      [{ source: 'netflix', type: 'watch', occurredAt: new Date(2026, 0, 2), title: 'The Matrix' }],
+      'now'
+    )
+    expect(md).not.toContain('## On this day')
   })
 })
 
