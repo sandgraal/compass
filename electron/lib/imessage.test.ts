@@ -1,5 +1,5 @@
 /**
- * Tests for the iMessage history recognizer (Phase 10.5). Builds a synthetic
+ * Tests for the iMessage history recognizer (Phase 10.6). Builds a synthetic
  * chat.db and checks the daily (day, conversation) aggregation + both date formats.
  */
 
