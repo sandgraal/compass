@@ -14,11 +14,18 @@
 
 import { createHash } from 'node:crypto'
 import type Database from 'better-sqlite3'
+import { AMAZON_RECOGNIZER } from './amazon'
 import { parseAppleHealth } from './apple-health'
 import { BROWSER_RECOGNIZERS } from './browser-history'
 import { parseCSV } from './csv'
+import { parseWhen } from './dates'
 import { IMESSAGE_RECOGNIZER } from './imessage'
 import { parseMbox } from './mbox'
+
+// Re-exported so existing importers keep `import { parseWhen } from './recognizers'`
+// working; the implementation now lives in `./dates` so recognizer files can use it
+// without an import cycle back through this module.
+export { parseWhen }
 
 export type RecordInput = {
   source: string
@@ -59,24 +66,6 @@ export function hashRecord(
     .update(`${source}|${type}|${occurredAt ?? ''}|${naturalKey}`)
     .digest('hex')
     .slice(0, 16)
-}
-
-/** Parse a date/time string to epoch ms, or null. Accepts ISO, 'YYYY-MM-DD HH:mm', and M/D/YY(YY). */
-export function parseWhen(raw: string | undefined | null): number | null {
-  if (!raw) return null
-  const s = String(raw).trim()
-  if (!s) return null
-  // Native parse handles ISO 8601, 'YYYY-MM-DD HH:mm' (local), and 'YYYY/MM/DD'.
-  const native = Date.parse(s)
-  if (!Number.isNaN(native)) return native
-  // Fall back to M/D/YY or M/D/YYYY (Netflix etc.).
-  const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/)
-  if (m) {
-    const year = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3])
-    const ms = new Date(year, Number(m[1]) - 1, Number(m[2])).getTime()
-    if (!Number.isNaN(ms)) return ms
-  }
-  return null
 }
 
 function safeJsonArray(text: string): unknown[] {
@@ -252,7 +241,13 @@ const youtube: Recognizer = {
   }
 }
 
-export const RECOGNIZERS: Recognizer[] = [netflix, spotify, youtube, genericTimeline]
+export const RECOGNIZERS: Recognizer[] = [
+  netflix,
+  spotify,
+  youtube,
+  AMAZON_RECOGNIZER,
+  genericTimeline
+]
 
 /** First recognizer that claims this file (specific → generic), or null. */
 export function recognize(f: RecognizerFile): Recognizer | null {

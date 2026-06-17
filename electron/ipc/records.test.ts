@@ -274,3 +274,24 @@ describe('records:import-paths — iMessage (chat.db)', () => {
     expect(r2.duplicates).toBe(1)
   })
 })
+
+describe('records:import-paths — Amazon orders (CSV)', () => {
+  it('imports an Amazon order export and dedupes on re-import', async () => {
+    const p = fixture(
+      'Retail.OrderHistory.1.csv',
+      [
+        'Order ID,Order Date,Currency,Total Owed,Quantity,Product Name',
+        '111-0001,2026-01-05,USD,12.99,1,USB-C Cable',
+        '111-0001,2026-01-05,USD,17.00,2,AA Batteries',
+        '222-0002,2025-12-20,USD,49.99,1,Mechanical Keyboard'
+      ].join('\n')
+    )
+    const r1 = (await invoke('records:import-paths', [p])) as ImportResult
+    expect(r1.perFile[0].recognizer).toBe('amazon')
+    expect(r1.imported).toBe(3) // one record per ordered item
+
+    const r2 = (await invoke('records:import-paths', [p])) as ImportResult
+    expect(r2.imported).toBe(0)
+    expect(r2.duplicates).toBe(3)
+  })
+})
