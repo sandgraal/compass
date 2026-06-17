@@ -18,7 +18,7 @@
  * its order id, date, and price — the full row is kept in `payload`.
  */
 
-import { parseCSV } from './csv'
+import { matchHeader, parseCSV } from './csv'
 import { parseWhen } from './dates'
 import type { Recognizer, RecordInput } from './recognizers'
 
@@ -50,17 +50,15 @@ export const AMAZON_RECOGNIZER: Recognizer = {
   parse: (f) => {
     const rows = parseCSV(f.text)
     if (!rows.length) return []
-    // Resolve the columns once against the actual header. Match case-insensitively
-    // AND trim — detect() claims the file via a substring regex that tolerates stray
-    // header whitespace, so the column lookup has to tolerate it too or we'd emit
-    // empty products / weak natural keys. Returns the real (untrimmed) key to index by.
-    const keyOf = (want: string): string | undefined =>
-      Object.keys(rows[0]).find((k) => k.trim().toLowerCase() === want.toLowerCase())
-    const cOrderId = keyOf('Order ID')
-    const cDate = keyOf('Order Date')
-    const cProduct = keyOf('Product Name') ?? keyOf('Title')
-    const cTotal = keyOf('Total Owed') ?? keyOf('Item Total') ?? keyOf('Purchase Price Per Unit')
-    const cCurrency = keyOf('Currency')
+    // Resolve columns tolerantly (case/whitespace, priority order) via the shared CSV
+    // header matcher — detect() claims the file via a substring regex that tolerates
+    // stray header whitespace, so the column lookup has to tolerate it too.
+    const keys = Object.keys(rows[0])
+    const cOrderId = matchHeader(keys, 'Order ID')
+    const cDate = matchHeader(keys, 'Order Date')
+    const cProduct = matchHeader(keys, 'Product Name', 'Title')
+    const cTotal = matchHeader(keys, 'Total Owed', 'Item Total', 'Purchase Price Per Unit')
+    const cCurrency = matchHeader(keys, 'Currency')
 
     const out: RecordInput[] = []
     for (const r of rows) {
