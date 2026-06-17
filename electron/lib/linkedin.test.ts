@@ -38,6 +38,18 @@ describe('LinkedIn connections recognizer', () => {
     expect(john?.occurredAt).toBe(Date.parse('15 Jan 2026'))
   })
 
+  it('falls back to name + connect date when the profile URL is blank', () => {
+    // LinkedIn blanks the URL when a member limited visibility — the dedup key
+    // must still be stable so re-imports don't duplicate.
+    const text = [
+      'First Name,Last Name,URL,Email Address,Company,Position,Connected On',
+      'Carol,Lee,,carol@example.com,Initech,Designer,20 Feb 2025'
+    ].join('\n')
+    const out = LINKEDIN_RECOGNIZER.parse(file('Connections.csv', text))
+    expect(out).toHaveLength(1)
+    expect(out[0].naturalKey).toBe('Carol Lee|20 Feb 2025')
+  })
+
   it('does not claim a non-LinkedIn CSV', () => {
     const f = file('misc.csv', 'when,event\n2026-02-01,Did a thing\n')
     expect(LINKEDIN_RECOGNIZER.detect(f)).toBe(false)
