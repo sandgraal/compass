@@ -25,6 +25,16 @@ export interface RecordSummaryRow {
 }
 
 /**
+ * Escape Markdown inline punctuation in imported, user-controlled labels
+ * (title / source / type) before they go into `overview.md`. The KnowledgeBase
+ * Markdown→HTML render doesn't sanitize, so an unescaped value could otherwise
+ * become a clickable link or raw HTML.
+ */
+function mdEscape(s: string): string {
+  return s.replace(/[\\`*_[\]()<>|~#]/g, '\\$&')
+}
+
+/**
  * Build the `timeline/overview.md` content from the full record list. `now`, when
  * provided, drives the "on this day" recap (records sharing today's month + day).
  */
@@ -59,7 +69,9 @@ export function buildRecordsOverviewMarkdown(
       const t = r.occurredAt.getTime()
       if (t < minTs) minTs = t
       if (t > maxTs) maxTs = t
-      const y = r.occurredAt.getFullYear()
+      // UTC year — consistent with the toISOString() span/recent rendering below
+      // (date-only imports are stored at UTC midnight).
+      const y = r.occurredAt.getUTCFullYear()
       byYear.set(y, (byYear.get(y) ?? 0) + 1)
     }
   }
@@ -73,7 +85,7 @@ export function buildRecordsOverviewMarkdown(
   // Shared "## Heading\n- **label** — count" block for the breakdown sections.
   const countList = (heading: string, entries: Array<[string, number]>): void => {
     lines.push(heading, '')
-    for (const [label, count] of entries) lines.push(`- **${label}** — ${count}`)
+    for (const [label, count] of entries) lines.push(`- **${mdEscape(label)}** — ${count}`)
     lines.push('')
   }
   const byCountDesc = (a: [string, number], b: [string, number]): number => b[1] - a[1]
@@ -95,25 +107,37 @@ export function buildRecordsOverviewMarkdown(
     lines.push('## Most recent', '')
     for (const r of recent) {
       lines.push(
-        `- ${(r.occurredAt as Date).toISOString().slice(0, 10)} — ${r.title} _(${r.source})_`
+        `- ${(r.occurredAt as Date).toISOString().slice(0, 10)} — ${mdEscape(r.title)} _(${mdEscape(r.source)})_`
       )
     }
     lines.push('')
   }
 
   if (now) {
-    const m = now.getMonth()
-    const d = now.getDate()
+    // Match in UTC — date-only imports are stored at UTC midnight, so a UTC calendar
+    // day recovers their true source date (and matches the toISOString rendering
+    // above); local getters would shift them a day in west-of-UTC zones.
+    const m = now.getUTCMonth()
+    const d = now.getUTCDate()
     const onThisDay = rows
       .filter(
-        (r) => r.occurredAt != null && r.occurredAt.getMonth() === m && r.occurredAt.getDate() === d
+        (r) =>
+          r.occurredAt != null &&
+          r.occurredAt.getUTCMonth() === m &&
+          r.occurredAt.getUTCDate() === d
       )
       .sort((a, b) => (b.occurredAt as Date).getTime() - (a.occurredAt as Date).getTime())
     if (onThisDay.length) {
-      const label = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
+      const label = now.toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        timeZone: 'UTC'
+      })
       lines.push(`## On this day (${label})`, '')
       for (const r of onThisDay.slice(0, 15)) {
-        lines.push(`- ${(r.occurredAt as Date).getFullYear()} — ${r.title} _(${r.source})_`)
+        lines.push(
+          `- ${(r.occurredAt as Date).getUTCFullYear()} — ${mdEscape(r.title)} _(${mdEscape(r.source)})_`
+        )
       }
       lines.push('')
     }

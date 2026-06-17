@@ -47,17 +47,23 @@ describe('buildRecordsOverviewMarkdown', () => {
     expect(md).toContain('Track A')
   })
 
-  it('renders an "On this day" recap scoped to the reference month/day', () => {
-    const now = new Date(2026, 5, 16, 12, 0, 0) // Jun 16, 2026 (local)
+  it('renders an "On this day" recap scoped to the reference month/day (UTC)', () => {
+    // UTC fixtures + UTC matching → deterministic regardless of the runner's TZ.
+    const now = new Date('2026-06-16T12:00:00Z')
     const md = buildRecordsOverviewMarkdown(
       [
         {
           source: 'netflix',
           type: 'watch',
-          occurredAt: new Date(2022, 5, 16, 20, 0, 0), // same Jun 16, prior year
+          occurredAt: new Date('2022-06-16T20:00:00Z'), // same Jun 16 (UTC), prior year
           title: 'Old Movie'
         },
-        { source: 'spotify', type: 'listen', occurredAt: new Date(2026, 1, 10), title: 'Track A' }
+        {
+          source: 'spotify',
+          type: 'listen',
+          occurredAt: new Date('2026-02-10T00:00:00Z'),
+          title: 'Track A'
+        }
       ],
       'now',
       now
@@ -66,6 +72,23 @@ describe('buildRecordsOverviewMarkdown', () => {
     const section = md.slice(md.indexOf('## On this day'))
     expect(section).toContain('2022 — Old Movie')
     expect(section).not.toContain('Track A') // Feb 10 is not June 16
+  })
+
+  it('escapes Markdown-special characters in imported labels', () => {
+    const md = buildRecordsOverviewMarkdown(
+      [
+        {
+          source: 'generic',
+          type: 'event',
+          occurredAt: new Date('2026-01-02T00:00:00Z'),
+          title: '[click](http://evil) <b>x</b>'
+        }
+      ],
+      'now'
+    )
+    expect(md).not.toContain('[click](http://evil)') // raw link must not survive
+    expect(md).toContain('\\[click\\]\\(http://evil\\)')
+    expect(md).toContain('\\<b\\>')
   })
 
   it('omits the "On this day" recap when no reference date is given', () => {
