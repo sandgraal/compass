@@ -14,7 +14,7 @@
 import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
 import { basename, extname } from 'node:path'
 import Database from 'better-sqlite3'
-import { type SQL, and, desc, eq, like, or } from 'drizzle-orm'
+import { type SQL, and, desc, eq, like, or, sql } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
 import { records } from '../db/schema'
@@ -276,6 +276,27 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
       return rows.map(rowToRecord)
     }
   )
+
+  // "On this day" recap — records sharing today's LOCAL month + day, from PRIOR
+  // years only (so it resurfaces memories rather than echoing today's imports).
+  // Date math runs in SQL on the ms epoch (÷1000 → seconds for strftime).
+  ipcMain.handle('records:on-this-day', (_event, opts?: { limit?: number }) => {
+    const db = getDb()
+    const limit = Math.min(Math.max(Math.trunc(opts?.limit ?? 50), 1), 200)
+    const now = new Date()
+    const mmdd = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    const year = String(now.getFullYear())
+    const localMonthDay = sql`strftime('%m-%d', ${records.occurredAt} / 1000, 'unixepoch', 'localtime')`
+    const localYear = sql`strftime('%Y', ${records.occurredAt} / 1000, 'unixepoch', 'localtime')`
+    const rows = db
+      .select()
+      .from(records)
+      .where(sql`${localMonthDay} = ${mmdd} AND ${localYear} <> ${year}`)
+      .orderBy(desc(records.occurredAt), desc(records.id))
+      .limit(limit)
+      .all()
+    return rows.map(rowToRecord)
+  })
 
   ipcMain.handle('records:import', async (): Promise<RecordsImportResult> => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
