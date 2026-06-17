@@ -129,6 +129,17 @@ describe('records:list', () => {
     const netflix = (await invoke('records:list', { source: 'netflix' })) as Rec[]
     expect(netflix).toHaveLength(2)
   })
+
+  it('filters by a full-text query over title and body', async () => {
+    await invoke('records:import-paths', [
+      fixture('NetflixViewingHistory.csv', 'Title,Date\nThe Matrix,1/2/26\nInception,12/25/25\n')
+    ])
+    const hits = (await invoke('records:list', { q: 'matrix' })) as Rec[]
+    expect(hits).toHaveLength(1)
+    expect(hits[0].title).toBe('The Matrix') // case-insensitive substring match
+    const none = (await invoke('records:list', { q: 'zzz-nope' })) as Rec[]
+    expect(none).toHaveLength(0)
+  })
 })
 
 describe('records:import (dialog)', () => {

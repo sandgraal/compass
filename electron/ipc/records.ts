@@ -14,7 +14,7 @@
 import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
 import { basename, extname } from 'node:path'
 import Database from 'better-sqlite3'
-import { type SQL, and, desc, eq } from 'drizzle-orm'
+import { type SQL, and, desc, eq, like, or } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
 import { records } from '../db/schema'
@@ -246,13 +246,25 @@ const EMPTY: Omit<RecordsImportResult, 'success'> = {
 export function registerRecordsHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(
     'records:list',
-    (_event, opts?: { source?: string; type?: string; limit?: number; offset?: number }) => {
+    (
+      _event,
+      opts?: { source?: string; type?: string; q?: string; limit?: number; offset?: number }
+    ) => {
       const db = getDb()
       const limit = Math.min(Math.max(Math.trunc(opts?.limit ?? 200), 1), 1000)
       const offset = Math.max(Math.trunc(opts?.offset ?? 0), 0)
       const conds: SQL[] = []
       if (opts?.source) conds.push(eq(records.source, opts.source))
       if (opts?.type) conds.push(eq(records.type, opts.type))
+      const q = opts?.q?.trim()
+      if (q) {
+        // Case-insensitive substring search over title + body, server-side so it
+        // spans the whole timeline (not just the loaded page). A null body simply
+        // doesn't match on body; OR still matches on a hit in the title.
+        const term = `%${q}%`
+        const m = or(like(records.title, term), like(records.body, term))
+        if (m) conds.push(m)
+      }
       const rows = db
         .select()
         .from(records)

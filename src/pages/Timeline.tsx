@@ -8,11 +8,12 @@ import {
   MessageSquare,
   Music,
   Package,
+  Search,
   Upload,
   Wallet,
   Youtube
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useToast } from '../components/ui/Toast'
 import { cn } from '../lib/utils'
 
@@ -54,18 +55,22 @@ function fmtTime(ms: number | null): string {
 export default function Timeline(): JSX.Element {
   const [items, setItems] = useState<TimelineRecord[]>([])
   const [source, setSource] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const { toast } = useToast()
 
-  useEffect(() => {
-    void load()
-  }, [])
-
-  async function load(): Promise<void> {
+  // Search runs server-side so it spans the whole timeline, not just the loaded page.
+  const reload = useCallback((): void => {
     if (!isElectron()) return
-    setItems(await window.api.records.list({ limit: 500 }))
-  }
+    void window.api.records.list({ q: query.trim() || undefined, limit: 500 }).then(setItems)
+  }, [query])
+
+  // Debounced — re-queries as the search text changes (and on first mount).
+  useEffect(() => {
+    const t = setTimeout(reload, 200)
+    return () => clearTimeout(t)
+  }, [reload])
 
   function report(r: RecordsImportResult): void {
     if (r.canceled) return
@@ -78,7 +83,7 @@ export default function Timeline(): JSX.Element {
     if (r.duplicates) parts.push(`${r.duplicates} already on your timeline`)
     if (r.unrecognized.length) parts.push(`${r.unrecognized.length} unrecognized`)
     toast(parts.join(' · ') || 'Nothing to import', r.imported > 0 ? 'success' : 'error')
-    void load()
+    reload()
   }
 
   async function pickFiles(): Promise<void> {
@@ -134,7 +139,8 @@ export default function Timeline(): JSX.Element {
             {items.length > 0 ? (
               <>
                 <span className="font-semibold text-foreground">{items.length}</span> record
-                {items.length === 1 ? '' : 's'} imported from your data exports
+                {items.length === 1 ? '' : 's'}{' '}
+                {query ? 'matching your search' : 'imported from your data exports'}
               </>
             ) : (
               'Bring your history home — drop a data export to begin'
@@ -176,6 +182,24 @@ export default function Timeline(): JSX.Element {
         </span>
       </button>
 
+      {/* Search */}
+      {(items.length > 0 || query) && (
+        <div className="relative mb-4">
+          <Search
+            size={15}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search your timeline…"
+            aria-label="Search your timeline"
+            className="w-full rounded-lg border border-border bg-card pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 transition-colors"
+          />
+        </div>
+      )}
+
       {/* Source filter chips */}
       {sources.length > 1 && (
         <div className="flex flex-wrap gap-1.5 mb-4">
@@ -193,13 +217,19 @@ export default function Timeline(): JSX.Element {
 
       {shown.length === 0 ? (
         items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
-            <p className="text-sm text-muted-foreground max-w-sm">
-              Your timeline is empty. Export your data from a service you use (Netflix, Spotify, …)
-              and drop the file above — it becomes a private, searchable, exportable timeline you
-              own forever.
+          query ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">
+              No records match “{query}”.
             </p>
-          </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+              <p className="text-sm text-muted-foreground max-w-sm">
+                Your timeline is empty. Export your data from a service you use (Netflix, Spotify,
+                …) and drop the file above — it becomes a private, searchable, exportable timeline
+                you own forever.
+              </p>
+            </div>
+          )
         ) : (
           <p className="text-sm text-muted-foreground py-8 text-center">No {source} records.</p>
         )

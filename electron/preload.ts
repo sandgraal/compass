@@ -297,8 +297,13 @@ const api = {
 
   // --- Records / Timeline (Phase 10.1 — the Drop Zone) ---
   records: {
-    list: (opts?: { source?: string; type?: string; limit?: number; offset?: number }) =>
-      ipcRenderer.invoke('records:list', opts),
+    list: (opts?: {
+      source?: string
+      type?: string
+      q?: string
+      limit?: number
+      offset?: number
+    }) => ipcRenderer.invoke('records:list', opts),
     importFiles: () => ipcRenderer.invoke('records:import'),
     importPaths: (paths: string[]) => ipcRenderer.invoke('records:import-paths', paths),
     pathsForFiles: (files: File[]) => files.map((f) => webUtils.getPathForFile(f))
