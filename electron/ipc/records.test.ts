@@ -178,6 +178,30 @@ describe('records:on-this-day', () => {
   })
 })
 
+describe('records:stats', () => {
+  it('returns true totals, distinct source count, and the dated span', async () => {
+    await invoke('records:import-paths', [
+      fixture('NetflixViewingHistory.csv', 'Title,Date\nThe Matrix,1/2/26\nInception,12/25/25\n'),
+      fixture(
+        'StreamingHistory0.json',
+        JSON.stringify([
+          { endTime: '2024-06-01 10:00', artistName: 'A', trackName: 'T', msPlayed: 1000 }
+        ])
+      )
+    ])
+    const stats = (await invoke('records:stats')) as {
+      total: number
+      sources: number
+      earliest: number | null
+      latest: number | null
+    }
+    expect(stats.total).toBe(3) // 2 netflix + 1 spotify
+    expect(stats.sources).toBe(2) // netflix + spotify
+    expect(stats.earliest).toBe(Date.parse('2024-06-01 10:00')) // oldest (spotify)
+    expect(stats.latest).toBe(new Date(2026, 0, 2).getTime()) // newest (The Matrix, Jan 2 2026)
+  })
+})
+
 describe('records:import (dialog)', () => {
   it('imports the chosen files', async () => {
     const p = fixture('NetflixViewingHistory.csv', 'Title,Date\nThe Matrix,1/2/26\n')

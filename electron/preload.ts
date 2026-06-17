@@ -305,6 +305,7 @@ const api = {
       offset?: number
     }) => ipcRenderer.invoke('records:list', opts),
     onThisDay: (opts?: { limit?: number }) => ipcRenderer.invoke('records:on-this-day', opts),
+    stats: () => ipcRenderer.invoke('records:stats'),
     importFiles: () => ipcRenderer.invoke('records:import'),
     importPaths: (paths: string[]) => ipcRenderer.invoke('records:import-paths', paths),
     pathsForFiles: (files: File[]) => files.map((f) => webUtils.getPathForFile(f))

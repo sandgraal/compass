@@ -302,6 +302,27 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
     return rows.map(rowToRecord)
   })
 
+  // At-a-glance totals for the Timeline header — the TRUE total (the list is capped
+  // at 500), distinct source count, and the dated span. One aggregate query.
+  ipcMain.handle('records:stats', () => {
+    const db = getDb()
+    const row = db
+      .select({
+        total: sql<number>`count(*)`,
+        sources: sql<number>`count(distinct ${records.source})`,
+        earliest: sql<number | null>`min(${records.occurredAt})`,
+        latest: sql<number | null>`max(${records.occurredAt})`
+      })
+      .from(records)
+      .get()
+    return {
+      total: row?.total ?? 0,
+      sources: row?.sources ?? 0,
+      earliest: row?.earliest ?? null,
+      latest: row?.latest ?? null
+    }
+  })
+
   ipcMain.handle('records:import', async (): Promise<RecordsImportResult> => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       title: 'Import a data export (CSV / JSON / XML / mbox / zip / sqlite)',

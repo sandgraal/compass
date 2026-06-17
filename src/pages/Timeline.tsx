@@ -58,10 +58,23 @@ function fmtTime(ms: number | null): string {
   if (d.getHours() === 0 && d.getMinutes() === 0) return ''
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 }
+/** "2019–2026" (or a single year) for the dated-records span — UTC to match the overview. */
+function fmtSpan(earliest: number | null, latest: number | null): string {
+  if (earliest == null || latest == null) return ''
+  const a = new Date(earliest).getUTCFullYear()
+  const b = new Date(latest).getUTCFullYear()
+  return a === b ? `${a}` : `${a}–${b}`
+}
 
 export default function Timeline(): JSX.Element {
   const [items, setItems] = useState<TimelineRecord[]>([])
   const [onThisDay, setOnThisDay] = useState<TimelineRecord[]>([])
+  const [stats, setStats] = useState<{
+    total: number
+    sources: number
+    earliest: number | null
+    latest: number | null
+  } | null>(null)
   const [source, setSource] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
@@ -80,6 +93,12 @@ export default function Timeline(): JSX.Element {
     void window.api.records.onThisDay({ limit: 8 }).then(setOnThisDay)
   }, [])
 
+  // True totals for the header (the list is capped at 500) — independent of search.
+  const loadStats = useCallback((): void => {
+    if (!isElectron()) return
+    void window.api.records.stats().then(setStats)
+  }, [])
+
   // Debounced — re-queries as the search text changes (and on first mount).
   useEffect(() => {
     const t = setTimeout(reload, 200)
@@ -88,7 +107,8 @@ export default function Timeline(): JSX.Element {
 
   useEffect(() => {
     loadOnThisDay()
-  }, [loadOnThisDay])
+    loadStats()
+  }, [loadOnThisDay, loadStats])
 
   function report(r: RecordsImportResult): void {
     if (r.canceled) return
@@ -103,6 +123,7 @@ export default function Timeline(): JSX.Element {
     toast(parts.join(' · ') || 'Nothing to import', r.imported > 0 ? 'success' : 'error')
     reload()
     loadOnThisDay()
+    loadStats()
   }
 
   async function pickFiles(): Promise<void> {
@@ -138,6 +159,7 @@ export default function Timeline(): JSX.Element {
   // clearable even when a search excludes it from those results.
   const sources = [...new Set([...items.map((i) => i.source), ...(source ? [source] : [])])].sort()
   const shown = source ? items.filter((i) => i.source === source) : items
+  const span = stats ? fmtSpan(stats.earliest, stats.latest) : ''
 
   // Records arrive newest-first, so consecutive same-day rows bucket cleanly.
   const groups: { day: string; rows: TimelineRecord[] }[] = []
@@ -157,11 +179,22 @@ export default function Timeline(): JSX.Element {
             <h1 className="text-2xl font-semibold text-foreground">Timeline</h1>
           </div>
           <p className="text-sm text-muted-foreground">
-            {items.length > 0 ? (
+            {query ? (
               <>
                 <span className="font-semibold text-foreground">{items.length}</span> record
-                {items.length === 1 ? '' : 's'}{' '}
-                {query ? 'matching your search' : 'imported from your data exports'}
+                {items.length === 1 ? '' : 's'} matching your search
+              </>
+            ) : stats && stats.total > 0 ? (
+              <>
+                <span className="font-semibold text-foreground">{stats.total}</span> record
+                {stats.total === 1 ? '' : 's'} · {stats.sources} source
+                {stats.sources === 1 ? '' : 's'}
+                {span && ` · ${span}`}
+              </>
+            ) : items.length > 0 ? (
+              <>
+                <span className="font-semibold text-foreground">{items.length}</span> record
+                {items.length === 1 ? '' : 's'} imported from your data exports
               </>
             ) : (
               'Bring your history home — drop a data export to begin'
