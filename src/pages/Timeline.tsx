@@ -1,4 +1,15 @@
-import { Activity, Clock, FileText, Film, Globe, Mail, Music, Upload, Youtube } from 'lucide-react'
+import {
+  Activity,
+  Clock,
+  FileText,
+  Film,
+  Globe,
+  Mail,
+  MessageSquare,
+  Music,
+  Upload,
+  Youtube
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useToast } from '../components/ui/Toast'
 import { cn } from '../lib/utils'
@@ -12,6 +23,7 @@ const SOURCE_META: Record<string, { label: string; icon: JSX.Element }> = {
   email: { label: 'Email', icon: <Mail size={13} /> },
   youtube: { label: 'YouTube', icon: <Youtube size={13} /> },
   browser: { label: 'Browser', icon: <Globe size={13} /> },
+  imessage: { label: 'Messages', icon: <MessageSquare size={13} /> },
   generic: { label: 'Imported', icon: <FileText size={13} /> }
 }
 function sourceMeta(s: string): { label: string; icon: JSX.Element } {

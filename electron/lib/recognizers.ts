@@ -17,6 +17,7 @@ import type Database from 'better-sqlite3'
 import { parseAppleHealth } from './apple-health'
 import { BROWSER_RECOGNIZERS } from './browser-history'
 import { parseCSV } from './csv'
+import { IMESSAGE_RECOGNIZER } from './imessage'
 import { parseMbox } from './mbox'
 
 export type RecordInput = {
@@ -322,7 +323,7 @@ export type SqliteRecognizer = {
   parse: (db: Database.Database) => RecordInput[]
 }
 
-export const SQLITE_RECOGNIZERS: SqliteRecognizer[] = [...BROWSER_RECOGNIZERS]
+export const SQLITE_RECOGNIZERS: SqliteRecognizer[] = [...BROWSER_RECOGNIZERS, IMESSAGE_RECOGNIZER]
 
 /** First SQLite recognizer that claims this opened DB, or null. */
 export function recognizeSqlite(db: Database.Database): SqliteRecognizer | null {

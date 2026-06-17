@@ -247,3 +247,30 @@ describe('records:import-paths — browser history (SQLite)', () => {
     expect(r2.duplicates).toBe(1)
   })
 })
+
+describe('records:import-paths — iMessage (chat.db)', () => {
+  it('aggregates a chat.db into daily message records and dedupes', async () => {
+    const dbPath = join(dir, 'chat.db')
+    const h = new Database(dbPath)
+    h.exec('CREATE TABLE message (ROWID INTEGER PRIMARY KEY, date INTEGER)')
+    h.exec('CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, chat_identifier TEXT, display_name TEXT)')
+    h.exec('CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER)')
+    h.prepare('INSERT INTO chat (ROWID, chat_identifier, display_name) VALUES (1, ?, NULL)').run(
+      'bob@x.com'
+    )
+    const ns = BigInt(Date.UTC(2026, 0, 5, 12, 0, 0) / 1000 - 978307200) * 1000000000n
+    h.prepare('INSERT INTO message (ROWID, date) VALUES (1, ?)').run(ns)
+    h.prepare('INSERT INTO message (ROWID, date) VALUES (2, ?)').run(ns)
+    h.prepare('INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1)').run()
+    h.prepare('INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 2)').run()
+    h.close()
+
+    const r1 = (await invoke('records:import-paths', [dbPath])) as ImportResult
+    expect(r1.perFile[0].recognizer).toBe('imessage')
+    expect(r1.imported).toBe(1) // one (day, conversation) record covering both messages
+
+    const r2 = (await invoke('records:import-paths', [dbPath])) as ImportResult
+    expect(r2.imported).toBe(0)
+    expect(r2.duplicates).toBe(1)
+  })
+})
