@@ -7,6 +7,7 @@ import {
   Mail,
   MessageSquare,
   Music,
+  Package,
   Upload,
   Youtube
 } from 'lucide-react'
@@ -19,6 +20,7 @@ const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
 const SOURCE_META: Record<string, { label: string; icon: JSX.Element }> = {
   netflix: { label: 'Netflix', icon: <Film size={13} /> },
   spotify: { label: 'Spotify', icon: <Music size={13} /> },
+  amazon: { label: 'Amazon', icon: <Package size={13} /> },
   'apple-health': { label: 'Apple Health', icon: <Activity size={13} /> },
   email: { label: 'Email', icon: <Mail size={13} /> },
   youtube: { label: 'YouTube', icon: <Youtube size={13} /> },
