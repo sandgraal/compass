@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { csvEscape, matchHeader, parseCSV, serializeCsv } from './csv'
+import { csvEscape, fromHeaderRow, matchHeader, parseCSV, serializeCsv } from './csv'
 
 describe('parseCSV', () => {
   it('parses headers and rows into keyed objects', () => {
@@ -70,6 +70,31 @@ describe('matchHeader', () => {
 
   it('returns undefined when nothing matches', () => {
     expect(matchHeader(['a', 'b'], 'Order ID')).toBeUndefined()
+  })
+})
+
+describe('fromHeaderRow', () => {
+  it('drops preamble lines before the line matching all required tokens', () => {
+    const text =
+      'Account Statement\nAccount Activity\n,ID,Datetime,Amount (total)\n,1,2026-01-01,$5.00\n'
+    const out = fromHeaderRow(text, 'Datetime', 'Amount (total)')
+    expect(out.startsWith(',ID,Datetime,Amount (total)')).toBe(true)
+    expect(parseCSV(out)).toHaveLength(1)
+  })
+
+  it('finds the header across CRLF and bare-CR line endings', () => {
+    const rows = ['Title', 'Notes', ',ID,Datetime,Amount (total)', ',1,2026-01-01,$5.00']
+    for (const eol of ['\r\n', '\r', '\n']) {
+      const out = fromHeaderRow(rows.join(eol), 'Datetime', 'Amount (total)')
+      expect(out.startsWith(',ID,Datetime,Amount (total)')).toBe(true)
+      expect(parseCSV(out)).toHaveLength(1)
+    }
+  })
+
+  it('returns the text unchanged when the header is line 0 or not found', () => {
+    const already = 'a,b\n1,2\n'
+    expect(fromHeaderRow(already, 'a', 'b')).toBe(already) // already line 0
+    expect(fromHeaderRow(already, 'zzz')).toBe(already) // no match
   })
 })
 

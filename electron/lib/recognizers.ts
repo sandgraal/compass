@@ -23,6 +23,7 @@ import { GOODREADS_RECOGNIZER } from './goodreads'
 import { IMESSAGE_RECOGNIZER } from './imessage'
 import { parseMbox } from './mbox'
 import { PAYPAL_RECOGNIZER } from './paypal'
+import { VENMO_RECOGNIZER } from './venmo'
 
 // Re-exported so existing importers keep `import { parseWhen } from './recognizers'`
 // working; the implementation now lives in `./dates` so recognizer files can use it
@@ -250,6 +251,7 @@ export const RECOGNIZERS: Recognizer[] = [
   AMAZON_RECOGNIZER,
   PAYPAL_RECOGNIZER,
   GOODREADS_RECOGNIZER,
+  VENMO_RECOGNIZER,
   genericTimeline
 ]
 

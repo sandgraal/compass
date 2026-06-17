@@ -88,6 +88,26 @@ export function matchHeader(keys: string[], ...wanted: string[]): string | undef
   return undefined
 }
 
+/**
+ * Drop leading preamble lines so parsing starts at the first line containing ALL
+ * of `required` (case-insensitive substring). Returns the text unchanged if the
+ * header is already line 0, or if no matching line is found. Lets recognizers
+ * handle exports (Venmo, LinkedIn, …) that prefix the real CSV header with a
+ * title / notes / account-summary block.
+ */
+export function fromHeaderRow(text: string, ...required: string[]): string {
+  // Split on any line ending (CRLF / CR / LF) so the header is found in exports
+  // that use \r\n or bare \r — otherwise a \r-only file is one "line" and the
+  // preamble would be mis-parsed as the header.
+  const lines = text.split(/\r\n|\r|\n/)
+  const needles = required.map((t) => t.toLowerCase())
+  const idx = lines.findIndex((line) => {
+    const lower = line.toLowerCase()
+    return needles.every((n) => lower.includes(n))
+  })
+  return idx <= 0 ? text : lines.slice(idx).join('\n')
+}
+
 /** Escape a single CSV field — quote it when it contains a comma, quote, or newline. */
 export function csvEscape(value: unknown): string {
   if (value == null) return ''

@@ -382,3 +382,26 @@ describe('records:import-paths — Goodreads books (CSV)', () => {
     expect(r2.duplicates).toBe(2)
   })
 })
+
+describe('records:import-paths — Venmo transactions (CSV with preamble)', () => {
+  it('skips the preamble, imports transactions, and dedupes on re-import', async () => {
+    const p = fixture(
+      'venmo_statement.csv',
+      [
+        'Account Statement - (@janedoe) - January 2026',
+        'Account Activity',
+        ',ID,Datetime,Type,Status,Note,From,To,Amount (total)',
+        ',,,,,,,,$100.00',
+        ',331,2026-01-15T10:30:00,Payment,Complete,Dinner,Jane Doe,John Smith,- $25.00',
+        ',332,2026-01-20T14:00:00,Payment,Complete,Tickets,Bob,Jane Doe,+ $50.00'
+      ].join('\n')
+    )
+    const r1 = (await invoke('records:import-paths', [p])) as ImportResult
+    expect(r1.perFile[0].recognizer).toBe('venmo')
+    expect(r1.imported).toBe(2) // summary row skipped
+
+    const r2 = (await invoke('records:import-paths', [p])) as ImportResult
+    expect(r2.imported).toBe(0)
+    expect(r2.duplicates).toBe(2)
+  })
+})
