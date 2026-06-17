@@ -74,14 +74,14 @@ describe('buildRecordsOverviewMarkdown', () => {
     expect(section).not.toContain('Track A') // Feb 10 is not June 16
   })
 
-  it('escapes Markdown-special characters in imported labels', () => {
+  it('escapes Markdown punctuation, links/HTML, and newline-injected blocks', () => {
     const md = buildRecordsOverviewMarkdown(
       [
         {
           source: 'generic',
           type: 'event',
           occurredAt: new Date('2026-01-02T00:00:00Z'),
-          title: '[click](http://evil) <b>x</b>'
+          title: '[click](http://evil) <b>x</b>\n## Injected'
         }
       ],
       'now'
@@ -89,6 +89,7 @@ describe('buildRecordsOverviewMarkdown', () => {
     expect(md).not.toContain('[click](http://evil)') // raw link must not survive
     expect(md).toContain('\\[click\\]\\(http://evil\\)')
     expect(md).toContain('\\<b\\>')
+    expect(md).not.toContain('\n## Injected') // a newline cannot inject a new heading
   })
 
   it('omits the "On this day" recap when no reference date is given', () => {

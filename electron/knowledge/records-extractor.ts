@@ -25,13 +25,18 @@ export interface RecordSummaryRow {
 }
 
 /**
- * Escape Markdown inline punctuation in imported, user-controlled labels
- * (title / source / type) before they go into `overview.md`. The KnowledgeBase
- * Markdown→HTML render doesn't sanitize, so an unescaped value could otherwise
- * become a clickable link or raw HTML.
+ * Sanitize an imported, user-controlled label (title / source / type) before it
+ * goes into `overview.md`. The KnowledgeBase Markdown→HTML render doesn't escape,
+ * so we both (1) collapse runs of whitespace — including newlines — to a single
+ * space (and trim), otherwise a value like `x\n## Heading` could inject a whole new
+ * Markdown block, then (2) escape inline punctuation (incl. `#`, `[`, `<`) so it
+ * can't form a heading / link / raw HTML on the same line either.
  */
 function mdEscape(s: string): string {
-  return s.replace(/[\\`*_[\]()<>|~#]/g, '\\$&')
+  return s
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[\\`*_[\]()<>|~#]/g, '\\$&')
 }
 
 /**
