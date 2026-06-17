@@ -183,6 +183,7 @@ export default function Timeline(): JSX.Element {
               <>
                 <span className="font-semibold text-foreground">{items.length}</span> record
                 {items.length === 1 ? '' : 's'} matching your search
+                {items.length === 500 ? ' (first 500 shown)' : ''}
               </>
             ) : stats && stats.total > 0 ? (
               <>
