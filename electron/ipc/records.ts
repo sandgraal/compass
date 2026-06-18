@@ -228,8 +228,12 @@ async function ingestPath(fp: string, name: string, ctx: IngestCtx, depth: numbe
   }
 }
 
-/** Core ingest shared by the dialog + drag-drop handlers. */
-async function ingestFiles(paths: string[]): Promise<RecordsImportResult> {
+/**
+ * Core ingest shared by the dialog + drag-drop handlers — and by the CRED
+ * engine (`electron/ipc/cred.ts`), so a portal-fetched artifact re-enters
+ * through the EXACT same validated, content-light pipeline as a manual drop.
+ */
+export async function ingestFiles(paths: string[]): Promise<RecordsImportResult> {
   const ctx: IngestCtx = { perFile: [], unrecognized: [], imported: 0, duplicates: 0 }
   for (const fp of paths) await ingestPath(fp, basename(fp), ctx, 0)
   if (ctx.imported > 0) {

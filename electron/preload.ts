@@ -310,6 +310,11 @@ const api = {
     importPaths: (paths: string[]) => ipcRenderer.invoke('records:import-paths', paths),
     pathsForFiles: (files: File[]) => files.map((f) => webUtils.getPathForFile(f))
   },
+  cred: {
+    list: () => ipcRenderer.invoke('cred:list'),
+    run: (portalId: string) => ipcRenderer.invoke('cred:run', portalId),
+    cancel: () => ipcRenderer.invoke('cred:cancel')
+  },
 
   // --- Household & Assets (Phase 9.5 — owned, editable, exportable) ---
   assets: {
