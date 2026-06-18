@@ -95,6 +95,48 @@ export const CREDIT_REPORT_RECOGNIZER: PdfRecognizer = {
   }
 }
 
+const TAX_FORM =
+  /\b(w-2|1099-[a-z]{1,4}|1099|1098|1040(?:-[a-z]{1,3})?|tax return transcript|wage and income transcript|wage and tax statement)\b/i
+const TAX_YEAR_LABELLED = /\b(?:tax year|for(?: the)?(?: tax)? year)\s*:?\s*(20\d{2})\b/i
+
+/** Normalize the matched tax-form marker to a display label (W-2, 1099-INT, transcript names). */
+function taxForm(text: string): string {
+  const m = text.match(TAX_FORM)
+  if (!m) return ''
+  const f = m[1].toLowerCase()
+  if (f === 'wage and tax statement') return 'W-2'
+  if (f.includes('income transcript')) return 'Wage & Income Transcript'
+  if (f.includes('return transcript')) return 'Tax Return Transcript'
+  return m[1].toUpperCase()
+}
+
+/** Tax documents (W-2 / 1099 / 1040 / IRS transcripts) — index by form + tax year only. */
+export const TAX_DOC_RECOGNIZER: PdfRecognizer = {
+  id: 'tax-document',
+  label: 'Tax document (PDF)',
+  // Require a tax-form marker AND tax context, so a stray "1099" in some invoice
+  // doesn't get mislabeled.
+  detect: (text) => TAX_FORM.test(text) && /\b(tax|irs|internal revenue)\b/i.test(text),
+  parse: (text, name) => {
+    const form = taxForm(text)
+    const year = text.match(TAX_YEAR_LABELLED)?.[1] ?? text.match(/\b20\d{2}\b/)?.[0] ?? ''
+    const label = [form, year].filter(Boolean).join(' ')
+    return [
+      {
+        source: 'tax-document',
+        type: 'tax-document',
+        // Dated to the end of the tax year it represents (Dec 31 of that year).
+        occurredAt: year ? parseWhen(`${year}-12-31`) : null,
+        title: label ? `Tax document — ${label}` : 'Tax document',
+        body: form || undefined,
+        // Content-light — form + year only, never wages / SSN / amounts.
+        payload: { form: form || null, year: year || null, file: name },
+        naturalKey: `${form || 'tax'}|${year}|${name}`
+      }
+    ]
+  }
+}
+
 /**
  * Catch-all: any other PDF becomes one dated document index entry. Metadata ONLY
  * — the title is the user's filename and the date is extracted metadata; the

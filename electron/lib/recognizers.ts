@@ -24,7 +24,7 @@ import { IMESSAGE_RECOGNIZER } from './imessage'
 import { LINKEDIN_RECOGNIZER } from './linkedin'
 import { parseMbox } from './mbox'
 import { PAYPAL_RECOGNIZER } from './paypal'
-import { CREDIT_REPORT_RECOGNIZER, GENERIC_DOC_RECOGNIZER } from './pdf'
+import { CREDIT_REPORT_RECOGNIZER, GENERIC_DOC_RECOGNIZER, TAX_DOC_RECOGNIZER } from './pdf'
 import { VENMO_RECOGNIZER } from './venmo'
 
 // Re-exported so existing importers keep `import { parseWhen } from './recognizers'`
@@ -355,7 +355,11 @@ export type PdfRecognizer = {
   parse: (text: string, name: string) => RecordInput[]
 }
 
-export const PDF_RECOGNIZERS: PdfRecognizer[] = [CREDIT_REPORT_RECOGNIZER, GENERIC_DOC_RECOGNIZER]
+export const PDF_RECOGNIZERS: PdfRecognizer[] = [
+  CREDIT_REPORT_RECOGNIZER,
+  TAX_DOC_RECOGNIZER,
+  GENERIC_DOC_RECOGNIZER
+]
 
 /** First PDF recognizer that claims this extracted text (generic document is the catch-all). */
 export function recognizePdf(text: string, name: string): PdfRecognizer | null {
