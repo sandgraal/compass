@@ -50,7 +50,7 @@ describe('tax-document PDF recognizer', () => {
     const out = TAX_DOC_RECOGNIZER.parse(text, 'w2.pdf')
     expect(out[0].source).toBe('tax-document')
     expect(out[0].title).toBe('Tax document — W-2 2025')
-    expect(out[0].occurredAt).toBe(Date.parse('2025-12-31')) // end of the tax year
+    expect(out[0].occurredAt).toBe(new Date(2025, 11, 31).getTime()) // local Dec 31 of the tax year
     expect(JSON.stringify(out[0].payload)).not.toContain('84,000') // no amounts
     expect(JSON.stringify(out[0].payload)).not.toContain('123-45-6789') // no SSN
   })
@@ -66,8 +66,17 @@ describe('tax-document PDF recognizer', () => {
     expect(out[0].title).toBe('Tax document — Wage & Income Transcript 2023')
   })
 
-  it('does not claim a "1099" amount without tax context', () => {
-    expect(TAX_DOC_RECOGNIZER.detect('Invoice #1099\nAmount due: $500', 'invoice.pdf')).toBe(false)
+  it('uses the tax-period year on a transcript, not the request date', () => {
+    const text = 'Tax Return Transcript\nRequest Date: 06-13-2024\nTax Period Ending: Dec. 31, 2023'
+    const out = TAX_DOC_RECOGNIZER.parse(text, 't.pdf')
+    expect(out[0].title).toBe('Tax document — Tax Return Transcript 2023') // not 2024
+    expect(out[0].occurredAt).toBe(new Date(2023, 11, 31).getTime())
+  })
+
+  it('does not claim an invoice with a bare "1099" number and a "Sales tax" line', () => {
+    const invoice = 'Invoice #1099\nSubtotal: $500\nSales tax: $40\nAmount due: $540'
+    expect(TAX_DOC_RECOGNIZER.detect(invoice, 'invoice.pdf')).toBe(false)
+    expect(recognizePdf(invoice, 'invoice.pdf')?.id).toBe('document') // falls to generic
   })
 })
 
