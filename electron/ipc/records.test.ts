@@ -12,6 +12,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import type { IpcMain } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as schema from '../db/schema'
+import { makePdf } from '../lib/__fixtures__/make-pdf'
 
 let sqlite: Database.Database
 vi.mock('../db/client', () => ({ getDb: () => drizzle(sqlite, { schema }) }))
@@ -427,6 +428,20 @@ describe('records:import-paths — Venmo transactions (CSV with preamble)', () =
     const r2 = (await invoke('records:import-paths', [p])) as ImportResult
     expect(r2.imported).toBe(0)
     expect(r2.duplicates).toBe(2)
+  })
+})
+
+describe('records:import-paths — credit report (PDF)', () => {
+  it('extracts a credit-report PDF, indexes it, and dedupes on re-import', async () => {
+    const p = join(dir, 'creditreport.pdf')
+    writeFileSync(p, makePdf('TransUnion Credit Report Report Date 2026-02-01 FICO Score 705'))
+    const r1 = (await invoke('records:import-paths', [p])) as ImportResult
+    expect(r1.perFile[0].recognizer).toBe('credit-report')
+    expect(r1.imported).toBe(1)
+
+    const r2 = (await invoke('records:import-paths', [p])) as ImportResult
+    expect(r2.imported).toBe(0)
+    expect(r2.duplicates).toBe(1)
   })
 })
 

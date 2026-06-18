@@ -20,10 +20,12 @@ import { getDb } from '../db/client'
 import { records } from '../db/schema'
 import { updateRecordsKnowledge } from '../knowledge/records-extractor'
 import { serializeCsv } from '../lib/csv'
+import { extractPdfText } from '../lib/pdf'
 import {
   type RecordInput,
   hashRecord,
   recognize,
+  recognizePdf,
   recognizeSqlite,
   recognizeStream
 } from '../lib/recognizers'
@@ -150,6 +152,34 @@ async function ingestPath(fp: string, name: string, ctx: IngestCtx, depth: numbe
         }
       } finally {
         db?.close()
+      }
+      return
+    }
+
+    // PDF (credit reports, tax/medical/government letters) — extract text (binary,
+    // so handled before the utf-8 read) and route through the PDF recognizers.
+    if (head.startsWith('%PDF-')) {
+      if (size > MAX_IMPORT_BYTES) {
+        ctx.unrecognized.push(`${name} (too large, max 50 MB)`)
+        ctx.perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
+        return
+      }
+      const { text } = await extractPdfText(fp)
+      const rec = recognizePdf(text, name)
+      if (rec) {
+        const out = rec.parse(text, name)
+        const { imported: imp } = insertRecords(out, name)
+        ctx.imported += imp
+        ctx.duplicates += out.length - imp
+        ctx.perFile.push({
+          file: name,
+          recognizer: rec.id,
+          imported: imp,
+          duplicates: out.length - imp
+        })
+      } else {
+        ctx.unrecognized.push(name)
+        ctx.perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
       }
       return
     }
@@ -326,9 +356,12 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
 
   ipcMain.handle('records:import', async (): Promise<RecordsImportResult> => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: 'Import a data export (CSV / JSON / XML / mbox / zip / sqlite)',
+      title: 'Import a data export (CSV / JSON / XML / mbox / zip / sqlite / pdf)',
       filters: [
-        { name: 'Data exports', extensions: ['csv', 'json', 'xml', 'mbox', 'zip', 'sqlite', 'db'] },
+        {
+          name: 'Data exports',
+          extensions: ['csv', 'json', 'xml', 'mbox', 'zip', 'sqlite', 'db', 'pdf']
+        },
         // Chrome's history DB is the extensionless file `History`, so allow any file.
         { name: 'All files', extensions: ['*'] }
       ],

@@ -24,6 +24,7 @@ import { IMESSAGE_RECOGNIZER } from './imessage'
 import { LINKEDIN_RECOGNIZER } from './linkedin'
 import { parseMbox } from './mbox'
 import { PAYPAL_RECOGNIZER } from './paypal'
+import { CREDIT_REPORT_RECOGNIZER, GENERIC_DOC_RECOGNIZER } from './pdf'
 import { VENMO_RECOGNIZER } from './venmo'
 
 // Re-exported so existing importers keep `import { parseWhen } from './recognizers'`
@@ -334,6 +335,34 @@ export function recognizeSqlite(db: Database.Database): SqliteRecognizer | null 
     SQLITE_RECOGNIZERS.find((rec) => {
       try {
         return rec.detect(db)
+      } catch {
+        return false
+      }
+    }) ?? null
+  )
+}
+
+// ── PDF recognizers (Phase 10.2/10.5 — RIGHTS mode) ───────────────────────────
+// For documents that arrive as PDFs (credit reports, tax/medical/government
+// letters). `records.ts` extracts the text (main-process `pdf-parse`) and each
+// recognizer claims it by text signature. (Parsers live in `pdf.ts`.) Records are
+// a content-light INDEX — the sensitive source text is never stored.
+
+export type PdfRecognizer = {
+  id: string
+  label: string
+  detect: (text: string, name: string) => boolean
+  parse: (text: string, name: string) => RecordInput[]
+}
+
+export const PDF_RECOGNIZERS: PdfRecognizer[] = [CREDIT_REPORT_RECOGNIZER, GENERIC_DOC_RECOGNIZER]
+
+/** First PDF recognizer that claims this extracted text (generic document is the catch-all). */
+export function recognizePdf(text: string, name: string): PdfRecognizer | null {
+  return (
+    PDF_RECOGNIZERS.find((rec) => {
+      try {
+        return rec.detect(text, name)
       } catch {
         return false
       }
