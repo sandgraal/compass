@@ -17,20 +17,21 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { PDFParse } from 'pdf-parse'
 import { parseWhen } from './dates'
 import type { PdfRecognizer, RecordInput } from './recognizers'
 
 /** Extract plain text from a PDF (main process). Strips pdf-parse's "-- N of M --" page markers. */
 export async function extractPdfText(path: string): Promise<{ text: string; pages: number }> {
+  const { PDFParse } = await import('pdf-parse')
   const parser = new PDFParse({ data: readFileSync(path) })
   try {
-    const r = await parser.getText()
-    const text = (r.text ?? '')
+    const textRes = await parser.getText()
+    const infoRes = await parser.getInfo({ parsePageInfo: true })
+    const text = (textRes.text ?? '')
       .replace(/^-- \d+ of \d+ --$/gm, '')
       .replace(/\n{3,}/g, '\n\n')
       .trim()
-    return { text, pages: r.total ?? 0 }
+    return { text, pages: infoRes.total ?? 0 }
   } finally {
     await parser.destroy()
   }
