@@ -12,6 +12,7 @@ import {
   Layers,
   LayoutDashboard,
   Plug2,
+  ScrollText,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -89,6 +90,7 @@ export function Sidebar(): JSX.Element {
     { label: 'Subscriptions', to: '/subscriptions', icon: <CreditCard size={18} /> },
     { label: 'Household & Assets', to: '/assets', icon: <Home size={18} /> },
     { label: 'Timeline', to: '/timeline', icon: <Clock size={18} /> },
+    { label: 'Get Your Data', to: '/data-rights', icon: <ScrollText size={18} /> },
     { label: 'Finance', to: '/finance', icon: <TrendingUp size={18} /> },
     {
       label: 'Integrations',

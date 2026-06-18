@@ -9,6 +9,7 @@ import ClaudeInbox from './pages/ClaudeInbox'
 import Contacts from './pages/Contacts'
 import Daily from './pages/Daily'
 import Dashboard from './pages/Dashboard'
+import DataRights from './pages/DataRights'
 import Export from './pages/Export'
 import Finance from './pages/Finance'
 import Integrations from './pages/Integrations'
@@ -83,6 +84,7 @@ export default function App(): JSX.Element {
           <Route path="assets" element={<Assets />} />
           <Route path="storehouse" element={<Storehouse />} />
           <Route path="timeline" element={<Timeline />} />
+          <Route path="data-rights" element={<DataRights />} />
           <Route path="export" element={<Export />} />
           <Route path="integrations" element={<Integrations />} />
           <Route path="settings" element={<Settings />} />
