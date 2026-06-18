@@ -158,9 +158,9 @@ readEncryptedJson<PortalCreds>('portal-credentials', getOrCreateKey())
 writeEncryptedJson('portal-credentials', creds, getOrCreateKey())
 ```
 The renderer can **set** a credential (one-way, like `assistant:set-key`) and read back only a masked tail
-via `cred:status`. It can never read a stored password back. `portal-credentials` is a reserved name that
-passes `SAFE_VAULT_NAME` and is excluded from any export/backup that isn't itself encrypted. **Not built in
-v1.**
+via `cred:status`. It can never read a stored password back. The vault name must satisfy `SAFE_VAULT_NAME`
+(note: only `key` is reserved today); `portal-credentials` is the convention for this feature, and any
+non-encrypted export/backup must exclude it. **Not built in v1.**
 
 ### 6.2 The sandboxed automation window — `electron/integrations/cred/runtime.ts`
 Extends the Plaid child-window pattern, hardened:
