@@ -88,7 +88,7 @@ describe('tax-document PDF recognizer', () => {
 describe('Social Security statement recognizer', () => {
   it('detects an SSA statement and indexes it (no earnings / SSN stored)', () => {
     const text =
-      'Your Social Security Statement\nSocial Security Administration\nPrepared for you on April 3, 2025\nEstimated monthly retirement benefit: $2,400\nYour Social Security Earnings: $84,000'
+      'Your Social Security Statement\nSocial Security Administration\nPrepared for you on April 3, 2025\nSSN: 123-45-6789\nEstimated monthly retirement benefit: $2,400\nYour Social Security Earnings: $84,000'
     expect(recognizePdf(text, 'ssa.pdf')?.id).toBe('social-security') // wins over generic
 
     const out = SOCIAL_SECURITY_RECOGNIZER.parse(text, 'ssa.pdf')
@@ -96,7 +96,7 @@ describe('Social Security statement recognizer', () => {
     expect(out[0].title).toBe('Social Security Statement 2025')
     expect(JSON.stringify(out[0].payload)).not.toContain('84,000') // no earnings record
     expect(JSON.stringify(out[0].payload)).not.toContain('2,400') // no benefit estimate
-  })
+    expect(JSON.stringify(out[0].payload)).not.toContain('123-45-6789') // no SSN
 
   it('does not grab a tax document that merely mentions social security wages', () => {
     const w2 = 'Form W-2 Wage and Tax Statement\nTax Year 2025\nSocial security wages $84,000'
