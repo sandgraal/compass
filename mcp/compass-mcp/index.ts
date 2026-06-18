@@ -32,7 +32,12 @@ import Database from 'better-sqlite3'
 import { REPO_ONLY_TOOLS, filterToolsForBundle, isBundled } from './bundle-mode.js'
 import { DAY_MS, localYm, localYmd } from './dates.js'
 import { PROPOSE_TOOLS, appendProposal, buildProposal, makeProposal } from './proposals.js'
-import { normalizeTaskRange, readRecentNotes, readTasksRange } from './readers.js'
+import {
+  normalizeTaskRange,
+  readRecentNotes,
+  readTasksRange,
+  readTimelineSummary
+} from './readers.js'
 
 // Mirror electron/paths.ts — but we open the DB read-only. Honor the same
 // opt-in COMPASS_HOME override so E2E / screenshot / test tooling can point
@@ -230,6 +235,12 @@ const TOOLS = [
       additionalProperties: false
     }
   },
+  {
+    name: 'compass_timeline',
+    description:
+      "Summarize the user's unified life Timeline — records imported from all their data sources (purchases, media watched/listened, messages, documents, health, credit/tax, and more). Returns AGGREGATES ONLY (total, counts by source and kind, the year span, per-year totals) — never the raw records or their titles. Use for 'how far back does my data go', 'what have I imported', 'how much/what kind of data do I have', or 'how active was I in <year>'. Read-only.",
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+  },
   // Propose-write tools — enqueue to the Claude Inbox, never mutate directly.
   ...PROPOSE_TOOLS
 ]
@@ -281,6 +292,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const rows = readRecentNotes(db, Number(args?.limit ?? 10))
       db.close()
       return textResult(JSON.stringify(rows, null, 2))
+    }
+
+    if (name === 'compass_timeline') {
+      const db = openDb()
+      if (!db) return errorResult('Compass DB not found — is the app installed?')
+      const summary = readTimelineSummary(db)
+      db.close()
+      return textResult(JSON.stringify(summary, null, 2))
     }
 
     if (name === 'compass_search_knowledge') {
