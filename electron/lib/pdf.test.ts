@@ -9,7 +9,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { makePdf } from './__fixtures__/make-pdf'
-import { CREDIT_REPORT_RECOGNIZER, TAX_DOC_RECOGNIZER, extractPdfText } from './pdf'
+import {
+  CREDIT_REPORT_RECOGNIZER,
+  SOCIAL_SECURITY_RECOGNIZER,
+  TAX_DOC_RECOGNIZER,
+  extractPdfText
+} from './pdf'
 import { recognizePdf } from './recognizers'
 
 describe('credit-report PDF recognizer', () => {
@@ -77,6 +82,25 @@ describe('tax-document PDF recognizer', () => {
     const invoice = 'Invoice #1099\nSubtotal: $500\nSales tax: $40\nAmount due: $540'
     expect(TAX_DOC_RECOGNIZER.detect(invoice, 'invoice.pdf')).toBe(false)
     expect(recognizePdf(invoice, 'invoice.pdf')?.id).toBe('document') // falls to generic
+  })
+})
+
+describe('Social Security statement recognizer', () => {
+  it('detects an SSA statement and indexes it (no earnings / SSN stored)', () => {
+    const text =
+      'Your Social Security Statement\nSocial Security Administration\nPrepared for you on April 3, 2025\nEstimated monthly retirement benefit: $2,400\nYour Social Security Earnings: $84,000'
+    expect(recognizePdf(text, 'ssa.pdf')?.id).toBe('social-security') // wins over generic
+
+    const out = SOCIAL_SECURITY_RECOGNIZER.parse(text, 'ssa.pdf')
+    expect(out[0].source).toBe('social-security')
+    expect(out[0].title).toBe('Social Security Statement 2025')
+    expect(JSON.stringify(out[0].payload)).not.toContain('84,000') // no earnings record
+    expect(JSON.stringify(out[0].payload)).not.toContain('2,400') // no benefit estimate
+  })
+
+  it('does not grab a tax document that merely mentions social security wages', () => {
+    const w2 = 'Form W-2 Wage and Tax Statement\nTax Year 2025\nSocial security wages $84,000'
+    expect(recognizePdf(w2, 'w2.pdf')?.id).toBe('tax-document') // tax wins; SSA stays specific
   })
 })
 

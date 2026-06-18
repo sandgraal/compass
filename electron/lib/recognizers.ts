@@ -24,7 +24,12 @@ import { IMESSAGE_RECOGNIZER } from './imessage'
 import { LINKEDIN_RECOGNIZER } from './linkedin'
 import { parseMbox } from './mbox'
 import { PAYPAL_RECOGNIZER } from './paypal'
-import { CREDIT_REPORT_RECOGNIZER, GENERIC_DOC_RECOGNIZER, TAX_DOC_RECOGNIZER } from './pdf'
+import {
+  CREDIT_REPORT_RECOGNIZER,
+  GENERIC_DOC_RECOGNIZER,
+  SOCIAL_SECURITY_RECOGNIZER,
+  TAX_DOC_RECOGNIZER
+} from './pdf'
 import { VENMO_RECOGNIZER } from './venmo'
 
 // Re-exported so existing importers keep `import { parseWhen } from './recognizers'`
@@ -358,6 +363,7 @@ export type PdfRecognizer = {
 export const PDF_RECOGNIZERS: PdfRecognizer[] = [
   CREDIT_REPORT_RECOGNIZER,
   TAX_DOC_RECOGNIZER,
+  SOCIAL_SECURITY_RECOGNIZER,
   GENERIC_DOC_RECOGNIZER
 ]
 
