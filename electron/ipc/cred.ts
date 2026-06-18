@@ -53,15 +53,30 @@ export function registerCredHandlers(ipcMain: IpcMain, deps: CredDeps = DEFAULT_
       if (!outcome.ok || !outcome.path) {
         return { ok: false, cancelled: outcome.cancelled, error: outcome.error }
       }
-      const res = await deps.ingest([outcome.path])
-      // The data now lives in `records`; don't leave the fetched artifact (which
-      // may hold sensitive content, e.g. an SSA statement) sitting in temp.
+      const path = outcome.path
       try {
-        rmSync(outcome.path, { force: true })
-      } catch {
-        /* best-effort cleanup */
+        const res = await deps.ingest([path])
+        return { ok: true, imported: res.imported, duplicates: res.duplicates }
+      } finally {
+        // The data now lives in `records`; don't leave the fetched artifact (which
+        // may hold sensitive content, e.g. an SSA statement) sitting in temp.
+        try {
+          rmSync(path, { force: true })
+        } catch {
+          /* best-effort cleanup */
+        }
+
+        // Best-effort cleanup of the per-run temp dir created by the runner.
+        const dir = path.replace(/[/\\][^/\\]+$/, '')
+        const leaf = dir.split(/[/\\]/).pop() ?? ''
+        if (leaf.startsWith('compass-cred-')) {
+          try {
+            rmSync(dir, { recursive: true, force: true })
+          } catch {
+            /* best-effort cleanup */
+          }
+        }
       }
-      return { ok: true, imported: res.imported, duplicates: res.duplicates }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     } finally {
