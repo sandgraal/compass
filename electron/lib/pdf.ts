@@ -95,6 +95,55 @@ export const CREDIT_REPORT_RECOGNIZER: PdfRecognizer = {
   }
 }
 
+const TAX_FORM =
+  /\b(w-2|1099-[a-z]{1,4}|1099|1098|1040(?:-[a-z]{1,3})?|tax return transcript|wage and income transcript|wage and tax statement)\b/i
+// Stronger detection: a definitive tax marker (Form-prefixed number, hyphenated
+// W-2 / 1099 code, transcript name, or explicit IRS / "Tax Year YYYY") — so a bare
+// "1099" invoice line next to a "Sales tax" total isn't claimed as a tax document.
+const TAX_SIGNATURE =
+  /\b(?:form\s+(?:w-2|1099(?:-[a-z]{1,4})?|1040(?:-[a-z]{1,3})?)|w-2|1099-[a-z]{1,4}|wage and tax statement|tax return transcript|wage and income transcript|internal revenue service|irs|tax year\s*:?\s*20\d{2})\b/i
+// Labelled tax year. Includes transcript wording ("Tax Period Ending: … 2023") so a
+// transcript's earlier request-date year doesn't win via the bare-year fallback.
+const TAX_YEAR_LABELLED =
+  /\b(?:tax year|tax period(?: ending)?|for(?: the)?(?: tax)? year)\b[^\n]{0,40}?(20\d{2})\b/i
+
+/** Normalize the matched tax-form marker to a display label (W-2, 1099-INT, transcript names). */
+function taxForm(text: string): string {
+  const m = text.match(TAX_FORM)
+  if (!m) return ''
+  const f = m[1].toLowerCase()
+  if (f === 'wage and tax statement') return 'W-2'
+  if (f.includes('income transcript')) return 'Wage & Income Transcript'
+  if (f.includes('return transcript')) return 'Tax Return Transcript'
+  return m[1].toUpperCase()
+}
+
+/** Tax documents (W-2 / 1099 / 1040 / IRS transcripts) — index by form + tax year only. */
+export const TAX_DOC_RECOGNIZER: PdfRecognizer = {
+  id: 'tax-document',
+  label: 'Tax document (PDF)',
+  detect: (text) => TAX_SIGNATURE.test(text),
+  parse: (text, name) => {
+    const form = taxForm(text)
+    const year = text.match(TAX_YEAR_LABELLED)?.[1] ?? text.match(/\b20\d{2}\b/)?.[0] ?? ''
+    const label = [form, year].filter(Boolean).join(' ')
+    return [
+      {
+        source: 'tax-document',
+        type: 'tax-document',
+        // Local midnight Dec 31 of the tax year — stable displayed day across
+        // timezones (no UTC-midnight drift / spurious time on the Timeline).
+        occurredAt: year ? new Date(Number(year), 11, 31).getTime() : null,
+        title: label ? `Tax document — ${label}` : 'Tax document',
+        body: form || undefined,
+        // Content-light — form + year only, never wages / SSN / amounts.
+        payload: { form: form || null, year: year || null, file: name },
+        naturalKey: `${form || 'tax'}|${year}|${name}`
+      }
+    ]
+  }
+}
+
 /**
  * Catch-all: any other PDF becomes one dated document index entry. Metadata ONLY
  * — the title is the user's filename and the date is extracted metadata; the
