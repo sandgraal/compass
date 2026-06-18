@@ -22,16 +22,21 @@ import type { PdfRecognizer, RecordInput } from './recognizers'
 
 /** Extract plain text from a PDF (main process). Strips pdf-parse's "-- N of M --" page markers. */
 export async function extractPdfText(path: string): Promise<{ text: string; pages: number }> {
+  // Dynamic import keeps pdf-parse (and the heavy pdfjs-dist) lazy + out of the
+  // renderer bundle — it loads only when a PDF is actually dropped (matches
+  // electron/integrations/finance-pdf.ts).
   const { PDFParse } = await import('pdf-parse')
-  const parser = new PDFParse({ data: readFileSync(path) })
+  const parser = new PDFParse({ data: new Uint8Array(readFileSync(path)) })
   try {
-    const textRes = await parser.getText()
-    const infoRes = await parser.getInfo({ parsePageInfo: true })
-    const text = (textRes.text ?? '')
+    // getText() already returns the page count via `total`, so no second getInfo
+    // pass is needed (and `pages` isn't even consumed in production — the
+    // round-trip test asserts pages === 1).
+    const r = await parser.getText()
+    const text = (r.text ?? '')
       .replace(/^-- \d+ of \d+ --$/gm, '')
       .replace(/\n{3,}/g, '\n\n')
       .trim()
-    return { text, pages: infoRes.total ?? 0 }
+    return { text, pages: r.total ?? 0 }
   } finally {
     await parser.destroy()
   }
