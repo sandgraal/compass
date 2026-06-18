@@ -154,15 +154,17 @@ export const SOCIAL_SECURITY_RECOGNIZER: PdfRecognizer = {
   label: 'Social Security statement (PDF)',
   detect: (text) => /\bsocial security statement\b/i.test(text),
   parse: (text, name) => {
-    const year = text.match(/\b20\d{2}\b/)?.[0] ?? ''
+    const when = reportDate(text)
+    const year =
+      when != null ? String(new Date(when).getFullYear()) : text.match(/\b20\d{2}\b/)?.[0] ?? ''
     return [
       {
         source: 'social-security',
         type: 'social-security',
-        occurredAt: reportDate(text),
+        occurredAt: when,
         title: year ? `Social Security Statement ${year}` : 'Social Security Statement',
         payload: { file: name }, // content-light — no earnings / SSN
-        naturalKey: `ssa|${year}|${name}`
+        naturalKey: when != null ? `ssa|${when}|${name}` : `ssa|${year}|${name}`
       }
     ]
   }
