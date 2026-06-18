@@ -13,6 +13,7 @@ import type { IpcMain } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as schema from '../db/schema'
 import { makePdf } from '../lib/__fixtures__/make-pdf'
+import { makeZip } from '../lib/__fixtures__/make-zip'
 
 let sqlite: Database.Database
 vi.mock('../db/client', () => ({ getDb: () => drizzle(sqlite, { schema }) }))
@@ -442,6 +443,15 @@ describe('records:import-paths — credit report (PDF)', () => {
     const r2 = (await invoke('records:import-paths', [p])) as ImportResult
     expect(r2.imported).toBe(0)
     expect(r2.duplicates).toBe(1)
+  })
+
+  it('reaches a PDF nested inside an imported ZIP (rights-disclosure archive)', async () => {
+    const pdf = makePdf('Equifax Credit Report Report Date 2026-03-15 FICO Score 760')
+    const p = join(dir, 'rights.zip')
+    writeFileSync(p, makeZip([{ name: 'disclosures/equifax.pdf', data: pdf }]))
+    const r = (await invoke('records:import-paths', [p])) as ImportResult
+    expect(r.perFile.some((f) => f.recognizer === 'credit-report')).toBe(true)
+    expect(r.imported).toBe(1)
   })
 })
 
