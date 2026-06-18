@@ -76,6 +76,7 @@ describe('ASSISTANT_TOOLS', () => {
     expect(names).toContain('get_weekly_goals')
     expect(names).toContain('get_habit_streaks')
     expect(names).toContain('get_insights')
+    expect(names).toContain('get_timeline')
     expect(names).toContain('propose_task')
     for (const t of ASSISTANT_TOOLS) expect(t.input_schema.type).toBe('object')
   })
@@ -285,5 +286,54 @@ describe('executeAssistantTool', () => {
   it('returns an error for an unknown tool', () => {
     const res = executeAssistantTool(db(), sqlite, 'nope', {})
     expect(res).toEqual({ ok: false, error: 'Unknown tool: nope' })
+  })
+})
+
+describe('get_timeline', () => {
+  beforeEach(() => {
+    sqlite.exec(`
+      CREATE TABLE records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, type TEXT NOT NULL,
+        occurred_at INTEGER, title TEXT
+      );
+    `)
+  })
+
+  it('summarizes by source, kind, and year — aggregates only, no titles', () => {
+    const ins = sqlite.prepare(
+      'INSERT INTO records (source, type, occurred_at, title) VALUES (?, ?, ?, ?)'
+    )
+    ins.run('paypal', 'payment', Date.UTC(2019, 5, 15), 'Coffee — 4.50 USD')
+    ins.run('venmo', 'payment', Date.UTC(2019, 8, 1), 'Split dinner')
+    ins.run('netflix', 'watch', Date.UTC(2022, 0, 3), 'Some Show')
+    ins.run('amazon', 'order', null, 'Undated order') // no date → excluded from span/byYear
+
+    const res = executeAssistantTool(db(), sqlite, 'get_timeline', {})
+    expect(res.ok).toBe(true)
+    if (!res.ok) throw new Error(res.error)
+    const data = res.data as {
+      total: number
+      sources: Array<{ source: string; count: number }>
+      kinds: Array<{ kind: string; count: number }>
+      span: { earliestYear: number; latestYear: number } | null
+      byYear: Array<{ year: number; count: number }>
+    }
+    expect(data.total).toBe(4)
+    expect(data.kinds.find((k) => k.kind === 'payment')?.count).toBe(2)
+    expect(data.sources.find((s) => s.source === 'paypal')?.count).toBe(1)
+    expect(data.span).toEqual({ earliestYear: 2019, latestYear: 2022 })
+    expect(data.byYear).toEqual([
+      { year: 2019, count: 2 },
+      { year: 2022, count: 1 }
+    ]) // undated row excluded
+    // The invariant: aggregates only — no raw record titles leak to the model.
+    expect(JSON.stringify(data)).not.toContain('Coffee')
+  })
+
+  it('handles an empty timeline gracefully', () => {
+    const res = executeAssistantTool(db(), sqlite, 'get_timeline', {})
+    expect(res.ok).toBe(true)
+    if (!res.ok) throw new Error(res.error)
+    expect((res.data as { total: number }).total).toBe(0)
   })
 })
