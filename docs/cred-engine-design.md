@@ -38,9 +38,9 @@ artifact handoff, the IPC/renderer surface, the first-portal choice, and the pha
 
 These restate [`storehouse-roadmap.md`](storehouse-roadmap.md) §5 and bind every slice:
 
-1. **The renderer never touches credentials.** Same rule as Plaid/SimpleFIN: a secret lives only in
-   `.vault/*.enc` and is used only in the main process. In CRED's **default mode it is stronger** — the
-   credential is typed by the user into the real portal page inside the sandbox and is *never seen by
+1. **The renderer never reads secrets back.** Same rule as Plaid/SimpleFIN: a secret lives only in
+   `.vault/*.enc` and is used only in the main process; IPC never returns raw secrets (masked tails only).
+   In CRED's **default mode it is stronger** — the credential is typed by the user into the real portal page inside the sandbox and is *never seen by
    Compass at all* (§5).
 2. **Credentials never appear in logs, errors, IPC payloads, or the records store.** Records remain a
    content-light index; a fetched artifact is summarized exactly like a manual file drop.
