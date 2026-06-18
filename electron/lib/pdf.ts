@@ -152,7 +152,7 @@ export const TAX_DOC_RECOGNIZER: PdfRecognizer = {
 export const SOCIAL_SECURITY_RECOGNIZER: PdfRecognizer = {
   id: 'social-security',
   label: 'Social Security statement (PDF)',
-  detect: (text) => /\bsocial security (?:statement|administration)\b/i.test(text),
+  detect: (text) => /\bsocial security statement\b/i.test(text),
   parse: (text, name) => {
     const year = text.match(/\b20\d{2}\b/)?.[0] ?? ''
     return [
