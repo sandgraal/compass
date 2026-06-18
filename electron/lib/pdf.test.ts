@@ -97,6 +97,7 @@ describe('Social Security statement recognizer', () => {
     expect(JSON.stringify(out[0].payload)).not.toContain('84,000') // no earnings record
     expect(JSON.stringify(out[0].payload)).not.toContain('2,400') // no benefit estimate
     expect(JSON.stringify(out[0].payload)).not.toContain('123-45-6789') // no SSN
+  })
 
   it('does not grab a tax document that merely mentions social security wages', () => {
     const w2 = 'Form W-2 Wage and Tax Statement\nTax Year 2025\nSocial security wages $84,000'
