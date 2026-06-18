@@ -85,33 +85,36 @@ export const CREDIT_REPORT_RECOGNIZER: PdfRecognizer = {
         body: [bureau, score ? `score ${score}` : ''].filter(Boolean).join(' · ') || undefined,
         // Summary only — NOT the raw text (it holds SSN / account numbers).
         payload: { bureau, score: score || null, file: name },
-        naturalKey: `${bureau || name}|${when ?? ''}`
+        // Dated reports key on bureau+date. Date extraction is heuristic, so when
+        // it's missing add a non-sensitive discriminator (filename + score) — else
+        // two distinct undated reports from one bureau would falsely dedupe.
+        naturalKey:
+          when != null ? `${bureau || name}|${when}` : `${bureau || name}|${name}|${score}`
       }
     ]
   }
 }
 
-/** Catch-all: any other PDF becomes one dated document index entry (title from the filename). */
+/**
+ * Catch-all: any other PDF becomes one dated document index entry. Metadata ONLY
+ * — the title is the user's filename and the date is extracted metadata; the
+ * document's own text is never persisted (records:list returns `body` and the
+ * Export Center serializes it, so a snippet of a tax/medical letter would leak).
+ */
 export const GENERIC_DOC_RECOGNIZER: PdfRecognizer = {
   id: 'document',
   label: 'PDF document',
   detect: () => true,
   parse: (text, name) => {
-    const firstLine =
-      text
-        .split('\n')
-        .map((l) => l.trim())
-        .find(Boolean) ?? ''
     const base = name.replace(/\.pdf$/i, '').trim()
     return [
       {
         source: 'document',
         type: 'document',
-        occurredAt: reportDate(text),
-        title: base || firstLine.slice(0, 120) || 'Document',
-        body: firstLine ? firstLine.slice(0, 200) : undefined,
-        payload: { file: name, firstLine: firstLine.slice(0, 200) },
-        naturalKey: `${name}|${firstLine.slice(0, 60)}`
+        occurredAt: reportDate(text), // a date is metadata, not document content
+        title: base || 'Document', // the user's filename, never extracted text
+        payload: { file: name },
+        naturalKey: name
       } satisfies RecordInput
     ]
   }

@@ -32,6 +32,14 @@ describe('credit-report PDF recognizer', () => {
     expect(JSON.stringify(out[0].payload)).not.toContain('123-45-6789')
     expect(JSON.stringify(out[0].payload)).not.toContain('4111111111111111')
   })
+
+  it('keeps distinct undated reports from one bureau separate (no false dedupe)', () => {
+    const text = 'Equifax Credit Report FICO Score 700 (no parseable date)'
+    const a = CREDIT_REPORT_RECOGNIZER.parse(text, 'jan.pdf')[0]
+    const b = CREDIT_REPORT_RECOGNIZER.parse(text, 'feb.pdf')[0]
+    expect(a.occurredAt).toBeNull() // no extractable date
+    expect(a.naturalKey).not.toBe(b.naturalKey) // distinct files → distinct keys
+  })
 })
 
 describe('generic document PDF recognizer', () => {
@@ -43,6 +51,8 @@ describe('generic document PDF recognizer', () => {
     expect(out[0].source).toBe('document')
     expect(out[0].title).toBe('lease') // filename sans extension
     expect(out[0].occurredAt).toBe(new Date(2025, 2, 3).getTime()) // "March 3, 2025"
+    expect(out[0].body).toBeUndefined() // metadata-only — no document text persisted
+    expect(JSON.stringify(out[0].payload)).not.toContain('Residential') // snippet not stored
   })
 })
 
