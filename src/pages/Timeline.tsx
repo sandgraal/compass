@@ -49,6 +49,24 @@ function sourceMeta(s: string): { label: string; icon: JSX.Element } {
   return SOURCE_META[s] ?? { label: s, icon: <FileText size={13} /> }
 }
 
+// Friendly labels for record kinds (the `type` column); unknown kinds fall back
+// to a title-cased version of the raw value ("credit-report" → "Credit Report").
+const TYPE_LABEL: Record<string, string> = {
+  watch: 'Watched',
+  listen: 'Listened',
+  order: 'Orders',
+  payment: 'Payments',
+  messages: 'Messages',
+  book: 'Books',
+  connection: 'Connections',
+  email: 'Email',
+  browse: 'Browsing',
+  document: 'Documents'
+}
+function typeLabel(t: string): string {
+  return TYPE_LABEL[t] ?? t.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 function fmtDay(ms: number | null): string {
   if (ms == null) return 'Undated'
   return new Date(ms).toLocaleDateString('en-US', {
@@ -83,6 +101,7 @@ export default function Timeline(): JSX.Element {
     latest: number | null
   } | null>(null)
   const [source, setSource] = useState<string | null>(null)
+  const [type, setType] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -162,10 +181,11 @@ export default function Timeline(): JSX.Element {
     }
   }
 
-  // Sources present in the loaded results, plus the active filter so it stays
-  // clearable even when a search excludes it from those results.
+  // Sources + kinds present in the loaded results, plus the active filter so it
+  // stays clearable even when a search/other filter excludes it from those.
   const sources = [...new Set([...items.map((i) => i.source), ...(source ? [source] : [])])].sort()
-  const shown = source ? items.filter((i) => i.source === source) : items
+  const types = [...new Set([...items.map((i) => i.type), ...(type ? [type] : [])])].sort()
+  const shown = items.filter((i) => (!source || i.source === source) && (!type || i.type === type))
   const span = stats ? fmtSpan(stats.earliest, stats.latest) : ''
 
   // Records arrive newest-first, so consecutive same-day rows bucket cleanly.
@@ -245,7 +265,7 @@ export default function Timeline(): JSX.Element {
       </button>
 
       {/* On this day — a memory from prior years, shown only in the default view */}
-      {query === '' && source === null && onThisDay.length > 0 && (
+      {query === '' && source === null && type === null && onThisDay.length > 0 && (
         <div className="mb-6 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
           <div className="flex items-center gap-2 mb-2">
             <Sparkles size={14} className="text-primary" />
@@ -287,14 +307,28 @@ export default function Timeline(): JSX.Element {
 
       {/* Source filter chips */}
       {(sources.length > 1 || source !== null) && (
-        <div className="flex flex-wrap gap-1.5 mb-4">
+        <div className="flex flex-wrap gap-1.5 mb-2">
           <Chip active={source === null} onClick={() => setSource(null)}>
-            All
+            All sources
           </Chip>
           {sources.map((s) => (
             <Chip key={s} active={source === s} onClick={() => setSource(s)}>
               {sourceMeta(s).icon}
               {sourceMeta(s).label}
+            </Chip>
+          ))}
+        </div>
+      )}
+
+      {/* Kind filter chips — slice the whole timeline by type of activity */}
+      {(types.length > 1 || type !== null) && (
+        <div className="flex flex-wrap gap-1.5 mb-4">
+          <Chip active={type === null} onClick={() => setType(null)}>
+            All kinds
+          </Chip>
+          {types.map((t) => (
+            <Chip key={t} active={type === t} onClick={() => setType(t)}>
+              {typeLabel(t)}
             </Chip>
           ))}
         </div>
@@ -317,7 +351,11 @@ export default function Timeline(): JSX.Element {
           )
         ) : (
           <p className="text-sm text-muted-foreground py-8 text-center">
-            No {source} records{query ? ' match your search' : ''}.
+            No{' '}
+            {[source ? sourceMeta(source).label : null, type ? typeLabel(type) : null]
+              .filter(Boolean)
+              .join(' · ') || 'matching'}{' '}
+            records{query ? ' match your search' : ''}.
           </p>
         )
       ) : (

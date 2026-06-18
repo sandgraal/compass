@@ -156,7 +156,7 @@ export const SOCIAL_SECURITY_RECOGNIZER: PdfRecognizer = {
   parse: (text, name) => {
     const when = reportDate(text)
     const year =
-      when != null ? String(new Date(when).getFullYear()) : text.match(/\b20\d{2}\b/)?.[0] ?? ''
+      when != null ? String(new Date(when).getFullYear()) : (text.match(/\b20\d{2}\b/)?.[0] ?? '')
     return [
       {
         source: 'social-security',
