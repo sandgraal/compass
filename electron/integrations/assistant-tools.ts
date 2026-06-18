@@ -125,6 +125,12 @@ export const ASSISTANT_TOOLS = [
     input_schema: { type: 'object', properties: {}, additionalProperties: false }
   },
   {
+    name: 'get_timeline',
+    description:
+      'Summarize the user\'s unified life Timeline — records imported from all their data sources (purchases, media watched/listened, messages, documents, health, credit/tax, and more). Returns AGGREGATES ONLY (total, counts by source and kind, the year span, per-year totals) — never the raw records. Use for questions like "how far back does my data go", "what have I imported", "how much data do I have and what kind", or "how active was I in <year>". Read-only.',
+    input_schema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
     name: 'propose_task',
     description:
       'Propose adding a task to a Compass checklist. Does NOT add it — it enqueues a proposal the user must approve in the Claude Inbox. Use this instead of claiming you added a task.',
@@ -357,6 +363,52 @@ function getHabitStreaks(sqlite: RawSqlite): unknown {
   })
 }
 
+/**
+ * Summarize the unified `records` Timeline for the assistant. AGGREGATES ONLY —
+ * counts by source/kind/year + the span — never raw rows or titles, honoring the
+ * "summaries only, never the raw timeline" invariant. Year buckets use UTC to
+ * match the Timeline header + overview.md.
+ */
+function getTimeline(sqlite: RawSqlite): unknown {
+  const total = (sqlite.prepare('SELECT COUNT(*) AS n FROM records').get() as { n: number }).n
+  if (total === 0) {
+    return {
+      total: 0,
+      note: 'No Timeline records imported yet — drop an export on the Timeline page.'
+    }
+  }
+  const sources = sqlite
+    .prepare('SELECT source, COUNT(*) AS n FROM records GROUP BY source ORDER BY n DESC, source')
+    .all() as Array<{ source: string; n: number }>
+  const types = sqlite
+    .prepare('SELECT type, COUNT(*) AS n FROM records GROUP BY type ORDER BY n DESC, type')
+    .all() as Array<{ type: string; n: number }>
+  const span = sqlite
+    .prepare(
+      'SELECT MIN(occurred_at) AS lo, MAX(occurred_at) AS hi FROM records WHERE occurred_at IS NOT NULL'
+    )
+    .get() as { lo: number | null; hi: number | null }
+  const byYear = sqlite
+    .prepare(
+      "SELECT CAST(strftime('%Y', occurred_at / 1000, 'unixepoch') AS INTEGER) AS year, COUNT(*) AS n " +
+        'FROM records WHERE occurred_at IS NOT NULL GROUP BY year ORDER BY year'
+    )
+    .all() as Array<{ year: number; n: number }>
+  return {
+    total,
+    sources: sources.map((r) => ({ source: r.source, count: r.n })),
+    kinds: types.map((r) => ({ kind: r.type, count: r.n })),
+    span:
+      span.lo != null && span.hi != null
+        ? {
+            earliestYear: new Date(span.lo).getUTCFullYear(),
+            latestYear: new Date(span.hi).getUTCFullYear()
+          }
+        : null,
+    byYear: byYear.map((r) => ({ year: r.year, count: r.n }))
+  }
+}
+
 function proposeTask(db: Db, input: Record<string, unknown>): unknown {
   const title = str(input.title)
   if (!title) return { error: 'title is required' }
@@ -417,6 +469,8 @@ export function executeAssistantTool(
         return { ok: true, data: getHabitStreaks(sqlite) }
       case 'get_insights':
         return { ok: true, data: buildInsights(db).insights }
+      case 'get_timeline':
+        return { ok: true, data: getTimeline(sqlite) }
       case 'propose_task': {
         const res = proposeTask(db, input) as Record<string, unknown>
         if ('error' in res) return { ok: false, error: String(res.error) }
