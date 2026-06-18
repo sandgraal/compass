@@ -11,6 +11,7 @@ import { registerAuthHandlers } from './ipc/auth'
 import { registerBackupHandlers } from './ipc/backup'
 import { registerClaudeHandlers } from './ipc/claude'
 import { registerContactsHandlers } from './ipc/contacts'
+import { registerCredHandlers } from './ipc/cred'
 import { registerExportHandlers } from './ipc/export'
 import { registerFinanceHandlers } from './ipc/finance'
 import { registerHabitsHandlers } from './ipc/habits'
@@ -152,6 +153,7 @@ app.whenReady().then(async () => {
   registerAssetsHandlers(ipcMain)
   registerStorehouseHandlers(ipcMain)
   registerRecordsHandlers(ipcMain)
+  registerCredHandlers(ipcMain)
   registerClaudeHandlers(ipcMain)
   registerUpdaterHandlers(ipcMain)
   registerBackupHandlers(ipcMain)

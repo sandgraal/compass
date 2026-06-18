@@ -25,6 +25,11 @@ export interface DataRightsSource {
   intoCompass: string
   /** Stable entry-point URL, when there's a public one (omitted for on-device data). */
   url?: string
+  /**
+   * CRED adapter id, when Compass can fetch this source via the Portal
+   * Automation Sandbox (assisted login). Surfaces an "Automate this pull" action.
+   */
+  adapterId?: string
 }
 
 export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
@@ -89,7 +94,8 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     how: 'Open a "my Social Security" account → download your Statement',
     format: 'PDF',
     intoCompass: 'Drop the PDF',
-    url: 'https://www.ssa.gov/myaccount/'
+    url: 'https://www.ssa.gov/myaccount/',
+    adapterId: 'ssa'
   },
 
   // ── Health ──────────────────────────────────────────────────────────────────
