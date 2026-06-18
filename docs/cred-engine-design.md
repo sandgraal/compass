@@ -66,7 +66,7 @@ What the engine defends, and what it does **not**.
 | Asset | Threat | Mitigation |
 |---|---|---|
 | Portal credentials | Exfiltration via renderer, logs, crash dumps, IPC | v1: never stored, never handled (user types into portal). v2 (opt-in): AES-256-GCM in `.vault/portal-credentials.enc`, main-process only, never returned across IPC (masked tail only). |
-| The session (cookies) inside the sandbox | A malicious or compromised portal page reaching Compass internals | No Compass preload, `contextIsolation: true`, `nodeIntegration: false`, dedicated `session` partition, restrictive CSP, `setWindowOpenHandler('deny')`, `will-navigate` allow-list pinned to the portal origin. |
+| The session (cookies) inside the sandbox | A malicious or compromised portal page reaching Compass internals | No Compass preload, `contextIsolation: true`, `nodeIntegration: false`, dedicated `session` partition, restrictive CSP, `webContents.setWindowOpenHandler(() => ({ action: 'deny' }))`, `will-navigate` allow-list pinned to the portal origin. |
 | The downloaded artifact | Path traversal / oversized / malicious file | `will-download` forces the save into a controlled temp dir with a sanitized name; `MAX_IMPORT_BYTES` guard; then the normal recognizer pipeline (which already treats input as untrusted). |
 | The user | Being tricked into automating a phishing look-alike domain | Portal origin is pinned in the adapter (not user-typed); the window shows the real URL bar/origin; we never follow links out of the pinned origin. |
 | Compass itself | Becoming a credential-stuffing / scraping tool aimed at third parties | Per-source opt-in, runs only against the logged-in user's *own* account, no bulk/headless credential testing, see §10. |
