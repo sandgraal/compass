@@ -86,3 +86,61 @@ export function readRecentNotes(db: Database.Database, limit = 10): RecentNoteRo
     )
     .all(capped) as RecentNoteRow[]
 }
+
+export interface TimelineSummary {
+  total: number
+  sources: Array<{ source: string; count: number }>
+  kinds: Array<{ kind: string; count: number }>
+  span: { earliestYear: number; latestYear: number } | null
+  byYear: Array<{ year: number; count: number }>
+}
+
+const EMPTY_TIMELINE: TimelineSummary = { total: 0, sources: [], kinds: [], span: null, byYear: [] }
+
+/**
+ * Content-light summary of the unified `records` Timeline — counts by source and
+ * kind, the UTC year span, and per-year totals. NEVER the raw records or their
+ * titles, honoring the same "summaries only" boundary the rest of the MCP keeps.
+ * Returns an empty summary when nothing's imported, or when the `records` table
+ * doesn't exist yet (an older DB predating the Acquisition Engine migration).
+ */
+export function readTimelineSummary(db: Database.Database): TimelineSummary {
+  const hasTable = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'records'")
+    .get()
+  if (!hasTable) return EMPTY_TIMELINE
+  const total = (db.prepare('SELECT COUNT(*) AS n FROM records').get() as { n: number }).n
+  if (total === 0) return EMPTY_TIMELINE
+
+  const sources = db
+    .prepare('SELECT source, COUNT(*) AS n FROM records GROUP BY source ORDER BY n DESC, source')
+    .all() as Array<{ source: string; n: number }>
+  const kinds = db
+    .prepare('SELECT type, COUNT(*) AS n FROM records GROUP BY type ORDER BY n DESC, type')
+    .all() as Array<{ type: string; n: number }>
+  const span = db
+    .prepare(
+      'SELECT MIN(occurred_at) AS lo, MAX(occurred_at) AS hi FROM records WHERE occurred_at IS NOT NULL'
+    )
+    .get() as { lo: number | null; hi: number | null }
+  const byYear = db
+    .prepare(
+      "SELECT CAST(strftime('%Y', occurred_at / 1000, 'unixepoch') AS INTEGER) AS year, COUNT(*) AS n " +
+        'FROM records WHERE occurred_at IS NOT NULL GROUP BY year ORDER BY year'
+    )
+    .all() as Array<{ year: number; n: number }>
+
+  return {
+    total,
+    sources: sources.map((r) => ({ source: r.source, count: r.n })),
+    kinds: kinds.map((r) => ({ kind: r.type, count: r.n })),
+    span:
+      span.lo != null && span.hi != null
+        ? {
+            earliestYear: new Date(span.lo).getUTCFullYear(),
+            latestYear: new Date(span.hi).getUTCFullYear()
+          }
+        : null,
+    byYear: byYear.map((r) => ({ year: r.year, count: r.n }))
+  }
+}

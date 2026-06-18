@@ -14,7 +14,7 @@ export function buildMcpbManifest(version: string) {
     display_name: 'Compass',
     version,
     description:
-      'Read + propose tools over your local Compass data: tasks, calendar, knowledge base, finance summaries, habit streaks.',
+      'Read + propose tools over your local Compass data: tasks, calendar, knowledge base, finance summaries, habit streaks, life Timeline.',
     long_description:
       'Connects Claude Desktop to the Compass app on this machine. Read tools open the local ' +
       'Compass database read-only (vault excluded; finance exposed as aggregates, never raw ' +

@@ -10,7 +10,8 @@ import {
   MAX_TASK_RANGE_DAYS,
   normalizeTaskRange,
   readRecentNotes,
-  readTasksRange
+  readTasksRange,
+  readTimelineSummary
 } from './readers.js'
 
 let db: Database.Database
@@ -112,5 +113,55 @@ describe('readRecentNotes', () => {
     expect(readRecentNotes(db, 9999)).toHaveLength(3)
     expect(readRecentNotes(db, -5)).toHaveLength(1)
     expect(MAX_RECENT_NOTES).toBe(50)
+  })
+})
+
+describe('readTimelineSummary', () => {
+  function createRecords(): void {
+    db.exec(`
+      CREATE TABLE records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, type TEXT NOT NULL,
+        occurred_at INTEGER, title TEXT
+      );
+    `)
+  }
+
+  it('returns an empty summary when the records table does not exist', () => {
+    // The shared setup creates no `records` table (older DB before the migration).
+    expect(readTimelineSummary(db)).toEqual({
+      total: 0,
+      sources: [],
+      kinds: [],
+      span: null,
+      byYear: []
+    })
+  })
+
+  it('aggregates by source, kind, and UTC year — never raw titles', () => {
+    createRecords()
+    const ins = db.prepare(
+      'INSERT INTO records (source, type, occurred_at, title) VALUES (?, ?, ?, ?)'
+    )
+    ins.run('paypal', 'payment', Date.UTC(2019, 5, 15), 'Coffee — 4.50 USD')
+    ins.run('venmo', 'payment', Date.UTC(2019, 8, 1), 'Split dinner')
+    ins.run('netflix', 'watch', Date.UTC(2022, 0, 3), 'Some Show')
+    ins.run('amazon', 'order', null, 'Undated order') // excluded from span/byYear
+
+    const out = readTimelineSummary(db)
+    expect(out.total).toBe(4)
+    expect(out.kinds.find((k) => k.kind === 'payment')?.count).toBe(2)
+    expect(out.sources.find((s) => s.source === 'paypal')?.count).toBe(1)
+    expect(out.span).toEqual({ earliestYear: 2019, latestYear: 2022 })
+    expect(out.byYear).toEqual([
+      { year: 2019, count: 2 },
+      { year: 2022, count: 1 }
+    ])
+    // Content-light invariant: no record titles in the summary.
+    expect(JSON.stringify(out)).not.toContain('Coffee')
+  })
+
+  it('returns an empty summary for an existing-but-empty records table', () => {
+    createRecords()
+    expect(readTimelineSummary(db).total).toBe(0)
   })
 })
