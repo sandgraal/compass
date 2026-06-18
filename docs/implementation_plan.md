@@ -451,7 +451,8 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
   Brief scheduler).
 - [ ] **10.6 Credential-Based Aggregation Engine** — the **Portal Automation Sandbox** (extends the Plaid
   Link child-window bridge): opt-in, vault-backed (`portal-credentials`), isolated, assisted-login for MFA.
-  Cross-cutting + riskiest → **last**.
+  Cross-cutting + riskiest → **last**. **Design gate:** [`cred-engine-design.md`](cred-engine-design.md)
+  (assisted-first / no-stored-creds v1, threat model, phased build, open questions).
 - [ ] **10.7 Advanced leverage** — rich unified timeline, cross-source insights (sleep vs. spending, "on this
   day"), Ask-Compass-over-everything (extends the Phase 5.9 semantic index + Phase 8.5 agent tools), combined
   dashboards. *(Basic timeline + Ask-over-it ship incrementally from 10.1.)*

@@ -852,6 +852,17 @@ declare global {
         importPaths(paths: string[]): Promise<RecordsImportResult>
         pathsForFiles(files: File[]): string[]
       }
+      cred: {
+        list(): Promise<{ id: string; name: string; status: 'beta' | 'stable' }[]>
+        run(portalId: string): Promise<{
+          ok: boolean
+          cancelled?: boolean
+          imported?: number
+          duplicates?: number
+          error?: string
+        }>
+        cancel(): Promise<{ ok: boolean }>
+      }
       assets: {
         list(opts?: { type?: string }): Promise<AssetRecord[]>
         create(input: AssetInput): Promise<{ success: boolean; id: number }>

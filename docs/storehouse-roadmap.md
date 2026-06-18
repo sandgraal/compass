@@ -84,6 +84,7 @@ An **isolated, opt-in** automation surface that extends the **Plaid Link child-w
 portal using credentials from the vault, navigates, downloads the export (or scrapes the page), and hands
 the artifact to the Drop Zone (A). **Assisted-login** mode surfaces the window so *you* complete MFA/2FA.
 Security model in §5. This is the riskiest, most powerful primitive — built last, after the clean paths.
+**Full design:** [`cred-engine-design.md`](cred-engine-design.md) (threat model, the assisted-vs-stored modes, first-portal choice, phased build).
 
 ### E. Live-sync connectors
 Keep the existing `add-integration` pattern ([integrations.md](integrations.md)) for high-value ongoing

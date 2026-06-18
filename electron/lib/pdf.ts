@@ -145,6 +145,32 @@ export const TAX_DOC_RECOGNIZER: PdfRecognizer = {
 }
 
 /**
+ * SSA — the Social Security Statement (earnings record + benefit estimate). Closes
+ * the loop the Concierge opens ("get your SSA statement"). Content-light: the
+ * statement's earnings history / SSN are never stored, only the title + date.
+ */
+export const SOCIAL_SECURITY_RECOGNIZER: PdfRecognizer = {
+  id: 'social-security',
+  label: 'Social Security statement (PDF)',
+  detect: (text) => /\bsocial security statement\b/i.test(text),
+  parse: (text, name) => {
+    const when = reportDate(text)
+    const year =
+      when != null ? String(new Date(when).getFullYear()) : text.match(/\b20\d{2}\b/)?.[0] ?? ''
+    return [
+      {
+        source: 'social-security',
+        type: 'social-security',
+        occurredAt: when,
+        title: year ? `Social Security Statement ${year}` : 'Social Security Statement',
+        payload: { file: name }, // content-light — no earnings / SSN
+        naturalKey: when != null ? `ssa|${when}|${name}` : `ssa|${year}|${name}`
+      }
+    ]
+  }
+}
+
+/**
  * Catch-all: any other PDF becomes one dated document index entry. Metadata ONLY
  * — the title is the user's filename and the date is extracted metadata; the
  * document's own text is never persisted (records:list returns `body` and the
