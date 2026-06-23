@@ -44,7 +44,7 @@ It's a *daily driver*: open it in the morning for your brief (calendar + tasks +
 | **Weekly review** — a Sunday ritual: progress, open issues, what-went-well / blockers / next-week. | ![Weekly review](docs/images/weekly.png) |
 | **Encrypted vault** — AES-256-GCM secrets (financial, identity, credentials, medical, legal). Master key in the OS Keychain — never on disk in plaintext. | ![Vault](docs/images/vault.png) |
 
-> Screenshots are generated from synthetic demo data via `npm run screenshots` (see [Generating screenshots](#generating-screenshots)). No real data is ever shown.
+> Screenshots are generated from synthetic demo data via `npm run screenshots`. No real data is ever shown.
 
 ## Feature matrix
 
@@ -142,16 +142,6 @@ npm test             # Vitest unit tests
 ```
 
 Primary target is **macOS** (signed releases via GitHub Actions); Windows (`nsis`/portable) and Linux (`AppImage`/`deb`) build targets exist. First launch seeds a starter knowledge base and an onboarding wizard.
-
-### Generating screenshots
-
-The images above are produced from **synthetic** demo data, never your real store:
-
-```bash
-npm run screenshots
-```
-
-This seeds a throwaway data dir (via the `COMPASS_HOME` override in `electron/paths.ts`), builds the app, drives it with Playwright, and writes PNGs to `docs/images/`. Your real app-data store (on macOS, `~/Library/Application Support/Compass`) is never touched.
 
 ## Roadmap
 
