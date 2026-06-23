@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type CredDeps, registerCredHandlers } from './cred'
 
 // The default deps reach the integration-only window module (opens a real
@@ -41,6 +41,14 @@ const okDeps = (over: Partial<CredDeps> = {}): CredDeps => ({
 })
 
 describe('cred IPC', () => {
+  // These exercise the enabled path; automation is opt-in via COMPASS_ENABLE_CRED.
+  beforeEach(() => {
+    vi.stubEnv('COMPASS_ENABLE_CRED', '1')
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it('cred:list returns safe adapter metadata (no secrets)', () => {
     const list = harness(okDeps()).list() as { id: string; name: string; status: string }[]
     expect(list.some((a) => a.id === 'ssa' && a.status === 'beta')).toBe(true)
@@ -114,5 +122,25 @@ describe('cred IPC', () => {
     expect(close).toHaveBeenCalled()
     release({ ok: false, cancelled: true })
     await run
+  })
+})
+
+describe('cred IPC — disabled by default (no COMPASS_ENABLE_CRED)', () => {
+  beforeEach(() => {
+    vi.stubEnv('COMPASS_ENABLE_CRED', undefined)
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('cred:list is empty so the UI shows no Automate affordance', () => {
+    expect(harness(okDeps()).list()).toEqual([])
+  })
+
+  it('cred:run refuses even a known portal, without running anything', async () => {
+    const deps = okDeps()
+    const res = await harness(deps).run('ssa')
+    expect(res).toEqual({ ok: false, error: 'Portal automation is disabled' })
+    expect(deps.runPull).not.toHaveBeenCalled()
   })
 })
