@@ -1,7 +1,8 @@
 /**
- * Facebook posts — the HTML "Download Your Information" (DYI) export.
+ * Facebook — the HTML "Download Your Information" (DYI) export. Recognizers for
+ * `your_posts__…` (posts) and `connections/friends/your_friends.html` (friends).
  *
- * FB's archive (HTML format) packs each post into a repeating `_a6-g` block: an
+ * FB's archive (HTML format) packs each entry into a repeating `_a6-g` block: an
  * `<h2>` action header ("… shared a link", "… updated his status"), the post
  * text/links, and a timestamp like "May 02, 2011 8:12:17 am". One record per
  * post, dated in the export's local time (Cocoa-free — parsed from the parts so
@@ -69,13 +70,25 @@ function parseFbDate(block: string): number | null {
   return Number.isNaN(t) ? null : t
 }
 
+/**
+ * A Facebook "Download Your Information" HTML file (any section). Signed by the
+ * DYI permalink marker (posts) OR the `_a6-g` entry-block class (friends and the
+ * rest, which have no permalinks). Detection still anchors on the section
+ * filename, so this just confirms "yes, an FB export".
+ */
+function isFbHtml(f: { ext: string; text: string }): boolean {
+  return (
+    (f.ext === 'html' || f.ext === 'htm') && (FB_DYI.test(f.text) || f.text.includes(POST_BLOCK))
+  )
+}
+
 export const FACEBOOK_POSTS_RECOGNIZER: Recognizer = {
   id: 'facebook',
   label: 'Facebook posts (HTML export)',
-  detect: (f) =>
-    (f.ext === 'html' || f.ext === 'htm') &&
-    FB_DYI.test(f.text) &&
-    (/your_posts/i.test(f.name) || f.text.includes(POST_BLOCK)),
+  // Filename-anchored: several FB sections share the `_a6-g` block, so matching on
+  // the block alone would mis-claim friends/comments/etc. The export filenames are
+  // stable (`your_posts__…`).
+  detect: (f) => isFbHtml(f) && /your_posts/i.test(f.name),
   parse: (f) => {
     const out: RecordInput[] = []
     // The first chunk before the first wrapper is the page header — drop it.
@@ -116,6 +129,39 @@ export const FACEBOOK_POSTS_RECOGNIZER: Recognizer = {
         naturalKey: `fb-post|${when ?? `i${idx}`}|${title.slice(0, 48)}`
       })
     })
+    return out
+  }
+}
+
+/**
+ * Facebook friends — `connections/friends/your_friends.html`. Same `_a6-g` block
+ * shape as posts, simpler: the `<h2>` is the friend's name and the footer date is
+ * when you connected. One `connection` record per friend (matching LinkedIn's
+ * `connection` type, so the kind filter groups them together).
+ */
+export const FACEBOOK_FRIENDS_RECOGNIZER: Recognizer = {
+  id: 'facebook-friends',
+  label: 'Facebook friends (HTML export)',
+  detect: (f) => isFbHtml(f) && /your_friends/i.test(f.name),
+  parse: (f) => {
+    const out: RecordInput[] = []
+    const blocks = f.text.split(POST_BLOCK).slice(1)
+    for (const raw of blocks) {
+      const close = raw.indexOf('>')
+      const block = close >= 0 ? raw.slice(close + 1) : raw
+      const h2 = block.match(/<h2\b[^>]*>([\s\S]*?)<\/h2>/i)
+      const name = h2 ? textOf(h2[1]) : ''
+      if (!name) continue
+      const when = parseFbDate(block)
+      out.push({
+        source: 'facebook',
+        type: 'connection',
+        occurredAt: when,
+        title: `Became friends with ${name}`,
+        // Dedup by name (the friendship is the event); a name twice just dedupes.
+        naturalKey: `fb-friend|${name}`
+      })
+    }
     return out
   }
 }

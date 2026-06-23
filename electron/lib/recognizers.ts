@@ -19,7 +19,7 @@ import { parseAppleHealth } from './apple-health'
 import { BROWSER_RECOGNIZERS } from './browser-history'
 import { parseCSV } from './csv'
 import { parseWhen } from './dates'
-import { FACEBOOK_POSTS_RECOGNIZER } from './facebook'
+import { FACEBOOK_FRIENDS_RECOGNIZER, FACEBOOK_POSTS_RECOGNIZER } from './facebook'
 import { GOODREADS_RECOGNIZER } from './goodreads'
 import { IMESSAGE_RECOGNIZER } from './imessage'
 import { LINKEDIN_RECOGNIZER } from './linkedin'
@@ -262,6 +262,7 @@ export const RECOGNIZERS: Recognizer[] = [
   VENMO_RECOGNIZER,
   LINKEDIN_RECOGNIZER,
   FACEBOOK_POSTS_RECOGNIZER,
+  FACEBOOK_FRIENDS_RECOGNIZER,
   genericTimeline
 ]
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { FACEBOOK_POSTS_RECOGNIZER as R } from './facebook'
+import { FACEBOOK_FRIENDS_RECOGNIZER, FACEBOOK_POSTS_RECOGNIZER as R } from './facebook'
 import type { RecognizerFile } from './recognizers'
 
 // Mirrors the real FB "Download Your Information" HTML export shape: each post is
@@ -32,10 +32,12 @@ const file = (over: Partial<RecognizerFile> = {}): RecognizerFile => ({
 })
 
 describe('Facebook posts recognizer', () => {
-  it('detects the DYI posts HTML (by filename or the post-block class)', () => {
+  it('detects the DYI posts HTML by its section filename', () => {
     expect(R.detect(file())).toBe(true)
-    // Renamed file still detected via the _a6-g + dyi content signature.
-    expect(R.detect(file({ name: 'whatever.html' }))).toBe(true)
+    // Filename-anchored: other FB sections share the _a6-g block, so a non-posts
+    // filename (e.g. the friends file) must NOT be claimed by the posts recognizer.
+    expect(R.detect(file({ name: 'your_friends.html' }))).toBe(false)
+    expect(R.detect(file({ name: 'whatever.html' }))).toBe(false)
   })
 
   it('does not claim non-Facebook HTML or non-HTML files', () => {
@@ -61,5 +63,51 @@ describe('Facebook posts recognizer', () => {
     expect(b.occurredAt).toBe(new Date(2020, 11, 25, 23, 30, 0).getTime()) // Dec 25 2020, 11:30 pm → 23:30
     expect(b.body).toBe('Hello world & good morning.') // entities decoded
     expect(a.naturalKey).not.toBe(b.naturalKey)
+  })
+})
+
+// The friends file has no DYI permalinks — only the `_a6-g` block with the name
+// in the <h2> and the connection date in the footer. (Validated against a real
+// 179-friend export spanning 2009–2026.)
+const FRIENDS_FIXTURE = `<!doctype html><html><body>
+<div class="_a6-g"><div aria-labelledby="u_0_cm">
+  <h2 class="_2ph_ _a6-h _a6-i">Rodrigo Mora</h2>
+  <footer class="_3-94 _a6-o _2pie"><div class="_a72d">May 17, 2026 2:05:15 pm</div></footer>
+</div>
+<div class="_a6-g"><div>
+  <h2 class="_2ph_ _a6-h _a6-i">Pierre Blondin</h2>
+  <footer class="_3-94 _a6-o _2pie"><div class="_a72d">Apr 30, 2011 6:02:45 am</div></footer>
+</div>
+</body></html>`
+
+const friendFile = (over: Partial<RecognizerFile> = {}): RecognizerFile => ({
+  name: 'your_friends.html',
+  ext: 'html',
+  text: FRIENDS_FIXTURE,
+  ...over
+})
+
+describe('Facebook friends recognizer', () => {
+  it('detects your_friends.html (no permalinks → keyed off the _a6-g block)', () => {
+    expect(FACEBOOK_FRIENDS_RECOGNIZER.detect(friendFile())).toBe(true)
+    // The posts recognizer must NOT claim the friends file, and vice versa.
+    expect(R.detect(friendFile())).toBe(false)
+    expect(FACEBOOK_FRIENDS_RECOGNIZER.detect(friendFile({ name: 'your_posts__1.html' }))).toBe(
+      false
+    )
+  })
+
+  it('parses one dated connection record per friend', () => {
+    const out = FACEBOOK_FRIENDS_RECOGNIZER.parse(friendFile())
+    expect(out).toHaveLength(2)
+    expect(out[0]).toMatchObject({
+      source: 'facebook',
+      type: 'connection',
+      title: 'Became friends with Rodrigo Mora',
+      occurredAt: new Date(2026, 4, 17, 14, 5, 15).getTime() // May 17 2026, 2:05:15 pm local
+    })
+    expect(out[1].title).toBe('Became friends with Pierre Blondin')
+    expect(out[1].occurredAt).toBe(new Date(2011, 3, 30, 6, 2, 45).getTime()) // Apr 30 2011, 6:02:45 am
+    expect(out[0].naturalKey).not.toBe(out[1].naturalKey)
   })
 })
