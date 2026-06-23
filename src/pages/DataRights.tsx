@@ -1,5 +1,5 @@
 import { ArrowUpRight, Banknote, Globe, HeartPulse, Landmark, ScrollText, Zap } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useToast } from '../components/ui/Toast'
 import { DATA_RIGHTS_SOURCES, type DataRightsDomain } from '../lib/data-rights'
 
@@ -11,11 +11,21 @@ const DOMAIN_ICON: Record<DataRightsDomain, JSX.Element> = {
   Digital: <Globe size={15} />
 }
 
-const hasCred = (): boolean => typeof window !== 'undefined' && !!window.api?.cred
-
 export default function DataRights(): JSX.Element {
   const { toast } = useToast()
   const [running, setRunning] = useState<string | null>(null)
+  // Adapter ids the main process reports as automatable — empty unless portal
+  // automation is enabled (COMPASS_ENABLE_CRED). Drives the "Automate" button's
+  // visibility, so an unvalidated/disabled adapter never shows an affordance.
+  const [automatable, setAutomatable] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.api?.cred) return
+    window.api.cred
+      .list()
+      .then((list) => setAutomatable(new Set(list.map((a) => a.id))))
+      .catch(() => {})
+  }, [])
 
   async function automate(adapterId: string, name: string): Promise<void> {
     if (running) return
@@ -89,7 +99,7 @@ export default function DataRights(): JSX.Element {
                           </a>
                         )}
                       </div>
-                      {adapterId && hasCred() && (
+                      {adapterId && automatable.has(adapterId) && (
                         <button
                           type="button"
                           onClick={() => automate(adapterId, s.name)}
