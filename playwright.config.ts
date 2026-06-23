@@ -18,7 +18,7 @@ export default defineConfig({
   projects: [
     {
       name: 'electron-mac',
-      // E2E specs use electron-playwright-helpers to drive the built app
+      // E2E specs drive the built app via Playwright's built-in `_electron` launcher.
       testMatch: /.*\.e2e\.ts/
     }
   ],

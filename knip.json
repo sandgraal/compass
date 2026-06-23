@@ -7,11 +7,12 @@
     "src/main.tsx",
     "src/App.tsx",
     "src/quickCapture/main.tsx",
+    "scripts/*.ts",
+    "electron.vite.config.ts",
     "vitest.config.ts",
-    "playwright.config.ts",
-    "mcp/compass-mcp/index.ts"
+    "playwright.config.ts"
   ],
-  "project": ["src/**/*.{ts,tsx}", "electron/**/*.ts", "mcp/**/*.ts"],
+  "project": ["src/**/*.{ts,tsx}", "electron/**/*.ts", "scripts/**/*.ts"],
   "ignore": [
     "knowledge-base/**",
     ".vault/**",
@@ -19,7 +20,8 @@
     "dist/**",
     "dist-electron/**",
     "out/**",
-    "release/**"
+    "release/**",
+    "**/*.d.ts"
   ],
-  "ignoreDependencies": ["tailwindcss-animate"]
+  "ignoreBinaries": ["mktemp"]
 }
