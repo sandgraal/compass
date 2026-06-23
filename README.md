@@ -12,7 +12,7 @@ A **local-first personal life OS** that unifies your finances, knowledge, calend
 ![Platform](https://img.shields.io/badge/macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-Electron%2041-6272F1)
 ![Stack](https://img.shields.io/badge/React%2018%20%C2%B7%20TypeScript%20%C2%B7%20SQLite-informational)
 ![Privacy](https://img.shields.io/badge/encrypted%20vault-AES--256--GCM-22c55e)
-![Status](https://img.shields.io/badge/version-0.4.1-blue)
+![Status](https://img.shields.io/badge/version-0.11.0-blue)
 
 </div>
 
@@ -38,6 +38,7 @@ It's a *daily driver*: open it in the morning for your brief (calendar + tasks +
 |---|---|
 | **Finance command center** — net worth, 90-day cash-flow forecast, subscription audit, budgets, tax tagging. | ![Net worth](docs/images/finance-networth.png) |
 | **90-day forecast** — projects subscriptions, income, debt minimums + calendar bills into a daily balance, with low-cash warnings. | ![Forecast](docs/images/finance-forecast.png) |
+| **Storehouse & Timeline** — the Acquisition Engine: drop any data export (CSV / JSON / PDF / mbox / zip / SQLite) into the Drop Zone and Compass normalizes it into one append-only, searchable life timeline — PayPal, Venmo, Amazon, LinkedIn, Goodreads, streaming history, browser history, iMessage, Apple Health, and PDF letters (credit report, tax, Social Security). | ![Knowledge base](docs/images/knowledge.png) |
 | **Knowledge base** — plain-markdown notes with `[[wikilinks]]`, backlinks, full-text + semantic search. | ![Knowledge base](docs/images/knowledge.png) |
 | **Ask Compass** — a RAG assistant grounded in *your* knowledge base. Bring your own key; runs against local Ollama first. | ![Ask Compass](docs/images/ask.png) |
 | **Weekly review** — a Sunday ritual: progress, open issues, what-went-well / blockers / next-week. | ![Weekly review](docs/images/weekly.png) |
@@ -51,24 +52,25 @@ It's a *daily driver*: open it in the morning for your brief (calendar + tasks +
 
 | Area | Capabilities |
 |---|---|
-| **💰 Finance** | ✅ CSV / PDF / Excel statement ingest · ✅ auto-categorization · ✅ net-worth tracking + trajectory · ✅ 90-day cash-flow forecast · ✅ subscription & price-hike audit · ✅ budgets · ✅ Schedule C/E + capex tax tagging + tax-pack export · ✅ Plaid bank-linking · 🔜 receipts via email · 🔜 investment holdings |
-| **📚 Knowledge** | ✅ markdown notes · ✅ `[[wikilinks]]` + backlinks · ✅ TipTap rich editor · ✅ full-text + semantic (local-embedding) search · ✅ Spotlight mirror · 🔜 Obsidian / Notion import-export · 🔜 web clipper |
+| **💰 Finance** | ✅ CSV / PDF / Excel statement ingest · ✅ auto-categorization · ✅ net-worth tracking + trajectory · ✅ 90-day cash-flow forecast · ✅ subscription & price-hike audit · ✅ budgets · ✅ Schedule C/E + capex tax tagging + tax-pack export · ✅ SimpleFIN bank + card sync (recommended; incl. Amex) · ✅ Plaid bank-linking (advanced) · 🔜 receipts via email · 🔜 investment holdings |
+| **🗂️ Storehouse** | ✅ Drop Zone for any data export (CSV / JSON / XML / mbox / zip / SQLite / PDF) · ✅ append-only searchable **Timeline** · ✅ "on this day" recap · ✅ recognizers: PayPal · Venmo · Amazon · LinkedIn · Goodreads · Netflix / Spotify / YouTube history · Chrome / Firefox / Safari history · iMessage · Apple Health · email (mbox) · ✅ PDF recognizers: credit report · tax docs · Social Security statement · ✅ Contacts · ✅ Data-Rights Concierge · ✅ assisted-login portal pull (SSA, *beta*) |
+| **📚 Knowledge** | ✅ markdown notes · ✅ `[[wikilinks]]` + backlinks · ✅ TipTap rich editor · ✅ full-text + semantic (local-embedding) search · ✅ Spotlight mirror · ✅ Obsidian vault bridge (import + export) · ✅ Notion import · 🔜 Notion export · 🔜 web clipper |
 | **🔐 Vault** | ✅ AES-256-GCM encrypted categories · ✅ OS-Keychain master key · ✅ auto-lock · ✅ 1Password CSV import · 🔜 encrypted sharing with a trusted partner |
 | **📅 Calendar** | ✅ Google Calendar · ✅ Apple Calendar (local `.ics`, RRULE expansion) · 🔜 Outlook / Office 365 · 🔜 CalDAV |
-| **✅ Tasks & habits** | ✅ daily / weekly / monthly checklists · ✅ habit streaks · ✅ tray quick-capture · ✅ `compass://` URL scheme · 🔜 Todoist / Things / Reminders sync · 🔜 voice capture |
-| **🤖 Assistant** | ✅ RAG over your knowledge base · ✅ BYO Anthropic/OpenAI key · ✅ local Ollama option · ✅ agentic mode (Claude tool-use over your data; proposes changes via the Claude Inbox) · 🔜 proactive insights |
+| **✅ Tasks & habits** | ✅ daily / weekly / monthly checklists · ✅ habit streaks · ✅ tray quick-capture · ✅ multi-type capture bar (task / note / expense) · ✅ `compass://` URL scheme · ✅ Todoist sync · ✅ Things 3 import · 🔜 Reminders sync · 🔜 voice capture |
+| **🤖 Assistant** | ✅ RAG over your knowledge base · ✅ BYO Anthropic/OpenAI key · ✅ local Ollama option · ✅ agentic mode (Claude tool-use over your data; proposes changes via the Claude Inbox) · ✅ proactive insights · ✅ Morning Brief digest (low-cash + price-hike alerts) |
 | **🔎 Search** | ✅ global ⌘K across notes, tasks, vault titles, transactions |
-| **🔗 Integrations** | ✅ Google · ✅ GitHub · ✅ Gmail action items · ✅ Plaid · ✅ Apple Calendar · 🔜 Slack · 🔜 Linear / Jira · 🔜 Apple Health / Strava · 🔜 browser extension |
+| **🔗 Integrations** | ✅ Google · ✅ GitHub · ✅ Gmail action items · ✅ SimpleFIN · ✅ Plaid · ✅ Apple Calendar · ✅ Linear · ✅ Todoist · 🔜 Slack · 🔜 Jira · 🔜 Strava · 🔜 browser extension |
 | **🧩 Platform** | ✅ local MCP server (agent introspection) · ✅ encrypted backup / restore · ✅ auto-update · 🔜 public plugin API + marketplace · 🔜 opt-in E2E-encrypted sync · 🔜 mobile companion |
-| **🤝 Claude** | ✅ MCP (read + propose) for Claude Code · ✅ BYO-key Ask Compass · ✅ confirmed-write **Claude Inbox** · ✅ end-user plugin + Compass skills (morning brief, weekly review, budget check, plan-my-week, web capture) · ✅ embedded agentic Ask Compass (Claude tool-use + propose) · 🔜 one-click Claude Desktop bundle |
+| **🤝 Claude** | ✅ MCP (read + propose) for Claude Code · ✅ BYO-key Ask Compass · ✅ confirmed-write **Claude Inbox** · ✅ end-user plugin + Compass skills (morning brief, weekly review, budget check, plan-my-week, web capture) · ✅ embedded agentic Ask Compass (Claude tool-use + propose) · ✅ one-click `.mcpb` Claude Desktop bundle · ✅ `compass_timeline` MCP tool (query your whole Timeline from Claude) |
 
 ## Works with Claude
 
 Compass **works with Claude in both directions** — it exposes its data to Claude over MCP, and embeds Claude inside the app — built so an assistant can help with your life OS *without* silently mutating it or leaking it. Full design: [`docs/claude-integration.md`](docs/claude-integration.md).
 
-- **Claude reads your Compass** — *today* via the MCP in Claude Code ("what's on my plate today?", "search my notes for X"), and via the **end-user plugin** (`claude-plugin/`) in Cowork/Desktop with ready-made skills (morning brief, weekly review, budget check); 🔜 a one-click Claude Desktop bundle.
+- **Claude reads your Compass** — *today* via the MCP in Claude Code ("what's on my plate today?", "search my notes for X", "show my Timeline"), and via the **end-user plugin** (`claude-plugin/`) in Cowork/Desktop with ready-made skills (morning brief, weekly review, budget check). A **one-click `.mcpb` bundle** (`npm run build:mcpb`) installs the read+propose server into Claude Desktop.
 - **Claude acts on your Compass** — *today* through **confirmed writes**: Claude *proposes* a change (a task, a note, a transaction tag) via the MCP and you **approve it in the Claude Inbox** inside Compass. Compass stays the sole writer; every change is human-approved.
-- **Compass embeds Claude** — "Ask Compass" answers grounded in your knowledge base (BYO key, local-Ollama-first), plus an **Agent mode** where Claude reads your agenda + finance summaries via tools and **proposes** changes you approve in the Claude Inbox (e.g. "plan my week"); 🔜 proactive insights.
+- **Compass embeds Claude** — "Ask Compass" answers grounded in your knowledge base (BYO key, local-Ollama-first), plus an **Agent mode** where Claude reads your agenda + finance summaries via tools and **proposes** changes you approve in the Claude Inbox (e.g. "plan my week"). Proactive insights surface anomalies and nudges in-app.
 
 > 🔒 **What Claude never sees:** your **vault** (secrets) is categorically excluded, and finance is exposed as **summaries, not raw transactions**. Cloud LLM access is always BYO-key and opt-in. See the [security model](docs/claude-integration.md#claude-inbox).
 
@@ -116,7 +118,7 @@ flowchart TB
   subgraph net["🌐 Only with your explicit consent"]
     g["Google / Gmail"]
     gh["GitHub"]
-    plaid["Plaid (banks)"]
+    fin["SimpleFIN / Plaid (banks)"]
     llm["Anthropic / OpenAI\n(only if you add a key)"]
   end
   device -->|"OAuth token + pull my data"| net
@@ -155,14 +157,15 @@ This seeds a throwaway data dir (via the `COMPASS_HOME` override in `electron/pa
 
 Compass is **100% local today.** The roadmap below is an expert-team evaluation of what turns it into a daily driver and a platform. Items marked *(opt-in cloud)* are a deliberate, clearly-bounded departure from local-only — always opt-in, never the default. Full detail + sizing lives in [`docs/implementation_plan.md` § Phase 7](docs/implementation_plan.md).
 
+Shipped so far: Morning Brief digest, weekly/monthly review rituals, multi-type quick-capture, Notion import + Obsidian bridge, Todoist / Things / Linear, proactive insights, and the agentic "plan my week". What's still ahead:
+
 ```mermaid
 timeline
-  title Compass platform roadmap (proposed)
-  Track A · Daily driver : Morning Brief digest : Evening / weekly review ritual : Voice + global quick-capture
-  Track B · Integrations : Notion / Obsidian : Slack · Linear / Jira : Outlook / CalDAV : Apple Health / Strava : Browser web-clipper
+  title Compass platform roadmap (remaining)
+  Track A · Daily driver : Voice quick-capture
+  Track B · Integrations : Slack : Jira : Outlook / CalDAV : Strava : Browser web-clipper : Notion export
   Track C · Platform & API : Plugin / extension API : Integrations marketplace : Webhooks + expanded MCP
   Track D · Sync & reach : E2E-encrypted sync (opt-in cloud) : Mobile companion (opt-in cloud) : Encrypted sharing
-  Track E · Intelligence : Proactive insights : Agentic "plan my week"
   Track F · Polish : Theming : Mobile-responsive : Accessibility pass
 ```
 

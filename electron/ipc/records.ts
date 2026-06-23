@@ -358,6 +358,24 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
     }
   })
 
+  // Distinct sources + kinds across the WHOLE timeline, for the filter chips. The
+  // list (records:list) is capped at a 500-row page, so deriving chips from it
+  // would hide sources/kinds that only appear deeper in the history — and a chip
+  // built that way would also filter only the loaded page. Facets come from the
+  // full table so a chip selection (pushed back through records:list's server-side
+  // source/type filter) spans everything, consistent with full-timeline search.
+  ipcMain.handle('records:facets', () => {
+    const db = getDb()
+    const rows = db
+      .select({ source: records.source, type: records.type })
+      .from(records)
+      .groupBy(records.source, records.type)
+      .all()
+    const sources = [...new Set(rows.map((r) => r.source))].sort()
+    const types = [...new Set(rows.map((r) => r.type))].sort()
+    return { sources, types }
+  })
+
   ipcMain.handle('records:import', async (): Promise<RecordsImportResult> => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       title: 'Import a data export (CSV / JSON / XML / mbox / zip / sqlite / pdf)',

@@ -848,6 +848,7 @@ declare global {
           earliest: number | null
           latest: number | null
         }>
+        facets(): Promise<{ sources: string[]; types: string[] }>
         importFiles(): Promise<RecordsImportResult>
         importPaths(paths: string[]): Promise<RecordsImportResult>
         pathsForFiles(files: File[]): string[]

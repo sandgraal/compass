@@ -204,6 +204,30 @@ describe('records:stats', () => {
   })
 })
 
+describe('records:facets', () => {
+  it('returns the sorted, distinct sources and kinds across the whole table', async () => {
+    await invoke('records:import-paths', [
+      fixture('NetflixViewingHistory.csv', 'Title,Date\nThe Matrix,1/2/26\nInception,12/25/25\n'),
+      fixture(
+        'StreamingHistory0.json',
+        JSON.stringify([
+          { endTime: '2024-06-01 10:00', artistName: 'A', trackName: 'T', msPlayed: 1000 }
+        ])
+      )
+    ])
+    const facets = (await invoke('records:facets')) as { sources: string[]; types: string[] }
+    // Distinct sources, sorted — not duplicated by the two Netflix rows.
+    expect(facets.sources).toEqual(['netflix', 'spotify'])
+    // Distinct kinds (the `type` column): Netflix → watch, Spotify → listen.
+    expect(facets.types).toEqual(['listen', 'watch'])
+  })
+
+  it('is empty for an empty timeline', async () => {
+    const facets = (await invoke('records:facets')) as { sources: string[]; types: string[] }
+    expect(facets).toEqual({ sources: [], types: [] })
+  })
+})
+
 describe('records:import (dialog)', () => {
   it('imports the chosen files', async () => {
     const p = fixture('NetflixViewingHistory.csv', 'Title,Date\nThe Matrix,1/2/26\n')
