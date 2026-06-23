@@ -4,6 +4,7 @@ import {
   BookOpen,
   Clock,
   CreditCard,
+  Facebook,
   FileText,
   Film,
   Globe,
@@ -43,6 +44,7 @@ const SOURCE_META: Record<string, { label: string; icon: JSX.Element }> = {
   youtube: { label: 'YouTube', icon: <Youtube size={13} /> },
   browser: { label: 'Browser', icon: <Globe size={13} /> },
   imessage: { label: 'Messages', icon: <MessageSquare size={13} /> },
+  facebook: { label: 'Facebook', icon: <Facebook size={13} /> },
   generic: { label: 'Imported', icon: <FileText size={13} /> }
 }
 function sourceMeta(s: string): { label: string; icon: JSX.Element } {
@@ -56,6 +58,7 @@ const TYPE_LABEL: Record<string, string> = {
   listen: 'Listened',
   order: 'Orders',
   payment: 'Payments',
+  post: 'Posts',
   messages: 'Messages',
   book: 'Books',
   connection: 'Connections',
