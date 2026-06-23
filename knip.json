@@ -9,6 +9,7 @@
     "src/quickCapture/main.tsx",
     "scripts/*.ts",
     "electron.vite.config.ts",
+    "tailwind.config.ts",
     "vitest.config.ts",
     "playwright.config.ts"
   ],

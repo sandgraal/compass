@@ -204,6 +204,10 @@ export default function Timeline(): JSX.Element {
   const types = [...new Set([...facets.types, ...(type ? [type] : [])])].sort()
   const shown = items
   const span = stats ? fmtSpan(stats.earliest, stats.latest) : ''
+  // Active source/kind filter, joined for the empty-state message (e.g. "PayPal · Payments").
+  const filterLabel = [source ? sourceMeta(source).label : null, type ? typeLabel(type) : null]
+    .filter(Boolean)
+    .join(' · ')
 
   // Records arrive newest-first, so consecutive same-day rows bucket cleanly.
   const groups: { day: string; rows: TimelineRecord[] }[] = []
@@ -354,12 +358,11 @@ export default function Timeline(): JSX.Element {
       {shown.length === 0 ? (
         query || source || type ? (
           // An active search/filter matched nothing (records exist; this slice is empty).
+          // `filterLabel` carries its own trailing space only when present, so a
+          // search-only miss reads "No records match …" without a double space.
           <p className="text-sm text-muted-foreground py-8 text-center">
-            No{' '}
-            {[source ? sourceMeta(source).label : null, type ? typeLabel(type) : null]
-              .filter(Boolean)
-              .join(' · ') || ''}{' '}
-            records{query ? <> match “{query}”</> : ''}.
+            No {filterLabel ? `${filterLabel} ` : ''}records
+            {query ? ` match “${query}”` : ''}.
           </p>
         ) : stats && stats.total === 0 ? (
           // The whole table is empty — first-run call to action.
