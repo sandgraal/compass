@@ -102,16 +102,29 @@ export default function Timeline(): JSX.Element {
   } | null>(null)
   const [source, setSource] = useState<string | null>(null)
   const [type, setType] = useState<string | null>(null)
+  const [facets, setFacets] = useState<{ sources: string[]; types: string[] }>({
+    sources: [],
+    types: []
+  })
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const { toast } = useToast()
 
-  // Search runs server-side so it spans the whole timeline, not just the loaded page.
+  // Search AND the source/kind filters all run server-side so they span the whole
+  // timeline, not just the loaded 500-row page — a "PayPal" chip shows every PayPal
+  // record, not only the ones near the top.
   const reload = useCallback((): void => {
     if (!isElectron()) return
-    void window.api.records.list({ q: query.trim() || undefined, limit: 500 }).then(setItems)
-  }, [query])
+    void window.api.records
+      .list({
+        q: query.trim() || undefined,
+        source: source ?? undefined,
+        type: type ?? undefined,
+        limit: 500
+      })
+      .then(setItems)
+  }, [query, source, type])
 
   // "On this day" recap (prior years, today's month/day) — independent of search.
   const loadOnThisDay = useCallback((): void => {
@@ -119,13 +132,16 @@ export default function Timeline(): JSX.Element {
     void window.api.records.onThisDay({ limit: 8 }).then(setOnThisDay)
   }, [])
 
-  // True totals for the header (the list is capped at 500) — independent of search.
+  // True totals + the full set of filter facets (the list is capped at 500, so
+  // chips must come from the whole table, not the loaded page) — both independent
+  // of the active search/filter.
   const loadStats = useCallback((): void => {
     if (!isElectron()) return
     void window.api.records.stats().then(setStats)
+    void window.api.records.facets().then(setFacets)
   }, [])
 
-  // Debounced — re-queries as the search text changes (and on first mount).
+  // Debounced — re-queries as the search text or active filters change (and on mount).
   useEffect(() => {
     const t = setTimeout(reload, 200)
     return () => clearTimeout(t)
@@ -181,11 +197,12 @@ export default function Timeline(): JSX.Element {
     }
   }
 
-  // Sources + kinds present in the loaded results, plus the active filter so it
-  // stays clearable even when a search/other filter excludes it from those.
-  const sources = [...new Set([...items.map((i) => i.source), ...(source ? [source] : [])])].sort()
-  const types = [...new Set([...items.map((i) => i.type), ...(type ? [type] : [])])].sort()
-  const shown = items.filter((i) => (!source || i.source === source) && (!type || i.type === type))
+  // Chips come from the whole-timeline facets (not the loaded page), unioned with
+  // the active filter so it stays clearable even if a concurrent search narrows the
+  // table. Filtering itself is server-side now, so the loaded page IS the result.
+  const sources = [...new Set([...facets.sources, ...(source ? [source] : [])])].sort()
+  const types = [...new Set([...facets.types, ...(type ? [type] : [])])].sort()
+  const shown = items
   const span = stats ? fmtSpan(stats.earliest, stats.latest) : ''
 
   // Records arrive newest-first, so consecutive same-day rows bucket cleanly.
@@ -335,29 +352,25 @@ export default function Timeline(): JSX.Element {
       )}
 
       {shown.length === 0 ? (
-        items.length === 0 ? (
-          query ? (
-            <p className="text-sm text-muted-foreground py-8 text-center">
-              No records match “{query}”.
-            </p>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
-              <p className="text-sm text-muted-foreground max-w-sm">
-                Your timeline is empty. Export your data from a service you use (Netflix, Spotify,
-                …) and drop the file above — it becomes a private, searchable, exportable timeline
-                you own forever.
-              </p>
-            </div>
-          )
-        ) : (
+        query || source || type ? (
+          // An active search/filter matched nothing (records exist; this slice is empty).
           <p className="text-sm text-muted-foreground py-8 text-center">
             No{' '}
             {[source ? sourceMeta(source).label : null, type ? typeLabel(type) : null]
               .filter(Boolean)
-              .join(' · ') || 'matching'}{' '}
-            records{query ? ' match your search' : ''}.
+              .join(' · ') || ''}{' '}
+            records{query ? <> match “{query}”</> : ''}.
           </p>
-        )
+        ) : stats && stats.total === 0 ? (
+          // The whole table is empty — first-run call to action.
+          <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+            <p className="text-sm text-muted-foreground max-w-sm">
+              Your timeline is empty. Export your data from a service you use (Netflix, Spotify, …)
+              and drop the file above — it becomes a private, searchable, exportable timeline you
+              own forever.
+            </p>
+          </div>
+        ) : null /* still loading (stats not in yet) — don't flash an empty message */
       ) : (
         <div className="space-y-6">
           {groups.map((g) => (
