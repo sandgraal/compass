@@ -30,17 +30,33 @@ export interface CredDeps {
 
 const DEFAULT_DEPS: CredDeps = { runPull: productionRunPull, ingest: ingestFiles }
 
+/**
+ * Portal automation is OFF by default and opt-in via `COMPASS_ENABLE_CRED=1`.
+ * It ships disabled while the first adapter (SSA) is still `beta` and unvalidated
+ * against a live account — so a release never surfaces a broken "Automate this
+ * pull" button. Validation runs in a dev build with the flag set; a user-facing
+ * Settings toggle lands once an adapter is proven. The gate is enforced on BOTH
+ * `cred:list` (so the UI hides the affordance) and `cred:run` (defense in depth).
+ */
+function isCredEnabled(): boolean {
+  return process.env.COMPASS_ENABLE_CRED === '1'
+}
+
 export function registerCredHandlers(ipcMain: IpcMain, deps: CredDeps = DEFAULT_DEPS): void {
   // Only one assisted pull at a time (one visible window the user is driving).
   let active: ActivePull | null = null
 
   // The portals Compass can automate — safe metadata only, never a credential.
+  // Empty until automation is enabled, so the UI shows no "Automate" affordance.
   ipcMain.handle('cred:list', () =>
-    CRED_ADAPTERS.map((a) => ({ id: a.id, name: a.name, status: a.status }))
+    isCredEnabled() ? CRED_ADAPTERS.map((a) => ({ id: a.id, name: a.name, status: a.status })) : []
   )
 
   // Open the assisted-login window for one portal, then ingest what it returns.
   ipcMain.handle('cred:run', async (_event, portalId: unknown): Promise<CredRunResult> => {
+    if (!isCredEnabled()) {
+      return { ok: false, error: 'Portal automation is disabled' }
+    }
     if (typeof portalId !== 'string' || !getAdapter(portalId)) {
       return { ok: false, error: 'Unknown portal' }
     }
