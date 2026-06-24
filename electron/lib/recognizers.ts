@@ -26,6 +26,7 @@ import {
   FACEBOOK_FRIENDS_RECOGNIZER,
   FACEBOOK_MESSAGES_RECOGNIZER,
   FACEBOOK_POSTS_RECOGNIZER,
+  FACEBOOK_PROFILE_RECOGNIZER,
   FACEBOOK_TABLE_RECOGNIZER
 } from './facebook'
 import { GOODREADS_RECOGNIZER } from './goodreads'
@@ -427,7 +428,10 @@ export function hashSnapshot(source: string, category: string, naturalKey: strin
     .slice(0, 16)
 }
 
-export const SNAPSHOT_RECOGNIZERS: SnapshotRecognizer[] = [FACEBOOK_AD_PROFILE_RECOGNIZER]
+export const SNAPSHOT_RECOGNIZERS: SnapshotRecognizer[] = [
+  FACEBOOK_AD_PROFILE_RECOGNIZER,
+  FACEBOOK_PROFILE_RECOGNIZER
+]
 
 /** First snapshot recognizer that claims this file, or null. */
 export function recognizeSnapshot(f: RecognizerFile): SnapshotRecognizer | null {

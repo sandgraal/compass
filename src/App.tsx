@@ -16,6 +16,7 @@ import Finance from './pages/Finance'
 import Integrations from './pages/Integrations'
 import KnowledgeBase from './pages/KnowledgeBase'
 import Monthly from './pages/Monthly'
+import Profile from './pages/Profile'
 import Settings from './pages/Settings'
 import Storehouse from './pages/Storehouse'
 import Subscriptions from './pages/Subscriptions'
@@ -86,6 +87,7 @@ export default function App(): JSX.Element {
           <Route path="storehouse" element={<Storehouse />} />
           <Route path="timeline" element={<Timeline />} />
           <Route path="ad-profile" element={<AdProfile />} />
+          <Route path="profile" element={<Profile />} />
           <Route path="data-rights" element={<DataRights />} />
           <Route path="export" element={<Export />} />
           <Route path="integrations" element={<Integrations />} />
