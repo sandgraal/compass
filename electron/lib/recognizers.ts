@@ -31,6 +31,7 @@ import {
   FACEBOOK_TABLE_RECOGNIZER
 } from './facebook'
 import { GOODREADS_RECOGNIZER } from './goodreads'
+import { GOOGLE_ACTIVITY_RECOGNIZER } from './google'
 import { IMESSAGE_RECOGNIZER } from './imessage'
 import { LINKEDIN_RECOGNIZER } from './linkedin'
 import { parseMbox } from './mbox'
@@ -277,6 +278,7 @@ export const RECOGNIZERS: Recognizer[] = [
   FACEBOOK_MESSAGES_RECOGNIZER,
   FACEBOOK_TABLE_RECOGNIZER,
   FACEBOOK_ACTIVITY_RECOGNIZER,
+  GOOGLE_ACTIVITY_RECOGNIZER,
   genericTimeline
 ]
 

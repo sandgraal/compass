@@ -545,3 +545,29 @@ describe('snapshot facts (ad profile)', () => {
     expect(after).toHaveLength(2)
   })
 })
+
+describe('Google My Activity import', () => {
+  const MYACTIVITY = `<!doctype html><html><body><div class="mdl-grid">
+    <div class="outer-cell mdl-shadow--2dp"><div class="mdl-grid">
+      <div class="header-cell"><p class="mdl-typography--title">Search<br></p></div>
+      <div class="content-cell mdl-cell mdl-cell--6-col mdl-typography--body-1">Searched for tiny desk<br>Jan 02, 2025, 8:00:00 AM EST<br></div>
+    </div></div>
+    <div class="outer-cell mdl-shadow--2dp"><div class="mdl-grid">
+      <div class="header-cell"><p class="mdl-typography--title">YouTube<br></p></div>
+      <div class="content-cell mdl-cell mdl-cell--6-col mdl-typography--body-1">Watched <a href="https://youtu.be/x">A Video</a><br>Jan 03, 2025, 9:00:00 PM EST<br></div>
+    </div></div></div></body></html>`
+
+  it('imports My Activity HTML as google timeline records and dedupes on re-import', async () => {
+    const p = fixture('MyActivity.html', MYACTIVITY)
+    const r1 = (await invoke('records:import-paths', [p])) as ImportResult
+    expect(r1.imported).toBe(2)
+    expect(r1.perFile[0].recognizer).toBe('google')
+
+    const rows = (await invoke('records:list', { source: 'google' })) as Rec[]
+    expect(rows.map((r) => r.title).sort()).toEqual(['Searched for tiny desk', 'Watched A Video'])
+
+    const r2 = (await invoke('records:import-paths', [p])) as ImportResult
+    expect(r2.imported).toBe(0)
+    expect(r2.duplicates).toBe(2)
+  })
+})

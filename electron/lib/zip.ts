@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os'
 import { basename, extname, join } from 'node:path'
 import yauzl from 'yauzl'
 
-const INGESTABLE = new Set(['csv', 'json', 'xml', 'mbox', 'txt', 'html', 'htm', 'pdf'])
+const INGESTABLE = new Set(['csv', 'json', 'xml', 'mbox', 'txt', 'html', 'htm', 'pdf', 'ics'])
 const MAX_ZIP_ENTRIES = 50000 // total entries ENUMERATED before we bail (high-entry-count bomb guard)
 const MAX_ZIP_TOTAL = 5 * 1024 ** 3 // 5 GB uncompressed extracted across the archive (bomb guard)
 const MAX_ENTRY_BYTES = 2 * 1024 ** 3 // per-entry uncompressed cap
