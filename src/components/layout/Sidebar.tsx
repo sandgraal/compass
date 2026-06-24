@@ -1,6 +1,7 @@
 import {
   Blocks,
   BookOpen,
+  Bookmark,
   CalendarCheck,
   CalendarDays,
   CalendarRange,
@@ -96,6 +97,7 @@ export function Sidebar(): JSX.Element {
     { label: 'Ad Profile', to: '/ad-profile', icon: <Target size={18} /> },
     { label: 'Profile', to: '/profile', icon: <IdCard size={18} /> },
     { label: 'Apps & Websites', to: '/apps', icon: <Blocks size={18} /> },
+    { label: 'Saved', to: '/google-saved', icon: <Bookmark size={18} /> },
     { label: 'Get Your Data', to: '/data-rights', icon: <ScrollText size={18} /> },
     { label: 'Finance', to: '/finance', icon: <TrendingUp size={18} /> },
     {
