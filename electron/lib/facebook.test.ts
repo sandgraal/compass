@@ -4,6 +4,7 @@ import {
   FACEBOOK_COMMENTS_RECOGNIZER,
   FACEBOOK_FRIENDS_RECOGNIZER,
   FACEBOOK_MESSAGES_RECOGNIZER,
+  FACEBOOK_TABLE_RECOGNIZER,
   FACEBOOK_POSTS_RECOGNIZER as R
 } from './facebook'
 import type { RecognizerFile } from './recognizers'
@@ -271,5 +272,81 @@ describe('Facebook activity catch-all recognizer', () => {
     expect(kind('your_uncategorized_photos.html')).toBe('post')
     // 'liked_pages' contains "like" but must classify as a page, not a reaction.
     expect(kind('liked_pages.html')).toBe('page')
+  })
+})
+
+// Mirrors the table-format FB sections (logins/devices/marketplace/…): each record
+// is a `<table>` of key/value rows — two-cell `Label | value` rows and single
+// colspan cells of `Label<div>value</div>`. The timestamp lives in a `<td>`, NOT in
+// an `_a6-g` footer; that is what separates these from the activity blocks.
+const TABLE_FIXTURE = `<!doctype html><html><body>
+<div class="_a6-g"><table style="table-layout: fixed;">
+  <tr><td class="_a6_q">Created</td><td class="_2piu _a6_r">Feb 04, 2026 10:48:26 am</td></tr>
+  <tr><td colspan="2" class="_a6_q">Location details<div>The Crossings, FL, United States</div></td></tr>
+  <tr><td colspan="2" class="_a6_q">IP address<div>94.140.11.152</div></td></tr>
+  <tr><td colspan="2" class="_a6_q">Session type<div>Desktop</div></td></tr>
+</table></div>
+<div class="_a6-g"><table style="table-layout: fixed;">
+  <tr><td class="_a6_q">Created</td><td class="_2piu _a6_r">Apr 10, 2026 9:14:41 am</td></tr>
+  <tr><td colspan="2" class="_a6_q">Location details<div>Cartago, Costa Rica</div></td></tr>
+</table></div>
+<div class="_a6-g"><table style="table-layout: fixed;">
+  <tr><td class="_a6_q">Is opted out of ads about Meta</td><td class="_2piu _a6_r">False</td></tr>
+</table></div>
+</body></html>`
+
+const tableFile = (over: Partial<RecognizerFile> = {}): RecognizerFile => ({
+  name: "where_you're_logged_in.html",
+  ext: 'html',
+  text: TABLE_FIXTURE,
+  ...over
+})
+
+describe('Facebook table recognizer', () => {
+  it('detects a `<td>`-dated table file, but NOT activity-footer files', () => {
+    expect(FACEBOOK_TABLE_RECOGNIZER.detect(tableFile())).toBe(true)
+    // The activity fixture dates its blocks in `_a6-g` footers, not `<td>` cells.
+    expect(FACEBOOK_TABLE_RECOGNIZER.detect(activityFile())).toBe(false)
+    expect(FACEBOOK_TABLE_RECOGNIZER.detect(tableFile({ text: '<p>not facebook</p>' }))).toBe(false)
+    // A non-FB HTML table with a `<td>` date must NOT be claimed — the detect also
+    // requires a Facebook marker (DYI / `_a6-g` / `_a6_` cell class).
+    expect(
+      FACEBOOK_TABLE_RECOGNIZER.detect(
+        tableFile({ text: '<table><tr><td>Feb 04, 2026 10:48:26 am</td></tr></table>' })
+      )
+    ).toBe(false)
+  })
+
+  it('emits one record per DATED table (undated config table skipped)', () => {
+    const out = FACEBOOK_TABLE_RECOGNIZER.parse(tableFile())
+    expect(out).toHaveLength(2) // the 3rd table (a boolean setting, no date) is skipped
+    expect(out[0]).toMatchObject({
+      source: 'facebook',
+      type: 'security', // "where_you're_logged_in" → security
+      title: 'The Crossings, FL, United States', // salient location field, not the date
+      occurredAt: new Date(2026, 1, 4, 10, 48, 26).getTime()
+    })
+    // Every field is preserved in the body.
+    expect(out[0].body).toContain('IP address: 94.140.11.152')
+    expect(out[0].body).toContain('Session type: Desktop')
+    expect(out[1].title).toBe('Cartago, Costa Rica')
+  })
+
+  it('types marketplace conversations from the filename despite the "had_a" trap', () => {
+    // "had_a_buyer" embeds "ad_a" — the off-Facebook matcher must not claim it.
+    const out = FACEBOOK_TABLE_RECOGNIZER.parse(
+      tableFile({ name: 'conversations_you_had_as_a_buyer.html' })
+    )
+    expect(out[0]?.type).toBe('marketplace')
+  })
+
+  it('falls back to a humanized filename when no field is title-worthy', () => {
+    const text = `<div class="_a6-g"><table>
+      <tr><td>Update time</td><td>May 04, 2021 6:45:33 am</td></tr>
+      <tr><td>Product title</td><td>Empty</td></tr>
+    </table></div>`
+    const out = FACEBOOK_TABLE_RECOGNIZER.parse(tableFile({ name: 'record_details.html', text }))
+    // "Empty"/date-only rows yield no salient value → humanized filename.
+    expect(out[0]?.title).toBe('Record details')
   })
 })

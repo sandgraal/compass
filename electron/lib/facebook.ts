@@ -82,7 +82,11 @@ function parseFbDate(block: string): number | null {
  */
 function isFbHtml(f: { ext: string; text: string }): boolean {
   return (
-    (f.ext === 'html' || f.ext === 'htm') && (FB_DYI.test(f.text) || f.text.includes(POST_BLOCK))
+    (f.ext === 'html' || f.ext === 'htm') &&
+    // Signed by the DYI permalink, the `_a6-g` entry block, OR the obfuscated
+    // table-cell class `_a6_q`/`_a6_r` (the table-format sections — e.g. Marketplace
+    // — carry neither permalink nor `_a6-g`, only these cells).
+    (FB_DYI.test(f.text) || f.text.includes(POST_BLOCK) || f.text.includes('_a6_'))
   )
 }
 
@@ -283,22 +287,119 @@ function fbActivityType(name: string): string {
   if (/photo|video|album/.test(n)) return 'post'
   if (/group/.test(n)) return 'group'
   if (/event/.test(n)) return 'event'
-  if (/marketplace/.test(n)) return 'marketplace'
+  if (/marketplace|buyer|seller/.test(n)) return 'marketplace'
   if (/saved|save_/.test(n)) return 'saved'
   if (/search/.test(n)) return 'search'
   if (/poll/.test(n)) return 'poll'
   if (/payment|purchase|order/.test(n)) return 'payment'
   if (/fundrais|donation/.test(n)) return 'fundraiser'
   if (/location|sampled_location/.test(n)) return 'location'
-  if (/off_meta|off_facebook|activity_off|apps_and_websites|advertiser|ad_|ads_/.test(n)) {
+  // `\bads?_` (word-anchored) avoids matching the "ad_a" inside "had_a_buyer".
+  if (/off_meta|off_facebook|activity_off|apps_and_websites|advertis|\bads?_/.test(n)) {
     return 'off-facebook'
   }
   if (
-    /login|logout|session|device|ip_address|cookie|two-factor|security|account_activity/.test(n)
+    /login|logout|logged_in|logged_out|session|device|ip_address|cookie|two-factor|security|account_activity/.test(
+      n
+    )
   ) {
     return 'security'
   }
   return 'activity'
+}
+
+/** A Facebook date opening a `<td>` cell — the signature of the table-format
+ * sections (logins, devices, marketplace, interactions, off-Meta, …), as opposed
+ * to the `_a6-g` activity blocks (where the date sits in a `<footer>` `<div>`). */
+const TD_DATE = /<td[^>]*>\s*[A-Z][a-z]{2} \d{1,2}, \d{4} \d{1,2}:\d{2}:\d{2}\s*[ap]m/i
+const TABLE_BLOCK = /<table\b[\s\S]*?<\/table>/gi
+const TABLE_ROW = /<tr\b[\s\S]*?<\/tr>/gi
+const TABLE_CELL = /<td\b[^>]*>([\s\S]*?)<\/td>/gi
+/** Labels worth promoting to a record title (a name/place/thing, not a flag). */
+const TITLE_LABELS =
+  /name|title|product|item|app|website|domain|advertiser|location|device|query|search|url|event|page|group|subject|recipient|sender|seller|merchant|description/i
+const DATE_LABEL = /time|created|updated|\bdate\b/i
+const FLAG_VALUE = /^(empty|true|false|n\/a|none|null)$/i
+
+/** "where_you're_logged_in.html" → "Where you're logged in". */
+function humanizeFbName(name: string): string {
+  return (
+    name
+      .replace(/\.html?$/i, '')
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/^./, (c) => c.toUpperCase()) || 'Facebook record'
+  )
+}
+
+/** Extract (label, value) pairs from one `<table>` block. Two-cell rows are
+ * label/value; single (colspan) cells are "Label<div>value</div>". */
+function parseFbTableRows(table: string): Array<[string, string]> {
+  const rows: Array<[string, string]> = []
+  for (const tr of table.match(TABLE_ROW) ?? []) {
+    const tds = [...tr.matchAll(TABLE_CELL)].map((m) => m[1])
+    if (tds.length === 0) continue
+    if (tds.length >= 2) {
+      rows.push([textOf(tds[0]), textOf(tds.slice(1).join(' '))])
+    } else {
+      const div = tds[0].match(/^([\s\S]*?)<div\b[^>]*>([\s\S]*)<\/div>\s*$/i)
+      if (div) rows.push([textOf(div[1]), textOf(div[2])])
+      else rows.push(['', textOf(tds[0])])
+    }
+  }
+  return rows
+}
+
+function fbTableTitle(rows: Array<[string, string]>, fallback: string): string {
+  const usable = ([label, value]: [string, string]) =>
+    value && !FLAG_VALUE.test(value) && !FB_DATE.test(value) && !DATE_LABEL.test(label)
+  // Prefer a name/place/thing field; otherwise the first meaningful value.
+  const titled = rows.find((r) => usable(r) && TITLE_LABELS.test(r[0]))
+  const first = titled ?? rows.find(usable)
+  return (first ? first[1] : fallback).slice(0, 120)
+}
+
+/**
+ * Facebook table sections — the parts of the DYI export whose records are laid
+ * out as `<table>` key/value blocks rather than `_a6-g` activity blocks: login
+ * sessions & recognized devices, Marketplace conversations, off-Meta activity,
+ * feed/ad interactions, dated profile fields, and more. Each dated `<table>` (one
+ * with a `<td>` timestamp) becomes one record; the salient field is the title and
+ * every field is kept in the body. Undated config tables (pure settings/snapshots)
+ * are skipped here and surfaced on a dedicated page instead. Registered BEFORE the
+ * `_a6-g` catch-all; its `<td>`-date detect never matches a genuine activity file.
+ */
+export const FACEBOOK_TABLE_RECOGNIZER: Recognizer = {
+  id: 'facebook-table',
+  label: 'Facebook records (HTML export, table format)',
+  detect: (f) => isFbHtml(f) && TD_DATE.test(f.text),
+  parse: (f) => {
+    const type = fbActivityType(f.name)
+    const fallback = humanizeFbName(f.name)
+    const out: RecordInput[] = []
+    for (const table of f.text.match(TABLE_BLOCK) ?? []) {
+      const when = parseFbDate(table)
+      if (when == null) continue // dated tables only — config snapshots go to a page
+      const rows = parseFbTableRows(table)
+      const title = fbTableTitle(rows, fallback)
+      const body =
+        rows
+          .filter(([, v]) => v && !FB_DATE.test(v))
+          .map(([l, v]) => (l ? `${l}: ${v}` : v))
+          .join(' · ')
+          .slice(0, 1500) || undefined
+      out.push({
+        source: 'facebook',
+        type,
+        occurredAt: when,
+        title,
+        body,
+        naturalKey: `fb-tbl|${type}|${when}|${title.slice(0, 40)}`
+      })
+    }
+    return out
+  }
 }
 
 /**
