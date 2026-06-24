@@ -184,4 +184,10 @@ describe('Google Calendar (.ics) recognizer', () => {
       occurredAt: new Date(2025, 11, 25, 0, 0, 0).getTime()
     })
   })
+
+  it('treats a trailing Z on DTSTART as UTC (not local)', () => {
+    const ics = 'BEGIN:VEVENT\r\nDTSTART:20250707T133000Z\r\nSUMMARY:UTC event\r\nEND:VEVENT'
+    const out = GOOGLE_CALENDAR_RECOGNIZER.parse(file2('z.ics', 'ics', ics))
+    expect(out[0].occurredAt).toBe(Date.UTC(2025, 6, 7, 13, 30, 0))
+  })
 })

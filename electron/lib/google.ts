@@ -201,7 +201,13 @@ type PlayRow = {
 export const GOOGLE_PLAY_RECOGNIZER: Recognizer = {
   id: 'google-play',
   label: 'Google Play purchases (Takeout JSON)',
-  detect: (f) => f.ext === 'json' && /purchaseHistory/.test(f.text) && /purchaseTime/.test(f.text),
+  // Validate the JSON shape (not just substrings) so we never claim an unrelated
+  // Takeout JSON and then return [] — which would starve the generic recognizer.
+  detect: (f) => {
+    if (f.ext !== 'json' || !f.text.includes('purchaseHistory')) return false
+    const v = safeJson(f.text)
+    return Array.isArray(v) && typeof (v[0] as PlayRow)?.purchaseHistory?.purchaseTime === 'string'
+  },
   parse: (f) => {
     const rows = safeJson(f.text)
     if (!Array.isArray(rows)) return []
@@ -230,10 +236,13 @@ export const GOOGLE_PLAY_RECOGNIZER: Recognizer = {
 export const GOOGLE_PAY_RECOGNIZER: Recognizer = {
   id: 'google-pay',
   label: 'Google Pay transactions (Takeout CSV)',
-  detect: (f) =>
-    f.ext === 'csv' &&
-    /(^|,)\s*"?Transaction ID"?\s*,/i.test(f.text) &&
-    /(^|,)\s*"?Amount"?/i.test(f.text),
+  // Inspect only the header line (O(header), not O(file)) — like the other CSV recognizers.
+  detect: (f) => {
+    if (f.ext !== 'csv') return false
+    const nl = f.text.indexOf('\n')
+    const header = nl === -1 ? f.text : f.text.slice(0, nl)
+    return /(^|,)\s*"?Transaction ID"?\s*,/i.test(header) && /(^|,)\s*"?Amount"?/i.test(header)
+  },
   parse: (f) => {
     const out: RecordInput[] = []
     for (const r of parseCSV(f.text)) {
@@ -258,7 +267,7 @@ export const GOOGLE_PAY_RECOGNIZER: Recognizer = {
 
 // ── Google Calendar (`Calendar/*.ics`) ────────────────────────────────────────
 // iCalendar VEVENTs — historical calendars (distinct from the live OAuth sync).
-const ICS_DATE = /^DTSTART[^:]*:(\d{8})(?:T(\d{2})(\d{2})(\d{2}))?/m
+const ICS_DATE = /^DTSTART[^:]*:(\d{8})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?/m
 /** Unescape RFC 5545 text (\, \; \n \\). */
 function unescapeIcs(s: string): string {
   return s
@@ -266,14 +275,19 @@ function unescapeIcs(s: string): string {
     .replace(/\\([,;\\])/g, '$1')
     .trim()
 }
-/** Parse a VEVENT's DTSTART to LOCAL epoch ms (date-only → local midnight), or null. */
+/** Parse a VEVENT's DTSTART to epoch ms, or null. A trailing `Z` is UTC; `TZID=` and
+ *  date-only values are taken as local (parts) — same convention as the rest of the
+ *  Google recognizers. */
 function parseIcsDate(vevent: string): number | null {
   const m = vevent.match(ICS_DATE)
   if (!m) return null
   const y = Number(m[1].slice(0, 4))
   const mo = Number(m[1].slice(4, 6)) - 1
   const d = Number(m[1].slice(6, 8))
-  const t = new Date(y, mo, d, Number(m[2] ?? 0), Number(m[3] ?? 0), Number(m[4] ?? 0)).getTime()
+  const hh = Number(m[2] ?? 0)
+  const mm = Number(m[3] ?? 0)
+  const ss = Number(m[4] ?? 0)
+  const t = m[5] === 'Z' ? Date.UTC(y, mo, d, hh, mm, ss) : new Date(y, mo, d, hh, mm, ss).getTime()
   return Number.isNaN(t) ? null : t
 }
 export const GOOGLE_CALENDAR_RECOGNIZER: Recognizer = {
