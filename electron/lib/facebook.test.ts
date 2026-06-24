@@ -269,5 +269,7 @@ describe('Facebook activity catch-all recognizer', () => {
     expect(kind('your_activity_off_meta_technologies.html')).toBe('off-facebook')
     expect(kind('account_activity.html')).toBe('security')
     expect(kind('your_uncategorized_photos.html')).toBe('post')
+    // 'liked_pages' contains "like" but must classify as a page, not a reaction.
+    expect(kind('liked_pages.html')).toBe('page')
   })
 })

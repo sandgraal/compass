@@ -234,10 +234,7 @@ function localDay(ms: number): string {
 export const FACEBOOK_MESSAGES_RECOGNIZER: Recognizer = {
   id: 'facebook-messages',
   label: 'Facebook messages (HTML export)',
-  detect: (f) =>
-    (f.ext === 'html' || f.ext === 'htm') &&
-    /message_\d/i.test(f.name) &&
-    f.text.includes(POST_BLOCK),
+  detect: (f) => isFbHtml(f) && /message_\d/i.test(f.name),
   parse: (f) => {
     const titleM = f.text.match(/<title[^>]*>([\s\S]*?)<\/title>/i)
     const rawTitle = titleM ? textOf(titleM[1]) : ''
@@ -276,10 +273,12 @@ export const FACEBOOK_MESSAGES_RECOGNIZER: Recognizer = {
 
 /**
  * Map an FB export filename to a timeline `type`, so the catch-all activity
- * recognizer lands each section under a meaningful kind chip.
+ * recognizer lands each section under a meaningful kind chip. Order matters:
+ * `liked_pages` contains "like", so the page check runs BEFORE the reaction one.
  */
 function fbActivityType(name: string): string {
   const n = name.toLowerCase()
+  if (/liked_pages|\bpages?\b|page_/.test(n)) return 'page'
   if (/react|\blike/.test(n)) return 'reaction'
   if (/photo|video|album/.test(n)) return 'post'
   if (/group/.test(n)) return 'group'
@@ -291,7 +290,6 @@ function fbActivityType(name: string): string {
   if (/payment|purchase|order/.test(n)) return 'payment'
   if (/fundrais|donation/.test(n)) return 'fundraiser'
   if (/location|sampled_location/.test(n)) return 'location'
-  if (/\bpages?\b|page_|liked_pages/.test(n)) return 'page'
   if (/off_meta|off_facebook|activity_off|apps_and_websites|advertiser|ad_|ads_/.test(n)) {
     return 'off-facebook'
   }
