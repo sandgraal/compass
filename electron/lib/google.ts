@@ -17,6 +17,8 @@
  * collides with the Facebook `_a6-g` recognizers.
  */
 
+import { parseCSV } from './csv'
+import { parseWhen } from './dates'
 import type { Recognizer, RecordInput } from './recognizers'
 
 const OUTER_CELL = 'class="outer-cell'
@@ -129,6 +131,189 @@ export const GOOGLE_ACTIVITY_RECOGNIZER: Recognizer = {
         title,
         body: product || undefined,
         naturalKey: `gact|${type}|${when}|${title.slice(0, 40)}`
+      })
+    }
+    return out
+  }
+}
+
+function safeJson(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+/** Best-effort hostname for a URL (body context); returns '' if unparseable. */
+function hostname(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return ''
+  }
+}
+
+// ── Chrome history (Takeout `Chrome/History.json`) ────────────────────────────
+// JSON `{ "Browser History": [{ title, url, time_usec }] }`. `time_usec` is
+// microseconds since the Unix epoch (Takeout-normalized — unlike the native SQLite
+// `History` db, which counts from 1601). Emitted under the shared `browser` source
+// so Takeout + live-DB history sit on one timeline chip.
+type ChromeRow = { title?: string; url?: string; time_usec?: number }
+export const GOOGLE_CHROME_RECOGNIZER: Recognizer = {
+  id: 'chrome-takeout',
+  label: 'Chrome history (Takeout JSON)',
+  detect: (f) => {
+    if (f.ext !== 'json' || !f.text.includes('Browser History')) return false
+    const v = safeJson(f.text) as { 'Browser History'?: unknown }
+    return Array.isArray(v?.['Browser History'])
+  },
+  parse: (f) => {
+    const rows =
+      (safeJson(f.text) as { 'Browser History'?: ChromeRow[] })?.['Browser History'] ?? []
+    const out: RecordInput[] = []
+    for (const r of rows) {
+      const url = r.url ?? ''
+      if (!url) continue
+      const when = typeof r.time_usec === 'number' ? Math.round(r.time_usec / 1000) : null
+      out.push({
+        source: 'browser',
+        type: 'visit',
+        occurredAt: when,
+        title: r.title?.trim() || url,
+        body: hostname(url) || undefined,
+        naturalKey: `${url}|${r.time_usec ?? ''}`
+      })
+    }
+    return out
+  }
+}
+
+// ── Google Play Store purchases (`Google Play Store/Purchase History.json`) ────
+// JSON array of `{ purchaseHistory: { doc: { title }, invoicePrice, purchaseTime } }`.
+type PlayRow = {
+  purchaseHistory?: {
+    doc?: { title?: string; documentType?: string }
+    invoicePrice?: string
+    purchaseTime?: string
+  }
+}
+export const GOOGLE_PLAY_RECOGNIZER: Recognizer = {
+  id: 'google-play',
+  label: 'Google Play purchases (Takeout JSON)',
+  // Validate the JSON shape (not just substrings) so we never claim an unrelated
+  // Takeout JSON and then return [] — which would starve the generic recognizer.
+  detect: (f) => {
+    if (f.ext !== 'json' || !f.text.includes('purchaseHistory')) return false
+    const v = safeJson(f.text)
+    return Array.isArray(v) && typeof (v[0] as PlayRow)?.purchaseHistory?.purchaseTime === 'string'
+  },
+  parse: (f) => {
+    const rows = safeJson(f.text)
+    if (!Array.isArray(rows)) return []
+    const out: RecordInput[] = []
+    for (const row of rows as PlayRow[]) {
+      const ph = row.purchaseHistory
+      const title = ph?.doc?.title
+      const when = ph?.purchaseTime ? Date.parse(ph.purchaseTime) : Number.NaN
+      if (!title) continue
+      const price = ph?.invoicePrice
+      out.push({
+        source: 'google-play',
+        type: 'purchase',
+        occurredAt: Number.isNaN(when) ? null : when,
+        title,
+        body: [ph?.doc?.documentType, price].filter(Boolean).join(' · ') || undefined,
+        naturalKey: `gplay|${ph?.purchaseTime ?? ''}|${title}`
+      })
+    }
+    return out
+  }
+}
+
+// ── Google Pay transactions (`Google Pay/.../transactions_*.csv`) ─────────────
+// CSV: Time, Transaction ID, Description, Product, Payment method, Status, Amount.
+export const GOOGLE_PAY_RECOGNIZER: Recognizer = {
+  id: 'google-pay',
+  label: 'Google Pay transactions (Takeout CSV)',
+  // Inspect only the header line (O(header), not O(file)) — like the other CSV recognizers.
+  detect: (f) => {
+    if (f.ext !== 'csv') return false
+    const nl = f.text.indexOf('\n')
+    const header = nl === -1 ? f.text : f.text.slice(0, nl)
+    return /(^|,)\s*"?Transaction ID"?\s*,/i.test(header) && /(^|,)\s*"?Amount"?/i.test(header)
+  },
+  parse: (f) => {
+    const out: RecordInput[] = []
+    for (const r of parseCSV(f.text)) {
+      const desc = r.Description ?? r.description ?? ''
+      const time = r.Time ?? r.time ?? ''
+      if (!desc && !time) continue
+      const amount = r.Amount ?? r.amount ?? ''
+      const status = r.Status ?? r.status ?? ''
+      out.push({
+        source: 'google-pay',
+        type: 'payment',
+        occurredAt: parseWhen(time),
+        title: desc || '(transaction)',
+        body: [amount, status].filter(Boolean).join(' · ') || undefined,
+        payload: r,
+        naturalKey: r['Transaction ID'] || `${time}|${desc}`
+      })
+    }
+    return out
+  }
+}
+
+// ── Google Calendar (`Calendar/*.ics`) ────────────────────────────────────────
+// iCalendar VEVENTs — historical calendars (distinct from the live OAuth sync).
+const ICS_DATE = /^DTSTART[^:]*:(\d{8})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?/m
+/** Unescape RFC 5545 text (\, \; \n \\). */
+function unescapeIcs(s: string): string {
+  return s
+    .replace(/\\n/gi, ' ')
+    .replace(/\\([,;\\])/g, '$1')
+    .trim()
+}
+/** Parse a VEVENT's DTSTART to epoch ms, or null. A trailing `Z` is UTC; `TZID=` and
+ *  date-only values are taken as local (parts) — same convention as the rest of the
+ *  Google recognizers. */
+function parseIcsDate(vevent: string): number | null {
+  const m = vevent.match(ICS_DATE)
+  if (!m) return null
+  const y = Number(m[1].slice(0, 4))
+  const mo = Number(m[1].slice(4, 6)) - 1
+  const d = Number(m[1].slice(6, 8))
+  const hh = Number(m[2] ?? 0)
+  const mm = Number(m[3] ?? 0)
+  const ss = Number(m[4] ?? 0)
+  const t = m[5] === 'Z' ? Date.UTC(y, mo, d, hh, mm, ss) : new Date(y, mo, d, hh, mm, ss).getTime()
+  return Number.isNaN(t) ? null : t
+}
+export const GOOGLE_CALENDAR_RECOGNIZER: Recognizer = {
+  id: 'gcal',
+  label: 'Google Calendar (.ics)',
+  detect: (f) => f.ext === 'ics' || f.text.startsWith('BEGIN:VCALENDAR'),
+  parse: (f) => {
+    // Unfold RFC 5545 continuation lines (a line break followed by space/tab).
+    const text = f.text.replace(/\r?\n[ \t]/g, '')
+    const out: RecordInput[] = []
+    for (const m of text.matchAll(/BEGIN:VEVENT([\s\S]*?)END:VEVENT/g)) {
+      const ve = m[1]
+      const when = parseIcsDate(ve)
+      if (when == null) continue // dated events only
+      const sum = ve.match(/^SUMMARY[^:]*:(.*)$/m)
+      const loc = ve.match(/^LOCATION[^:]*:(.*)$/m)
+      const uid = ve.match(/^UID[^:]*:(.*)$/m)
+      const title = sum ? unescapeIcs(sum[1]) : '(event)'
+      const location = loc ? unescapeIcs(loc[1]) : ''
+      out.push({
+        source: 'gcal',
+        type: 'event',
+        occurredAt: when,
+        title: title || '(event)',
+        body: location || undefined,
+        naturalKey: uid ? `${unescapeIcs(uid[1])}|${when}` : `${when}|${title.slice(0, 40)}`
       })
     }
     return out
