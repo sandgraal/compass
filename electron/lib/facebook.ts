@@ -169,3 +169,49 @@ export const FACEBOOK_FRIENDS_RECOGNIZER: Recognizer = {
     return out
   }
 }
+
+/**
+ * Facebook comments — `comments_and_reactions/comments.html` (and the in-group
+ * variants). Same `_a6-g` block: the `<h2>` is the context ("… commented on X's
+ * post"), the `_a6-p` div is your comment text, the footer holds the date. Unlike
+ * posts, we do NOT strip `<section>` blocks — a comment's text can live inside one.
+ */
+export const FACEBOOK_COMMENTS_RECOGNIZER: Recognizer = {
+  id: 'facebook-comments',
+  label: 'Facebook comments (HTML export)',
+  detect: (f) => isFbHtml(f) && /comments/i.test(f.name),
+  parse: (f) => {
+    const out: RecordInput[] = []
+    const blocks = f.text.split(POST_BLOCK).slice(1)
+    blocks.forEach((raw, idx) => {
+      const close = raw.indexOf('>')
+      const block = close >= 0 ? raw.slice(close + 1) : raw
+      const when = parseFbDate(block)
+      const h2 = block.match(/<h2\b[^>]*>([\s\S]*?)<\/h2>/i)
+      const action = h2 ? textOf(h2[1]) : ''
+      // Body = the comment text: drop the <h2> + the footer (keep <section>), strip
+      // tags + leftover tag fragments + the date.
+      let rest = block
+      if (h2) rest = rest.replace(h2[0], ' ')
+      rest = rest.replace(/<footer\b[\s\S]*?<\/footer>/gi, ' ')
+      const body = textOf(rest)
+        .replace(/<[a-z!/][^>]*>?/gi, ' ')
+        .replace(FB_DATE, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 2000)
+
+      if (when == null && !action && !body) return
+      const title = action || (body ? `Comment: ${body.slice(0, 80)}` : 'Facebook comment')
+      out.push({
+        source: 'facebook',
+        type: 'comment',
+        occurredAt: when,
+        title,
+        body: body || undefined,
+        naturalKey: `fb-comment|${when ?? `i${idx}`}|${(body || action).slice(0, 48)}`
+      })
+    })
+    return out
+  }
+}

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { FACEBOOK_FRIENDS_RECOGNIZER, FACEBOOK_POSTS_RECOGNIZER as R } from './facebook'
+import {
+  FACEBOOK_COMMENTS_RECOGNIZER,
+  FACEBOOK_FRIENDS_RECOGNIZER,
+  FACEBOOK_POSTS_RECOGNIZER as R
+} from './facebook'
 import type { RecognizerFile } from './recognizers'
 
 // Mirrors the real FB "Download Your Information" HTML export shape: each post is
@@ -108,5 +112,54 @@ describe('Facebook friends recognizer', () => {
     expect(out[1].title).toBe('Became friends with Alice Johnson')
     expect(out[1].occurredAt).toBe(new Date(2011, 3, 30, 6, 2, 45).getTime()) // Apr 30 2011, 6:02:45 am
     expect(out[0].naturalKey).not.toBe(out[1].naturalKey)
+  })
+})
+
+// Comments: the <h2> is the context, an `_a6-p` div holds the comment text (kept,
+// unlike posts), the footer holds the date. (Validated against a real export of
+// thousands of comments spanning 2009–2026.)
+const COMMENTS_FIXTURE = `<!doctype html><html><body>
+<div class="_a6-g"><div aria-labelledby="c1">
+  <h2 class="_2ph_ _a6-h _a6-i">Christopher D Ennis commented on a friend's post.</h2>
+  <div class="_2ph_ _a6-p"><div class="_2pin">Great pics, Ma &amp; Pa!</div></div>
+  <footer class="_3-94 _a6-o"><div class="_a72d">Jan 20, 2009 1:17:08 pm</div></footer>
+</div>
+<div class="_a6-g"><div aria-labelledby="c2">
+  <h2 class="_2ph_ _a6-h _a6-i">Christopher D Ennis commented on a photo.</h2>
+  <footer class="_3-94 _a6-o"><div class="_a72d">Jun 15, 2015 9:00:00 am</div></footer>
+</div>
+</body></html>`
+
+const commentFile = (over: Partial<RecognizerFile> = {}): RecognizerFile => ({
+  name: 'comments.html',
+  ext: 'html',
+  text: COMMENTS_FIXTURE,
+  ...over
+})
+
+describe('Facebook comments recognizer', () => {
+  it('detects comments.html and does not cross-claim posts/friends', () => {
+    expect(FACEBOOK_COMMENTS_RECOGNIZER.detect(commentFile())).toBe(true)
+    expect(R.detect(commentFile())).toBe(false)
+    expect(FACEBOOK_FRIENDS_RECOGNIZER.detect(commentFile())).toBe(false)
+    expect(FACEBOOK_COMMENTS_RECOGNIZER.detect(commentFile({ name: 'your_posts__1.html' }))).toBe(
+      false
+    )
+  })
+
+  it('parses one comment record per block, keeping the comment text as the body', () => {
+    const out = FACEBOOK_COMMENTS_RECOGNIZER.parse(commentFile())
+    expect(out).toHaveLength(2)
+    expect(out[0]).toMatchObject({
+      source: 'facebook',
+      type: 'comment',
+      title: "Christopher D Ennis commented on a friend's post.",
+      occurredAt: new Date(2009, 0, 20, 13, 17, 8).getTime() // Jan 20 2009, 1:17:08 pm local
+    })
+    expect(out[0].body).toBe('Great pics, Ma & Pa!') // _a6-p text kept + entity decoded
+    // A comment with no text body still becomes a dated record (title only).
+    expect(out[1].title).toBe('Christopher D Ennis commented on a photo.')
+    expect(out[1].occurredAt).toBe(new Date(2015, 5, 15, 9, 0, 0).getTime())
+    expect(out[1].body).toBeUndefined()
   })
 })
