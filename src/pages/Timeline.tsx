@@ -59,6 +59,7 @@ const TYPE_LABEL: Record<string, string> = {
   order: 'Orders',
   payment: 'Payments',
   post: 'Posts',
+  comment: 'Comments',
   messages: 'Messages',
   book: 'Books',
   connection: 'Connections',
