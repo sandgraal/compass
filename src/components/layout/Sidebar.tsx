@@ -1,4 +1,5 @@
 import {
+  Blocks,
   BookOpen,
   CalendarCheck,
   CalendarDays,
@@ -94,6 +95,7 @@ export function Sidebar(): JSX.Element {
     { label: 'Timeline', to: '/timeline', icon: <Clock size={18} /> },
     { label: 'Ad Profile', to: '/ad-profile', icon: <Target size={18} /> },
     { label: 'Profile', to: '/profile', icon: <IdCard size={18} /> },
+    { label: 'Apps & Websites', to: '/apps', icon: <Blocks size={18} /> },
     { label: 'Get Your Data', to: '/data-rights', icon: <ScrollText size={18} /> },
     { label: 'Finance', to: '/finance', icon: <TrendingUp size={18} /> },
     {

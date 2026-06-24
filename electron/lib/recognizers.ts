@@ -22,6 +22,7 @@ import { parseWhen } from './dates'
 import {
   FACEBOOK_ACTIVITY_RECOGNIZER,
   FACEBOOK_AD_PROFILE_RECOGNIZER,
+  FACEBOOK_APPS_RECOGNIZER,
   FACEBOOK_COMMENTS_RECOGNIZER,
   FACEBOOK_FRIENDS_RECOGNIZER,
   FACEBOOK_MESSAGES_RECOGNIZER,
@@ -430,7 +431,8 @@ export function hashSnapshot(source: string, category: string, naturalKey: strin
 
 export const SNAPSHOT_RECOGNIZERS: SnapshotRecognizer[] = [
   FACEBOOK_AD_PROFILE_RECOGNIZER,
-  FACEBOOK_PROFILE_RECOGNIZER
+  FACEBOOK_PROFILE_RECOGNIZER,
+  FACEBOOK_APPS_RECOGNIZER
 ]
 
 /** First snapshot recognizer that claims this file, or null. */

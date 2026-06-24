@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   FACEBOOK_ACTIVITY_RECOGNIZER,
   FACEBOOK_AD_PROFILE_RECOGNIZER,
+  FACEBOOK_APPS_RECOGNIZER,
   FACEBOOK_COMMENTS_RECOGNIZER,
   FACEBOOK_FRIENDS_RECOGNIZER,
   FACEBOOK_MESSAGES_RECOGNIZER,
@@ -444,8 +445,65 @@ describe('Facebook profile-identity snapshot recognizer', () => {
       value: 'Christopher D Ennis',
       position: 0
     })
-    // Emails/Phones <ul><li> lists are joined with "; ".
+    // Emails/Phones <ul><li> lists are joined with "; "; the empty <li> is dropped.
     expect(out[1]).toMatchObject({ label: 'Emails', value: 'a@example.com; b@example.com' })
     expect(out[2].label).toBe('Birthday')
+  })
+})
+
+// Apps & websites: two `<td>`-keyed tables — "App Name" rows in the connected file,
+// "Apps blocked from accessing your data" rows in the permissions file. (Validated
+// against the real export: 14 connected + 10 blocked.)
+const APPS_FIXTURE = `<!doctype html><html><body>
+<table class="_a6_q"><tr><td>App Name</td><td>McDonald&#039;s</td></tr>
+<tr><td>Unique ID</td><td>123</td></tr>
+<tr><td>Date Added</td><td>Jul 09, 2023 11:48:45 am</td></tr></table>
+<table class="_a6_q"><tr><td>App Name</td><td>Spotify</td></tr></table>
+</body></html>`
+const PERMS_FIXTURE = `<!doctype html><html><body>
+<table class="_a6_q"><tr><td>Created time</td><td>Jan 14, 2009 7:18:27 pm</td></tr>
+<tr><td>Apps blocked from accessing your data</td><td>Buggle</td></tr>
+<tr><td>Apps blocked from accessing your data</td><td>Candy Planet</td></tr></table>
+</body></html>`
+
+const appsFile = (over: Partial<RecognizerFile> = {}): RecognizerFile => ({
+  name: 'connected_apps_and_websites.html',
+  ext: 'html',
+  text: APPS_FIXTURE,
+  ...over
+})
+
+describe('Facebook apps & websites snapshot recognizer', () => {
+  it('detects the connected-apps and permissions files only', () => {
+    expect(FACEBOOK_APPS_RECOGNIZER.detect(appsFile())).toBe(true)
+    expect(
+      FACEBOOK_APPS_RECOGNIZER.detect(
+        appsFile({ name: 'permissions_you_have_granted_to_apps.html' })
+      )
+    ).toBe(true)
+    expect(FACEBOOK_APPS_RECOGNIZER.detect(appsFile({ name: 'your_posts__1.html' }))).toBe(false)
+  })
+
+  it('parses connected apps from "App Name" rows, decoding entities', () => {
+    const out = FACEBOOK_APPS_RECOGNIZER.parse(appsFile())
+    expect(out).toHaveLength(2) // App Name rows only — Unique ID / Date Added ignored
+    expect(out[0]).toMatchObject({
+      source: 'facebook',
+      category: 'apps',
+      label: 'Connected app',
+      value: "McDonald's", // &#039; decoded
+      position: 0
+    })
+    expect(out[1].value).toBe('Spotify')
+  })
+
+  it('parses blocked apps from the permissions file', () => {
+    const out = FACEBOOK_APPS_RECOGNIZER.parse(
+      appsFile({ name: 'permissions_you_have_granted_to_apps.html', text: PERMS_FIXTURE })
+    )
+    // The "Created time" row is not a blocked-app row → skipped.
+    expect(out).toHaveLength(2)
+    expect(out.every((f) => f.label === 'Blocked app')).toBe(true)
+    expect(out.map((f) => f.value)).toEqual(['Buggle', 'Candy Planet'])
   })
 })

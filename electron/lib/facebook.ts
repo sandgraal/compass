@@ -487,6 +487,49 @@ export const FACEBOOK_PROFILE_RECOGNIZER: SnapshotRecognizer = {
 }
 
 /**
+ * Facebook apps & websites — the off-Meta app inventory, fed to the dedicated Apps
+ * page (category `apps`). Two static lists: the third-party apps you've connected to
+ * Facebook (`connected_apps_and_websites.html` — "App Name" rows) and the apps you've
+ * blocked (`permissions_you_have_granted_to_apps.html` — "Apps blocked from accessing
+ * your data" rows). One fact per distinct app, sub-grouped by `label` (Connected app /
+ * Blocked app). (The dated *connections* also land on the timeline via the table
+ * recognizer; this is the at-a-glance inventory view.)
+ */
+export const FACEBOOK_APPS_RECOGNIZER: SnapshotRecognizer = {
+  id: 'facebook-apps',
+  label: 'Facebook apps & websites (HTML export)',
+  detect: (f) =>
+    isFbHtml(f) && /connected_apps_and_websites|permissions_you_have_granted_to_apps/i.test(f.name),
+  parse: (f) => {
+    const isPerms = /permissions_you_have_granted_to_apps/i.test(f.name)
+    const out: SnapshotFact[] = []
+    let position = 0
+    for (const tr of f.text.match(/<tr\b[\s\S]*?<\/tr>/gi) ?? []) {
+      const tds = [...tr.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)].map((m) => textOf(m[1]))
+      if (tds.length < 2) continue
+      const [key, value] = tds
+      const label = isPerms
+        ? /blocked from accessing/i.test(key)
+          ? 'Blocked app'
+          : null
+        : /^App Name$/i.test(key)
+          ? 'Connected app'
+          : null
+      if (!label || !value) continue
+      out.push({
+        source: 'facebook',
+        category: 'apps',
+        label,
+        value,
+        position: position++,
+        naturalKey: `${label}|${value}`
+      })
+    }
+    return out
+  }
+}
+
+/**
  * Catch-all Facebook recognizer — claims ANY FB DYI HTML the specific recognizers
  * (posts/friends/comments/messages) didn't, emitting one timeline record per
  * **dated** `_a6-g` block. Undated blocks are skipped: a pure snapshot/list file
