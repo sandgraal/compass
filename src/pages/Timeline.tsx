@@ -175,10 +175,10 @@ export default function Timeline(): JSX.Element {
     }
     const parts: string[] = []
     if (r.imported) parts.push(`${r.imported} imported`)
-    // Snapshot facts (e.g. the Ad Profile / Profile pages) are a successful import
-    // too, even when nothing landed on the timeline — don't let a snapshot-only drop
-    // read as a failure.
-    if (r.snapshots) parts.push(`${r.snapshots} profile ${r.snapshots === 1 ? 'fact' : 'facts'}`)
+    // Snapshot facts (the Ad Profile / Profile / … themed pages) are a successful
+    // import too, even when nothing landed on the timeline — don't let a snapshot-only
+    // drop read as a failure. `snapshots` spans every category, so keep it generic.
+    if (r.snapshots) parts.push(`${r.snapshots} snapshot ${r.snapshots === 1 ? 'fact' : 'facts'}`)
     if (r.duplicates) parts.push(`${r.duplicates} already on your timeline`)
     if (r.unrecognized.length) parts.push(`${r.unrecognized.length} unrecognized`)
     const ok = r.imported > 0 || r.snapshots > 0

@@ -466,7 +466,11 @@ export const FACEBOOK_PROFILE_RECOGNIZER: SnapshotRecognizer = {
       if (!th || !td) continue
       const label = textOf(th[1])
       // Flatten `<li>` lists (Emails/Phones) to "; "-joined; else collapse to text.
-      const lis = [...td[1].matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)].map((m) => textOf(m[1]))
+      // Drop empty `<li>` entries so we never produce "; b@example.com" or a
+      // whitespace-only value that should have been skipped.
+      const lis = [...td[1].matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)]
+        .map((m) => textOf(m[1]))
+        .filter(Boolean)
       const value = lis.length ? lis.join('; ') : textOf(td[1])
       if (!label || !value) continue
       out.push({

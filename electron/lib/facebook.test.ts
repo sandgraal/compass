@@ -414,7 +414,7 @@ describe('Facebook ad-profile snapshot recognizer', () => {
 const PROFILE_FIXTURE = `<!doctype html><html><body>
 <table class="_a6_q">
   <tr><th>Name</th><td>Christopher D Ennis</td></tr>
-  <tr><th>Emails</th><td><ul><li>a@example.com</li><li>b@example.com</li></ul></td></tr>
+  <tr><th>Emails</th><td><ul><li>a@example.com</li><li>  </li><li>b@example.com</li></ul></td></tr>
   <tr><th>Birthday</th><td>Mar 21, 1973</td></tr>
   <tr><th>Gender</th><td></td></tr>
 </table></body></html>`
