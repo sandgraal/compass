@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { GOOGLE_ACTIVITY_RECOGNIZER as G } from './google'
+import {
+  GOOGLE_ACTIVITY_RECOGNIZER as G,
+  GOOGLE_CALENDAR_RECOGNIZER,
+  GOOGLE_CHROME_RECOGNIZER,
+  GOOGLE_PAY_RECOGNIZER,
+  GOOGLE_PLAY_RECOGNIZER
+} from './google'
 import type { RecognizerFile } from './recognizers'
 
 // Mirrors Google Takeout's "My Activity" / YouTube-history HTML template: repeating
@@ -76,5 +82,106 @@ describe('Google My Activity recognizer', () => {
     expect(kind('Google Play Store', 'Used App')).toBe('app')
     expect(kind('some-site.com', 'Visited Page')).toBe('visit') // verb fallback
     expect(kind('Discover', '20 cards in your feed')).toBe('activity') // no verb match
+  })
+})
+
+const file2 = (name: string, ext: string, text: string): RecognizerFile => ({ name, ext, text })
+
+describe('Chrome history (Takeout JSON) recognizer', () => {
+  const HISTORY = JSON.stringify({
+    'Browser History': [
+      { title: 'Example', url: 'https://example.com/a', time_usec: 1782316900830694 },
+      { url: 'https://no-title.test/x', time_usec: 1700000000000000 }
+    ]
+  })
+  it('detects the Takeout Browser History JSON, emitting browser/visit records', () => {
+    expect(GOOGLE_CHROME_RECOGNIZER.detect(file2('History.json', 'json', HISTORY))).toBe(true)
+    expect(GOOGLE_CHROME_RECOGNIZER.detect(file2('x.json', 'json', '[]'))).toBe(false)
+    const out = GOOGLE_CHROME_RECOGNIZER.parse(file2('History.json', 'json', HISTORY))
+    expect(out).toHaveLength(2)
+    expect(out[0]).toMatchObject({
+      source: 'browser',
+      type: 'visit',
+      title: 'Example',
+      body: 'example.com',
+      occurredAt: Math.round(1782316900830694 / 1000) // µs → ms
+    })
+    expect(out[1].title).toBe('https://no-title.test/x') // falls back to the URL
+  })
+})
+
+describe('Google Play purchases recognizer', () => {
+  const PLAY = JSON.stringify([
+    {
+      purchaseHistory: {
+        invoicePrice: '$0.00',
+        doc: { documentType: 'Android Apps', title: 'Google One' },
+        purchaseTime: '2026-04-09T22:24:04.567Z'
+      }
+    }
+  ])
+  it('parses nested purchaseHistory into google-play/purchase records', () => {
+    expect(GOOGLE_PLAY_RECOGNIZER.detect(file2('Purchase History.json', 'json', PLAY))).toBe(true)
+    const out = GOOGLE_PLAY_RECOGNIZER.parse(file2('Purchase History.json', 'json', PLAY))
+    expect(out[0]).toMatchObject({
+      source: 'google-play',
+      type: 'purchase',
+      title: 'Google One',
+      body: 'Android Apps · $0.00',
+      occurredAt: Date.parse('2026-04-09T22:24:04.567Z')
+    })
+  })
+})
+
+describe('Google Pay transactions recognizer', () => {
+  const PAY = [
+    'Time,Transaction ID,Description,Product,Payment method,Status,Amount',
+    '"Nov 23, 2025, 3:13 PM",YTR.ABCD,YouTube Premium,YouTube,Amex,Complete,USD 15.87'
+  ].join('\n')
+  it('parses the transactions CSV into google-pay/payment records', () => {
+    expect(GOOGLE_PAY_RECOGNIZER.detect(file2('transactions_1.csv', 'csv', PAY))).toBe(true)
+    const out = GOOGLE_PAY_RECOGNIZER.parse(file2('transactions_1.csv', 'csv', PAY))
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({
+      source: 'google-pay',
+      type: 'payment',
+      title: 'YouTube Premium',
+      body: 'USD 15.87 · Complete',
+      naturalKey: 'YTR.ABCD'
+    })
+    expect(out[0].occurredAt).not.toBeNull()
+  })
+})
+
+describe('Google Calendar (.ics) recognizer', () => {
+  const ICS = [
+    'BEGIN:VCALENDAR',
+    'BEGIN:VEVENT',
+    'DTSTART;TZID=America/Costa_Rica:20250707T063000',
+    'SUMMARY:Wake\\, oral care',
+    'LOCATION:Home',
+    'UID:abc@google.com',
+    'END:VEVENT',
+    'BEGIN:VEVENT',
+    'DTSTART;VALUE=DATE:20251225',
+    'SUMMARY:Holiday',
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n')
+  it('parses VEVENTs into gcal/event records, unescaping text and handling date-only', () => {
+    expect(GOOGLE_CALENDAR_RECOGNIZER.detect(file2('Family.ics', 'ics', ICS))).toBe(true)
+    const out = GOOGLE_CALENDAR_RECOGNIZER.parse(file2('Family.ics', 'ics', ICS))
+    expect(out).toHaveLength(2)
+    expect(out[0]).toMatchObject({
+      source: 'gcal',
+      type: 'event',
+      title: 'Wake, oral care', // \, unescaped
+      body: 'Home',
+      occurredAt: new Date(2025, 6, 7, 6, 30, 0).getTime() // local from parts
+    })
+    expect(out[1]).toMatchObject({
+      title: 'Holiday',
+      occurredAt: new Date(2025, 11, 25, 0, 0, 0).getTime()
+    })
   })
 })

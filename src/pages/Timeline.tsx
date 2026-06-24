@@ -2,6 +2,7 @@ import {
   Activity,
   ArrowLeftRight,
   BookOpen,
+  CalendarDays,
   Clock,
   CreditCard,
   Facebook,
@@ -47,6 +48,9 @@ const SOURCE_META: Record<string, { label: string; icon: JSX.Element }> = {
   imessage: { label: 'Messages', icon: <MessageSquare size={13} /> },
   facebook: { label: 'Facebook', icon: <Facebook size={13} /> },
   google: { label: 'Google', icon: <Footprints size={13} /> },
+  'google-play': { label: 'Play Store', icon: <Package size={13} /> },
+  'google-pay': { label: 'Google Pay', icon: <Wallet size={13} /> },
+  gcal: { label: 'Calendar', icon: <CalendarDays size={13} /> },
   generic: { label: 'Imported', icon: <FileText size={13} /> }
 }
 function sourceMeta(s: string): { label: string; icon: JSX.Element } {
@@ -60,6 +64,7 @@ const TYPE_LABEL: Record<string, string> = {
   listen: 'Listened',
   order: 'Orders',
   payment: 'Payments',
+  purchase: 'Purchases',
   post: 'Posts',
   comment: 'Comments',
   messages: 'Messages',
