@@ -162,8 +162,8 @@ export const FACEBOOK_FRIENDS_RECOGNIZER: Recognizer = {
         type: 'connection',
         occurredAt: when,
         title: `Became friends with ${name}`,
-        // Dedup by name (the friendship is the event); a name twice just dedupes.
-        naturalKey: `fb-friend|${name}`
+        // Dedup by (name, occurredAt) to reduce collisions for common names while staying stable on re-import.
+        naturalKey: `fb-friend|${when ?? ''}|${name}`
       })
     }
     return out
