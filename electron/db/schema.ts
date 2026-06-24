@@ -375,7 +375,7 @@ export const records = sqliteTable('records', {
 export const snapshotFacts = sqliteTable('snapshot_facts', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   source: text('source').notNull(), // 'facebook'
-  category: text('category').notNull(), // 'ad-interests' | 'off-meta-apps' | 'profile' | 'security'
+  category: text('category').notNull(), // themed page: 'ad-profile' | 'profile' (more: off-meta-apps, security)
   label: text('label'), // optional key (e.g. "Email", an app name); null for bare list items
   value: text('value').notNull(), // the fact value / list item
   position: integer('position').notNull().default(0), // stable order within (source, category)

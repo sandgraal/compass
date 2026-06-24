@@ -72,6 +72,7 @@ export default function AdProfile(): JSX.Element {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            aria-label="Filter advertisers and categories"
             placeholder="Filter advertisers and categories…"
             className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-border bg-card/40 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50"
           />

@@ -5,6 +5,7 @@ import {
   FACEBOOK_COMMENTS_RECOGNIZER,
   FACEBOOK_FRIENDS_RECOGNIZER,
   FACEBOOK_MESSAGES_RECOGNIZER,
+  FACEBOOK_PROFILE_RECOGNIZER,
   FACEBOOK_TABLE_RECOGNIZER,
   FACEBOOK_POSTS_RECOGNIZER as R
 } from './facebook'
@@ -405,5 +406,46 @@ describe('Facebook ad-profile snapshot recognizer', () => {
       adProfileFile({ name: 'other_categories_used_to_reach_you.html' })
     )
     expect(out[0].label).toBe('Category')
+  })
+})
+
+// Profile identity is a `<th>Label</th><td>value</td>` table (Name/Emails/Birthday…),
+// with `<li>` lists for Emails/Phones. (Validated against the real export: 9 fields.)
+const PROFILE_FIXTURE = `<!doctype html><html><body>
+<table class="_a6_q">
+  <tr><th>Name</th><td>Christopher D Ennis</td></tr>
+  <tr><th>Emails</th><td><ul><li>a@example.com</li><li>  </li><li>b@example.com</li></ul></td></tr>
+  <tr><th>Birthday</th><td>Mar 21, 1973</td></tr>
+  <tr><th>Gender</th><td></td></tr>
+</table></body></html>`
+
+const profileFile = (over: Partial<RecognizerFile> = {}): RecognizerFile => ({
+  name: 'profile_information.html',
+  ext: 'html',
+  text: PROFILE_FIXTURE,
+  ...over
+})
+
+describe('Facebook profile-identity snapshot recognizer', () => {
+  it('detects profile_information.html, not other FB HTML', () => {
+    expect(FACEBOOK_PROFILE_RECOGNIZER.detect(profileFile())).toBe(true)
+    expect(FACEBOOK_PROFILE_RECOGNIZER.detect(profileFile({ name: 'your_posts__1.html' }))).toBe(
+      false
+    )
+  })
+
+  it('emits a profile fact per row, flattening <li> lists and skipping empty values', () => {
+    const out = FACEBOOK_PROFILE_RECOGNIZER.parse(profileFile())
+    expect(out).toHaveLength(3) // the empty "Gender" row is skipped
+    expect(out[0]).toMatchObject({
+      source: 'facebook',
+      category: 'profile',
+      label: 'Name',
+      value: 'Christopher D Ennis',
+      position: 0
+    })
+    // Emails/Phones <ul><li> lists are joined with "; ".
+    expect(out[1]).toMatchObject({ label: 'Emails', value: 'a@example.com; b@example.com' })
+    expect(out[2].label).toBe('Birthday')
   })
 })

@@ -8,6 +8,7 @@ import {
   CreditCard,
   Download,
   Home,
+  IdCard,
   Inbox,
   Layers,
   LayoutDashboard,
@@ -92,6 +93,7 @@ export function Sidebar(): JSX.Element {
     { label: 'Household & Assets', to: '/assets', icon: <Home size={18} /> },
     { label: 'Timeline', to: '/timeline', icon: <Clock size={18} /> },
     { label: 'Ad Profile', to: '/ad-profile', icon: <Target size={18} /> },
+    { label: 'Profile', to: '/profile', icon: <IdCard size={18} /> },
     { label: 'Get Your Data', to: '/data-rights', icon: <ScrollText size={18} /> },
     { label: 'Finance', to: '/finance', icon: <TrendingUp size={18} /> },
     {

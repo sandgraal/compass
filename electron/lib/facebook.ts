@@ -446,6 +446,47 @@ export const FACEBOOK_AD_PROFILE_RECOGNIZER: SnapshotRecognizer = {
 }
 
 /**
+ * Facebook profile identity — `personal_information/profile_information/profile_information.html`.
+ * Unlike the rest of the export this section is a `<th>Label</th><td>value</td>`
+ * table: Name, Username, Profile URL, Registration date, Emails, Phones, Birthday,
+ * Gender, Family, etc. Each row becomes one `snapshot_fact` under category `profile`
+ * (the dedicated Profile page), with `<li>` lists (emails/phones) flattened. Static
+ * identity, not timeline events.
+ */
+export const FACEBOOK_PROFILE_RECOGNIZER: SnapshotRecognizer = {
+  id: 'facebook-profile',
+  label: 'Facebook profile information (HTML export)',
+  detect: (f) => isFbHtml(f) && /profile_information/i.test(f.name),
+  parse: (f) => {
+    const out: SnapshotFact[] = []
+    let position = 0
+    for (const tr of f.text.match(/<tr\b[\s\S]*?<\/tr>/gi) ?? []) {
+      const th = tr.match(/<th\b[^>]*>([\s\S]*?)<\/th>/i)
+      const td = tr.match(/<td\b[^>]*>([\s\S]*?)<\/td>/i)
+      if (!th || !td) continue
+      const label = textOf(th[1])
+      // Flatten `<li>` lists (Emails/Phones) to "; "-joined; else collapse to text.
+      // Drop empty `<li>` entries so we never produce "; b@example.com" or a
+      // whitespace-only value that should have been skipped.
+      const lis = [...td[1].matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)]
+        .map((m) => textOf(m[1]))
+        .filter(Boolean)
+      const value = lis.length ? lis.join('; ') : textOf(td[1])
+      if (!label || !value) continue
+      out.push({
+        source: 'facebook',
+        category: 'profile',
+        label,
+        value,
+        position: position++,
+        naturalKey: `${label}|${value}`
+      })
+    }
+    return out
+  }
+}
+
+/**
  * Catch-all Facebook recognizer — claims ANY FB DYI HTML the specific recognizers
  * (posts/friends/comments/messages) didn't, emitting one timeline record per
  * **dated** `_a6-g` block. Undated blocks are skipped: a pure snapshot/list file
