@@ -234,10 +234,7 @@ function localDay(ms: number): string {
 export const FACEBOOK_MESSAGES_RECOGNIZER: Recognizer = {
   id: 'facebook-messages',
   label: 'Facebook messages (HTML export)',
-  detect: (f) =>
-    (f.ext === 'html' || f.ext === 'htm') &&
-    /message_\d/i.test(f.name) &&
-    f.text.includes(POST_BLOCK),
+  detect: (f) => isFbHtml(f) && /message_\d/i.test(f.name),
   parse: (f) => {
     const titleM = f.text.match(/<title[^>]*>([\s\S]*?)<\/title>/i)
     const rawTitle = titleM ? textOf(titleM[1]) : ''
@@ -268,6 +265,83 @@ export const FACEBOOK_MESSAGES_RECOGNIZER: Recognizer = {
         occurredAt: new Date(`${day}T00:00:00`).getTime(), // local midnight
         title: `${count} message${count === 1 ? '' : 's'} with ${conversation}`,
         naturalKey: `fb-msg|${day}|${conversation}`
+      })
+    }
+    return out
+  }
+}
+
+/**
+ * Map an FB export filename to a timeline `type`, so the catch-all activity
+ * recognizer lands each section under a meaningful kind chip. Order matters:
+ * `liked_pages` contains "like", so the page check runs BEFORE the reaction one.
+ */
+function fbActivityType(name: string): string {
+  const n = name.toLowerCase()
+  if (/liked_pages|\bpages?\b|page_/.test(n)) return 'page'
+  if (/react|\blike/.test(n)) return 'reaction'
+  if (/photo|video|album/.test(n)) return 'post'
+  if (/group/.test(n)) return 'group'
+  if (/event/.test(n)) return 'event'
+  if (/marketplace/.test(n)) return 'marketplace'
+  if (/saved|save_/.test(n)) return 'saved'
+  if (/search/.test(n)) return 'search'
+  if (/poll/.test(n)) return 'poll'
+  if (/payment|purchase|order/.test(n)) return 'payment'
+  if (/fundrais|donation/.test(n)) return 'fundraiser'
+  if (/location|sampled_location/.test(n)) return 'location'
+  if (/off_meta|off_facebook|activity_off|apps_and_websites|advertiser|ad_|ads_/.test(n)) {
+    return 'off-facebook'
+  }
+  if (
+    /login|logout|session|device|ip_address|cookie|two-factor|security|account_activity/.test(n)
+  ) {
+    return 'security'
+  }
+  return 'activity'
+}
+
+/**
+ * Catch-all Facebook recognizer — claims ANY FB DYI HTML the specific recognizers
+ * (posts/friends/comments/messages) didn't, emitting one timeline record per
+ * **dated** `_a6-g` block. Undated blocks are skipped: a pure snapshot/list file
+ * (e.g. your ad-interest categories) produces nothing here and is surfaced via a
+ * dedicated page instead. The `type` is derived from the filename so reactions,
+ * groups, events, marketplace, searches, off-Facebook activity, etc. each land
+ * under their own kind chip. Registered LAST among the FB recognizers.
+ */
+export const FACEBOOK_ACTIVITY_RECOGNIZER: Recognizer = {
+  id: 'facebook-activity',
+  label: 'Facebook activity (HTML export)',
+  detect: (f) => isFbHtml(f) && f.text.includes(POST_BLOCK),
+  parse: (f) => {
+    const type = fbActivityType(f.name)
+    const out: RecordInput[] = []
+    for (const raw of f.text.split(POST_BLOCK).slice(1)) {
+      const close = raw.indexOf('>')
+      const block = close >= 0 ? raw.slice(close + 1) : raw
+      const when = parseFbDate(block)
+      if (when == null) continue // dated events only — undated snapshots go to a page
+      const h2 = block.match(/<h2\b[^>]*>([\s\S]*?)<\/h2>/i)
+      const action = h2 ? textOf(h2[1]) : ''
+      let rest = block
+      if (h2) rest = rest.replace(h2[0], ' ')
+      rest = rest.replace(/<footer\b[\s\S]*?<\/footer>/gi, ' ')
+      const body = textOf(rest)
+        .replace(/<[a-z!/][^>]*>?/gi, ' ')
+        .replace(FB_DATE, ' ')
+        .replace(/\bUpdated\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 1000)
+      const title = action || (body ? body.slice(0, 90) : 'Facebook activity')
+      out.push({
+        source: 'facebook',
+        type,
+        occurredAt: when,
+        title,
+        body: body || undefined,
+        naturalKey: `fb-act|${type}|${when}|${title.slice(0, 40)}`
       })
     }
     return out

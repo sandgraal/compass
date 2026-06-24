@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  FACEBOOK_ACTIVITY_RECOGNIZER,
   FACEBOOK_COMMENTS_RECOGNIZER,
   FACEBOOK_FRIENDS_RECOGNIZER,
   FACEBOOK_MESSAGES_RECOGNIZER,
@@ -213,5 +214,62 @@ describe('Facebook messages recognizer', () => {
     )
     const out = FACEBOOK_MESSAGES_RECOGNIZER.parse(messageFile({ text }))
     expect(out[0].title).toBe('2 messages with Bob Smith')
+  })
+})
+
+// Catch-all activity: any FB _a6-g HTML the specific recognizers didn't claim,
+// one dated record per block, typed from the filename. (Validated against the
+// real archive: reactions, groups, events, searches, security, off-Facebook…)
+const ACTIVITY_FIXTURE = `<!doctype html><html><body>
+<div class="_a6-g"><div aria-labelledby="a1">
+  <h2 class="_2ph_ _a6-h _a6-i">Christopher D Ennis liked a post.</h2>
+  <footer class="_3-94 _a6-o"><div class="_a72d">Mar 03, 2014 5:00:00 pm</div></footer>
+</div>
+<div class="_a6-g"><div aria-labelledby="a2">
+  <h2 class="_2ph_ _a6-h _a6-i">Christopher D Ennis liked a comment.</h2>
+  <footer class="_3-94 _a6-o"><div class="_a72d">Apr 04, 2015 10:00:00 am</div></footer>
+</div>
+<div class="_a6-g"><div aria-labelledby="a3">
+  <h2 class="_2ph_ _a6-h _a6-i">An undated thing with no date.</h2>
+</div>
+</body></html>`
+
+const activityFile = (over: Partial<RecognizerFile> = {}): RecognizerFile => ({
+  name: 'likes_and_reactions_1.html',
+  ext: 'html',
+  text: ACTIVITY_FIXTURE,
+  ...over
+})
+
+describe('Facebook activity catch-all recognizer', () => {
+  it('claims any FB _a6-g HTML and ignores non-FB files', () => {
+    expect(FACEBOOK_ACTIVITY_RECOGNIZER.detect(activityFile())).toBe(true)
+    expect(FACEBOOK_ACTIVITY_RECOGNIZER.detect(activityFile({ text: '<p>not facebook</p>' }))).toBe(
+      false
+    )
+  })
+
+  it('emits one record per DATED block (undated skipped), typed from the filename', () => {
+    const out = FACEBOOK_ACTIVITY_RECOGNIZER.parse(activityFile())
+    expect(out).toHaveLength(2) // 2 dated, the undated block is skipped
+    expect(out[0]).toMatchObject({
+      source: 'facebook',
+      type: 'reaction', // from the "likes_and_reactions" filename
+      title: 'Christopher D Ennis liked a post.',
+      occurredAt: new Date(2014, 2, 3, 17, 0, 0).getTime()
+    })
+  })
+
+  it('derives the kind from the section filename', () => {
+    const kind = (name: string): string | undefined =>
+      FACEBOOK_ACTIVITY_RECOGNIZER.parse(activityFile({ name }))[0]?.type
+    expect(kind('your_group_membership_activity.html')).toBe('group')
+    expect(kind('event_invitations.html')).toBe('event')
+    expect(kind('your_search_history.html')).toBe('search')
+    expect(kind('your_activity_off_meta_technologies.html')).toBe('off-facebook')
+    expect(kind('account_activity.html')).toBe('security')
+    expect(kind('your_uncategorized_photos.html')).toBe('post')
+    // 'liked_pages' contains "like" but must classify as a page, not a reaction.
+    expect(kind('liked_pages.html')).toBe('page')
   })
 })
