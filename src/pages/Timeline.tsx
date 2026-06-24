@@ -7,6 +7,7 @@ import {
   Facebook,
   FileText,
   Film,
+  Footprints,
   Globe,
   Landmark,
   Linkedin,
@@ -45,6 +46,7 @@ const SOURCE_META: Record<string, { label: string; icon: JSX.Element }> = {
   browser: { label: 'Browser', icon: <Globe size={13} /> },
   imessage: { label: 'Messages', icon: <MessageSquare size={13} /> },
   facebook: { label: 'Facebook', icon: <Facebook size={13} /> },
+  google: { label: 'Google', icon: <Footprints size={13} /> },
   generic: { label: 'Imported', icon: <FileText size={13} /> }
 }
 function sourceMeta(s: string): { label: string; icon: JSX.Element } {
@@ -72,6 +74,10 @@ const TYPE_LABEL: Record<string, string> = {
   security: 'Security',
   location: 'Location',
   activity: 'Activity',
+  maps: 'Maps',
+  app: 'Apps',
+  assistant: 'Assistant',
+  visit: 'Visits',
   book: 'Books',
   connection: 'Connections',
   email: 'Email',

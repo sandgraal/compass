@@ -35,7 +35,7 @@ import {
 import { forEachZipEntry } from '../lib/zip'
 
 const MAX_IMPORT_BYTES = 50 * 1024 * 1024 // 50 MB — matches the contacts/finance guard
-const MAX_STREAM_BYTES = 2 * 1024 ** 3 // 2 GB — streaming recognizers (e.g. Apple Health export.xml)
+const MAX_STREAM_BYTES = 8 * 1024 ** 3 // 8 GB — streaming recognizers read the file incrementally (not as one in-memory string), so multi-GB inputs like a Gmail .mbox / Apple Health export.xml are feasible
 const MAX_FILES = 50
 
 /** Read the first `bytes` of a file without loading the whole thing (head-sniff for detection). */
@@ -222,7 +222,7 @@ async function ingestPath(fp: string, name: string, ctx: IngestCtx, depth: numbe
     const sr = recognizeStream({ name, ext, head })
     if (sr) {
       if (size > MAX_STREAM_BYTES) {
-        ctx.unrecognized.push(`${name} (too large, max 2 GB)`)
+        ctx.unrecognized.push(`${name} (too large, max 8 GB)`)
         ctx.perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
         return
       }
