@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   FACEBOOK_COMMENTS_RECOGNIZER,
   FACEBOOK_FRIENDS_RECOGNIZER,
+  FACEBOOK_MESSAGES_RECOGNIZER,
   FACEBOOK_POSTS_RECOGNIZER as R
 } from './facebook'
 import type { RecognizerFile } from './recognizers'
@@ -161,5 +162,56 @@ describe('Facebook comments recognizer', () => {
     expect(out[1].title).toBe('Christopher D Ennis commented on a photo.')
     expect(out[1].occurredAt).toBe(new Date(2015, 5, 15, 9, 0, 0).getTime())
     expect(out[1].body).toBeUndefined()
+  })
+})
+
+// Messages: a conversation file (message_N.html) — the <title> is the other
+// party, `_a6-g` blocks are messages. Aggregated to content-light daily counts;
+// the message TEXT is never stored. (Validated against real conversations.)
+const MESSAGES_FIXTURE = `<!doctype html><html><head><title>Jane Doe</title></head><body>
+<div class="_a6-g"><div><div class="_2ph_ _a6-p">hey there</div>
+  <footer class="_3-94 _a6-o"><div class="_a72d">Jun 25, 2021 3:33:52 pm</div></footer></div></div>
+<div class="_a6-g"><div><div class="_2ph_ _a6-p">how are you</div>
+  <footer class="_3-94 _a6-o"><div class="_a72d">Jun 25, 2021 4:00:00 pm</div></footer></div></div>
+<div class="_a6-g"><div><div class="_2ph_ _a6-p">bye now</div>
+  <footer class="_3-94 _a6-o"><div class="_a72d">Jun 26, 2021 9:00:00 am</div></footer></div></div>
+</body></html>`
+
+const messageFile = (over: Partial<RecognizerFile> = {}): RecognizerFile => ({
+  name: 'message_1.html',
+  ext: 'html',
+  text: MESSAGES_FIXTURE,
+  ...over
+})
+
+describe('Facebook messages recognizer', () => {
+  it('detects message_N.html and not other FB sections', () => {
+    expect(FACEBOOK_MESSAGES_RECOGNIZER.detect(messageFile())).toBe(true)
+    expect(FACEBOOK_MESSAGES_RECOGNIZER.detect(messageFile({ name: 'comments.html' }))).toBe(false)
+    expect(R.detect(messageFile())).toBe(false)
+  })
+
+  it('aggregates to daily counts per conversation, storing NO message text', () => {
+    const out = FACEBOOK_MESSAGES_RECOGNIZER.parse(messageFile())
+    expect(out).toHaveLength(2) // 2 messages on Jun 25, 1 on Jun 26
+    expect(out[0]).toMatchObject({
+      source: 'facebook',
+      type: 'messages',
+      title: '2 messages with Jane Doe',
+      occurredAt: new Date('2021-06-25T00:00:00').getTime() // local midnight
+    })
+    expect(out[1].title).toBe('1 message with Jane Doe')
+    // Privacy: the message bodies never land in any record.
+    expect(out.every((r) => r.body === undefined)).toBe(true)
+    expect(JSON.stringify(out)).not.toContain('hey there')
+  })
+
+  it('strips the trailing self from a "Participants:" thread title', () => {
+    const text = MESSAGES_FIXTURE.replace(
+      '<title>Jane Doe</title>',
+      '<title>Participants: Bob Smith and Christopher D Ennis</title>'
+    )
+    const out = FACEBOOK_MESSAGES_RECOGNIZER.parse(messageFile({ text }))
+    expect(out[0].title).toBe('2 messages with Bob Smith')
   })
 })

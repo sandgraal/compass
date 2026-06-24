@@ -215,3 +215,61 @@ export const FACEBOOK_COMMENTS_RECOGNIZER: Recognizer = {
     return out
   }
 }
+
+function localDay(ms: number): string {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/**
+ * Facebook messages — a conversation file (`messages/**​/message_N.html`). Detected
+ * by the stable `message_<n>.html` filename + the `_a6-g` message blocks.
+ * Aggregated to **content-light daily counts** ("N messages with X" per local day),
+ * exactly like the iMessage recognizer — the message TEXT is never stored.
+ *
+ * The conversation label comes from the `<title>`: usually the other party's name
+ * directly ("Yamilette Espinoza Aparicio"), or a "Participants: X and <you>" list
+ * for archived/special threads (then we drop the trailing self).
+ */
+export const FACEBOOK_MESSAGES_RECOGNIZER: Recognizer = {
+  id: 'facebook-messages',
+  label: 'Facebook messages (HTML export)',
+  detect: (f) =>
+    (f.ext === 'html' || f.ext === 'htm') &&
+    /message_\d/i.test(f.name) &&
+    f.text.includes(POST_BLOCK),
+  parse: (f) => {
+    const titleM = f.text.match(/<title[^>]*>([\s\S]*?)<\/title>/i)
+    const rawTitle = titleM ? textOf(titleM[1]) : ''
+    let conversation: string
+    if (/^Participants:/i.test(rawTitle)) {
+      // Participant list — drop "Participants:" and the trailing self.
+      const parts = rawTitle.replace(/^Participants:\s*/i, '').split(/\s+and\s+/)
+      conversation = (parts.length > 1 ? parts.slice(0, -1).join(' and ') : parts[0]) || ''
+    } else {
+      conversation = rawTitle // the <title> is the other party's name directly
+    }
+    conversation = conversation || 'a conversation'
+
+    // Count messages per LOCAL day — content-light, no message text retained.
+    const perDay = new Map<string, number>()
+    for (const raw of f.text.split(POST_BLOCK).slice(1)) {
+      const when = parseFbDate(raw)
+      if (when == null) continue
+      const day = localDay(when)
+      perDay.set(day, (perDay.get(day) ?? 0) + 1)
+    }
+
+    const out: RecordInput[] = []
+    for (const [day, count] of perDay) {
+      out.push({
+        source: 'facebook',
+        type: 'messages',
+        occurredAt: new Date(`${day}T00:00:00`).getTime(), // local midnight
+        title: `${count} message${count === 1 ? '' : 's'} with ${conversation}`,
+        naturalKey: `fb-msg|${day}|${conversation}`
+      })
+    }
+    return out
+  }
+}
