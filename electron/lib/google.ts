@@ -319,3 +319,126 @@ export const GOOGLE_CALENDAR_RECOGNIZER: Recognizer = {
     return out
   }
 }
+
+// ── Google Fit daily activity (`Fit/Daily activity metrics/…csv`) ─────────────
+// Two shapes: the aggregate `Daily activity metrics.csv` (one row per day, a `Date`
+// column) and the per-day `YYYY-MM-DD.csv` files (15-min segments, date in the
+// filename). Both collapse to ONE content-light daily record (steps · kcal · km ·
+// move-min), deduped by `gfit|<day>`.
+const FIT_DATE_FILE = /^(\d{4}-\d{2}-\d{2})\.csv$/i
+function fitNum(v: unknown): number {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : 0
+}
+function fitRecord(
+  day: string,
+  steps: number,
+  kcal: number,
+  dist: number,
+  move: number
+): RecordInput {
+  const parts = [
+    steps ? `${Math.round(steps)} steps` : '',
+    kcal ? `${Math.round(kcal)} kcal` : '',
+    dist ? `${(dist / 1000).toFixed(1)} km` : '',
+    move ? `${Math.round(move)} move min` : ''
+  ].filter(Boolean)
+  const when = parseWhen(day)
+  return {
+    source: 'google-fit',
+    type: 'fitness',
+    occurredAt: when,
+    title: parts[0] || 'Activity',
+    body: parts.slice(1).join(' · ') || undefined,
+    naturalKey: `gfit|${day}`
+  }
+}
+export const GOOGLE_FIT_RECOGNIZER: Recognizer = {
+  id: 'google-fit',
+  label: 'Google Fit daily activity (Takeout CSV)',
+  detect: (f) => {
+    if (f.ext !== 'csv') return false
+    const nl = f.text.indexOf('\n')
+    const header = nl === -1 ? f.text : f.text.slice(0, nl)
+    return /Move Minutes count/i.test(header) && /Step count/i.test(header)
+  },
+  parse: (f) => {
+    const rows = parseCSV(f.text)
+    if (!rows.length) return []
+    const out: RecordInput[] = []
+    if ('Date' in rows[0]) {
+      // Aggregate file — one row per day, already totaled.
+      for (const r of rows) {
+        const day = String(r.Date ?? '')
+        if (!day) continue
+        out.push(
+          fitRecord(
+            day,
+            fitNum(r['Step count']),
+            fitNum(r['Calories (kcal)']),
+            fitNum(r['Distance (m)']),
+            fitNum(r['Move Minutes count'])
+          )
+        )
+      }
+    } else {
+      // Per-day file — sum the 15-min segments; the day is the filename.
+      const m = f.name.match(FIT_DATE_FILE)
+      if (!m) return []
+      let steps = 0
+      let kcal = 0
+      let dist = 0
+      let move = 0
+      for (const r of rows) {
+        steps += fitNum(r['Step count'])
+        kcal += fitNum(r['Calories (kcal)'])
+        dist += fitNum(r['Distance (m)'])
+        move += fitNum(r['Move Minutes count'])
+      }
+      out.push(fitRecord(m[1], steps, kcal, dist, move))
+    }
+    return out
+  }
+}
+
+// ── Google Voice calls & texts (`Voice/Calls/<contact> - <Type> - <ISO>Z.html`) ─
+// CONTENT-LIGHT: the contact, kind, and timestamp all live in the FILENAME — the
+// message text / call audio is never read. One dated record per call/text/voicemail.
+const VOICE_FILE =
+  /^(.+?) - (Text|Placed|Received|Missed|Voicemail|Recorded) - (\d{4}-\d{2}-\d{2}T\d{2}_\d{2}_\d{2}Z)\.html?$/i
+function voiceKind(label: string): { type: string; verb: string } {
+  switch (label.toLowerCase()) {
+    case 'text':
+      return { type: 'text', verb: 'Text with' }
+    case 'voicemail':
+      return { type: 'voicemail', verb: 'Voicemail from' }
+    case 'missed':
+      return { type: 'call', verb: 'Missed call from' }
+    case 'placed':
+      return { type: 'call', verb: 'Call to' }
+    default: // received / recorded
+      return { type: 'call', verb: 'Call from' }
+  }
+}
+export const GOOGLE_VOICE_RECOGNIZER: Recognizer = {
+  id: 'google-voice',
+  label: 'Google Voice calls & texts (Takeout HTML)',
+  detect: (f) => (f.ext === 'html' || f.ext === 'htm') && VOICE_FILE.test(f.name),
+  parse: (f) => {
+    const m = f.name.match(VOICE_FILE)
+    if (!m) return []
+    const contact = m[1].trim() || 'unknown'
+    const { type, verb } = voiceKind(m[2])
+    const when = Date.parse(m[3].replace(/_/g, ':')) // 2026-06-23T02_10_31Z → ISO
+    return [
+      {
+        source: 'google-voice',
+        type,
+        occurredAt: Number.isNaN(when) ? null : when,
+        title: `${verb} ${contact}`,
+        body: m[2],
+        naturalKey: f.name
+      }
+    ]
+  }
+}
