@@ -4,6 +4,7 @@ import CommandPalette from './components/CommandPalette'
 import { AppLayout } from './components/layout/AppLayout'
 import { isThemePreference } from './lib/theme'
 import AdProfile from './pages/AdProfile'
+import Apps from './pages/Apps'
 import Ask from './pages/Ask'
 import Assets from './pages/Assets'
 import ClaudeInbox from './pages/ClaudeInbox'
@@ -88,6 +89,7 @@ export default function App(): JSX.Element {
           <Route path="timeline" element={<Timeline />} />
           <Route path="ad-profile" element={<AdProfile />} />
           <Route path="profile" element={<Profile />} />
+          <Route path="apps" element={<Apps />} />
           <Route path="data-rights" element={<DataRights />} />
           <Route path="export" element={<Export />} />
           <Route path="integrations" element={<Integrations />} />
