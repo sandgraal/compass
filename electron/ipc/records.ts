@@ -35,7 +35,7 @@ import {
 import { forEachZipEntry } from '../lib/zip'
 
 const MAX_IMPORT_BYTES = 50 * 1024 * 1024 // 50 MB — matches the contacts/finance guard
-const MAX_STREAM_BYTES = 8 * 1024 ** 3 // 8 GB — streaming recognizers run in O(1) memory (Apple Health export.xml, multi-GB Gmail .mbox)
+const MAX_STREAM_BYTES = 8 * 1024 ** 3 // 8 GB — streaming recognizers read the file incrementally (not as one in-memory string), so multi-GB inputs like a Gmail .mbox / Apple Health export.xml are feasible
 const MAX_FILES = 50
 
 /** Read the first `bytes` of a file without loading the whole thing (head-sniff for detection). */

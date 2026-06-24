@@ -7,8 +7,10 @@
  * ("Watched …", "Searched for …", "Used Maps", "Viewed image …") plus a timestamp
  * like "Jun 23, 2026, 12:25:59 AM EDT".
  *
- * One timeline record per DATED cell, in the export's local time (parsed from the
- * parts so it's timezone-deterministic — the trailing TZ abbreviation is ignored).
+ * One timeline record per DATED cell, parsed from the date parts into the importing
+ * machine's LOCAL time — the trailing TZ abbreviation is ignored, so the local
+ * calendar day is preserved (same approach as the Facebook recognizer; a re-import
+ * on a machine in a different timezone would shift the epoch ms / dedup hash).
  * Undated cells (some Android/“Used …” entries) are skipped. Brittle by nature:
  * Google's obfuscated mdl class names can change between export eras; detection is
  * structural (the `content-cell mdl-cell` + a Google-format date) so it never
