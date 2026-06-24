@@ -3,6 +3,7 @@ import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-d
 import CommandPalette from './components/CommandPalette'
 import { AppLayout } from './components/layout/AppLayout'
 import { isThemePreference } from './lib/theme'
+import AdProfile from './pages/AdProfile'
 import Ask from './pages/Ask'
 import Assets from './pages/Assets'
 import ClaudeInbox from './pages/ClaudeInbox'
@@ -84,6 +85,7 @@ export default function App(): JSX.Element {
           <Route path="assets" element={<Assets />} />
           <Route path="storehouse" element={<Storehouse />} />
           <Route path="timeline" element={<Timeline />} />
+          <Route path="ad-profile" element={<AdProfile />} />
           <Route path="data-rights" element={<DataRights />} />
           <Route path="export" element={<Export />} />
           <Route path="integrations" element={<Integrations />} />

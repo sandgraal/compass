@@ -367,6 +367,23 @@ export const records = sqliteTable('records', {
   ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
+// Static, NON-timeline snapshot facts from a data export — the parts of an archive
+// that describe *who you are / what's set* rather than *what happened*: your ad-
+// interest profile, the apps sharing data off-Meta, profile identity fields, account
+// security config. Grouped by (source, category); each themed page reads one
+// category. Re-import is idempotent via the UNIQUE `dedup_hash`.
+export const snapshotFacts = sqliteTable('snapshot_facts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  source: text('source').notNull(), // 'facebook'
+  category: text('category').notNull(), // 'ad-interests' | 'off-meta-apps' | 'profile' | 'security'
+  label: text('label'), // optional key (e.g. "Email", an app name); null for bare list items
+  value: text('value').notNull(), // the fact value / list item
+  position: integer('position').notNull().default(0), // stable order within (source, category)
+  dedupHash: text('dedup_hash').notNull().unique(),
+  provenance: text('provenance'), // import filename
+  ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
 // ---- Knowledge Suggestions ----
 export const knowledgeSuggestions = sqliteTable('knowledge_suggestions', {
   id: integer('id').primaryKey({ autoIncrement: true }),
