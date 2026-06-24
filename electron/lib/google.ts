@@ -464,13 +464,15 @@ export const GOOGLE_SUBSCRIPTIONS_RECOGNIZER: SnapshotRecognizer = {
     for (const r of parseCSV(f.text)) {
       const title = (r['Channel Title'] ?? r['Channel title'] ?? '').trim()
       if (!title) continue
+      // Key on the stable Channel Id (titles rename / collide); fall back to title.
+      const id = (r['Channel Id'] ?? r['Channel id'] ?? '').trim()
       out.push({
         source: 'google',
         category: 'google-saved',
         label: 'YouTube subscription',
         value: title,
         position: position++,
-        naturalKey: `YouTube subscription|${title}`
+        naturalKey: `YouTube subscription|${id || title}`
       })
     }
     return out
@@ -487,16 +489,18 @@ export const GOOGLE_BOOKMARKS_RECOGNIZER: SnapshotRecognizer = {
   parse: (f) => {
     const out: SnapshotFact[] = []
     let position = 0
-    for (const m of f.text.matchAll(/<A\b[^>]*HREF="[^"]*"[^>]*>([\s\S]*?)<\/A>/gi)) {
-      const value = textOf(m[1])
+    for (const m of f.text.matchAll(/<A\b[^>]*HREF="([^"]*)"[^>]*>([\s\S]*?)<\/A>/gi)) {
+      const href = m[1]
+      const value = textOf(m[2])
       if (!value) continue
+      // Key on the URL (titles like "Home" collide); fall back to the title.
       out.push({
         source: 'google',
         category: 'google-saved',
         label: 'Bookmark',
         value,
         position: position++,
-        naturalKey: `Bookmark|${value}`
+        naturalKey: `Bookmark|${href || value}`
       })
     }
     return out

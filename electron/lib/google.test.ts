@@ -265,18 +265,25 @@ describe('Google Saved snapshot recognizers', () => {
       category: 'google-saved',
       label: 'YouTube subscription',
       value: 'Reserve Channel',
-      position: 0
+      position: 0,
+      naturalKey: 'YouTube subscription|UC1' // keyed on Channel Id, not the title
     })
   })
 
-  it('parses Chrome Bookmarks.html into google-saved facts', () => {
+  it('parses Chrome Bookmarks.html, keying on the URL so duplicate titles survive', () => {
     const html =
-      '<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><DT><A HREF="https://a.test" ADD_DATE="1">Tire Rack</A><DT><A HREF="https://b.test">ToyoDIY</A></DL>'
+      '<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><DT><A HREF="https://a.test" ADD_DATE="1">Home</A><DT><A HREF="https://b.test">Home</A></DL>'
     expect(GOOGLE_BOOKMARKS_RECOGNIZER.detect(file2('Bookmarks.html', 'html', html))).toBe(true)
     // A non-bookmark HTML is not claimed.
     expect(GOOGLE_BOOKMARKS_RECOGNIZER.detect(file2('x.html', 'html', '<html></html>'))).toBe(false)
     const out = GOOGLE_BOOKMARKS_RECOGNIZER.parse(file2('Bookmarks.html', 'html', html))
-    expect(out.map((f) => f.value)).toEqual(['Tire Rack', 'ToyoDIY'])
-    expect(out[0]).toMatchObject({ category: 'google-saved', label: 'Bookmark' })
+    expect(out).toHaveLength(2)
+    expect(out[0]).toMatchObject({
+      label: 'Bookmark',
+      value: 'Home',
+      naturalKey: 'Bookmark|https://a.test'
+    })
+    // Two "Home" bookmarks with different URLs must NOT collapse.
+    expect(out[0].naturalKey).not.toBe(out[1].naturalKey)
   })
 })
