@@ -18,7 +18,7 @@
  * parse degrades to "skip the block" rather than crashing if the shape drifts.
  */
 
-import type { Recognizer, RecordInput } from './recognizers'
+import type { Recognizer, RecordInput, SnapshotFact, SnapshotRecognizer } from './recognizers'
 
 const FB_DYI = /facebook\.com\/dyi/i
 const POST_BLOCK = 'class="_a6-g"'
@@ -396,6 +396,49 @@ export const FACEBOOK_TABLE_RECOGNIZER: Recognizer = {
         title,
         body,
         naturalKey: `fb-tbl|${type}|${when}|${title.slice(0, 40)}`
+      })
+    }
+    return out
+  }
+}
+
+/** Pull FB's repeated list items — the `_a6-p` content divs — out of a section. */
+function fbListItems(html: string): string[] {
+  const out: string[] = []
+  for (const m of html.matchAll(/<div\b[^>]*class="[^"]*_a6-p[^"]*"[^>]*>([\s\S]*?)<\/div>/gi)) {
+    const v = textOf(m[1])
+    if (v) out.push(v)
+  }
+  return out
+}
+
+/**
+ * Facebook ad profile — the NON-timeline "how advertisers see you" snapshot, fed to
+ * the dedicated Ad Profile page (not the records timeline). Two of the export's
+ * eye-opener files: the advertisers that uploaded/used your info
+ * (`advertisers_using_your_activity_or_information.html` — often thousands) and the
+ * targeting categories Meta inferred about you (`other_categories_used_to_reach_you.html`).
+ * Each list item becomes one `snapshot_fact` under category `ad-profile`, sub-grouped
+ * by `label` (Advertiser / Category).
+ */
+export const FACEBOOK_AD_PROFILE_RECOGNIZER: SnapshotRecognizer = {
+  id: 'facebook-ad-profile',
+  label: 'Facebook ad profile (HTML export)',
+  detect: (f) =>
+    isFbHtml(f) &&
+    /advertisers_using_your_activity|other_categories_used_to_reach_you/i.test(f.name),
+  parse: (f) => {
+    const label = /other_categories_used_to_reach_you/i.test(f.name) ? 'Category' : 'Advertiser'
+    const out: SnapshotFact[] = []
+    let position = 0
+    for (const value of fbListItems(f.text)) {
+      out.push({
+        source: 'facebook',
+        category: 'ad-profile',
+        label,
+        value,
+        position: position++,
+        naturalKey: `${label}|${value}`
       })
     }
     return out

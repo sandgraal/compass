@@ -455,6 +455,7 @@ declare global {
     error?: string
     imported: number
     duplicates: number
+    snapshots: number
     perFile: Array<{
       file: string
       recognizer: string | null
@@ -462,6 +463,15 @@ declare global {
       duplicates: number
     }>
     unrecognized: string[]
+  }
+
+  interface SnapshotFactRecord {
+    id: number
+    source: string
+    category: string
+    label: string | null
+    value: string
+    position: number
   }
 
   interface StorehouseSummary {
@@ -852,6 +862,9 @@ declare global {
         importFiles(): Promise<RecordsImportResult>
         importPaths(paths: string[]): Promise<RecordsImportResult>
         pathsForFiles(files: File[]): string[]
+      }
+      snapshot: {
+        list(opts?: { source?: string; category?: string }): Promise<SnapshotFactRecord[]>
       }
       cred: {
         list(): Promise<{ id: string; name: string; status: 'beta' | 'stable' }[]>

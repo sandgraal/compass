@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   FACEBOOK_ACTIVITY_RECOGNIZER,
+  FACEBOOK_AD_PROFILE_RECOGNIZER,
   FACEBOOK_COMMENTS_RECOGNIZER,
   FACEBOOK_FRIENDS_RECOGNIZER,
   FACEBOOK_MESSAGES_RECOGNIZER,
@@ -348,5 +349,61 @@ describe('Facebook table recognizer', () => {
     const out = FACEBOOK_TABLE_RECOGNIZER.parse(tableFile({ name: 'record_details.html', text }))
     // "Empty"/date-only rows yield no salient value → humanized filename.
     expect(out[0]?.title).toBe('Record details')
+  })
+})
+
+// The ad-profile snapshot files: a single table of `_a6-p` list items — the
+// advertisers that uploaded/used your info, and the targeting categories Meta
+// inferred. (Validated against the real export: 3008 advertisers + 26 categories.)
+const AD_PROFILE_FIXTURE = `<!doctype html><html><body>
+<table class="_a6_q"><tr><td><div class="_2pin _a6-p">Acme Corp</div></td></tr>
+<tr><td><div class="_2pin _a6-p">A list uploaded or used by the advertiser Globex</div></td></tr>
+<tr><td><div class="_2pin _a6-p">Initech</div></td></tr></table>
+</body></html>`
+
+const adProfileFile = (over: Partial<RecognizerFile> = {}): RecognizerFile => ({
+  name: 'advertisers_using_your_activity_or_information.html',
+  ext: 'html',
+  text: AD_PROFILE_FIXTURE,
+  ...over
+})
+
+describe('Facebook ad-profile snapshot recognizer', () => {
+  it('detects the advertiser/category files, not arbitrary FB HTML', () => {
+    expect(FACEBOOK_AD_PROFILE_RECOGNIZER.detect(adProfileFile())).toBe(true)
+    expect(
+      FACEBOOK_AD_PROFILE_RECOGNIZER.detect(
+        adProfileFile({ name: 'other_categories_used_to_reach_you.html' })
+      )
+    ).toBe(true)
+    // A different FB section (e.g. posts) must not be claimed as ad-profile.
+    expect(
+      FACEBOOK_AD_PROFILE_RECOGNIZER.detect(adProfileFile({ name: 'your_posts__1.html' }))
+    ).toBe(false)
+  })
+
+  it('emits one ad-profile fact per list item, labeled Advertiser', () => {
+    const out = FACEBOOK_AD_PROFILE_RECOGNIZER.parse(adProfileFile())
+    expect(out).toHaveLength(3)
+    expect(out[0]).toMatchObject({
+      source: 'facebook',
+      category: 'ad-profile',
+      label: 'Advertiser',
+      value: 'Acme Corp',
+      position: 0
+    })
+    expect(out[2].position).toBe(2)
+    expect(out.map((f) => f.naturalKey)).toEqual([
+      'Advertiser|Acme Corp',
+      'Advertiser|A list uploaded or used by the advertiser Globex',
+      'Advertiser|Initech'
+    ])
+  })
+
+  it('labels the categories file Category', () => {
+    const out = FACEBOOK_AD_PROFILE_RECOGNIZER.parse(
+      adProfileFile({ name: 'other_categories_used_to_reach_you.html' })
+    )
+    expect(out[0].label).toBe('Category')
   })
 })

@@ -21,6 +21,7 @@ import { parseCSV } from './csv'
 import { parseWhen } from './dates'
 import {
   FACEBOOK_ACTIVITY_RECOGNIZER,
+  FACEBOOK_AD_PROFILE_RECOGNIZER,
   FACEBOOK_COMMENTS_RECOGNIZER,
   FACEBOOK_FRIENDS_RECOGNIZER,
   FACEBOOK_MESSAGES_RECOGNIZER,
@@ -387,6 +388,53 @@ export function recognizePdf(text: string, name: string): PdfRecognizer | null {
     PDF_RECOGNIZERS.find((rec) => {
       try {
         return rec.detect(text, name)
+      } catch {
+        return false
+      }
+    }) ?? null
+  )
+}
+
+// ── Snapshot recognizers (Phase 10.x) ─────────────────────────────────────────
+// For the NON-timeline parts of an export — the static "who you are / what's set"
+// facts (ad-interest profile, off-Meta apps, profile identity, security config).
+// These do NOT go into the `records` timeline; they feed the `snapshot_facts` table
+// behind dedicated themed pages. A file can match a snapshot recognizer AND a
+// regular one (different data extracted from the same file), so this dispatch runs
+// IN ADDITION to `recognize`, not instead of it.
+
+export type SnapshotFact = {
+  source: string
+  category: string // groups facts to a themed page, e.g. 'ad-profile'
+  label: string | null // optional key/sub-group, e.g. 'Advertiser' | 'Email'
+  value: string
+  position: number // stable order within (source, category)
+  naturalKey: string
+}
+
+export type SnapshotRecognizer = {
+  id: string
+  label: string
+  detect: (f: RecognizerFile) => boolean
+  parse: (f: RecognizerFile) => SnapshotFact[]
+}
+
+/** Content-addressed dedup key for `snapshot_facts.dedupHash` (non-crypto, like `hashRecord`). */
+export function hashSnapshot(source: string, category: string, naturalKey: string): string {
+  return createHash('sha1') // codeql[js/weak-cryptographic-algorithm] -- non-crypto content-dedup key
+    .update(`${source}|${category}|${naturalKey}`)
+    .digest('hex')
+    .slice(0, 16)
+}
+
+export const SNAPSHOT_RECOGNIZERS: SnapshotRecognizer[] = [FACEBOOK_AD_PROFILE_RECOGNIZER]
+
+/** First snapshot recognizer that claims this file, or null. */
+export function recognizeSnapshot(f: RecognizerFile): SnapshotRecognizer | null {
+  return (
+    SNAPSHOT_RECOGNIZERS.find((rec) => {
+      try {
+        return rec.detect(f)
       } catch {
         return false
       }

@@ -17,15 +17,18 @@ import Database from 'better-sqlite3'
 import { type SQL, and, desc, eq, like, or, sql } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
-import { records } from '../db/schema'
+import { records, snapshotFacts } from '../db/schema'
 import { updateRecordsKnowledge } from '../knowledge/records-extractor'
 import { serializeCsv } from '../lib/csv'
 import { extractPdfText } from '../lib/pdf'
 import {
   type RecordInput,
+  type SnapshotFact,
   hashRecord,
+  hashSnapshot,
   recognize,
   recognizePdf,
+  recognizeSnapshot,
   recognizeSqlite,
   recognizeStream
 } from '../lib/recognizers'
@@ -53,6 +56,7 @@ export interface RecordsImportResult {
   error?: string
   imported: number
   duplicates: number
+  snapshots: number // non-timeline snapshot facts inserted (ad profile, etc.)
   perFile: Array<{ file: string; recognizer: string | null; imported: number; duplicates: number }>
   unrecognized: string[]
 }
@@ -97,6 +101,29 @@ function insertRecords(inputs: RecordInput[], provenance: string): { imported: n
   return { imported }
 }
 
+/** Insert a batch of snapshot facts, deduping by content hash. Returns counts. */
+function insertSnapshotFacts(facts: SnapshotFact[], provenance: string): { imported: number } {
+  const db = getDb()
+  let imported = 0
+  for (const fact of facts) {
+    const res = db
+      .insert(snapshotFacts)
+      .values({
+        source: fact.source,
+        category: fact.category,
+        label: fact.label,
+        value: fact.value.slice(0, 2000),
+        position: fact.position,
+        dedupHash: hashSnapshot(fact.source, fact.category, fact.naturalKey),
+        provenance
+      })
+      .onConflictDoNothing()
+      .run()
+    if (res.changes > 0) imported++
+  }
+  return { imported }
+}
+
 const MAX_ZIP_DEPTH = 1 // unwrap a Takeout .zip, but not zips-within-zips (bomb guard)
 
 interface IngestCtx {
@@ -104,6 +131,7 @@ interface IngestCtx {
   unrecognized: string[]
   imported: number
   duplicates: number
+  snapshots: number
 }
 
 /** Detect a ZIP archive (Google Takeout etc.) by extension or local-file-header magic. */
@@ -189,6 +217,7 @@ async function ingestPath(fp: string, name: string, ctx: IngestCtx, depth: numbe
 
     let inputs: RecordInput[] | null = null
     let recognizer: string | null = null
+    let snapImported = 0
 
     const sr = recognizeStream({ name, ext, head })
     if (sr) {
@@ -205,6 +234,13 @@ async function ingestPath(fp: string, name: string, ctx: IngestCtx, depth: numbe
         inputs = rec.parse({ name, ext, text })
         recognizer = rec.id
       }
+      // Non-timeline snapshot facts — extracted IN ADDITION to any record recognizer
+      // (a file can yield both timeline events and static facts).
+      const snap = recognizeSnapshot({ name, ext, text })
+      if (snap) {
+        snapImported = insertSnapshotFacts(snap.parse({ name, ext, text }), name).imported
+        if (!recognizer) recognizer = snap.id // so a snapshot-only file isn't "unrecognized"
+      }
     } else {
       // Big file no streaming recognizer claimed — we won't read it into memory.
       ctx.unrecognized.push(`${name} (too large, max 50 MB)`)
@@ -212,16 +248,17 @@ async function ingestPath(fp: string, name: string, ctx: IngestCtx, depth: numbe
       return
     }
 
-    if (inputs == null) {
+    if (inputs == null && recognizer == null) {
       ctx.unrecognized.push(name)
       ctx.perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
       return
     }
-    const { imported: imp } = insertRecords(inputs, name)
-    const dup = inputs.length - imp
+    const { imported: imp } = inputs ? insertRecords(inputs, name) : { imported: 0 }
+    const dup = inputs ? inputs.length - imp : 0
     ctx.imported += imp
     ctx.duplicates += dup
-    ctx.perFile.push({ file: name, recognizer, imported: imp, duplicates: dup })
+    ctx.snapshots += snapImported
+    ctx.perFile.push({ file: name, recognizer, imported: imp + snapImported, duplicates: dup })
   } catch (err) {
     ctx.unrecognized.push(`${name} (${String(err)})`)
     ctx.perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
@@ -234,7 +271,13 @@ async function ingestPath(fp: string, name: string, ctx: IngestCtx, depth: numbe
  * through the EXACT same validated, content-light pipeline as a manual drop.
  */
 export async function ingestFiles(paths: string[]): Promise<RecordsImportResult> {
-  const ctx: IngestCtx = { perFile: [], unrecognized: [], imported: 0, duplicates: 0 }
+  const ctx: IngestCtx = {
+    perFile: [],
+    unrecognized: [],
+    imported: 0,
+    duplicates: 0,
+    snapshots: 0
+  }
   for (const fp of paths) await ingestPath(fp, basename(fp), ctx, 0)
   if (ctx.imported > 0) {
     try {
@@ -247,6 +290,7 @@ export async function ingestFiles(paths: string[]): Promise<RecordsImportResult>
     success: true,
     imported: ctx.imported,
     duplicates: ctx.duplicates,
+    snapshots: ctx.snapshots,
     perFile: ctx.perFile,
     unrecognized: ctx.unrecognized
   }
@@ -273,11 +317,35 @@ export function buildRecordsCsv(): string {
 const EMPTY: Omit<RecordsImportResult, 'success'> = {
   imported: 0,
   duplicates: 0,
+  snapshots: 0,
   perFile: [],
   unrecognized: []
 }
 
 export function registerRecordsHandlers(ipcMain: IpcMain): void {
+  // Non-timeline snapshot facts for the themed pages (ad profile, etc.), ordered
+  // for display. Filterable by source + category; the page groups by `label`.
+  ipcMain.handle('snapshot:list', (_event, opts?: { source?: string; category?: string }) => {
+    const db = getDb()
+    const conds: SQL[] = []
+    if (opts?.source) conds.push(eq(snapshotFacts.source, opts.source))
+    if (opts?.category) conds.push(eq(snapshotFacts.category, opts.category))
+    return db
+      .select()
+      .from(snapshotFacts)
+      .where(and(...conds))
+      .orderBy(snapshotFacts.category, snapshotFacts.label, snapshotFacts.position)
+      .all()
+      .map((r) => ({
+        id: r.id,
+        source: r.source,
+        category: r.category,
+        label: r.label,
+        value: r.value,
+        position: r.position
+      }))
+  })
+
   ipcMain.handle(
     'records:list',
     (

@@ -57,6 +57,11 @@ beforeEach(async () => {
       occurred_at INTEGER, title TEXT NOT NULL, body TEXT, payload TEXT,
       dedup_hash TEXT NOT NULL UNIQUE, provenance TEXT, ingested_at INTEGER
     );
+    CREATE TABLE snapshot_facts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, category TEXT NOT NULL,
+      label TEXT, value TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0,
+      dedup_hash TEXT NOT NULL UNIQUE, provenance TEXT, ingested_at INTEGER
+    );
   `)
   for (const k of Object.keys(handlers)) delete handlers[k]
   mockDialog.showOpenDialog.mockReset()
@@ -499,5 +504,44 @@ describe('records:import-paths — LinkedIn connections (CSV with preamble)', ()
     const r2 = (await invoke('records:import-paths', [p])) as ImportResult
     expect(r2.imported).toBe(0)
     expect(r2.duplicates).toBe(2)
+  })
+})
+
+describe('snapshot facts (ad profile)', () => {
+  type Fact = {
+    id: number
+    category: string
+    label: string | null
+    value: string
+    position: number
+  }
+  const ADVERTISERS = `<!doctype html><html><body>
+    <table class="_a6_q">
+      <tr><td><div class="_2pin _a6-p">Acme Corp</div></td></tr>
+      <tr><td><div class="_2pin _a6-p">Globex</div></td></tr>
+    </table></body></html>`
+
+  it('routes a FB ad-profile file to snapshot_facts (not the timeline) and dedupes', async () => {
+    const p = fixture('advertisers_using_your_activity_or_information.html', ADVERTISERS)
+    const r1 = (await invoke('records:import-paths', [p])) as ImportResult & { snapshots: number }
+    expect(r1.snapshots).toBe(2)
+    expect(r1.imported).toBe(0) // nothing on the timeline
+    expect(r1.perFile[0].recognizer).toBe('facebook-ad-profile') // recognized, not unrecognized
+    expect(r1.unrecognized).toHaveLength(0)
+
+    const facts = (await invoke('snapshot:list', {
+      source: 'facebook',
+      category: 'ad-profile'
+    })) as Fact[]
+    expect(facts.map((f) => f.value)).toEqual(['Acme Corp', 'Globex'])
+    expect(facts[0]).toMatchObject({ label: 'Advertiser', position: 0 })
+
+    // Re-import is idempotent.
+    const again = (await invoke('records:import-paths', [p])) as ImportResult & {
+      snapshots: number
+    }
+    expect(again.snapshots).toBe(0)
+    const after = (await invoke('snapshot:list', { source: 'facebook' })) as Fact[]
+    expect(after).toHaveLength(2)
   })
 })
