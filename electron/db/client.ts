@@ -136,6 +136,26 @@ function ensureNewTables(sqlite: Database.Database): void {
       due_date TEXT,
       synced_at INTEGER
     );
+    -- Storehouse "Acquisition Engine" Drop Zone (migrations 0016/0017). These live
+    -- ONLY in the drizzle migrations, and the packaged app does not bundle the
+    -- migrations folder — so migrate() throws there and these tables would never be
+    -- created, breaking every import. Recreate them here (the always-run fallback)
+    -- so the timeline + snapshot pages work in production and on pre-existing DBs.
+    CREATE TABLE IF NOT EXISTS records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL, type TEXT NOT NULL, occurred_at INTEGER,
+      title TEXT NOT NULL, body TEXT, payload TEXT,
+      dedup_hash TEXT NOT NULL, provenance TEXT, ingested_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS records_dedup_hash_unique ON records (dedup_hash);
+    CREATE INDEX IF NOT EXISTS idx_records_occurred_at ON records (occurred_at);
+    CREATE INDEX IF NOT EXISTS idx_records_source_type ON records (source, type);
+    CREATE TABLE IF NOT EXISTS snapshot_facts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL, category TEXT NOT NULL, label TEXT, value TEXT NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0, dedup_hash TEXT NOT NULL, provenance TEXT, ingested_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS snapshot_facts_dedup_hash_unique ON snapshot_facts (dedup_hash);
   `)
 
   // Backfill new columns on pre-existing tables (safe no-op when columns already exist).
