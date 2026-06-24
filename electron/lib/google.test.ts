@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   GOOGLE_ACTIVITY_RECOGNIZER as G,
+  GOOGLE_BOOKMARKS_RECOGNIZER,
   GOOGLE_CALENDAR_RECOGNIZER,
   GOOGLE_CHROME_RECOGNIZER,
   GOOGLE_FIT_RECOGNIZER,
   GOOGLE_PAY_RECOGNIZER,
   GOOGLE_PLAY_RECOGNIZER,
+  GOOGLE_SUBSCRIPTIONS_RECOGNIZER,
   GOOGLE_VOICE_RECOGNIZER
 } from './google'
 import type { RecognizerFile } from './recognizers'
@@ -233,7 +235,9 @@ describe('Google Voice recognizer (content-light, filename-driven)', () => {
       source: 'google-voice',
       type: 'text',
       title: 'Text with Dillon Ennis',
-      occurredAt: Date.parse('2026-06-17T22:58:46Z') // _ → : , UTC
+      occurredAt: Date.parse('2026-06-17T22:58:46Z'), // _ → : , UTC
+      // naturalKey excludes the contact label → stable across contact renames.
+      naturalKey: 'gvoice|Text|2026-06-17T22_58_46Z'
     })
   })
 
@@ -244,5 +248,42 @@ describe('Google Voice recognizer (content-light, filename-driven)', () => {
     expect(kind('A - Placed - 2026-01-01T00_00_00Z.html')).toBe('call')
     expect(kind('A - Voicemail - 2026-01-01T00_00_00Z.html')).toBe('voicemail')
     expect(GOOGLE_VOICE_RECOGNIZER.detect(file2('MyActivity.html', 'html', ''))).toBe(false)
+  })
+})
+
+describe('Google Saved snapshot recognizers', () => {
+  it('parses YouTube subscriptions.csv into google-saved facts', () => {
+    const csv =
+      'Channel Id,Channel Url,Channel Title\nUC1,http://x,Reserve Channel\nUC2,http://y,webcajun'
+    expect(GOOGLE_SUBSCRIPTIONS_RECOGNIZER.detect(file2('subscriptions.csv', 'csv', csv))).toBe(
+      true
+    )
+    const out = GOOGLE_SUBSCRIPTIONS_RECOGNIZER.parse(file2('subscriptions.csv', 'csv', csv))
+    expect(out).toHaveLength(2)
+    expect(out[0]).toMatchObject({
+      source: 'google',
+      category: 'google-saved',
+      label: 'YouTube subscription',
+      value: 'Reserve Channel',
+      position: 0,
+      naturalKey: 'YouTube subscription|UC1' // keyed on Channel Id, not the title
+    })
+  })
+
+  it('parses Chrome Bookmarks.html, keying on the URL so duplicate titles survive', () => {
+    const html =
+      '<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><DT><A HREF="https://a.test" ADD_DATE="1">Home</A><DT><A HREF="https://b.test">Home</A></DL>'
+    expect(GOOGLE_BOOKMARKS_RECOGNIZER.detect(file2('Bookmarks.html', 'html', html))).toBe(true)
+    // A non-bookmark HTML is not claimed.
+    expect(GOOGLE_BOOKMARKS_RECOGNIZER.detect(file2('x.html', 'html', '<html></html>'))).toBe(false)
+    const out = GOOGLE_BOOKMARKS_RECOGNIZER.parse(file2('Bookmarks.html', 'html', html))
+    expect(out).toHaveLength(2)
+    expect(out[0]).toMatchObject({
+      label: 'Bookmark',
+      value: 'Home',
+      naturalKey: 'Bookmark|https://a.test'
+    })
+    // Two "Home" bookmarks with different URLs must NOT collapse.
+    expect(out[0].naturalKey).not.toBe(out[1].naturalKey)
   })
 })

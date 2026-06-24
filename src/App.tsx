@@ -14,6 +14,7 @@ import Dashboard from './pages/Dashboard'
 import DataRights from './pages/DataRights'
 import Export from './pages/Export'
 import Finance from './pages/Finance'
+import GoogleSaved from './pages/GoogleSaved'
 import Integrations from './pages/Integrations'
 import KnowledgeBase from './pages/KnowledgeBase'
 import Monthly from './pages/Monthly'
@@ -90,6 +91,7 @@ export default function App(): JSX.Element {
           <Route path="ad-profile" element={<AdProfile />} />
           <Route path="profile" element={<Profile />} />
           <Route path="apps" element={<Apps />} />
+          <Route path="google-saved" element={<GoogleSaved />} />
           <Route path="data-rights" element={<DataRights />} />
           <Route path="export" element={<Export />} />
           <Route path="integrations" element={<Integrations />} />

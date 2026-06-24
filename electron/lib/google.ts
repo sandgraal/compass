@@ -19,7 +19,7 @@
 
 import { parseCSV } from './csv'
 import { parseWhen } from './dates'
-import type { Recognizer, RecordInput } from './recognizers'
+import type { Recognizer, RecordInput, SnapshotFact, SnapshotRecognizer } from './recognizers'
 
 const OUTER_CELL = 'class="outer-cell'
 const CONTENT_MARKER = 'content-cell mdl-cell'
@@ -437,8 +437,72 @@ export const GOOGLE_VOICE_RECOGNIZER: Recognizer = {
         occurredAt: Number.isNaN(when) ? null : when,
         title: `${verb} ${contact}`,
         body: m[2],
-        naturalKey: f.name
+        // Key on kind + timestamp only (NOT the contact label) so a re-export with
+        // renamed/merged contacts still dedupes to the same record.
+        naturalKey: `gvoice|${m[2]}|${m[3]}`
       }
     ]
+  }
+}
+
+// ── Snapshot recognizers — the static "Saved" lists → the Google Saved page ────
+// Non-timeline facts (category `google-saved`), grouped by `label`.
+
+// YouTube subscriptions (`YouTube and YouTube Music/subscriptions/subscriptions.csv`):
+// CSV `Channel Id, Channel Url, Channel Title`.
+export const GOOGLE_SUBSCRIPTIONS_RECOGNIZER: SnapshotRecognizer = {
+  id: 'google-subscriptions',
+  label: 'YouTube subscriptions (Takeout CSV)',
+  detect: (f) => {
+    if (f.ext !== 'csv') return false
+    const nl = f.text.indexOf('\n')
+    return /Channel (Id|Title)/i.test(nl === -1 ? f.text : f.text.slice(0, nl))
+  },
+  parse: (f) => {
+    const out: SnapshotFact[] = []
+    let position = 0
+    for (const r of parseCSV(f.text)) {
+      const title = (r['Channel Title'] ?? r['Channel title'] ?? '').trim()
+      if (!title) continue
+      // Key on the stable Channel Id (titles rename / collide); fall back to title.
+      const id = (r['Channel Id'] ?? r['Channel id'] ?? '').trim()
+      out.push({
+        source: 'google',
+        category: 'google-saved',
+        label: 'YouTube subscription',
+        value: title,
+        position: position++,
+        naturalKey: `YouTube subscription|${id || title}`
+      })
+    }
+    return out
+  }
+}
+
+// Chrome bookmarks (`Chrome/Bookmarks.html` — Netscape bookmark file). Each `<A>` is
+// a saved page; the value is the title.
+export const GOOGLE_BOOKMARKS_RECOGNIZER: SnapshotRecognizer = {
+  id: 'google-bookmarks',
+  label: 'Chrome bookmarks (Takeout HTML)',
+  detect: (f) =>
+    (f.ext === 'html' || f.ext === 'htm') && /NETSCAPE-Bookmark-file/i.test(f.text.slice(0, 200)),
+  parse: (f) => {
+    const out: SnapshotFact[] = []
+    let position = 0
+    for (const m of f.text.matchAll(/<A\b[^>]*HREF="([^"]*)"[^>]*>([\s\S]*?)<\/A>/gi)) {
+      const href = m[1]
+      const value = textOf(m[2])
+      if (!value) continue
+      // Key on the URL (titles like "Home" collide); fall back to the title.
+      out.push({
+        source: 'google',
+        category: 'google-saved',
+        label: 'Bookmark',
+        value,
+        position: position++,
+        naturalKey: `Bookmark|${href || value}`
+      })
+    }
+    return out
   }
 }
