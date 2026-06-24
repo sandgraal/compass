@@ -16,6 +16,7 @@ import {
   MessageSquare,
   Music,
   Package,
+  Phone,
   Receipt,
   Search,
   Sparkles,
@@ -50,6 +51,8 @@ const SOURCE_META: Record<string, { label: string; icon: JSX.Element }> = {
   google: { label: 'Google', icon: <Footprints size={13} /> },
   'google-play': { label: 'Play Store', icon: <Package size={13} /> },
   'google-pay': { label: 'Google Pay', icon: <Wallet size={13} /> },
+  'google-fit': { label: 'Google Fit', icon: <Activity size={13} /> },
+  'google-voice': { label: 'Google Voice', icon: <Phone size={13} /> },
   gcal: { label: 'Calendar', icon: <CalendarDays size={13} /> },
   generic: { label: 'Imported', icon: <FileText size={13} /> }
 }
@@ -83,6 +86,10 @@ const TYPE_LABEL: Record<string, string> = {
   app: 'Apps',
   assistant: 'Assistant',
   visit: 'Visits',
+  fitness: 'Fitness',
+  text: 'Texts',
+  call: 'Calls',
+  voicemail: 'Voicemail',
   book: 'Books',
   connection: 'Connections',
   email: 'Email',

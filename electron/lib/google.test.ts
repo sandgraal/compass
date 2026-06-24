@@ -3,8 +3,10 @@ import {
   GOOGLE_ACTIVITY_RECOGNIZER as G,
   GOOGLE_CALENDAR_RECOGNIZER,
   GOOGLE_CHROME_RECOGNIZER,
+  GOOGLE_FIT_RECOGNIZER,
   GOOGLE_PAY_RECOGNIZER,
-  GOOGLE_PLAY_RECOGNIZER
+  GOOGLE_PLAY_RECOGNIZER,
+  GOOGLE_VOICE_RECOGNIZER
 } from './google'
 import type { RecognizerFile } from './recognizers'
 
@@ -189,5 +191,58 @@ describe('Google Calendar (.ics) recognizer', () => {
     const ics = 'BEGIN:VEVENT\r\nDTSTART:20250707T133000Z\r\nSUMMARY:UTC event\r\nEND:VEVENT'
     const out = GOOGLE_CALENDAR_RECOGNIZER.parse(file2('z.ics', 'ics', ics))
     expect(out[0].occurredAt).toBe(Date.UTC(2025, 6, 7, 13, 30, 0))
+  })
+})
+
+describe('Google Fit daily activity recognizer', () => {
+  const HEADER = 'Move Minutes count,Calories (kcal),Distance (m),Step count'
+  it('parses the aggregate file (Date column) as one record per day', () => {
+    const csv = `Date,${HEADER}\n2026-05-10,1,966,84,225\n2026-05-11,3,1683,178,350`
+    expect(GOOGLE_FIT_RECOGNIZER.detect(file2('Daily activity metrics.csv', 'csv', csv))).toBe(true)
+    const out = GOOGLE_FIT_RECOGNIZER.parse(file2('Daily activity metrics.csv', 'csv', csv))
+    expect(out).toHaveLength(2)
+    expect(out[0]).toMatchObject({
+      source: 'google-fit',
+      type: 'fitness',
+      title: '225 steps',
+      body: '966 kcal · 0.1 km · 1 move min',
+      naturalKey: 'gfit|2026-05-10'
+    })
+  })
+
+  it('sums the 15-min segments of a per-day file, dating it from the filename', () => {
+    const csv = `Start time,${HEADER}\n00:00,1,500,40,100\n00:15,1,466,44,125`
+    const out = GOOGLE_FIT_RECOGNIZER.parse(file2('2026-05-12.csv', 'csv', csv))
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ title: '225 steps', naturalKey: 'gfit|2026-05-12' }) // 100+125
+    expect(out[0].body).toContain('966 kcal') // 500+466
+  })
+})
+
+describe('Google Voice recognizer (content-light, filename-driven)', () => {
+  it('detects the Calls filename pattern and parses kind + timestamp from the name', () => {
+    const f = file2(
+      'Dillon Ennis - Text - 2026-06-17T22_58_46Z.html',
+      'html',
+      '<html>ignored</html>'
+    )
+    expect(GOOGLE_VOICE_RECOGNIZER.detect(f)).toBe(true)
+    const out = GOOGLE_VOICE_RECOGNIZER.parse(f)
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({
+      source: 'google-voice',
+      type: 'text',
+      title: 'Text with Dillon Ennis',
+      occurredAt: Date.parse('2026-06-17T22:58:46Z') // _ → : , UTC
+    })
+  })
+
+  it('maps the call kinds and ignores non-Voice HTML', () => {
+    const kind = (name: string): string | undefined =>
+      GOOGLE_VOICE_RECOGNIZER.parse(file2(name, 'html', ''))[0]?.type
+    expect(kind('A - Missed - 2026-01-01T00_00_00Z.html')).toBe('call')
+    expect(kind('A - Placed - 2026-01-01T00_00_00Z.html')).toBe('call')
+    expect(kind('A - Voicemail - 2026-01-01T00_00_00Z.html')).toBe('voicemail')
+    expect(GOOGLE_VOICE_RECOGNIZER.detect(file2('MyActivity.html', 'html', ''))).toBe(false)
   })
 })
