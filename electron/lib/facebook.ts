@@ -82,7 +82,11 @@ function parseFbDate(block: string): number | null {
  */
 function isFbHtml(f: { ext: string; text: string }): boolean {
   return (
-    (f.ext === 'html' || f.ext === 'htm') && (FB_DYI.test(f.text) || f.text.includes(POST_BLOCK))
+    (f.ext === 'html' || f.ext === 'htm') &&
+    // Signed by the DYI permalink, the `_a6-g` entry block, OR the obfuscated
+    // table-cell class `_a6_q`/`_a6_r` (the table-format sections — e.g. Marketplace
+    // — carry neither permalink nor `_a6-g`, only these cells).
+    (FB_DYI.test(f.text) || f.text.includes(POST_BLOCK) || f.text.includes('_a6_'))
   )
 }
 
@@ -369,7 +373,7 @@ function fbTableTitle(rows: Array<[string, string]>, fallback: string): string {
 export const FACEBOOK_TABLE_RECOGNIZER: Recognizer = {
   id: 'facebook-table',
   label: 'Facebook records (HTML export, table format)',
-  detect: (f) => (f.ext === 'html' || f.ext === 'htm') && TD_DATE.test(f.text),
+  detect: (f) => isFbHtml(f) && TD_DATE.test(f.text),
   parse: (f) => {
     const type = fbActivityType(f.name)
     const fallback = humanizeFbName(f.name)

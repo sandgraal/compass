@@ -308,6 +308,13 @@ describe('Facebook table recognizer', () => {
     // The activity fixture dates its blocks in `_a6-g` footers, not `<td>` cells.
     expect(FACEBOOK_TABLE_RECOGNIZER.detect(activityFile())).toBe(false)
     expect(FACEBOOK_TABLE_RECOGNIZER.detect(tableFile({ text: '<p>not facebook</p>' }))).toBe(false)
+    // A non-FB HTML table with a `<td>` date must NOT be claimed — the detect also
+    // requires a Facebook marker (DYI / `_a6-g` / `_a6_` cell class).
+    expect(
+      FACEBOOK_TABLE_RECOGNIZER.detect(
+        tableFile({ text: '<table><tr><td>Feb 04, 2026 10:48:26 am</td></tr></table>' })
+      )
+    ).toBe(false)
   })
 
   it('emits one record per DATED table (undated config table skipped)', () => {
