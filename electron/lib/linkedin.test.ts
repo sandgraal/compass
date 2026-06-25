@@ -5,7 +5,20 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { LINKEDIN_RECOGNIZER } from './linkedin'
+import {
+  LINKEDIN_CERTIFICATIONS_RECOGNIZER,
+  LINKEDIN_ENDORSEMENTS_RECOGNIZER,
+  LINKEDIN_EVENTS_RECOGNIZER,
+  LINKEDIN_FOLLOWS_RECOGNIZER,
+  LINKEDIN_INVITATIONS_RECOGNIZER,
+  LINKEDIN_JOB_APPLICATIONS_RECOGNIZER,
+  LINKEDIN_LEARNING_RECOGNIZER,
+  LINKEDIN_MESSAGES_RECOGNIZER,
+  LINKEDIN_POSITIONS_RECOGNIZER,
+  LINKEDIN_RECOGNIZER,
+  LINKEDIN_RECOMMENDATIONS_GIVEN_RECOGNIZER,
+  LINKEDIN_RECOMMENDATIONS_RECEIVED_RECOGNIZER
+} from './linkedin'
 import { type RecognizerFile, recognize } from './recognizers'
 
 function file(name: string, text: string): RecognizerFile {
@@ -56,16 +69,6 @@ describe('LinkedIn connections recognizer', () => {
     expect(recognize(f)?.id).not.toBe('linkedin')
   })
 })
-
-import {
-  LINKEDIN_ENDORSEMENTS_RECOGNIZER,
-  LINKEDIN_INVITATIONS_RECOGNIZER,
-  LINKEDIN_LEARNING_RECOGNIZER,
-  LINKEDIN_MESSAGES_RECOGNIZER,
-  LINKEDIN_POSITIONS_RECOGNIZER,
-  LINKEDIN_RECOMMENDATIONS_GIVEN_RECOGNIZER,
-  LINKEDIN_RECOMMENDATIONS_RECEIVED_RECOGNIZER
-} from './linkedin'
 
 describe('LinkedIn messages recognizer (content-light)', () => {
   const MSGS = [
@@ -140,5 +143,78 @@ describe('LinkedIn recommendations + learning', () => {
     const out = LINKEDIN_LEARNING_RECOGNIZER.parse(file('Learning.csv', csv))
     expect(out[0]).toMatchObject({ type: 'learning', title: '11 Tips for .NET 6' })
     expect(out[0].occurredAt).toBe(Date.parse('2022-09-18T02:10:00Z')) // seconds-less + N/A handled
+  })
+})
+
+describe('LinkedIn certifications recognizer', () => {
+  const csv =
+    'Name,Url,Authority,Started On,Finished On,License Number\n' +
+    'AWS Certified Developer,http://x,Amazon Web Services,2021-03-01 00:00:00 UTC,,ABC123\n'
+  it('detects the file ahead of the generic catch-all', () => {
+    expect(LINKEDIN_CERTIFICATIONS_RECOGNIZER.detect(file('Certifications.csv', csv))).toBe(true)
+    expect(recognize(file('Certifications.csv', csv))?.id).toBe('linkedin-certifications')
+  })
+  it('parses name + authority + Started On date', () => {
+    const out = LINKEDIN_CERTIFICATIONS_RECOGNIZER.parse(file('Certifications.csv', csv))
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({
+      source: 'linkedin',
+      type: 'certification',
+      title: 'AWS Certified Developer',
+      body: 'Amazon Web Services',
+      naturalKey: 'li-cert|AWS Certified Developer'
+    })
+    expect(out[0].occurredAt).toBe(Date.parse('2021-03-01T00:00:00Z'))
+  })
+})
+
+describe('LinkedIn company-follows recognizer', () => {
+  const csv = 'Organization,Followed On\nAnthropic,2024-05-02 18:30:00 UTC\n'
+  it('detects and parses one follow with date + naturalKey', () => {
+    expect(LINKEDIN_FOLLOWS_RECOGNIZER.detect(file('Company Follows.csv', csv))).toBe(true)
+    const out = LINKEDIN_FOLLOWS_RECOGNIZER.parse(file('Company Follows.csv', csv))
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({
+      source: 'linkedin',
+      type: 'follow',
+      title: 'Followed Anthropic',
+      naturalKey: 'li-follow|Anthropic'
+    })
+    expect(out[0].occurredAt).toBe(Date.parse('2024-05-02T18:30:00Z'))
+  })
+})
+
+describe('LinkedIn events recognizer', () => {
+  const csv = 'Event Name,Event Time\nReact Conf,2023-11-09 09:00:00 UTC\n'
+  it('detects and parses one event with date + naturalKey', () => {
+    expect(LINKEDIN_EVENTS_RECOGNIZER.detect(file('Events.csv', csv))).toBe(true)
+    const out = LINKEDIN_EVENTS_RECOGNIZER.parse(file('Events.csv', csv))
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({
+      source: 'linkedin',
+      type: 'event',
+      title: 'React Conf',
+      naturalKey: 'li-event|React Conf'
+    })
+    expect(out[0].occurredAt).toBe(Date.parse('2023-11-09T09:00:00Z'))
+  })
+})
+
+describe('LinkedIn job-applications recognizer', () => {
+  const csv =
+    'Application Date,Company Name,Job Title,Job Url\n' +
+    '2025-01-15 14:00:00 UTC,Anthropic,Software Engineer,http://x\n'
+  it('detects and parses one application as "Applied: <title> at <company>"', () => {
+    expect(LINKEDIN_JOB_APPLICATIONS_RECOGNIZER.detect(file('Job Applications.csv', csv))).toBe(
+      true
+    )
+    const out = LINKEDIN_JOB_APPLICATIONS_RECOGNIZER.parse(file('Job Applications.csv', csv))
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({
+      source: 'linkedin',
+      type: 'job-application',
+      title: 'Applied: Software Engineer at Anthropic'
+    })
+    expect(out[0].occurredAt).toBe(Date.parse('2025-01-15T14:00:00Z'))
   })
 })
