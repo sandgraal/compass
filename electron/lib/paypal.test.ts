@@ -58,6 +58,36 @@ describe('PayPal transaction-history recognizer', () => {
     expect(out[0].naturalKey).toBe('5EF00112233445566')
   })
 
+  // Real-world "Activity Download" shape: one real purchase wrapped in PayPal's
+  // double-entry plumbing (auth holds, funding leg, FX-conversion pair, a Completed
+  // copy of the authorization). Only the real payment should survive.
+  const NOISY = [
+    'Date,Time,TimeZone,Name,Type,Status,Currency,Amount,Fees,Total,Exchange Rate,Receipt ID,Balance,Transaction ID,Item Title',
+    '04/29/2021,09:23:28,EDT,Spirit Airlines Inc.,General Authorization,Pending,USD,-184.30,0.00,-184.30,,,0.00,2T95326070198954R,',
+    '05/01/2021,06:53:02,EDT,PayPal,Account Hold for Open Authorization,Pending,USD,-184.30,0.00,-184.30,,,0.00,168166622E3800620,',
+    '05/01/2021,06:53:02,EDT,Spirit Airlines Inc.,Express Checkout Payment,Completed,USD,-184.30,0.00,-184.30,,,-184.30,0PS58355R6855003J,',
+    '05/01/2021,06:53:02,EDT,,Bank Deposit to PP Account,Pending,USD,184.30,0.00,184.30,,,0.00,139554415H905521T,',
+    '05/01/2021,06:53:02,EDT,PayPal,Reversal of General Account Hold,Completed,USD,184.30,0.00,184.30,,,0.00,0YT15314GH7493238,',
+    '05/01/2021,06:53:02,EDT,Spirit Airlines Inc.,General Authorization,Completed,USD,-184.30,0.00,-184.30,,,0.00,2T95326070198954R,',
+    '12/14/2021,21:33:51,EST,,General Currency Conversion,Completed,USD,-4.94,0.00,-4.94,,,0.00,2PD75588298419512,',
+    '12/15/2021,20:01:40,EST,GigaNet,Invoice Received,Paid,EUR,,,,,,0.00,INV2-VCBR-ZW7E-23ZY-STAX,'
+  ].join('\n')
+
+  it('filters PayPal internal-mechanics rows, keeping only real transactions', () => {
+    const f = file('Download.csv', NOISY)
+    expect(recognize(f)?.id).toBe('paypal')
+    const out = PAYPAL_RECOGNIZER.parse(f)
+    // 8 rows in → only the real Express Checkout Payment survives.
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({
+      source: 'paypal',
+      type: 'payment',
+      title: 'Spirit Airlines Inc.',
+      body: '-184.30 USD · Express Checkout Payment',
+      naturalKey: '0PS58355R6855003J'
+    })
+  })
+
   it('does not claim an Amazon order CSV or a plain dated CSV', () => {
     const amazon = file(
       'Retail.OrderHistory.1.csv',

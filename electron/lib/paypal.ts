@@ -18,6 +18,17 @@ import { matchHeader, parseCSV } from './csv'
 import { parseWhen } from './dates'
 import type { Recognizer, RecordInput } from './recognizers'
 
+/**
+ * PayPal's double-entry "plumbing" rows — funding legs, auth holds, FX-conversion
+ * pairs, and PayPal-Credit (BML) transfers — that MIRROR each real transaction. One
+ * ~$184 purchase yields up to 5 rows (a pending `General Authorization` + a Completed
+ * copy, the real `Express Checkout Payment`, a `Bank Deposit to PP Account` funding
+ * leg, …). Skipping these keeps one clean record per real transaction; the full row
+ * still lives in the kept record's `payload`.
+ */
+const PAYPAL_PLUMBING =
+  /Bank Deposit to PP Account|General Card Deposit|Account Hold for Open Authorization|Reversal of General Account Hold|General Authorization|Void of Authorization|General Currency Conversion|Transfer (from|to) BML|Buyer Credit Payment/i
+
 /** Format a PayPal money column (bare signed number + separate Currency col) for the body. */
 function formatAmount(raw: string, currency: string): string | undefined {
   const t = raw.trim()
@@ -56,9 +67,13 @@ export const PAYPAL_RECOGNIZER: Recognizer = {
       const txnId = cTxnId ? r[cTxnId].trim() : ''
       const name = cName ? r[cName].trim() : ''
       const amountRaw = cAmount ? r[cAmount].trim() : ''
-      if (!txnId && !name && !amountRaw) continue // skip blank / footer rows
+      // Skip blank/footer rows and rows with NO amount cell at all — e.g. an
+      // "Invoice Received" line, whose real payment is recorded on a separate row.
+      // (A present "0.00" amount is kept; only the empty cell is dropped.)
+      if (!amountRaw) continue
       const date = cDate ? r[cDate] : ''
       const type = cType ? r[cType].trim() : ''
+      if (PAYPAL_PLUMBING.test(type)) continue // drop internal accounting legs
       const currency = cCurrency ? r[cCurrency].trim() : ''
       const item = cItem ? r[cItem].trim() : ''
       const money = formatAmount(amountRaw, currency)
