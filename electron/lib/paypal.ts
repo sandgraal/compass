@@ -67,8 +67,9 @@ export const PAYPAL_RECOGNIZER: Recognizer = {
       const txnId = cTxnId ? r[cTxnId].trim() : ''
       const name = cName ? r[cName].trim() : ''
       const amountRaw = cAmount ? r[cAmount].trim() : ''
-      // Skip blank/footer rows AND zero-movement rows (e.g. "Invoice Received", whose
-      // real payment is a separate row).
+      // Skip blank/footer rows and rows with NO amount cell at all — e.g. an
+      // "Invoice Received" line, whose real payment is recorded on a separate row.
+      // (A present "0.00" amount is kept; only the empty cell is dropped.)
       if (!amountRaw) continue
       const date = cDate ? r[cDate] : ''
       const type = cType ? r[cType].trim() : ''
