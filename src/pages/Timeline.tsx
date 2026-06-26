@@ -164,7 +164,9 @@ export default function Timeline(): JSX.Element {
       // newest-first (undated last) so they read as a familiar timeline slice
       // rather than raw relevance order — the day grouping assumes that order.
       void window.api.records
-        .search({ q, source: source ?? undefined, type: type ?? undefined, limit: 500 })
+        // 200 = the backend's search cap (records-search.ts); ranked hits, so the
+        // top 200 by relevance are plenty for the list (browse uses list() at 500).
+        .search({ q, source: source ?? undefined, type: type ?? undefined, limit: 200 })
         .then((hits) => {
           const rows: TimelineRecord[] = hits.map((h) => ({
             id: h.id,

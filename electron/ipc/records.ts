@@ -389,7 +389,20 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
   // (Drizzle can't model MATCH/bm25), mirroring getFinanceSummary's raw statements.
   ipcMain.handle('records:search', (_event, opts: RecordSearchOpts): TimelineSearchHit[] => {
     if (!opts || typeof opts.q !== 'string') return []
-    return searchRecords(getRawSqlite(), opts)
+    // Sanitize numeric inputs at the boundary — a NaN/Infinity/non-number from the
+    // renderer would otherwise bind into the date/limit comparisons and yield
+    // surprising empty results. (limit/offset are additionally clamped downstream.)
+    const finite = (v: unknown): number | undefined =>
+      typeof v === 'number' && Number.isFinite(v) ? v : undefined
+    return searchRecords(getRawSqlite(), {
+      q: opts.q,
+      source: typeof opts.source === 'string' ? opts.source : undefined,
+      type: typeof opts.type === 'string' ? opts.type : undefined,
+      from: finite(opts.from),
+      to: finite(opts.to),
+      limit: finite(opts.limit),
+      offset: finite(opts.offset)
+    })
   })
 
   // "On this day" recap — records sharing today's month + day, from PRIOR years

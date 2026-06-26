@@ -188,6 +188,20 @@ describe('records:search (FTS5)', () => {
     expect(await invoke('records:search', { q: '   ' })).toEqual([])
     expect(await invoke('records:search', {})).toEqual([])
   })
+
+  it('sanitizes non-finite from/to at the boundary (NaN/Infinity ignored, not bound)', async () => {
+    await invoke('records:import-paths', [
+      fixture('NetflixViewingHistory.csv', 'Title,Date\nThe Matrix,1/2/26\n')
+    ])
+    // A NaN `from` / Infinity `to` from the renderer must be dropped, not bound into
+    // the date comparison (which would otherwise return nothing).
+    const hits = (await invoke('records:search', {
+      q: 'matrix',
+      from: Number.NaN,
+      to: Number.POSITIVE_INFINITY
+    })) as Hit[]
+    expect(hits.map((h) => h.title)).toEqual(['The Matrix'])
+  })
 })
 
 describe('records:on-this-day', () => {
