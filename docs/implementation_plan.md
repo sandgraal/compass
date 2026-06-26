@@ -471,7 +471,14 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
     offline. Opt-in: `records:rebuild-semantic` + `records:semantic-status` + a Timeline "by meaning" toggle with an
     inline build affordance; auto-extends after each import once built. (AI tools stay FTS-only — making the sync
     tool layer async for one optional mode wasn't worth the churn; the Timeline is the semantic surface.)
-    *Next: the Connect (entity resolution + insight cards) and Curate (value-tier tagging) tracks.*
+  - [x] **"Connect" — People directory (PR1).** `electron/lib/people.ts` (`extractPersonName` + `buildPeople`)
+    derives a cross-source people directory from the high-precision people-bearing records (LinkedIn
+    connection/invitation/recommendation/endorsement + Facebook friend), collapsing the SAME person across sources
+    into one entry (touchpoints + sources + first/last seen) and matching `contacts` by normalized name. `people:list`
+    IPC + a **People** page (`/people`) whose rows deep-link to `/timeline?q=<name>` (the Timeline now seeds its
+    search from `?q=`). Pure + derived, no schema change. *Next: noisier person sources (PayPal/Venmo/email with a
+    person/merchant classifier) + records-aware insight cards (dormant relationships, year-in-review) via the
+    `buildInsights` pattern; then the Curate (value-tier tagging) track.*
 
 > Build order: 10.1 (spine) → 10.2 / 10.3 / 10.4 (independent, parallelizable) → 10.5 → 10.6 (gated) → 10.7
 > (delivered incrementally throughout). Each wave is its own PR(s) with tests + a `security-auditor` pass on

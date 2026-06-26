@@ -20,6 +20,7 @@ import { registerKnowledgeHandlers } from './ipc/knowledge'
 import { registerMonthlyRollupHandlers } from './ipc/monthly-rollup'
 import { registerMorningBriefHandlers } from './ipc/morning-brief'
 import { registerObsidianHandlers } from './ipc/obsidian'
+import { registerPeopleHandlers } from './ipc/people'
 import { registerPlaidHandlers } from './ipc/plaid'
 import { registerQuickCaptureHandlers } from './ipc/quick-capture'
 import { registerRecordsHandlers } from './ipc/records'
@@ -153,6 +154,7 @@ app.whenReady().then(async () => {
   registerAssetsHandlers(ipcMain)
   registerStorehouseHandlers(ipcMain)
   registerRecordsHandlers(ipcMain)
+  registerPeopleHandlers(ipcMain)
   registerCredHandlers(ipcMain)
   registerClaudeHandlers(ipcMain)
   registerUpdaterHandlers(ipcMain)
