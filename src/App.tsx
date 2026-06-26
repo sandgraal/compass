@@ -18,6 +18,7 @@ import GoogleSaved from './pages/GoogleSaved'
 import Integrations from './pages/Integrations'
 import KnowledgeBase from './pages/KnowledgeBase'
 import Monthly from './pages/Monthly'
+import People from './pages/People'
 import Profile from './pages/Profile'
 import Settings from './pages/Settings'
 import Storehouse from './pages/Storehouse'
@@ -83,6 +84,7 @@ export default function App(): JSX.Element {
           <Route path="knowledge/*" element={<KnowledgeBase />} />
           <Route path="vault" element={<Vault />} />
           <Route path="contacts" element={<Contacts />} />
+          <Route path="people" element={<People />} />
           <Route path="finance" element={<Finance />} />
           <Route path="subscriptions" element={<Subscriptions />} />
           <Route path="assets" element={<Assets />} />

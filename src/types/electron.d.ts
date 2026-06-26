@@ -449,6 +449,16 @@ declare global {
     ingestedAt: number | null
   }
 
+  interface Person {
+    name: string
+    key: string
+    count: number
+    sources: string[]
+    firstSeen: number | null
+    lastSeen: number | null
+    contactId: number | null
+  }
+
   interface TimelineSearchHit {
     id: number
     source: string
@@ -901,6 +911,9 @@ declare global {
         importFiles(): Promise<RecordsImportResult>
         importPaths(paths: string[]): Promise<RecordsImportResult>
         pathsForFiles(files: File[]): string[]
+      }
+      people: {
+        list(): Promise<Person[]>
       }
       snapshot: {
         list(opts?: { source?: string; category?: string }): Promise<SnapshotFactRecord[]>

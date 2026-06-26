@@ -25,6 +25,7 @@ import {
   Youtube
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useToast } from '../components/ui/Toast'
 import { cn } from '../lib/utils'
 
@@ -147,7 +148,10 @@ export default function Timeline(): JSX.Element {
     sources: [],
     types: []
   })
-  const [query, setQuery] = useState('')
+  // Seed the search from a ?q= param so deep links (e.g. the People page's "see
+  // everything involving X") land with the search pre-filled.
+  const [searchParams] = useSearchParams()
+  const [query, setQuery] = useState(() => searchParams.get('q') ?? '')
   const [semantic, setSemantic] = useState(false)
   const [semStatus, setSemStatus] = useState<{
     available: boolean

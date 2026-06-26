@@ -323,6 +323,9 @@ const api = {
     importPaths: (paths: string[]) => ipcRenderer.invoke('records:import-paths', paths),
     pathsForFiles: (files: File[]) => files.map((f) => webUtils.getPathForFile(f))
   },
+  people: {
+    list: () => ipcRenderer.invoke('people:list')
+  },
   snapshot: {
     list: (opts?: { source?: string; category?: string }) =>
       ipcRenderer.invoke('snapshot:list', opts)

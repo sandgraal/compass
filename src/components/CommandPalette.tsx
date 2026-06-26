@@ -16,6 +16,7 @@ import {
   Layers,
   LayoutDashboard,
   LineChart,
+  Network,
   Plug,
   Plus,
   RefreshCw,
@@ -209,6 +210,14 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       icon: <Users size={15} />,
       action: () => nav('/contacts'),
       keywords: ['people', 'address book', 'phone', 'vcard', 'friends', 'family']
+    },
+    {
+      id: 'people',
+      label: 'People',
+      description: 'Everyone across your imported data',
+      icon: <Network size={15} />,
+      action: () => nav('/people'),
+      keywords: ['connections', 'friends', 'linkedin', 'facebook', 'who', 'relationships']
     },
     {
       id: 'subscriptions',
