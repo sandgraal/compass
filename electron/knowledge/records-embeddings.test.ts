@@ -113,6 +113,35 @@ describe('buildRecordsEmbeddingsIndex (incremental)', () => {
     expect(result.total).toBe(3)
     expect(index.embeddings).toHaveLength(3)
   })
+
+  it('stops on the first embed failure without advancing maxId past it', async () => {
+    add({ source: 'a', type: 'x', title: 'Coffee one' }) // id 1
+    add({ source: 'a', type: 'x', title: 'Coffee two' }) // id 2 — fails
+    add({ source: 'a', type: 'x', title: 'Coffee three' }) // id 3
+    const flaky = (text: string, opts: EmbedOptions): Promise<number[]> =>
+      text.includes('two') ? Promise.reject(new Error('Ollama down')) : fakeEmbed(text, opts)
+    const { index, result } = await buildRecordsEmbeddingsIndex(sqlite, { embed: flaky })
+    expect(result.embedded).toBe(1)
+    expect(index.maxId).toBe(1) // did NOT advance to 2/3 — they're un-embedded
+    expect(result.errors).toHaveLength(1)
+    // A retry with a working embed resumes from id 2 — nothing permanently skipped.
+    const retry = await buildRecordsEmbeddingsIndex(sqlite, { embed: fakeEmbed, existing: index })
+    expect(retry.index.embeddings.map((e) => e.id)).toEqual([1, 2, 3])
+    expect(retry.index.maxId).toBe(3)
+  })
+
+  it('slides the window — a capped index keeps the most recent records', async () => {
+    for (let i = 1; i <= 3; i++) add({ source: 'a', type: 'x', title: `Note ${i}` }) // ids 1,2,3
+    const first = await buildRecordsEmbeddingsIndex(sqlite, { embed: fakeEmbed, cap: 2 })
+    expect(first.index.embeddings.map((e) => e.id)).toEqual([1, 2])
+    const second = await buildRecordsEmbeddingsIndex(sqlite, {
+      embed: fakeEmbed,
+      existing: first.index,
+      cap: 2
+    })
+    expect(second.index.embeddings.map((e) => e.id)).toEqual([2, 3]) // evicted the oldest (1)
+    expect(second.index.maxId).toBe(3)
+  })
 })
 
 describe('searchRecordsSemantic', () => {
@@ -172,6 +201,26 @@ describe('searchRecordsSemantic', () => {
         })
       )?.map((h) => h.title)
     ).toEqual(['Coffee with Sam'])
+  })
+
+  it('applies the offset window for pagination', async () => {
+    const index = await indexed() // two "coffee" records (beans id1, with-Sam id3)
+    const page1 = await searchRecordsSemantic(sqlite, 'coffee', {
+      embed: fakeEmbed,
+      index,
+      minScore: 0.1,
+      limit: 1,
+      offset: 0
+    })
+    const page2 = await searchRecordsSemantic(sqlite, 'coffee', {
+      embed: fakeEmbed,
+      index,
+      minScore: 0.1,
+      limit: 1,
+      offset: 1
+    })
+    expect(page1?.map((h) => h.title)).toEqual(['Coffee beans'])
+    expect(page2?.map((h) => h.title)).toEqual(['Coffee with Sam'])
   })
 
   it('returns null when there is no index (caller falls back to FTS)', async () => {

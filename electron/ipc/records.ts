@@ -326,7 +326,9 @@ async function refreshRecordsSemanticIndex(): Promise<void> {
       model: existing.model,
       existing
     })
-    saveRecordsIndex(index)
+    // Stop-on-failure preserves the prior vectors, so this only skips a save when the
+    // index would be empty — never clobbers a good index because Ollama went offline.
+    if (index.embeddings.length > 0) saveRecordsIndex(index)
   })()
   semanticBuildInFlight = run
   try {
@@ -484,6 +486,7 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
           const hits = await searchRecordsSemantic(getRawSqlite(), opts.q, {
             model: embeddingModel(),
             limit: base.limit ?? 50,
+            offset: base.offset, // keep pagination consistent with the FTS path
             source: base.source,
             type: base.type,
             from: base.from ?? null,
@@ -506,6 +509,12 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
       const { index, result } = await buildRecordsEmbeddingsIndex(getRawSqlite(), {
         model: embeddingModel()
       })
+      // Don't persist a useless index: if nothing got embedded AND there were errors
+      // (e.g. Ollama offline), surface the failure instead of saving an empty index
+      // that would read as "ready" with zero results.
+      if (index.embeddings.length === 0 && result.errors.length > 0) {
+        throw new Error(result.errors[0].message || 'Embedding failed')
+      }
       saveRecordsIndex(index)
       return result
     })()

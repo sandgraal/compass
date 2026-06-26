@@ -143,36 +143,43 @@ export async function buildRecordsEmbeddingsIndex(
   const existing = options.existing ?? loadRecordsIndex(options.indexPath)
   const reuse = existing && existing.model === model
 
-  const kept: RecordEmbedding[] = reuse ? existing.embeddings.slice(0, cap) : []
+  // A model change above flips reuse off, so we re-embed from scratch (kept=[], maxId=0).
+  const kept: RecordEmbedding[] = reuse ? existing.embeddings.slice() : []
   let maxId = reuse ? existing.maxId : 0
   const errors: Array<{ id: number; message: string }> = []
 
-  const remaining = cap - kept.length
+  // Embed up to `cap` records newer than the high-water mark this run.
   let embedded = 0
-  if (remaining > 0) {
-    const rows = sqlite
-      .prepare(
-        'SELECT id, source, type, occurred_at AS occurredAt, title, body FROM records WHERE id > ? ORDER BY id LIMIT ?'
-      )
-      .all(maxId, remaining) as RecordRow[]
-    for (const r of rows) {
-      if (options.signal?.aborted) throw new Error('Build aborted')
-      try {
-        const vector = await embed(recordEmbedText(r), { model, signal: options.signal })
-        kept.push({ id: r.id, vector })
-        embedded++
-      } catch (err) {
-        errors.push({ id: r.id, message: (err as Error).message })
-        // One bad row shouldn't abort the whole build; record it and move on.
-      }
-      if (r.id > maxId) maxId = r.id
+  const rows = sqlite
+    .prepare(
+      'SELECT id, source, type, occurred_at AS occurredAt, title, body FROM records WHERE id > ? ORDER BY id LIMIT ?'
+    )
+    .all(maxId, cap) as RecordRow[]
+  for (const r of rows) {
+    if (options.signal?.aborted) throw new Error('Build aborted')
+    try {
+      const vector = await embed(recordEmbedText(r), { model, signal: options.signal })
+      kept.push({ id: r.id, vector })
+      embedded++
+      maxId = r.id // advance ONLY after a successful embed (rows are id-ordered)
+    } catch (err) {
+      errors.push({ id: r.id, message: (err as Error).message })
+      // STOP on the first failure so maxId never passes an un-embedded id — a
+      // transient Ollama outage then resumes from here on the next build instead of
+      // permanently skipping records.
+      break
     }
   }
 
-  const index: RecordsEmbeddingIndex = { model, builtAt: startedAt, maxId, embeddings: kept }
+  // Sliding window: retain the most recent `cap` vectors (kept is id-ascending), so a
+  // capped index keeps embedding newer records and evicts the oldest rather than
+  // freezing at the first `cap` it ever saw.
+  const embeddings = kept.length > cap ? kept.slice(kept.length - cap) : kept
+
+  const index: RecordsEmbeddingIndex = { model, builtAt: startedAt, maxId, embeddings }
   return {
     index,
-    result: { embedded, total: kept.length, durationMs: Date.now() - startedAt, errors }
+    result: { embedded, total: embeddings.length, durationMs: Date.now() - startedAt, errors }
   }
 }
 
@@ -183,6 +190,7 @@ export interface SearchRecordsSemanticOptions {
   indexPath?: string
   minScore?: number
   limit?: number
+  offset?: number
   source?: string
   type?: string
   from?: number | null
@@ -215,6 +223,7 @@ export async function searchRecordsSemantic(
 
   const minScore = options.minScore ?? 0.25
   const limit = Math.max(1, Math.min(Math.floor(options.limit ?? 25), 200))
+  const offset = Math.max(0, Math.floor(options.offset ?? 0))
 
   // Score every vector, keep those above the floor, best-first.
   const scored: Array<{ id: number; score: number }> = []
@@ -225,9 +234,10 @@ export async function searchRecordsSemantic(
   scored.sort((a, b) => b.score - a.score)
   if (scored.length === 0) return []
 
-  // Hydrate a bounded candidate set, then apply filters + the limit. (The vector
-  // index isn't filtered, so source/type/date are post-filters on the rows.)
-  const candidates = scored.slice(0, Math.max(limit * 4, 100))
+  // Hydrate a bounded candidate set, then apply filters + the limit/offset window.
+  // (The vector index isn't filtered, so source/type/date are post-filters on the
+  // rows.) Widen the candidate pool by `offset` so paging deeper still has rows.
+  const candidates = scored.slice(0, Math.max((limit + offset) * 4, 100))
   const byId = new Map(candidates.map((c) => [c.id, c.score]))
   const placeholders = candidates.map(() => '?').join(',')
   const rows = sqlite
@@ -245,7 +255,7 @@ export async function searchRecordsSemantic(
     hits.push({ ...r, score: byId.get(r.id) ?? 0 })
   }
   hits.sort((a, b) => b.score - a.score)
-  return hits.slice(0, limit)
+  return hits.slice(offset, offset + limit)
 }
 
 export const _internal = { INDEX_PATH }

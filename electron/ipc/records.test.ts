@@ -12,6 +12,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import type { IpcMain } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as schema from '../db/schema'
+import { buildRecordsEmbeddingsIndex, saveRecordsIndex } from '../knowledge/records-embeddings'
 import { makePdf } from '../lib/__fixtures__/make-pdf'
 import { makeZip } from '../lib/__fixtures__/make-zip'
 
@@ -233,6 +234,19 @@ describe('records:semantic-status', () => {
       building: boolean
     }
     expect(status).toMatchObject({ available: false, count: 0, building: false })
+  })
+})
+
+describe('records:rebuild-semantic', () => {
+  it('does not save and reports failure when nothing embeds (e.g. Ollama offline)', async () => {
+    vi.mocked(buildRecordsEmbeddingsIndex).mockResolvedValueOnce({
+      index: { model: 'm', builtAt: 0, maxId: 0, embeddings: [] },
+      result: { embedded: 0, total: 0, durationMs: 0, errors: [{ id: 1, message: 'Ollama down' }] }
+    })
+    const res = (await invoke('records:rebuild-semantic')) as { success: boolean; error?: string }
+    expect(res.success).toBe(false)
+    expect(res.error).toContain('Ollama')
+    expect(vi.mocked(saveRecordsIndex)).not.toHaveBeenCalled()
   })
 })
 
