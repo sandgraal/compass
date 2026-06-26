@@ -5,11 +5,12 @@
  * SAME person seen through different sources into one entry — a LinkedIn connection
  * who's also a Facebook friend becomes a single person with two source touchpoints.
  *
- * Pure + derived: no schema change, no stored links. We read the people-bearing
- * records (where the title is an unambiguous "verb + person", so precision stays
- * high and merchants/newsletters don't leak in) and match each to your `contacts`
- * by normalized display name. Recomputed on demand, exactly like the timeline
- * stats/facets aggregates.
+ * Pure + derived: no schema change, no stored links. Two kinds of source: the
+ * social graph (LinkedIn/Facebook connections — titles that unambiguously name a
+ * person) and the noisier counterparties (PayPal payees, message conversation
+ * partners) which are passed through `isLikelyPerson` to drop merchants /
+ * newsletters / groups / phone numbers. Each is matched to your `contacts` by
+ * normalized display name. Recomputed on demand, like the timeline stats/facets.
  */
 
 export interface PersonSourceRow {
@@ -49,13 +50,91 @@ function capture(title: string, re: RegExp): string | null {
   return m ? m[1].trim() : null
 }
 
+// ── Person vs. merchant classifier ───────────────────────────────────────────
+// The financial / messaging counterparties (PayPal payees, conversation labels)
+// are a MIX of real people and merchants / newsletters / phone numbers / groups.
+// This keeps the high-volume noise out of the People directory. Best-effort and
+// conservative: a few stray merchants are tolerable; the social-graph sources
+// (LinkedIn/Facebook connections) bypass it entirely since they're always people.
+
+const CORP_SUFFIX =
+  /\b(inc|llc|ltd|co|corp|corporation|company|gmbh|plc|srl|pllc|lp|llp|technologies|payments|services|solutions|systems|store|shop|market|media|group|holdings|enterprises|bank|insurance|foundation|fund)\b/i
+
+const KNOWN_MERCHANTS = new Set([
+  'netflix',
+  'amazon',
+  'uber',
+  'lyft',
+  'spotify',
+  'paypal',
+  'google',
+  'apple',
+  'ebay',
+  'walmart',
+  'target',
+  'doordash',
+  'grubhub',
+  'instacart',
+  'venmo',
+  'cash app',
+  'airbnb',
+  'steam',
+  'microsoft',
+  'meta',
+  'facebook',
+  'starbucks',
+  'whole foods',
+  'best buy',
+  'ikea',
+  'etsy',
+  'shopify',
+  'stripe',
+  'square',
+  'patreon',
+  'twitch',
+  'youtube',
+  'hulu',
+  'disney'
+])
+
+/**
+ * Heuristic: does this counterparty/conversation label look like a PERSON (vs a
+ * merchant, newsletter, group thread, or phone number)? Permissive on real names
+ * (keeps single first-name contacts like "Mom"), strict on the obvious non-people.
+ */
+export function isLikelyPerson(raw: string): boolean {
+  const name = raw.trim()
+  if (name.length < 2) return false
+  if (KNOWN_MERCHANTS.has(name.toLowerCase())) return false
+  if (/\d/.test(name)) return false // digits → handle / phone / order / SKU
+  if (/[,&/|]| and /i.test(name)) return false // group thread / "Alice and Bob"
+  if (/\.(com|net|org|io|co|app|gov)\b/i.test(name)) return false // a domain
+  if (CORP_SUFFIX.test(name)) return false
+  // Multi-word ALL-CAPS reads like a merchant ("ACME CORP"); a single all-caps token
+  // could be a name typed in caps, so only reject the multi-word case.
+  if (name === name.toUpperCase() && /\s/.test(name)) return false
+  return true
+}
+
 /**
  * Pull the person's name out of a people-bearing record title, or null if the
- * record doesn't name a person. Gated by (source, type) so the patterns stay
- * unambiguous — these titles are all minted by our own recognizers.
+ * record doesn't name a person. The social-graph titles (LinkedIn/Facebook
+ * connections) are unambiguous; the financial/messaging counterparties are passed
+ * through `isLikelyPerson` to drop merchants / newsletters / groups / phone numbers.
  */
 export function extractPersonName(source: string, type: string, title: string): string | null {
   const t = title.trim()
+  // Conversation partners (iMessage / Facebook / LinkedIn messages) — "N messages
+  // with X" or "N messages — X"; LinkedIn labels can be "Chat with X".
+  if (type === 'messages') {
+    const m = t.match(/^\d+\s+messages?\s+(?:with\s+|—\s+)(.+)$/i)
+    if (!m) return null
+    const label = m[1]
+      .trim()
+      .replace(/^chat with\s+/i, '')
+      .trim()
+    return isLikelyPerson(label) ? label : null
+  }
   if (source === 'linkedin') {
     if (type === 'connection') return capture(t, /^Connected with (.+)$/)
     if (type === 'invitation') {
@@ -70,13 +149,22 @@ export function extractPersonName(source: string, type: string, title: string): 
   if (source === 'facebook' && type === 'connection') {
     return capture(t, /^Became friends with (.+)$/)
   }
+  // PayPal payees — the title is the counterparty name; keep it only if it's a person.
+  if (source === 'paypal' && type === 'payment') {
+    return isLikelyPerson(t) ? t : null
+  }
   return null
 }
 
 /** (source, type) pairs whose titles name a person — used to scope the DB read. */
 export const PEOPLE_RECORD_FILTERS: Array<{ source: string; types: string[] }> = [
-  { source: 'linkedin', types: ['connection', 'invitation', 'recommendation', 'endorsement'] },
-  { source: 'facebook', types: ['connection'] }
+  {
+    source: 'linkedin',
+    types: ['connection', 'invitation', 'recommendation', 'endorsement', 'messages']
+  },
+  { source: 'facebook', types: ['connection', 'messages'] },
+  { source: 'imessage', types: ['messages'] },
+  { source: 'paypal', types: ['payment'] }
 ]
 
 /**

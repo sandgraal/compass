@@ -487,8 +487,13 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
     `includeFirehose` (default true; when false AND no source filter, excludes the firehose via `NOT IN`), and
     `records:stats` returns the firehose count. The Timeline collapses firehose by default with a "Show browsing
     (N hidden)" toggle; selecting the source's chip overrides it. **Nothing is deleted** — "tag & filter, keep
-    everything," the user's chosen approach. *Remaining: noisier person sources (PayPal/Venmo/email with a
-    person/merchant classifier) to enrich the People directory.*
+    everything," the user's chosen approach.
+  - [x] **"Connect" — noisier people sources (cont.).** Extended `people.ts` with an `isLikelyPerson`
+    person/merchant classifier (drops merchants, newsletters, group threads, phone numbers) and pulls **PayPal
+    payees** (title counterparty) + **message conversation partners** (iMessage/Facebook/LinkedIn "N messages
+    with X" / "— X", strips "Chat with"). Title-based, no payload parsing. *Deferred: Venmo (ambiguous "From → To"
+    in the body) + email senders (payload + newsletter noise).* **This completes the Phase 10.7 leverage arc**
+    (Converse · Connect · Curate); candidate for a v0.14.0 release.
 
 > Build order: 10.1 (spine) → 10.2 / 10.3 / 10.4 (independent, parallelizable) → 10.5 → 10.6 (gated) → 10.7
 > (delivered incrementally throughout). Each wave is its own PR(s) with tests + a `security-auditor` pass on

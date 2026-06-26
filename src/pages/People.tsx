@@ -1,4 +1,13 @@
-import { Facebook, Linkedin, Network, Search, User, UserCheck } from 'lucide-react'
+import {
+  Facebook,
+  Linkedin,
+  MessageSquare,
+  Network,
+  Search,
+  User,
+  UserCheck,
+  Wallet
+} from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useToast } from '../components/ui/Toast'
@@ -7,7 +16,9 @@ const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
 
 const SOURCE_META: Record<string, { label: string; icon: JSX.Element }> = {
   linkedin: { label: 'LinkedIn', icon: <Linkedin size={12} /> },
-  facebook: { label: 'Facebook', icon: <Facebook size={12} /> }
+  facebook: { label: 'Facebook', icon: <Facebook size={12} /> },
+  imessage: { label: 'Messages', icon: <MessageSquare size={12} /> },
+  paypal: { label: 'PayPal', icon: <Wallet size={12} /> }
 }
 function sourceMeta(s: string): { label: string; icon: JSX.Element } {
   return SOURCE_META[s] ?? { label: s, icon: <User size={12} /> }
@@ -66,7 +77,7 @@ export default function People(): JSX.Element {
               {inContacts > 0 && ` · ${inContacts} in your contacts`}
             </>
           ) : (
-            'The people in your imported data — connections, friends, and recommendations, in one place'
+            'The people in your imported data — who you connect with, message, and pay, in one place'
           )}
         </p>
       </div>
@@ -90,9 +101,10 @@ export default function People(): JSX.Element {
 
       {loaded && people.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center text-sm text-muted-foreground">
-          No people yet. Drop a <span className="text-foreground">LinkedIn</span> or{' '}
-          <span className="text-foreground">Facebook</span> export on the Timeline to see everyone
-          you're connected to.
+          No people yet. Drop a <span className="text-foreground">LinkedIn</span>,{' '}
+          <span className="text-foreground">Facebook</span>, or{' '}
+          <span className="text-foreground">PayPal</span> export on the Timeline to see everyone you
+          connect with, message, and pay.
         </div>
       ) : (
         <ul className="flex flex-col gap-1.5">

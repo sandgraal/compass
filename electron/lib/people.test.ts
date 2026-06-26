@@ -10,6 +10,7 @@ import {
   type PersonSourceRow,
   buildPeople,
   extractPersonName,
+  isLikelyPerson,
   normalizeName
 } from './people'
 
@@ -37,6 +38,49 @@ describe('extractPersonName', () => {
     expect(extractPersonName('linkedin', 'job', 'Engineer at Acme')).toBeNull()
     expect(extractPersonName('netflix', 'watch', 'The Matrix')).toBeNull()
     expect(extractPersonName('facebook', 'post', 'Became a fan of something')).toBeNull()
+  })
+
+  it('pulls conversation partners from message titles (with / em-dash / "Chat with")', () => {
+    expect(extractPersonName('imessage', 'messages', '23 messages with Alice')).toBe('Alice')
+    expect(extractPersonName('facebook', 'messages', '5 messages with Maria Cruz')).toBe(
+      'Maria Cruz'
+    )
+    expect(extractPersonName('linkedin', 'messages', '7 messages — Chat with Joe Herbert')).toBe(
+      'Joe Herbert'
+    )
+    // phone-number conversations + group threads are dropped
+    expect(extractPersonName('imessage', 'messages', '4 messages with +14155551234')).toBeNull()
+    expect(extractPersonName('imessage', 'messages', '9 messages with Alice, Bob')).toBeNull()
+  })
+
+  it('keeps PayPal payees that are people, drops merchants', () => {
+    expect(extractPersonName('paypal', 'payment', 'Jane Doe')).toBe('Jane Doe')
+    expect(extractPersonName('paypal', 'payment', 'Netflix')).toBeNull() // known merchant
+    expect(extractPersonName('paypal', 'payment', 'ACME LLC')).toBeNull() // corp suffix
+    expect(extractPersonName('paypal', 'payment', 'Store 1234')).toBeNull() // digits
+  })
+})
+
+describe('isLikelyPerson', () => {
+  it('accepts real names (including single first names)', () => {
+    for (const n of ['Alice Smith', 'Mom', 'José García', "O'Brien"]) {
+      expect(isLikelyPerson(n)).toBe(true)
+    }
+  })
+  it('rejects merchants, domains, phones, groups, and corp suffixes', () => {
+    for (const n of [
+      'Netflix',
+      'spotify',
+      'ACME CORP',
+      'Globex Inc',
+      'shop.example.com',
+      '+1 (415) 555-1234',
+      'Alice & Bob',
+      'Alice, Bob',
+      'Acme Technologies'
+    ]) {
+      expect(isLikelyPerson(n)).toBe(false)
+    }
   })
 })
 
