@@ -12,6 +12,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import type { IpcMain } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as schema from '../db/schema'
+import { buildRecordsEmbeddingsIndex, saveRecordsIndex } from '../knowledge/records-embeddings'
 import { makePdf } from '../lib/__fixtures__/make-pdf'
 import { makeZip } from '../lib/__fixtures__/make-zip'
 
@@ -23,6 +24,17 @@ vi.mock('../db/client', () => ({
 const mockDialog = { showOpenDialog: vi.fn() }
 vi.mock('electron', () => ({ dialog: mockDialog }))
 vi.mock('../knowledge/records-extractor', () => ({ updateRecordsKnowledge: vi.fn() }))
+// Stub the semantic-index boundary so the import-triggered refresh + the
+// `records:search` semantic branch never touch the real `.data` index or Ollama.
+// `loadRecordsIndex: null` makes the auto-refresh a no-op (semantic is opt-in) and
+// `searchRecordsSemantic: null` forces the deterministic FTS fallback below. The
+// semantic logic itself is covered in records-embeddings.test.ts.
+vi.mock('../knowledge/records-embeddings', () => ({
+  loadRecordsIndex: () => null,
+  saveRecordsIndex: vi.fn(),
+  buildRecordsEmbeddingsIndex: vi.fn(),
+  searchRecordsSemantic: vi.fn(async () => null)
+}))
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown
 const handlers: Record<string, Handler> = {}
@@ -201,6 +213,40 @@ describe('records:search (FTS5)', () => {
       to: Number.POSITIVE_INFINITY
     })) as Hit[]
     expect(hits.map((h) => h.title)).toEqual(['The Matrix'])
+  })
+
+  it("mode:'semantic' falls back to FTS keyword when there's no index", async () => {
+    await invoke('records:import-paths', [
+      fixture('NetflixViewingHistory.csv', 'Title,Date\nThe Matrix,1/2/26\n')
+    ])
+    // The mocked searchRecordsSemantic returns null (no index) → the handler must
+    // transparently serve FTS results rather than nothing.
+    const hits = (await invoke('records:search', { q: 'matrix', mode: 'semantic' })) as Hit[]
+    expect(hits.map((h) => h.title)).toEqual(['The Matrix'])
+  })
+})
+
+describe('records:semantic-status', () => {
+  it('reports the opt-in index as unavailable until built', async () => {
+    const status = (await invoke('records:semantic-status')) as {
+      available: boolean
+      count: number
+      building: boolean
+    }
+    expect(status).toMatchObject({ available: false, count: 0, building: false })
+  })
+})
+
+describe('records:rebuild-semantic', () => {
+  it('does not save and reports failure when nothing embeds (e.g. Ollama offline)', async () => {
+    vi.mocked(buildRecordsEmbeddingsIndex).mockResolvedValueOnce({
+      index: { model: 'm', builtAt: 0, maxId: 0, embeddings: [] },
+      result: { embedded: 0, total: 0, durationMs: 0, errors: [{ id: 1, message: 'Ollama down' }] }
+    })
+    const res = (await invoke('records:rebuild-semantic')) as { success: boolean; error?: string }
+    expect(res.success).toBe(false)
+    expect(res.error).toContain('Ollama')
+    expect(vi.mocked(saveRecordsIndex)).not.toHaveBeenCalled()
   })
 })
 

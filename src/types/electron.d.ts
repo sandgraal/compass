@@ -875,6 +875,21 @@ declare global {
           offset?: number
           mode?: 'keyword' | 'semantic'
         }): Promise<TimelineSearchHit[]>
+        rebuildSemantic(): Promise<{
+          success: boolean
+          error?: string
+          embedded?: number
+          total?: number
+          durationMs?: number
+          errors?: Array<{ id: number; message: string }>
+        }>
+        semanticStatus(): Promise<{
+          available: boolean
+          builtAt: number | null
+          count: number
+          model: string | null
+          building: boolean
+        }>
         onThisDay(opts?: { limit?: number }): Promise<TimelineRecord[]>
         stats(): Promise<{
           total: number

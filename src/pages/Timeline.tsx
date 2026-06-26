@@ -148,6 +148,12 @@ export default function Timeline(): JSX.Element {
     types: []
   })
   const [query, setQuery] = useState('')
+  const [semantic, setSemantic] = useState(false)
+  const [semStatus, setSemStatus] = useState<{
+    available: boolean
+    building: boolean
+    count: number
+  } | null>(null)
   const [busy, setBusy] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const { toast } = useToast()
@@ -166,7 +172,15 @@ export default function Timeline(): JSX.Element {
       void window.api.records
         // 200 = the backend's search cap (records-search.ts); ranked hits, so the
         // top 200 by relevance are plenty for the list (browse uses list() at 500).
-        .search({ q, source: source ?? undefined, type: type ?? undefined, limit: 200 })
+        // mode 'semantic' uses the local vector index, transparently falling back to
+        // keyword (FTS) when no index is built / Ollama is offline.
+        .search({
+          q,
+          source: source ?? undefined,
+          type: type ?? undefined,
+          limit: 200,
+          mode: semantic ? 'semantic' : undefined
+        })
         .then((hits) => {
           const rows: TimelineRecord[] = hits.map((h) => ({
             id: h.id,
@@ -192,13 +206,40 @@ export default function Timeline(): JSX.Element {
     void window.api.records
       .list({ source: source ?? undefined, type: type ?? undefined, limit: 500 })
       .then(setItems)
-  }, [query, source, type])
+  }, [query, source, type, semantic])
 
   // "On this day" recap (prior years, today's month/day) — independent of search.
   const loadOnThisDay = useCallback((): void => {
     if (!isElectron()) return
     void window.api.records.onThisDay({ limit: 8 }).then(setOnThisDay)
   }, [])
+
+  // Status of the opt-in local semantic index (whether "search by meaning" is ready).
+  const loadSemStatus = useCallback((): void => {
+    if (!isElectron()) return
+    void window.api.records
+      .semanticStatus()
+      .then((s) => setSemStatus({ available: s.available, building: s.building, count: s.count }))
+  }, [])
+
+  async function buildSemanticIndex(): Promise<void> {
+    if (!isElectron()) return
+    setSemStatus((s) => ({
+      available: s?.available ?? false,
+      count: s?.count ?? 0,
+      building: true
+    }))
+    try {
+      const res = await window.api.records.rebuildSemantic()
+      if (res.success) toast(`Semantic index ready · ${res.total ?? 0} records`, 'success')
+      else toast(res.error ?? 'Could not build the semantic index', 'error')
+    } catch {
+      toast('Could not build the semantic index', 'error')
+    } finally {
+      loadSemStatus()
+      reload()
+    }
+  }
 
   // True totals + the full set of filter facets (the list is capped at 500, so
   // chips must come from the whole table, not the loaded page) — both independent
@@ -218,7 +259,8 @@ export default function Timeline(): JSX.Element {
   useEffect(() => {
     loadOnThisDay()
     loadStats()
-  }, [loadOnThisDay, loadStats])
+    loadSemStatus()
+  }, [loadOnThisDay, loadStats, loadSemStatus])
 
   function report(r: RecordsImportResult): void {
     if (r.canceled) return
@@ -383,19 +425,63 @@ export default function Timeline(): JSX.Element {
 
       {/* Search */}
       {(items.length > 0 || query) && (
-        <div className="relative mb-4">
-          <Search
-            size={15}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-          />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search your timeline…"
-            aria-label="Search your timeline"
-            className="w-full rounded-lg border border-border bg-card pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 transition-colors"
-          />
+        <div className="mb-4">
+          <div className="relative">
+            <Search
+              size={15}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+            />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={semantic ? 'Search by meaning…' : 'Search your timeline…'}
+              aria-label="Search your timeline"
+              className="w-full rounded-lg border border-border bg-card pl-9 pr-28 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 transition-colors"
+            />
+            <button
+              type="button"
+              onClick={() => setSemantic((v) => !v)}
+              aria-pressed={semantic}
+              title={
+                semantic
+                  ? 'Searching by meaning (semantic)'
+                  : 'Search by meaning instead of keywords'
+              }
+              className={cn(
+                'absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 text-xs px-2 py-1 rounded-md transition-colors',
+                semantic
+                  ? 'bg-primary/20 text-primary'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              )}
+            >
+              <Sparkles size={13} /> Meaning
+            </button>
+          </div>
+          {semantic && semStatus && !semStatus.available && (
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              {semStatus.building ? (
+                'Building the semantic index on your machine…'
+              ) : (
+                <>
+                  Search-by-meaning needs a local index (uses Ollama, stays on your machine).{' '}
+                  <button
+                    type="button"
+                    onClick={buildSemanticIndex}
+                    className="text-primary hover:underline"
+                  >
+                    Build it
+                  </button>
+                  . Until then, results fall back to keyword search.
+                </>
+              )}
+            </p>
+          )}
+          {semantic && semStatus?.available && query && (
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              Searching by meaning across {semStatus.count.toLocaleString()} indexed records.
+            </p>
+          )}
         </div>
       )}
 
