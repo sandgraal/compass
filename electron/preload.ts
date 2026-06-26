@@ -303,6 +303,7 @@ const api = {
       q?: string
       limit?: number
       offset?: number
+      includeFirehose?: boolean
     }) => ipcRenderer.invoke('records:list', opts),
     search: (opts: {
       q: string

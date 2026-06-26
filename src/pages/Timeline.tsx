@@ -141,8 +141,12 @@ export default function Timeline(): JSX.Element {
     sources: number
     earliest: number | null
     latest: number | null
+    firehose: number
   } | null>(null)
   const [source, setSource] = useState<string | null>(null)
+  // Curate: collapse firehose sources (browser history) from the default browse so
+  // they don't bury the signal events. Off by default; revealable, never deleted.
+  const [showFirehose, setShowFirehose] = useState(false)
   const [type, setType] = useState<string | null>(null)
   const [facets, setFacets] = useState<{ sources: string[]; types: string[] }>({
     sources: [],
@@ -207,10 +211,18 @@ export default function Timeline(): JSX.Element {
       return
     }
     // Empty query → plain browse (already newest-first, paginated server-side).
+    // Firehose is collapsed ONLY in the fully-unfiltered browse — an explicit source
+    // OR type chip (e.g. "Visits") is the user narrowing, so include it then (the
+    // server also overrides the collapse when a source is set).
     void window.api.records
-      .list({ source: source ?? undefined, type: type ?? undefined, limit: 500 })
+      .list({
+        source: source ?? undefined,
+        type: type ?? undefined,
+        limit: 500,
+        includeFirehose: showFirehose || type !== null
+      })
       .then(setItems)
-  }, [query, source, type, semantic])
+  }, [query, source, type, semantic, showFirehose])
 
   // "On this day" recap (prior years, today's month/day) — independent of search.
   const loadOnThisDay = useCallback((): void => {
@@ -516,6 +528,23 @@ export default function Timeline(): JSX.Element {
             </Chip>
           ))}
         </div>
+      )}
+
+      {/* Curate: firehose (browsing history) is collapsed from the default browse so
+          it doesn't bury the signal events — revealable, never deleted. Only shown
+          when there IS firehose data and no search/source filter is narrowing already. */}
+      {!query && !source && !type && stats && stats.firehose > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowFirehose((v) => !v)}
+          aria-pressed={showFirehose}
+          className="flex items-center gap-1.5 mb-4 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <Globe size={13} />
+          {showFirehose
+            ? 'Hide browsing history'
+            : `Show browsing history (${stats.firehose.toLocaleString()} hidden)`}
+        </button>
       )}
 
       {shown.length === 0 ? (

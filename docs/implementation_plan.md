@@ -481,8 +481,14 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
     sharing today's date, grouped by year ("N years ago · YYYY"), each deep-linking to `/timeline?q=<title>`.
     Reuses the existing `records:on-this-day` IPC; the grouping is a pure, unit-tested `src/lib/on-this-day.ts`
     (`groupOnThisDay` + `yearsAgoLabel`). Quiet (renders nothing) on days with no history. *Deliberately a memory
-    surface, not folded into the episodic "Worth a look" insights card.* *Next: noisier person sources
-    (PayPal/Venmo/email with a person/merchant classifier); then the Curate (value-tier tagging) track.*
+    surface, not folded into the episodic "Worth a look" insights card.*
+  - [x] **"Curate" — firehose value-tiering (non-destructive).** `electron/lib/source-tiers.ts` (pure, tested)
+    tags high-volume/low-signal sources (browser history) as a **firehose**. `records:list` gains
+    `includeFirehose` (default true; when false AND no source filter, excludes the firehose via `NOT IN`), and
+    `records:stats` returns the firehose count. The Timeline collapses firehose by default with a "Show browsing
+    (N hidden)" toggle; selecting the source's chip overrides it. **Nothing is deleted** — "tag & filter, keep
+    everything," the user's chosen approach. *Remaining: noisier person sources (PayPal/Venmo/email with a
+    person/merchant classifier) to enrich the People directory.*
 
 > Build order: 10.1 (spine) → 10.2 / 10.3 / 10.4 (independent, parallelizable) → 10.5 → 10.6 (gated) → 10.7
 > (delivered incrementally throughout). Each wave is its own PR(s) with tests + a `security-auditor` pass on
