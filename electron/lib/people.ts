@@ -120,8 +120,18 @@ export function buildPeople(records: PersonSourceRow[], contacts: ContactRow[]):
 
   const people: Person[] = []
   for (const [key, e] of acc) {
-    // Canonical display = the original casing seen most often (ties → first).
-    const name = [...e.nameCounts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+    // Canonical display = the original casing seen most often; on a tie the
+    // first-seen variant wins. `nameCounts` preserves insertion order and we only
+    // replace on a STRICTLY greater count, so this is deterministic without leaning
+    // on Array.sort stability.
+    let name = ''
+    let best = -1
+    for (const [variant, c] of e.nameCounts) {
+      if (c > best) {
+        best = c
+        name = variant
+      }
+    }
     people.push({
       name,
       key,

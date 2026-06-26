@@ -83,6 +83,26 @@ describe('buildPeople', () => {
     expect(people[0].contactId).toBeNull()
   })
 
+  it('picks the first-seen casing as the canonical name on a count tie', () => {
+    const records: PersonSourceRow[] = [
+      {
+        source: 'linkedin',
+        type: 'connection',
+        title: 'Connected with john doe',
+        occurredAt: null
+      },
+      {
+        source: 'facebook',
+        type: 'connection',
+        title: 'Became friends with John Doe',
+        occurredAt: null
+      }
+    ]
+    const [person] = buildPeople(records, [])
+    expect(person.key).toBe('john doe') // same person despite casing
+    expect(person.name).toBe('john doe') // 1–1 tie → the first-seen variant, deterministically
+  })
+
   it('matches a person to a contact by normalized name', () => {
     const records: PersonSourceRow[] = [
       {

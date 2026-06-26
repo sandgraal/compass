@@ -1,6 +1,7 @@
 import { Facebook, Linkedin, Network, Search, User, UserCheck } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useToast } from '../components/ui/Toast'
 
 const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
 
@@ -27,17 +28,21 @@ export default function People(): JSX.Element {
   const [query, setQuery] = useState('')
   const [loaded, setLoaded] = useState(false)
   const navigate = useNavigate()
+  const { toast } = useToast()
 
   useEffect(() => {
     if (!isElectron()) {
       setLoaded(true)
       return
     }
-    void window.api.people.list().then((p) => {
-      setPeople(p)
-      setLoaded(true)
-    })
-  }, [])
+    // `loaded` must flip even if the IPC rejects, or the page renders a blank area
+    // (neither the empty state nor the list).
+    void window.api.people
+      .list()
+      .then(setPeople)
+      .catch(() => toast('Could not load your people directory', 'error'))
+      .finally(() => setLoaded(true))
+  }, [toast])
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
