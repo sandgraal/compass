@@ -77,8 +77,112 @@ describe('ASSISTANT_TOOLS', () => {
     expect(names).toContain('get_habit_streaks')
     expect(names).toContain('get_insights')
     expect(names).toContain('get_timeline')
+    expect(names).toContain('search_records')
     expect(names).toContain('propose_task')
     for (const t of ASSISTANT_TOOLS) expect(t.input_schema.type).toBe('object')
+  })
+})
+
+describe('search_records (raw timeline retrieval — Phase 10.7)', () => {
+  beforeEach(() => {
+    sqlite.exec(`
+      CREATE TABLE records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, type TEXT NOT NULL, occurred_at INTEGER,
+        title TEXT NOT NULL, body TEXT, payload TEXT, dedup_hash TEXT NOT NULL, provenance TEXT, ingested_at INTEGER
+      );
+      CREATE VIRTUAL TABLE records_fts USING fts5(title, body, payload, content='records', content_rowid='id', tokenize='unicode61 remove_diacritics 2');
+      CREATE TRIGGER records_ai AFTER INSERT ON records BEGIN INSERT INTO records_fts(rowid,title,body,payload) VALUES (new.id,new.title,new.body,new.payload); END;
+    `)
+  })
+  function addRecord(r: {
+    source: string
+    type: string
+    title: string
+    body?: string
+    occurredAt?: number
+  }): void {
+    sqlite
+      .prepare(
+        'INSERT INTO records (source,type,occurred_at,title,body,dedup_hash) VALUES (?,?,?,?,?,?)'
+      )
+      .run(
+        r.source,
+        r.type,
+        r.occurredAt ?? null,
+        r.title,
+        r.body ?? null,
+        `${r.source}|${r.title}`
+      )
+  }
+  // biome-ignore lint/suspicious/noExplicitAny: terse access to the tagged tool result in assertions
+  const data = (res: unknown): any => (res as { data: unknown }).data
+
+  it('returns the ACTUAL matching records (date / source / kind / title / detail)', () => {
+    addRecord({
+      source: 'amazon',
+      type: 'order',
+      title: 'Echo Dot',
+      body: 'smart speaker',
+      occurredAt: Date.parse('2021-03-01T00:00:00Z')
+    })
+    addRecord({ source: 'netflix', type: 'watch', title: 'The Matrix' })
+    const res = executeAssistantTool(db(), sqlite, 'search_records', { q: 'echo' })
+    expect(res.ok).toBe(true)
+    expect(data(res).count).toBe(1)
+    expect(data(res).records[0]).toMatchObject({
+      title: 'Echo Dot',
+      source: 'amazon',
+      type: 'order',
+      date: '2021-03-01',
+      detail: 'smart speaker'
+    })
+  })
+
+  it('honors source / date filters and rejects a bad date', () => {
+    addRecord({
+      source: 'amazon',
+      type: 'order',
+      title: 'Coffee beans',
+      occurredAt: Date.parse('2020-01-01T00:00:00Z')
+    })
+    addRecord({
+      source: 'venmo',
+      type: 'payment',
+      title: 'Coffee with Sam',
+      occurredAt: Date.parse('2024-01-01T00:00:00Z')
+    })
+    expect(
+      data(
+        executeAssistantTool(db(), sqlite, 'search_records', { q: 'coffee', source: 'amazon' })
+      ).records.map((r: { title: string }) => r.title)
+    ).toEqual(['Coffee beans'])
+    expect(
+      data(
+        executeAssistantTool(db(), sqlite, 'search_records', { q: 'coffee', from: '2023-01-01' })
+      ).records.map((r: { title: string }) => r.title)
+    ).toEqual(['Coffee with Sam'])
+    expect(
+      executeAssistantTool(db(), sqlite, 'search_records', { q: 'coffee', from: 'nope' }).ok
+    ).toBe(false)
+  })
+
+  it('caps the result count (≤25) and flags that there may be more', () => {
+    for (let i = 0; i < 40; i++)
+      addRecord({ source: 'email', type: 'email', title: `Meeting notes ${i}` })
+    const res = executeAssistantTool(db(), sqlite, 'search_records', { q: 'meeting', limit: 999 })
+    expect(data(res).records.length).toBeLessThanOrEqual(25)
+    expect(data(res).note).toBeTruthy()
+  })
+
+  it('caps each detail line (no unbounded body dump) and never returns payload', () => {
+    addRecord({ source: 'email', type: 'email', title: 'Long one', body: 'x'.repeat(5000) })
+    const rec = data(executeAssistantTool(db(), sqlite, 'search_records', { q: 'long' })).records[0]
+    expect(rec.detail.length).toBeLessThanOrEqual(200)
+    expect('payload' in rec).toBe(false)
+  })
+
+  it('requires a query', () => {
+    expect(executeAssistantTool(db(), sqlite, 'search_records', { q: '' }).ok).toBe(false)
   })
 })
 

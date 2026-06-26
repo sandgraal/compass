@@ -36,6 +36,7 @@ import {
   normalizeTaskRange,
   readRecentNotes,
   readTasksRange,
+  readTimelineSearch,
   readTimelineSummary
 } from './readers.js'
 
@@ -238,8 +239,29 @@ const TOOLS = [
   {
     name: 'compass_timeline',
     description:
-      "Summarize the user's unified life Timeline — records imported from all their data sources (purchases, media watched/listened, messages, documents, health, credit/tax, and more). Returns AGGREGATES ONLY (total, counts by source and kind, the year span, per-year totals) — never the raw records or their titles. Use for 'how far back does my data go', 'what have I imported', 'how much/what kind of data do I have', or 'how active was I in <year>'. Read-only.",
+      "Summarize the user's unified life Timeline — records imported from all their data sources (purchases, media watched/listened, messages, documents, health, credit/tax, and more). Returns AGGREGATES (total, counts by source and kind, the year span, per-year totals). Use for 'how far back does my data go', 'what have I imported', 'how much/what kind of data do I have', or 'how active was I in <year>'. To read the actual matching records, use compass_search_timeline. Read-only.",
     inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
+    name: 'compass_search_timeline',
+    description:
+      "Search the user's unified life Timeline — the ACTUAL records imported from their data exports (purchases, media watched/listened, messages, browsing, documents, health, credit/tax, connections, and more) — and return the matching records (date, source, kind, title, short detail). Use for 'what/when did I…' questions: 'when did I last watch X', 'what did I buy from Y', 'find anything about Z', 'what was I doing in <month/year>'. Optional source/kind filters and a from/to date range (YYYY-MM-DD). Read-only. (For totals by source or year, use compass_timeline.)",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        q: {
+          type: 'string',
+          description: 'Search text (matches titles + details, prefix-matched)'
+        },
+        source: { type: 'string', description: 'Optional: one source, e.g. "amazon", "linkedin"' },
+        type: { type: 'string', description: 'Optional: one kind, e.g. "order", "watch"' },
+        from: { type: 'string', description: 'Optional start date YYYY-MM-DD (inclusive)' },
+        to: { type: 'string', description: 'Optional end date YYYY-MM-DD (inclusive)' },
+        limit: { type: 'integer', minimum: 1, maximum: 25, default: 8 }
+      },
+      required: ['q'],
+      additionalProperties: false
+    }
   },
   // Propose-write tools — enqueue to the Claude Inbox, never mutate directly.
   ...PROPOSE_TOOLS
@@ -300,6 +322,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const summary = readTimelineSummary(db)
       db.close()
       return textResult(JSON.stringify(summary, null, 2))
+    }
+
+    if (name === 'compass_search_timeline') {
+      const q = String(args?.q ?? '').trim()
+      if (!q) return errorResult('q (search text) is required')
+      const db = openDb()
+      if (!db) return errorResult('Compass DB not found — is the app installed?')
+      const found = readTimelineSearch(db, {
+        q,
+        source: args?.source ? String(args.source) : undefined,
+        type: args?.type ? String(args.type) : undefined,
+        from: args?.from ? String(args.from) : undefined,
+        to: args?.to ? String(args.to) : undefined,
+        limit: Number(args?.limit ?? 8)
+      })
+      db.close()
+      return textResult(JSON.stringify(found, null, 2))
     }
 
     if (name === 'compass_search_knowledge') {

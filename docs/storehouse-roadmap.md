@@ -175,9 +175,12 @@ Every item below is non-negotiable and consistent with [architecture.md](archite
   prefers EXPORT/RIGHTS/LIVE, and treats CRED as the fallback of last resort. A short legal/ToS note ships
   with the CRED wave.
 - **Leverage vs. privacy invariant.** Raw records stay local. The assistant + MCP see **derived knowledge
-  markdown and summaries only — never raw vault rows or raw finance/health rows** (the existing rule:
+  markdown and summaries — never raw vault rows or raw finance/health rows** (the existing rule:
   `mcp/compass-mcp` opens the DB `readonly` with the vault and raw finance excluded; the agent has read +
-  `propose_task` only). Any new agent tool is reviewed against this.
+  `propose_task` only). **Exception (Phase 10.7 "Converse", user-opted-in):** the `records` timeline is
+  searchable in detail via `search_records` / `compass_search_timeline` (capped, char-budgeted, payload
+  never returned) — scoped to `records` only; vault + raw finance stay aggregates-only. Any new agent tool
+  is reviewed against this.
 - **Export excludes the vault.** The Universal Export Center stays plaintext-portable but **deliberately
   vault-free** (`export:export-all` reads no `VAULT_DIR`). Encrypted backup (`backup.ts`) remains the only
   path that includes secrets, passphrase-wrapped.

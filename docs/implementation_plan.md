@@ -434,7 +434,8 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 >
 > Reuses Phase 9's spine; **CRED generalizes the SimpleFIN "the user (not the developer) owns the data
 > relationship" decision.** Every source registers with the Universal Export Center (9.0); the vault is never
-> exported in plaintext; the assistant/MCP see summaries only.
+> exported in plaintext; the assistant/MCP see summaries only — **except the `records` timeline, which the
+> user opted to make searchable in detail (Phase 10.7 "Converse"; vault + raw finance stay aggregates-only).**
 
 - [ ] **10.1 The acquisition spine** — the **Drop Zone** (universal archive import + format-recognizer
   registry, generalizing `electron/lib/{vcard,ics,csv,archive-importers}.ts` + the finance CSV/PDF importers)
@@ -456,6 +457,14 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 - [ ] **10.7 Advanced leverage** — rich unified timeline, cross-source insights (sleep vs. spending, "on this
   day"), Ask-Compass-over-everything (extends the Phase 5.9 semantic index + Phase 8.5 agent tools), combined
   dashboards. *(Basic timeline + Ask-over-it ship incrementally from 10.1.)*
+  - [x] **"Converse" — full-text search + ask-over-everything (PR1).** `records_fts` external-content FTS5
+    index (title/body/payload, bm25-weighted, trigger-synced; migration `0018` + `ensureNewTables` + a
+    `syncRecordsFts` backfill). `records:search` powers the Timeline's real search; `search_records`
+    (Ask Compass) and `compass_search_timeline` (MCP) return the ACTUAL matching records (capped +
+    char-budgeted, payload never returned) — the **deliberate, user-opted-in relaxation** of the
+    aggregates-only boundary, scoped to `records` (vault + raw finance unchanged). Shared pure helper
+    `electron/lib/records-search.ts`. *Next: PR2 semantic search over records (reuse `embeddings.ts`);
+    then the Connect (entity resolution + insight cards) and Curate (value-tier tagging) tracks.*
 
 > Build order: 10.1 (spine) → 10.2 / 10.3 / 10.4 (independent, parallelizable) → 10.5 → 10.6 (gated) → 10.7
 > (delivered incrementally throughout). Each wave is its own PR(s) with tests + a `security-auditor` pass on

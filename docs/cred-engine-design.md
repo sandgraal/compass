@@ -54,8 +54,11 @@ These restate [`storehouse-roadmap.md`](storehouse-roadmap.md) §5 and bind ever
 6. **Honest posture.** Scraping is brittle and ToS-gray. The UI says so plainly, always prefers
    EXPORT/RIGHTS/LIVE when a source offers them, and treats CRED as the fallback of last resort. A short
    legal/ToS note ships with the wave.
-7. **Leverage-vs-privacy invariant preserved.** The assistant/MCP see derived summaries only — never raw
-   records, never the vault, never anything a portal returned.
+7. **Leverage-vs-privacy invariant preserved.** The assistant/MCP see derived summaries — never the vault,
+   never raw finance/health rows, never anything a portal returned. (Phase 10.7 "Converse" scoped a single
+   user-opted-in exception: the `records` timeline is searchable in detail via `search_records` /
+   `compass_search_timeline`. CRED-fetched artifacts re-enter through the same `records` pipeline, so this
+   applies to them too — by design, since the user chose to make their own acquired data searchable.)
 
 ---
 

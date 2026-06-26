@@ -52,6 +52,34 @@ export async function initDb(): Promise<void> {
   ensureNewTables(sqlite)
 }
 
+/**
+ * Rebuild the `records_fts` full-text index from `records`. Use after the index
+ * is added to a DB that already holds records, or to recover from any drift.
+ * Exported for tests + manual recovery.
+ */
+export function rebuildRecordsFts(sqlite: Database.Database): void {
+  sqlite.exec("INSERT INTO records_fts(records_fts) VALUES('rebuild')")
+}
+
+/**
+ * Rebuild `records_fts` only when it's out of sync with `records` (cheap no-op
+ * otherwise). Detection uses the FTS5 `_docsize` shadow table — one row per
+ * INDEXED document — because `COUNT(*) FROM records_fts` reads the external
+ * CONTENT table (`records`) and so always equals the base count even when the
+ * index is empty (the upgrade case we must catch).
+ */
+function syncRecordsFts(sqlite: Database.Database): void {
+  try {
+    const base = sqlite.prepare('SELECT COUNT(*) AS n FROM records').get() as { n: number }
+    const indexed = sqlite.prepare('SELECT COUNT(*) AS n FROM records_fts_docsize').get() as {
+      n: number
+    }
+    if (base.n !== indexed.n) rebuildRecordsFts(sqlite)
+  } catch {
+    /* records_fts not present on an unusual/old DB — recreated next launch */
+  }
+}
+
 function ensureNewTables(sqlite: Database.Database): void {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS finance_accounts (
@@ -156,7 +184,31 @@ function ensureNewTables(sqlite: Database.Database): void {
       position INTEGER NOT NULL DEFAULT 0, dedup_hash TEXT NOT NULL, provenance TEXT, ingested_at INTEGER
     );
     CREATE UNIQUE INDEX IF NOT EXISTS snapshot_facts_dedup_hash_unique ON snapshot_facts (dedup_hash);
+    -- Full-text index over the timeline (Phase 10.7 "Converse"). External-content
+    -- FTS5 mirroring records by rowid; the triggers keep it in sync for EVERY writer
+    -- (import + the future per-source delete). Lives here (the always-run fallback) as
+    -- well as migration 0018 because the packaged app doesn't bundle migrations.
+    CREATE VIRTUAL TABLE IF NOT EXISTS records_fts USING fts5(
+      title, body, payload,
+      content='records', content_rowid='id',
+      tokenize='unicode61 remove_diacritics 2'
+    );
+    CREATE TRIGGER IF NOT EXISTS records_ai AFTER INSERT ON records BEGIN
+      INSERT INTO records_fts(rowid, title, body, payload) VALUES (new.id, new.title, new.body, new.payload);
+    END;
+    CREATE TRIGGER IF NOT EXISTS records_ad AFTER DELETE ON records BEGIN
+      INSERT INTO records_fts(records_fts, rowid, title, body, payload) VALUES('delete', old.id, old.title, old.body, old.payload);
+    END;
+    CREATE TRIGGER IF NOT EXISTS records_au AFTER UPDATE ON records BEGIN
+      INSERT INTO records_fts(records_fts, rowid, title, body, payload) VALUES('delete', old.id, old.title, old.body, old.payload);
+      INSERT INTO records_fts(rowid, title, body, payload) VALUES (new.id, new.title, new.body, new.payload);
+    END;
   `)
+
+  // Backfill the FTS index for rows that predate it (the triggers only fire on
+  // writes AFTER the table exists, so an upgrade leaves existing records unindexed).
+  // Cheap on every launch: rebuilds only when the counts diverge.
+  syncRecordsFts(sqlite)
 
   // Backfill new columns on pre-existing tables (safe no-op when columns already exist).
   const addedSyncInterval = ensureColumn(

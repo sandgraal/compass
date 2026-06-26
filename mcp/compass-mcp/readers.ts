@@ -144,3 +144,130 @@ export function readTimelineSummary(db: Database.Database): TimelineSummary {
     byYear: byYear.map((r) => ({ year: r.year, count: r.n }))
   }
 }
+
+export interface TimelineSearchHit {
+  date: string | null
+  source: string
+  type: string
+  title: string
+  detail?: string
+}
+
+export interface TimelineSearchResult {
+  query: string
+  count: number
+  records: TimelineSearchHit[]
+  note?: string
+}
+
+export const TIMELINE_SEARCH_DEFAULT = 8
+export const TIMELINE_SEARCH_MAX = 25
+const TIMELINE_SEARCH_CHAR_BUDGET = 6000
+
+/**
+ * FTS5 MATCH builder — each whitespace token double-quoted (so operators/punctuation
+ * are literal), last token prefix-matched. Mirrors electron/lib/records-search.ts
+ * (duplicated because the MCP is a separate package that can't import `electron/`).
+ */
+function toFtsMatchQuery(q: string): string | null {
+  const terms = q
+    .trim()
+    .split(/\s+/)
+    .map((t) => t.replace(/"/g, '').trim())
+    .filter((t) => t.length > 0)
+  if (terms.length === 0) return null
+  return terms.map((t, i) => (i === terms.length - 1 ? `"${t}"*` : `"${t}"`)).join(' ')
+}
+
+function hasObject(db: Database.Database, name: string): boolean {
+  return Boolean(db.prepare('SELECT 1 FROM sqlite_master WHERE name = ?').get(name))
+}
+
+/** YYYY-MM-DD → epoch ms (UTC); `endOfDay` makes an inclusive upper bound. Ignores junk. */
+function ymdMs(value: string | undefined, endOfDay: boolean): number | null {
+  if (!value || !YMD_RE.test(value)) return null
+  const base = Date.parse(`${value}T00:00:00Z`)
+  if (Number.isNaN(base)) return null
+  return endOfDay ? base + (86_400_000 - 1) : base
+}
+
+/**
+ * Full-text search over the `records` Timeline, returning the ACTUAL matching
+ * records (date, source, kind, title, short detail). The deliberate, scoped
+ * relaxation of the MCP's "timeline summaries only" boundary (Phase 10.7): the
+ * user opted into letting connected Claude clients read their own records. Bounded
+ * by a result cap + char budget; payload is never returned. Only touches `records`
+ * — vault + raw finance stay aggregates-only. Empty/guarded when the FTS index or
+ * the table is absent (older DB).
+ */
+export function readTimelineSearch(
+  db: Database.Database,
+  opts: { q: string; source?: string; type?: string; from?: string; to?: string; limit?: number }
+): TimelineSearchResult {
+  const q = (opts.q ?? '').trim()
+  const match = toFtsMatchQuery(q)
+  if (!match) return { query: q, count: 0, records: [] }
+  if (!hasObject(db, 'records') || !hasObject(db, 'records_fts')) {
+    return { query: q, count: 0, records: [], note: 'Timeline search index not available.' }
+  }
+  const limit = Math.max(
+    1,
+    Math.min(Math.floor(opts.limit ?? TIMELINE_SEARCH_DEFAULT), TIMELINE_SEARCH_MAX)
+  )
+  const rows = db
+    .prepare(
+      `SELECT r.occurred_at AS occurredAt, r.source AS source, r.type AS type,
+              r.title AS title, r.body AS body,
+              bm25(records_fts, 10.0, 5.0, 1.0) AS rank
+         FROM records_fts
+         JOIN records r ON r.id = records_fts.rowid
+        WHERE records_fts MATCH @match
+          AND (@source IS NULL OR r.source = @source)
+          AND (@type   IS NULL OR r.type   = @type)
+          AND (@from   IS NULL OR r.occurred_at >= @from)
+          AND (@to     IS NULL OR r.occurred_at <= @to)
+        ORDER BY rank
+        LIMIT @limit`
+    )
+    .all({
+      match,
+      source: opts.source ? String(opts.source) : null,
+      type: opts.type ? String(opts.type) : null,
+      from: ymdMs(opts.from, false),
+      to: ymdMs(opts.to, true),
+      limit
+    }) as Array<{
+    occurredAt: number | null
+    source: string
+    type: string
+    title: string
+    body: string | null
+  }>
+
+  const records: TimelineSearchHit[] = []
+  let budget = TIMELINE_SEARCH_CHAR_BUDGET
+  let truncated = false
+  for (const r of rows) {
+    const date = r.occurredAt != null ? new Date(r.occurredAt).toISOString().slice(0, 10) : null
+    const detail = r.body ? r.body.slice(0, 200) : undefined
+    const cost = r.title.length + (detail?.length ?? 0) + r.source.length + r.type.length + 20
+    if (budget - cost < 0 && records.length > 0) {
+      truncated = true
+      break
+    }
+    budget -= cost
+    records.push({
+      date,
+      source: r.source,
+      type: r.type,
+      title: r.title,
+      ...(detail ? { detail } : {})
+    })
+  }
+  const result: TimelineSearchResult = { query: q, count: records.length, records }
+  // A full page (hit the limit) or a char-budget cut means there are likely more.
+  if (truncated || rows.length >= limit) {
+    result.note = 'Showing the top matches — add a source/kind/date filter or refine the query.'
+  }
+  return result
+}

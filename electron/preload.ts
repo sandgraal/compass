@@ -304,6 +304,16 @@ const api = {
       limit?: number
       offset?: number
     }) => ipcRenderer.invoke('records:list', opts),
+    search: (opts: {
+      q: string
+      source?: string
+      type?: string
+      from?: number | null
+      to?: number | null
+      limit?: number
+      offset?: number
+      mode?: 'keyword' | 'semantic'
+    }) => ipcRenderer.invoke('records:search', opts),
     onThisDay: (opts?: { limit?: number }) => ipcRenderer.invoke('records:on-this-day', opts),
     stats: () => ipcRenderer.invoke('records:stats'),
     facets: () => ipcRenderer.invoke('records:facets'),

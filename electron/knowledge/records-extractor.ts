@@ -8,8 +8,11 @@
  * SECURITY: this is a SUMMARY only — counts by source/type/year, the date span,
  * a few recent titles, and an "on this day" recap. A unified life-timeline can
  * hold sensitive events, so the full per-record detail is deliberately NOT dumped
- * into the knowledge base (and thus not into the semantic index / MCP). Per-record
- * exposure is a later opt-in.
+ * into the knowledge base (which would mirror it into every markdown export).
+ * Per-record retrieval is instead served on demand by the Converse search path
+ * (Phase 10.7 — `records:search` and the `search_records` / `compass_search_timeline`
+ * tools), which the user opted into; that covers `records` only (vault + raw
+ * finance stay aggregates-only).
  */
 
 import { getDb } from '../db/client'

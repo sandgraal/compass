@@ -62,6 +62,50 @@ describe('initDb fallback when migrations are not bundled', () => {
         )
         .run('google', 'watch', 'x', 'h1')
       expect(second.changes).toBe(0) // deduped
+
+      // The Converse FTS index + its sync triggers are created on the same
+      // production path; the row inserted above is searchable via MATCH.
+      expect(
+        sqlite.prepare("SELECT name FROM sqlite_master WHERE name = 'records_fts'").get()
+      ).toBeTruthy()
+      const hit = sqlite
+        .prepare(
+          "SELECT r.title FROM records_fts JOIN records r ON r.id = records_fts.rowid WHERE records_fts MATCH 'x'"
+        )
+        .all() as Array<{ title: string }>
+      expect(hit).toHaveLength(1)
+    } finally {
+      sqlite.close()
+    }
+  })
+
+  it('backfills records_fts for rows that predate the index (upgrade path)', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'compass-fts-'))
+    const dbPath = dbPathForHome(home)
+    mkdirSync(dirname(dbPath), { recursive: true })
+    // Pre-seed an older install: a `records` table with a row but NO fts index.
+    const seed = new Database(dbPath)
+    seed.exec(
+      'CREATE TABLE records (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, type TEXT NOT NULL, occurred_at INTEGER, title TEXT NOT NULL, body TEXT, payload TEXT, dedup_hash TEXT NOT NULL, provenance TEXT, ingested_at INTEGER);'
+    )
+    seed
+      .prepare('INSERT INTO records (source,type,title,dedup_hash) VALUES (?,?,?,?)')
+      .run('amazon', 'order', 'Kindle Paperwhite', 'h1')
+    seed.close()
+
+    process.env.HOME = home
+    vi.resetModules()
+    const { initDb } = await import('./client')
+    await initDb() // ensureNewTables creates records_fts + triggers, then syncRecordsFts rebuilds
+
+    const sqlite = new Database(dbPath)
+    try {
+      const hit = sqlite
+        .prepare(
+          "SELECT r.title FROM records_fts JOIN records r ON r.id = records_fts.rowid WHERE records_fts MATCH 'kindle'"
+        )
+        .all() as Array<{ title: string }>
+      expect(hit.map((h) => h.title)).toEqual(['Kindle Paperwhite'])
     } finally {
       sqlite.close()
     }

@@ -449,6 +449,20 @@ declare global {
     ingestedAt: number | null
   }
 
+  interface TimelineSearchHit {
+    id: number
+    source: string
+    type: string
+    occurredAt: number | null
+    title: string
+    body: string | null
+    /** bm25 `snippet()` with [matched] terms bracketed — for highlight in the list. */
+    titleSnippet: string
+    bodySnippet: string
+    /** bm25 score (more negative = better); rows arrive already sorted best-first. */
+    rank: number
+  }
+
   interface RecordsImportResult {
     success: boolean
     canceled?: boolean
@@ -851,6 +865,16 @@ declare global {
           limit?: number
           offset?: number
         }): Promise<TimelineRecord[]>
+        search(opts: {
+          q: string
+          source?: string
+          type?: string
+          from?: number | null
+          to?: number | null
+          limit?: number
+          offset?: number
+          mode?: 'keyword' | 'semantic'
+        }): Promise<TimelineSearchHit[]>
         onThisDay(opts?: { limit?: number }): Promise<TimelineRecord[]>
         stats(): Promise<{
           total: number

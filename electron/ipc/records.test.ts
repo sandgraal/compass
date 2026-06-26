@@ -16,7 +16,10 @@ import { makePdf } from '../lib/__fixtures__/make-pdf'
 import { makeZip } from '../lib/__fixtures__/make-zip'
 
 let sqlite: Database.Database
-vi.mock('../db/client', () => ({ getDb: () => drizzle(sqlite, { schema }) }))
+vi.mock('../db/client', () => ({
+  getDb: () => drizzle(sqlite, { schema }),
+  getRawSqlite: () => sqlite
+}))
 const mockDialog = { showOpenDialog: vi.fn() }
 vi.mock('electron', () => ({ dialog: mockDialog }))
 vi.mock('../knowledge/records-extractor', () => ({ updateRecordsKnowledge: vi.fn() }))
@@ -62,6 +65,8 @@ beforeEach(async () => {
       label TEXT, value TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0,
       dedup_hash TEXT NOT NULL UNIQUE, provenance TEXT, ingested_at INTEGER
     );
+    CREATE VIRTUAL TABLE records_fts USING fts5(title, body, payload, content='records', content_rowid='id', tokenize='unicode61 remove_diacritics 2');
+    CREATE TRIGGER records_ai AFTER INSERT ON records BEGIN INSERT INTO records_fts(rowid,title,body,payload) VALUES (new.id,new.title,new.body,new.payload); END;
   `)
   for (const k of Object.keys(handlers)) delete handlers[k]
   mockDialog.showOpenDialog.mockReset()
@@ -157,6 +162,31 @@ describe('records:list', () => {
     expect(byBody[0].title).toBe('Jane Doe')
     const none = (await invoke('records:list', { q: 'zzz-nope' })) as Rec[]
     expect(none).toHaveLength(0)
+  })
+})
+
+describe('records:search (FTS5)', () => {
+  type Hit = { title: string; source: string; titleSnippet: string; rank: number }
+  it('bm25-ranks matches across the whole timeline (via the AFTER INSERT trigger)', async () => {
+    await invoke('records:import-paths', [
+      fixture('NetflixViewingHistory.csv', 'Title,Date\nThe Matrix,1/2/26\nInception,12/25/25\n'),
+      fixture(
+        'Download.csv',
+        'Date,Name,Type,Status,Currency,Gross,Transaction ID\n01/15/2026,Jane Doe,Money Sent,Completed,USD,-25.00,TX-Q1\n'
+      )
+    ])
+    // prefix match: "matr" → "The Matrix"
+    const hits = (await invoke('records:search', { q: 'matr' })) as Hit[]
+    expect(hits.map((h) => h.title)).toEqual(['The Matrix'])
+    expect(hits[0].titleSnippet).toContain('[Matrix]') // snippet brackets the match
+    // body match: "Money Sent" lives in the PayPal record's body
+    const body = (await invoke('records:search', { q: 'money sent' })) as Hit[]
+    expect(body.map((h) => h.title)).toEqual(['Jane Doe'])
+  })
+
+  it('returns [] for an empty / malformed query rather than throwing', async () => {
+    expect(await invoke('records:search', { q: '   ' })).toEqual([])
+    expect(await invoke('records:search', {})).toEqual([])
   })
 })
 
