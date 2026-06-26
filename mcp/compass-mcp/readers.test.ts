@@ -8,9 +8,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   MAX_RECENT_NOTES,
   MAX_TASK_RANGE_DAYS,
+  TIMELINE_SEARCH_MAX,
   normalizeTaskRange,
   readRecentNotes,
   readTasksRange,
+  readTimelineSearch,
   readTimelineSummary
 } from './readers.js'
 
@@ -163,5 +165,76 @@ describe('readTimelineSummary', () => {
   it('returns an empty summary for an existing-but-empty records table', () => {
     createRecords()
     expect(readTimelineSummary(db).total).toBe(0)
+  })
+})
+
+describe('readTimelineSearch (raw timeline retrieval — Phase 10.7)', () => {
+  function createFts(): void {
+    db.exec(`
+      CREATE TABLE records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, type TEXT NOT NULL, occurred_at INTEGER,
+        title TEXT NOT NULL, body TEXT, payload TEXT, dedup_hash TEXT NOT NULL
+      );
+      CREATE VIRTUAL TABLE records_fts USING fts5(title, body, payload, content='records', content_rowid='id', tokenize='unicode61 remove_diacritics 2');
+      CREATE TRIGGER records_ai AFTER INSERT ON records BEGIN INSERT INTO records_fts(rowid,title,body,payload) VALUES (new.id,new.title,new.body,new.payload); END;
+    `)
+  }
+  function add(
+    source: string,
+    type: string,
+    title: string,
+    occurredAt: number | null,
+    body?: string
+  ): void {
+    db.prepare(
+      'INSERT INTO records (source,type,occurred_at,title,body,dedup_hash) VALUES (?,?,?,?,?,?)'
+    ).run(source, type, occurredAt, title, body ?? null, `${source}|${title}`)
+  }
+
+  it('returns the actual matching records with date / source / kind / title', () => {
+    createFts()
+    add('amazon', 'order', 'Echo Dot', Date.UTC(2021, 2, 1), 'smart speaker')
+    add('netflix', 'watch', 'The Matrix', Date.UTC(2022, 5, 1))
+    const res = readTimelineSearch(db, { q: 'echo' })
+    expect(res.count).toBe(1)
+    expect(res.records[0]).toMatchObject({
+      source: 'amazon',
+      type: 'order',
+      title: 'Echo Dot',
+      date: '2021-03-01',
+      detail: 'smart speaker'
+    })
+  })
+
+  it('honors source + date filters', () => {
+    createFts()
+    add('amazon', 'order', 'Coffee beans', Date.UTC(2020, 0, 1))
+    add('venmo', 'payment', 'Coffee with Sam', Date.UTC(2024, 0, 1))
+    expect(
+      readTimelineSearch(db, { q: 'coffee', source: 'amazon' }).records.map((r) => r.title)
+    ).toEqual(['Coffee beans'])
+    expect(
+      readTimelineSearch(db, { q: 'coffee', from: '2023-01-01' }).records.map((r) => r.title)
+    ).toEqual(['Coffee with Sam'])
+  })
+
+  it(`caps results at ${TIMELINE_SEARCH_MAX} and flags more`, () => {
+    createFts()
+    for (let i = 0; i < 40; i++) add('email', 'email', `Meeting notes ${i}`, null)
+    const res = readTimelineSearch(db, { q: 'meeting', limit: 999 })
+    expect(res.count).toBeLessThanOrEqual(TIMELINE_SEARCH_MAX)
+    expect(res.note).toBeTruthy()
+  })
+
+  it('falls back gracefully when the FTS index / records table is absent (legacy DB)', () => {
+    // No createFts() — mirrors a DB that predates the Converse migration.
+    const res = readTimelineSearch(db, { q: 'anything' })
+    expect(res).toMatchObject({ count: 0, records: [] })
+    expect(res.note).toBeTruthy()
+  })
+
+  it('returns nothing for an empty query (no FTS syntax error)', () => {
+    createFts()
+    expect(readTimelineSearch(db, { q: '   ' })).toMatchObject({ count: 0, records: [] })
   })
 })

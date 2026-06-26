@@ -157,13 +157,40 @@ export default function Timeline(): JSX.Element {
   // record, not only the ones near the top.
   const reload = useCallback((): void => {
     if (!isElectron()) return
+    const q = query.trim()
+    if (q) {
+      // A real query goes through full-text search (bm25-ranked, prefix-matched,
+      // spans the whole timeline). Map the hits into the list shape and re-sort
+      // newest-first (undated last) so they read as a familiar timeline slice
+      // rather than raw relevance order — the day grouping assumes that order.
+      void window.api.records
+        // 200 = the backend's search cap (records-search.ts); ranked hits, so the
+        // top 200 by relevance are plenty for the list (browse uses list() at 500).
+        .search({ q, source: source ?? undefined, type: type ?? undefined, limit: 200 })
+        .then((hits) => {
+          const rows: TimelineRecord[] = hits.map((h) => ({
+            id: h.id,
+            source: h.source,
+            type: h.type,
+            occurredAt: h.occurredAt,
+            title: h.title,
+            body: h.body,
+            payload: null,
+            provenance: null,
+            ingestedAt: null
+          }))
+          rows.sort(
+            (a, b) =>
+              (b.occurredAt ?? Number.NEGATIVE_INFINITY) -
+              (a.occurredAt ?? Number.NEGATIVE_INFINITY)
+          )
+          setItems(rows)
+        })
+      return
+    }
+    // Empty query → plain browse (already newest-first, paginated server-side).
     void window.api.records
-      .list({
-        q: query.trim() || undefined,
-        source: source ?? undefined,
-        type: type ?? undefined,
-        limit: 500
-      })
+      .list({ source: source ?? undefined, type: type ?? undefined, limit: 500 })
       .then(setItems)
   }, [query, source, type])
 

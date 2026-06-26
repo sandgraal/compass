@@ -7,8 +7,11 @@
  * `onConflictDoNothing`), exactly like the finance ledger.
  *
  * Local-only: reads files the user explicitly chose, writes a summary to the
- * knowledge base. No network, no vault, no CSP widening. Raw rows are NOT exposed
- * to the MCP/assistant in 10.1 (a unified timeline is sensitive) — summaries only.
+ * knowledge base. No network, no vault, no CSP widening. As of Phase 10.7
+ * ("Converse") the user opted in to letting the assistant + MCP SEARCH the raw
+ * timeline (`records:search` / `search_records` / `compass_search_timeline`),
+ * a scoped relaxation that covers `records` ONLY — the vault and raw finance rows
+ * stay aggregates-only.
  */
 
 import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
@@ -16,7 +19,7 @@ import { basename, extname } from 'node:path'
 import Database from 'better-sqlite3'
 import { type SQL, and, desc, eq, like, or, sql } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
-import { getDb } from '../db/client'
+import { getDb, getRawSqlite } from '../db/client'
 import { records, snapshotFacts } from '../db/schema'
 import { updateRecordsKnowledge } from '../knowledge/records-extractor'
 import { serializeCsv } from '../lib/csv'
@@ -32,6 +35,7 @@ import {
   recognizeSqlite,
   recognizeStream
 } from '../lib/recognizers'
+import { type RecordSearchOpts, type TimelineSearchHit, searchRecords } from '../lib/records-search'
 import { forEachZipEntry } from '../lib/zip'
 
 const MAX_IMPORT_BYTES = 50 * 1024 * 1024 // 50 MB — matches the contacts/finance guard
@@ -378,6 +382,28 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
       return rows.map(rowToRecord)
     }
   )
+
+  // Full-text search across the WHOLE timeline (bm25-ranked), with the same
+  // source/type/date filters as the list. The Timeline routes a non-empty query
+  // here; an empty query stays on records:list (browse). Raw SQL over records_fts
+  // (Drizzle can't model MATCH/bm25), mirroring getFinanceSummary's raw statements.
+  ipcMain.handle('records:search', (_event, opts: RecordSearchOpts): TimelineSearchHit[] => {
+    if (!opts || typeof opts.q !== 'string') return []
+    // Sanitize numeric inputs at the boundary — a NaN/Infinity/non-number from the
+    // renderer would otherwise bind into the date/limit comparisons and yield
+    // surprising empty results. (limit/offset are additionally clamped downstream.)
+    const finite = (v: unknown): number | undefined =>
+      typeof v === 'number' && Number.isFinite(v) ? v : undefined
+    return searchRecords(getRawSqlite(), {
+      q: opts.q,
+      source: typeof opts.source === 'string' ? opts.source : undefined,
+      type: typeof opts.type === 'string' ? opts.type : undefined,
+      from: finite(opts.from),
+      to: finite(opts.to),
+      limit: finite(opts.limit),
+      offset: finite(opts.offset)
+    })
+  })
 
   // "On this day" recap — records sharing today's month + day, from PRIOR years
   // only (so it resurfaces memories rather than echoing today's imports). Matching

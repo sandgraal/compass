@@ -26,6 +26,7 @@ import {
   financeAccounts
 } from '../db/schema'
 import { buildInsights } from '../ipc/insights'
+import { searchRecords } from '../lib/records-search'
 
 type Db = ReturnType<typeof getDb>
 type RawSqlite = BetterSqlite3.Database
@@ -127,8 +128,32 @@ export const ASSISTANT_TOOLS = [
   {
     name: 'get_timeline',
     description:
-      'Summarize the user\'s unified life Timeline — records imported from all their data sources (purchases, media watched/listened, messages, documents, health, credit/tax, and more). Returns AGGREGATES ONLY (total, counts by source and kind, the year span, per-year totals) — never the raw records. Use for questions like "how far back does my data go", "what have I imported", "how much data do I have and what kind", or "how active was I in <year>". Read-only.',
+      'Summarize the user\'s unified life Timeline — records imported from all their data sources (purchases, media watched/listened, messages, documents, health, credit/tax, and more). Returns AGGREGATES (total, counts by source and kind, the year span, per-year totals). Use for shape-of-the-data questions like "how far back does my data go", "what have I imported", "how much data do I have and what kind", or "how active was I in <year>". To read the actual matching records, use search_records. Read-only.',
     input_schema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
+    name: 'search_records',
+    description:
+      'Search the user\'s unified life Timeline — the ACTUAL records imported from their data exports (purchases, media watched/listened, messages, browsing, documents, health, credit/tax, connections, and more) — and return the matching records themselves (date, source, kind, title, short detail). Use this for "what/when did I…" questions: "when did I last watch X", "what did I buy from Y", "find anything about Z", "what was I doing in <month/year>". Supports optional source/kind filters and a from/to date range (YYYY-MM-DD). Read-only. (For totals/counts by source or year, use get_timeline.)',
+    input_schema: {
+      type: 'object',
+      properties: {
+        q: {
+          type: 'string',
+          description: 'Search text — matches record titles + details, last word prefix-matched'
+        },
+        source: { type: 'string', description: 'Optional: one source, e.g. "amazon", "linkedin"' },
+        type: {
+          type: 'string',
+          description: 'Optional: one kind, e.g. "order", "watch", "connection"'
+        },
+        from: { type: 'string', description: 'Optional start date YYYY-MM-DD (inclusive)' },
+        to: { type: 'string', description: 'Optional end date YYYY-MM-DD (inclusive)' },
+        limit: { type: 'integer', minimum: 1, maximum: 25, description: 'Max records (default 8)' }
+      },
+      required: ['q'],
+      additionalProperties: false
+    }
   },
   {
     name: 'propose_task',
@@ -363,10 +388,88 @@ function getHabitStreaks(sqlite: RawSqlite): unknown {
   })
 }
 
+/** Record-search caps — the user opted in to raw record content, so safety is
+ * bounding, not redaction: a capped count + total char budget keep a broad query
+ * from blowing the agent's small token window. Payload is never returned. */
+const RECORD_SEARCH_DEFAULT = 8
+const RECORD_SEARCH_MAX = 25
+const RECORD_SEARCH_CHAR_BUDGET = 6000
+
+/** YYYY-MM-DD → epoch ms (UTC). `endOfDay` pushes to 23:59:59.999 for an inclusive `to`. */
+function ymdToMs(value: string, endOfDay: boolean): number | null {
+  if (!isRealYmd(value)) return null
+  const base = Date.parse(`${value}T00:00:00Z`)
+  if (Number.isNaN(base)) return null
+  return endOfDay ? base + (DAY_MS - 1) : base
+}
+
 /**
- * Summarize the unified `records` Timeline for the assistant. AGGREGATES ONLY —
- * counts by source/kind/year + the span — never raw rows or titles, honoring the
- * "summaries only, never the raw timeline" invariant. Year buckets use UTC to
+ * Full-text search over the `records` Timeline, returning the ACTUAL matching
+ * records (date, source, kind, title, short detail) — the deliberate, scoped
+ * relaxation of the old "timeline is aggregates-only" boundary (Phase 10.7).
+ * Bounded by a result cap + char budget; payload is never returned. Only ever
+ * touches `records` — the vault and raw finance rows stay excluded.
+ */
+function searchRecordsTool(sqlite: RawSqlite, input: Record<string, unknown>): unknown {
+  const q = str(input.q)
+  if (!q) return { error: 'q (search text) is required' }
+  const limit = Math.min(
+    RECORD_SEARCH_MAX,
+    Math.max(1, Number.isFinite(Number(input.limit)) ? Number(input.limit) : RECORD_SEARCH_DEFAULT)
+  )
+  const fromRaw = str(input.from)
+  const toRaw = str(input.to)
+  const from = fromRaw ? ymdToMs(fromRaw, false) : null
+  const to = toRaw ? ymdToMs(toRaw, true) : null
+  if (fromRaw && from == null) return { error: 'from must be a real YYYY-MM-DD date' }
+  if (toRaw && to == null) return { error: 'to must be a real YYYY-MM-DD date' }
+  const hits = searchRecords(sqlite, {
+    q,
+    source: str(input.source) || undefined,
+    type: str(input.type) || undefined,
+    from,
+    to,
+    limit
+  })
+  const out: Array<{
+    date: string | null
+    source: string
+    type: string
+    title: string
+    detail?: string
+  }> = []
+  let budget = RECORD_SEARCH_CHAR_BUDGET
+  let truncated = false
+  for (const h of hits) {
+    const date = h.occurredAt != null ? new Date(h.occurredAt).toISOString().slice(0, 10) : null
+    const detail = h.body ? h.body.slice(0, 200) : undefined
+    const cost = h.title.length + (detail?.length ?? 0) + h.source.length + h.type.length + 20
+    if (budget - cost < 0 && out.length > 0) {
+      truncated = true
+      break
+    }
+    budget -= cost
+    out.push({
+      date,
+      source: h.source,
+      type: h.type,
+      title: h.title,
+      ...(detail ? { detail } : {})
+    })
+  }
+  const result: Record<string, unknown> = { query: q, count: out.length, records: out }
+  // A full page (hit the limit) or a char-budget cut means there are likely more.
+  if (truncated || hits.length >= limit) {
+    result.note =
+      'Showing the top matches — add a source/kind/date filter or a more specific query to narrow.'
+  }
+  return result
+}
+
+/**
+ * Summarize the unified `records` Timeline for the assistant — AGGREGATES (counts
+ * by source/kind/year + the span). Detailed per-record reads go through
+ * `search_records`; this stays the shape-of-the-data view. Year buckets use UTC to
  * match the Timeline header + overview.md.
  */
 function getTimeline(sqlite: RawSqlite): unknown {
@@ -471,6 +574,11 @@ export function executeAssistantTool(
         return { ok: true, data: buildInsights(db).insights }
       case 'get_timeline':
         return { ok: true, data: getTimeline(sqlite) }
+      case 'search_records': {
+        const res = searchRecordsTool(sqlite, input) as Record<string, unknown>
+        if ('error' in res) return { ok: false, error: String(res.error) }
+        return { ok: true, data: res }
+      }
       case 'propose_task': {
         const res = proposeTask(db, input) as Record<string, unknown>
         if ('error' in res) return { ok: false, error: String(res.error) }
