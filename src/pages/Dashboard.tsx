@@ -13,6 +13,7 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { MorningBrief } from '../components/MorningBrief'
+import { OnThisDay } from '../components/OnThisDay'
 import { ProactiveInsights } from '../components/ProactiveInsights'
 import { cn, formatRelative, formatTime, todayISO } from '../lib/utils'
 
@@ -186,6 +187,9 @@ export default function Dashboard(): JSX.Element {
 
       {/* Proactive insights — local-only nudges (Phase 7 Track E) */}
       <ProactiveInsights />
+
+      {/* On this day — memories from prior years (Phase 10.7 "Connect") */}
+      <OnThisDay />
 
       {/* Stats row */}
       <div className="grid grid-cols-4 gap-4 mb-8">
