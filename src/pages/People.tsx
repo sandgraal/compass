@@ -101,9 +101,10 @@ export default function People(): JSX.Element {
 
       {loaded && people.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center text-sm text-muted-foreground">
-          No people yet. Drop a <span className="text-foreground">LinkedIn</span>,{' '}
+          No people yet. Import a <span className="text-foreground">LinkedIn</span>,{' '}
           <span className="text-foreground">Facebook</span>, or{' '}
-          <span className="text-foreground">PayPal</span> export on the Timeline to see everyone you
+          <span className="text-foreground">PayPal</span> export — or your{' '}
+          <span className="text-foreground">Messages</span> — on the Timeline to see everyone you
           connect with, message, and pay.
         </div>
       ) : (
