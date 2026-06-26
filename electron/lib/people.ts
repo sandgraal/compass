@@ -105,7 +105,7 @@ const KNOWN_MERCHANTS = new Set([
 export function isLikelyPerson(raw: string): boolean {
   const name = raw.trim()
   if (name.length < 2) return false
-  if (KNOWN_MERCHANTS.has(name.toLowerCase())) return false
+  if (KNOWN_MERCHANTS.has(normalizeName(name))) return false // normalize so "Cash  App" still matches
   if (/\d/.test(name)) return false // digits → handle / phone / order / SKU
   if (/[,&/|]| and /i.test(name)) return false // group thread / "Alice and Bob"
   if (/\.(com|net|org|io|co|app|gov)\b/i.test(name)) return false // a domain
@@ -149,8 +149,11 @@ export function extractPersonName(source: string, type: string, title: string): 
   if (source === 'facebook' && type === 'connection') {
     return capture(t, /^Became friends with (.+)$/)
   }
-  // PayPal payees — the title is the counterparty name; keep it only if it's a person.
+  // PayPal payees — the title is the counterparty name, EXCEPT when the recognizer
+  // fell back to its generic placeholder (Name/Item/Type all empty); keep it only if
+  // it's a real person.
   if (source === 'paypal' && type === 'payment') {
+    if (t === 'PayPal transaction') return null
     return isLikelyPerson(t) ? t : null
   }
   return null

@@ -53,11 +53,12 @@ describe('extractPersonName', () => {
     expect(extractPersonName('imessage', 'messages', '9 messages with Alice, Bob')).toBeNull()
   })
 
-  it('keeps PayPal payees that are people, drops merchants', () => {
+  it('keeps PayPal payees that are people, drops merchants + the generic fallback', () => {
     expect(extractPersonName('paypal', 'payment', 'Jane Doe')).toBe('Jane Doe')
     expect(extractPersonName('paypal', 'payment', 'Netflix')).toBeNull() // known merchant
     expect(extractPersonName('paypal', 'payment', 'ACME LLC')).toBeNull() // corp suffix
     expect(extractPersonName('paypal', 'payment', 'Store 1234')).toBeNull() // digits
+    expect(extractPersonName('paypal', 'payment', 'PayPal transaction')).toBeNull() // recognizer fallback
   })
 })
 
@@ -77,7 +78,8 @@ describe('isLikelyPerson', () => {
       '+1 (415) 555-1234',
       'Alice & Bob',
       'Alice, Bob',
-      'Acme Technologies'
+      'Acme Technologies',
+      'Cash  App' // double-spaced merchant still normalizes to the known-merchant set
     ]) {
       expect(isLikelyPerson(n)).toBe(false)
     }
