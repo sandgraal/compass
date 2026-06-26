@@ -75,6 +75,18 @@ describe('people:list', () => {
     expect(people[1].contactId).toBeNull() // Jane isn't a contact
   })
 
+  it('includes PayPal payees + message partners (people only) and skips merchants', async () => {
+    addRecord('paypal', 'payment', 'Jane Doe', Date.UTC(2024, 0, 1)) // a person → kept
+    addRecord('paypal', 'payment', 'Netflix', Date.UTC(2024, 1, 1)) // merchant → dropped
+    addRecord('imessage', 'messages', '12 messages with Jane Doe', Date.UTC(2024, 2, 1)) // collapses w/ the payee
+    addRecord('imessage', 'messages', '3 messages with +14155551234', Date.UTC(2024, 3, 1)) // phone → dropped
+
+    const people = (await invoke('people:list')) as Person[]
+    expect(people.map((p) => p.name)).toEqual(['Jane Doe']) // only the real person
+    expect(people[0].count).toBe(2) // paypal + imessage touchpoints
+    expect(people[0].sources).toEqual(['imessage', 'paypal'])
+  })
+
   it('returns an empty list when there are no people-bearing records', async () => {
     addRecord('netflix', 'watch', 'The Matrix', Date.UTC(2023, 0, 1))
     expect(await invoke('people:list')).toEqual([])
