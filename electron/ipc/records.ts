@@ -582,7 +582,8 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
 
   // At-a-glance totals for the Timeline header — the TRUE total (the Timeline UI
   // only loads a 500-row page via records:list), distinct source count, and the
-  // dated span. One aggregate query.
+  // dated span (one aggregate), plus a second small aggregate for the collapsed
+  // firehose count (the "Show browsing (N hidden)" toggle).
   ipcMain.handle('records:stats', () => {
     const db = getDb()
     const row = db

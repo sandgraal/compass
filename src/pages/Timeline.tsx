@@ -211,14 +211,15 @@ export default function Timeline(): JSX.Element {
       return
     }
     // Empty query → plain browse (already newest-first, paginated server-side).
-    // Firehose sources are collapsed unless toggled on (or a source chip is active,
-    // which the server-side filter overrides anyway).
+    // Firehose is collapsed ONLY in the fully-unfiltered browse — an explicit source
+    // OR type chip (e.g. "Visits") is the user narrowing, so include it then (the
+    // server also overrides the collapse when a source is set).
     void window.api.records
       .list({
         source: source ?? undefined,
         type: type ?? undefined,
         limit: 500,
-        includeFirehose: showFirehose
+        includeFirehose: showFirehose || type !== null
       })
       .then(setItems)
   }, [query, source, type, semantic, showFirehose])
@@ -532,10 +533,11 @@ export default function Timeline(): JSX.Element {
       {/* Curate: firehose (browsing history) is collapsed from the default browse so
           it doesn't bury the signal events — revealable, never deleted. Only shown
           when there IS firehose data and no search/source filter is narrowing already. */}
-      {!query && !source && stats && stats.firehose > 0 && (
+      {!query && !source && !type && stats && stats.firehose > 0 && (
         <button
           type="button"
           onClick={() => setShowFirehose((v) => !v)}
+          aria-pressed={showFirehose}
           className="flex items-center gap-1.5 mb-4 text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
           <Globe size={13} />
