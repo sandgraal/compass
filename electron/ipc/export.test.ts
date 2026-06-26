@@ -33,7 +33,10 @@ const { KNOWLEDGE_TMP } = vi.hoisted(() => {
   const { join: pjoin } = require('node:path')
   return { KNOWLEDGE_TMP: mkdtempSync(pjoin(tmpdir(), 'compass-kb-')) }
 })
-vi.mock('../paths', () => ({ KNOWLEDGE_DIR: KNOWLEDGE_TMP }))
+// DATA_DIR is needed because export.ts → records.ts now transitively loads the
+// embeddings modules (which read DATA_DIR at import). These tests never build a
+// semantic index, so pointing it at the same temp dir is enough to satisfy the load.
+vi.mock('../paths', () => ({ KNOWLEDGE_DIR: KNOWLEDGE_TMP, DATA_DIR: KNOWLEDGE_TMP }))
 
 const outRoot = vi.hoisted(() => {
   const { mkdtempSync } = require('node:fs')

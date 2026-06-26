@@ -463,8 +463,15 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
     (Ask Compass) and `compass_search_timeline` (MCP) return the ACTUAL matching records (capped +
     char-budgeted, payload never returned) — the **deliberate, user-opted-in relaxation** of the
     aggregates-only boundary, scoped to `records` (vault + raw finance unchanged). Shared pure helper
-    `electron/lib/records-search.ts`. *Next: PR2 semantic search over records (reuse `embeddings.ts`);
-    then the Connect (entity resolution + insight cards) and Curate (value-tier tagging) tracks.*
+    `electron/lib/records-search.ts`.
+  - [x] **"Converse" — semantic search over records (PR2).** `electron/knowledge/records-embeddings.ts` reuses the
+    Ollama primitives (`embedText`/`cosineSimilarity`) with a SEPARATE compact index (one vector per record, keyed
+    by `records.id`, at `.data/records-embeddings.json`), incremental by max-id. `records:search mode:'semantic'`
+    cosine-ranks → hydrates → post-filters, transparently falling back to FTS when there's no index / Ollama is
+    offline. Opt-in: `records:rebuild-semantic` + `records:semantic-status` + a Timeline "by meaning" toggle with an
+    inline build affordance; auto-extends after each import once built. (AI tools stay FTS-only — making the sync
+    tool layer async for one optional mode wasn't worth the churn; the Timeline is the semantic surface.)
+    *Next: the Connect (entity resolution + insight cards) and Curate (value-tier tagging) tracks.*
 
 > Build order: 10.1 (spine) → 10.2 / 10.3 / 10.4 (independent, parallelizable) → 10.5 → 10.6 (gated) → 10.7
 > (delivered incrementally throughout). Each wave is its own PR(s) with tests + a `security-auditor` pass on

@@ -314,6 +314,8 @@ const api = {
       offset?: number
       mode?: 'keyword' | 'semantic'
     }) => ipcRenderer.invoke('records:search', opts),
+    rebuildSemantic: () => ipcRenderer.invoke('records:rebuild-semantic'),
+    semanticStatus: () => ipcRenderer.invoke('records:semantic-status'),
     onThisDay: (opts?: { limit?: number }) => ipcRenderer.invoke('records:on-this-day', opts),
     stats: () => ipcRenderer.invoke('records:stats'),
     facets: () => ipcRenderer.invoke('records:facets'),

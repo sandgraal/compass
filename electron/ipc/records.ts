@@ -20,7 +20,15 @@ import Database from 'better-sqlite3'
 import { type SQL, and, desc, eq, like, or, sql } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
-import { records, snapshotFacts } from '../db/schema'
+import { appSettings, records, snapshotFacts } from '../db/schema'
+import { DEFAULT_EMBED_MODEL } from '../knowledge/embeddings'
+import {
+  type RecordSemanticHit,
+  buildRecordsEmbeddingsIndex,
+  loadRecordsIndex,
+  saveRecordsIndex,
+  searchRecordsSemantic
+} from '../knowledge/records-embeddings'
 import { updateRecordsKnowledge } from '../knowledge/records-extractor'
 import { serializeCsv } from '../lib/csv'
 import { extractPdfText } from '../lib/pdf'
@@ -269,6 +277,67 @@ async function ingestPath(fp: string, name: string, ctx: IngestCtx, depth: numbe
   }
 }
 
+// ── Semantic index (Phase 10.7 "Converse" PR2) ───────────────────────────────
+// Records "find by meaning" via the OPT-IN local-Ollama vector index. A module
+// lock serializes the (incremental) rebuilds so an import-triggered refresh and a
+// manual rebuild can't race on the JSON store.
+let semanticBuildInFlight: Promise<unknown> | null = null
+
+/** The embedding model the user configured (shared with the knowledge index). */
+function embeddingModel(): string {
+  try {
+    const row = getDb()
+      .select()
+      .from(appSettings)
+      .where(eq(appSettings.key, 'embeddingModel'))
+      .get()
+    return row?.value && row.value.trim().length > 0 ? row.value : DEFAULT_EMBED_MODEL
+  } catch {
+    return DEFAULT_EMBED_MODEL
+  }
+}
+
+/** Map a semantic hit into the shared list shape (no term snippets for a meaning match). */
+function semanticToHit(h: RecordSemanticHit): TimelineSearchHit {
+  return {
+    id: h.id,
+    source: h.source,
+    type: h.type,
+    occurredAt: h.occurredAt,
+    title: h.title,
+    body: h.body,
+    titleSnippet: '',
+    bodySnippet: '',
+    rank: -h.score // -score → lower-is-better, matching the FTS bm25 convention
+  }
+}
+
+/**
+ * Best-effort incremental refresh of the records semantic index after an import.
+ * No-op unless the user already built one (semantic is opt-in) — never blocks the
+ * import, and a missing/offline Ollama just leaves the index as-is (FTS still works).
+ */
+async function refreshRecordsSemanticIndex(): Promise<void> {
+  if (semanticBuildInFlight) return
+  const existing = loadRecordsIndex()
+  if (!existing) return
+  const run = (async () => {
+    const { index } = await buildRecordsEmbeddingsIndex(getRawSqlite(), {
+      model: existing.model,
+      existing
+    })
+    saveRecordsIndex(index)
+  })()
+  semanticBuildInFlight = run
+  try {
+    await run
+  } catch {
+    /* Ollama offline / etc. — leave the prior index in place */
+  } finally {
+    semanticBuildInFlight = null
+  }
+}
+
 /**
  * Core ingest shared by the dialog + drag-drop handlers — and by the CRED
  * engine (`electron/ipc/cred.ts`), so a portal-fetched artifact re-enters
@@ -289,6 +358,9 @@ export async function ingestFiles(paths: string[]): Promise<RecordsImportResult>
     } catch {
       /* knowledge refresh is best-effort */
     }
+    // Extend the opt-in semantic index with the new records (fire-and-forget; only
+    // does anything if the user has already built one, and never blocks the import).
+    void refreshRecordsSemanticIndex()
   }
   return {
     success: true,
@@ -387,22 +459,76 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
   // source/type/date filters as the list. The Timeline routes a non-empty query
   // here; an empty query stays on records:list (browse). Raw SQL over records_fts
   // (Drizzle can't model MATCH/bm25), mirroring getFinanceSummary's raw statements.
-  ipcMain.handle('records:search', (_event, opts: RecordSearchOpts): TimelineSearchHit[] => {
-    if (!opts || typeof opts.q !== 'string') return []
-    // Sanitize numeric inputs at the boundary — a NaN/Infinity/non-number from the
-    // renderer would otherwise bind into the date/limit comparisons and yield
-    // surprising empty results. (limit/offset are additionally clamped downstream.)
-    const finite = (v: unknown): number | undefined =>
-      typeof v === 'number' && Number.isFinite(v) ? v : undefined
-    return searchRecords(getRawSqlite(), {
-      q: opts.q,
-      source: typeof opts.source === 'string' ? opts.source : undefined,
-      type: typeof opts.type === 'string' ? opts.type : undefined,
-      from: finite(opts.from),
-      to: finite(opts.to),
-      limit: finite(opts.limit),
-      offset: finite(opts.offset)
-    })
+  ipcMain.handle(
+    'records:search',
+    async (_event, opts: RecordSearchOpts): Promise<TimelineSearchHit[]> => {
+      if (!opts || typeof opts.q !== 'string') return []
+      // Sanitize numeric inputs at the boundary — a NaN/Infinity/non-number from the
+      // renderer would otherwise bind into the date/limit comparisons and yield
+      // surprising empty results. (limit/offset are additionally clamped downstream.)
+      const finite = (v: unknown): number | undefined =>
+        typeof v === 'number' && Number.isFinite(v) ? v : undefined
+      const base = {
+        q: opts.q,
+        source: typeof opts.source === 'string' ? opts.source : undefined,
+        type: typeof opts.type === 'string' ? opts.type : undefined,
+        from: finite(opts.from),
+        to: finite(opts.to),
+        limit: finite(opts.limit),
+        offset: finite(opts.offset)
+      }
+      // "Find by meaning" — try the opt-in semantic index, transparently falling back
+      // to FTS keyword when there's no index (null) or Ollama is offline (throws).
+      if (opts.mode === 'semantic') {
+        try {
+          const hits = await searchRecordsSemantic(getRawSqlite(), opts.q, {
+            model: embeddingModel(),
+            limit: base.limit ?? 50,
+            source: base.source,
+            type: base.type,
+            from: base.from ?? null,
+            to: base.to ?? null
+          })
+          if (hits) return hits.map(semanticToHit)
+        } catch {
+          /* fall through to FTS */
+        }
+      }
+      return searchRecords(getRawSqlite(), base)
+    }
+  )
+
+  // Build / extend the OPT-IN records semantic index (local Ollama). Serial — the
+  // module lock prevents a manual rebuild from racing the import-triggered refresh.
+  ipcMain.handle('records:rebuild-semantic', async () => {
+    if (semanticBuildInFlight) return { success: false, error: 'A rebuild is already in progress' }
+    const run = (async () => {
+      const { index, result } = await buildRecordsEmbeddingsIndex(getRawSqlite(), {
+        model: embeddingModel()
+      })
+      saveRecordsIndex(index)
+      return result
+    })()
+    semanticBuildInFlight = run
+    try {
+      const result = await run
+      return { success: true, ...result }
+    } catch (err) {
+      return { success: false, error: (err as Error).message }
+    } finally {
+      semanticBuildInFlight = null
+    }
+  })
+
+  ipcMain.handle('records:semantic-status', () => {
+    const index = loadRecordsIndex()
+    return {
+      available: Boolean(index && index.embeddings.length > 0),
+      builtAt: index?.builtAt ?? null,
+      count: index?.embeddings.length ?? 0,
+      model: index?.model ?? null,
+      building: semanticBuildInFlight !== null
+    }
   })
 
   // "On this day" recap — records sharing today's month + day, from PRIOR years
