@@ -299,6 +299,46 @@ describe('records:stats', () => {
   })
 })
 
+describe('firehose curation (Curate)', () => {
+  function insertRecord(source: string, type: string, title: string): void {
+    sqlite
+      .prepare('INSERT INTO records (source,type,occurred_at,title,dedup_hash) VALUES (?,?,?,?,?)')
+      .run(source, type, Date.UTC(2024, 0, 1), title, `${source}|${title}`)
+  }
+
+  it('collapses browser history when includeFirehose=false, reveals it otherwise, and a source filter overrides', async () => {
+    insertRecord('netflix', 'watch', 'The Matrix')
+    insertRecord('browser', 'visit', 'example.com')
+    insertRecord('browser', 'visit', 'news.com')
+
+    // Collapsed (what the Timeline browses by default).
+    const collapsed = (await invoke('records:list', { includeFirehose: false })) as Rec[]
+    expect(collapsed.map((r) => r.source)).toEqual(['netflix'])
+
+    // Omitted → no exclusion (back-compat for any other caller).
+    expect(((await invoke('records:list')) as Rec[]).length).toBe(3)
+    // Explicitly included.
+    expect(((await invoke('records:list', { includeFirehose: true })) as Rec[]).length).toBe(3)
+
+    // Selecting the browser source overrides the collapse (the chip still works).
+    const browserOnly = (await invoke('records:list', {
+      source: 'browser',
+      includeFirehose: false
+    })) as Rec[]
+    expect(browserOnly).toHaveLength(2)
+    expect(browserOnly.every((r) => r.source === 'browser')).toBe(true)
+  })
+
+  it('records:stats reports the firehose (browser) count', async () => {
+    insertRecord('netflix', 'watch', 'X')
+    insertRecord('browser', 'visit', 'a')
+    insertRecord('browser', 'visit', 'b')
+    const stats = (await invoke('records:stats')) as { total: number; firehose: number }
+    expect(stats.total).toBe(3)
+    expect(stats.firehose).toBe(2)
+  })
+})
+
 describe('records:facets', () => {
   it('returns the sorted, distinct sources and kinds across the whole table', async () => {
     await invoke('records:import-paths', [

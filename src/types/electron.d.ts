@@ -874,6 +874,7 @@ declare global {
           q?: string
           limit?: number
           offset?: number
+          includeFirehose?: boolean
         }): Promise<TimelineRecord[]>
         search(opts: {
           q: string
@@ -906,6 +907,7 @@ declare global {
           sources: number
           earliest: number | null
           latest: number | null
+          firehose: number
         }>
         facets(): Promise<{ sources: string[]; types: string[] }>
         importFiles(): Promise<RecordsImportResult>

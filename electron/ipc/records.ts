@@ -17,7 +17,7 @@
 import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
 import { basename, extname } from 'node:path'
 import Database from 'better-sqlite3'
-import { type SQL, and, desc, eq, like, or, sql } from 'drizzle-orm'
+import { type SQL, and, desc, eq, inArray, like, notInArray, or, sql } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
 import { appSettings, records, snapshotFacts } from '../db/schema'
@@ -44,6 +44,7 @@ import {
   recognizeStream
 } from '../lib/recognizers'
 import { type RecordSearchOpts, type TimelineSearchHit, searchRecords } from '../lib/records-search'
+import { FIREHOSE_SOURCE_LIST } from '../lib/source-tiers'
 import { forEachZipEntry } from '../lib/zip'
 
 const MAX_IMPORT_BYTES = 50 * 1024 * 1024 // 50 MB — matches the contacts/finance guard
@@ -428,13 +429,27 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
     'records:list',
     (
       _event,
-      opts?: { source?: string; type?: string; q?: string; limit?: number; offset?: number }
+      opts?: {
+        source?: string
+        type?: string
+        q?: string
+        limit?: number
+        offset?: number
+        includeFirehose?: boolean
+      }
     ) => {
       const db = getDb()
       const limit = Math.min(Math.max(Math.trunc(opts?.limit ?? 200), 1), 1000)
       const offset = Math.max(Math.trunc(opts?.offset ?? 0), 0)
       const conds: SQL[] = []
-      if (opts?.source) conds.push(eq(records.source, opts.source))
+      if (opts?.source) {
+        conds.push(eq(records.source, opts.source))
+      } else if (opts?.includeFirehose === false && FIREHOSE_SOURCE_LIST.length > 0) {
+        // Curate (Phase 10.7): collapse firehose sources (browser history, …) from
+        // the default browse so they don't bury the signal events. Non-destructive —
+        // the rows stay on disk, and selecting the source's chip overrides this.
+        conds.push(notInArray(records.source, FIREHOSE_SOURCE_LIST))
+      }
       if (opts?.type) conds.push(eq(records.type, opts.type))
       const q = opts?.q?.trim()
       if (q) {
@@ -579,11 +594,22 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
       })
       .from(records)
       .get()
+    // Count of collapsed firehose records (browser history, …) so the Timeline can
+    // label its "Show browsing (N)" toggle. 0 when nothing firehose is imported.
+    const firehose =
+      FIREHOSE_SOURCE_LIST.length > 0
+        ? (db
+            .select({ n: sql<number>`count(*)` })
+            .from(records)
+            .where(inArray(records.source, FIREHOSE_SOURCE_LIST))
+            .get()?.n ?? 0)
+        : 0
     return {
       total: row?.total ?? 0,
       sources: row?.sources ?? 0,
       earliest: row?.earliest ?? null,
-      latest: row?.latest ?? null
+      latest: row?.latest ?? null,
+      firehose
     }
   })
 
