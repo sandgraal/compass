@@ -277,8 +277,8 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       }
     ) => {
       const db = getDb()
-      // Phase 11.1 — accept an ISO-4217 currency; reject anything we can't value
-      // (falls back to USD) so a bad code never lands in the ledger.
+      // Phase 11.1 — accept a supported ISO-4217 currency; anything unsupported
+      // or blank falls back to USD so a bad code never lands in the ledger.
       const currency = isSupportedCurrency(account.currency)
         ? normalizeCurrency(account.currency)
         : DEFAULT_BASE_CURRENCY
@@ -730,7 +730,15 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   // the "X accounts unconverted — add a rate" prompt.
   ipcMain.handle('finance:get-fx-rates', () => {
     const db = getDb()
-    return db.select().from(fxRates).orderBy(desc(fxRates.date), fxRates.base, fxRates.quote).all()
+    const rows = db
+      .select()
+      .from(fxRates)
+      .orderBy(desc(fxRates.date), fxRates.base, fxRates.quote)
+      .all()
+    // `fetchedAt` is a Drizzle `timestamp_ms` column → a `Date` on select, but
+    // the preload/renderer contract is epoch ms (`number | null`). Normalize so
+    // consumers that treat it as a number don't break.
+    return rows.map((r) => ({ ...r, fetchedAt: r.fetchedAt ? r.fetchedAt.getTime() : null }))
   })
 
   // Manually record an FX rate (units of `quote` per 1 unit of `base`). The

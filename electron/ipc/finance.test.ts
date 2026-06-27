@@ -416,9 +416,16 @@ describe('finance:set-fx-rate + finance:get-fx-rates', () => {
     expect(out.success).toBe(true)
 
     const get = await registerAndGet('finance:get-fx-rates')
-    const rows = (await invoke(get)) as Array<{ base: string; quote: string; rate: number }>
+    const rows = (await invoke(get)) as Array<{
+      base: string
+      quote: string
+      rate: number
+      fetchedAt: number | null
+    }>
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ base: 'USD', quote: 'CRC', rate: 512.3 })
+    // `fetchedAt` must cross the wire as epoch ms (number), not a Drizzle Date.
+    expect(typeof rows[0].fetchedAt).toBe('number')
   })
 
   it('upserts the same (date, base, quote) in place', async () => {

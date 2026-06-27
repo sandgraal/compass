@@ -1421,7 +1421,13 @@ function FxRatesCard({
   }, [load])
 
   const quoteOptions = supported.filter((c) => c.code !== base)
-  const selectedQuote = quote || quoteOptions[0]?.code || ''
+  // Clamp to a valid non-base option: if the user picked a quote and then made
+  // it the base currency, the stale `quote` would no longer be selectable (and
+  // would make base === quote, which the backend rejects). Fall back to the
+  // first available quote in that case.
+  const selectedQuote = quoteOptions.some((c) => c.code === quote)
+    ? quote
+    : (quoteOptions[0]?.code ?? '')
 
   const addRate = async () => {
     if (!window.api?.finance) return
