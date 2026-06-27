@@ -1,4 +1,11 @@
-import { type AnySQLiteColumn, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import {
+  type AnySQLiteColumn,
+  integer,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex
+} from 'drizzle-orm/sqlite-core'
 
 // ---- Integrations ----
 export const integrations = sqliteTable('integrations', {
@@ -148,6 +155,11 @@ export const financeAccounts = sqliteTable('finance_accounts', {
   type: text('type').notNull().default('credit'), // 'checking' | 'savings' | 'credit' | 'investment'
   isDebt: integer('is_debt', { mode: 'boolean' }).default(false),
   balance: real('balance').default(0), // current balance; for debt accounts, positive = amount owed
+  // ISO 4217 native currency of this account (Phase 11.1). Balances + this
+  // account's transactions are denominated here; net-worth/forecast convert to
+  // the user's base currency via the `fx_rates` snapshot. Default 'USD' so every
+  // pre-multi-currency account keeps working unchanged.
+  currency: text('currency').notNull().default('USD'),
   apr: real('apr').default(0), // annual rate as decimal e.g. 0.2499
   minPayment: real('min_payment').default(0),
   creditLimit: real('credit_limit'),
@@ -208,6 +220,30 @@ export const financeBalanceSnapshots = sqliteTable('finance_balance_snapshots', 
   balance: real('balance').notNull(),
   source: text('source').notNull() // 'manual' | 'inferred' | 'plaid'
 })
+
+// ---- FX-rate snapshots (Phase 11.1 — multi-currency foundation) ----
+// One row per (day, base→quote) exchange rate. `rate` is units of `quote` per
+// ONE unit of `base` (e.g. base='USD', quote='CRC', rate=512.3 → $1 = ₡512.3).
+// The latest row for a pair drives net-worth/forecast conversion to the user's
+// base currency; historical rows let a transfer's FX gain/loss be computed at
+// the rate that held on its day. Rows arrive from a manual entry OR a daily
+// main-process fetch (Phase 11.1b) — `source` records which. Idempotent: the
+// UNIQUE (date, base, quote) index upserts a re-fetch/re-entry in place.
+export const fxRates = sqliteTable(
+  'fx_rates',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    date: text('date').notNull(), // ISO 'YYYY-MM-DD' — the rate's as-of day (local)
+    base: text('base').notNull(), // ISO 4217, e.g. 'USD'
+    quote: text('quote').notNull(), // ISO 4217, e.g. 'CRC'
+    rate: real('rate').notNull(), // units of `quote` per 1 unit of `base`
+    source: text('source').notNull().default('manual'), // 'manual' | 'erapi'
+    fetchedAt: integer('fetched_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+  },
+  (t) => ({
+    uniqByDayPair: uniqueIndex('uq_fx_rates_date_base_quote').on(t.date, t.base, t.quote)
+  })
+)
 
 // ---- Forecast overrides (Phase 4.5) ----
 // User edits to the projected cash-flow stream. The forecast engine reads
@@ -290,6 +326,10 @@ export const financeTransactions = sqliteTable('finance_transactions', {
   hash: text('hash').notNull().unique(), // dedup key
   date: text('date').notNull(), // ISO 'YYYY-MM-DD'
   amount: real('amount').notNull(), // negative = expense
+  // ISO 4217 currency this `amount` is denominated in (Phase 11.1). Inherited
+  // from the owning account at ingest; default 'USD'. Lets a colón-priced CR
+  // charge report its true base-currency (USD) cost via the `fx_rates` snapshot.
+  currency: text('currency').notNull().default('USD'),
   description: text('description').notNull(),
   accountId: integer('account_id').references(() => financeAccounts.id),
   category: text('category').default('Uncategorized'),

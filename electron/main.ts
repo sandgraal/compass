@@ -107,7 +107,7 @@ function createWindow(): void {
         responseHeaders: {
           ...details.responseHeaders,
           'Content-Security-Policy': [
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://gmail.googleapis.com https://api.github.com https://oauth2.googleapis.com https://github.com https://accounts.google.com https://bridge.simplefin.org https://beta-bridge.simplefin.org; frame-src 'none'; object-src 'none'"
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://gmail.googleapis.com https://api.github.com https://oauth2.googleapis.com https://github.com https://accounts.google.com https://bridge.simplefin.org https://beta-bridge.simplefin.org https://open.er-api.com; frame-src 'none'; object-src 'none'"
           ]
         }
       })

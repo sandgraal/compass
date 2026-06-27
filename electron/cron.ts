@@ -5,6 +5,7 @@ import { schedulePlaidDailySync, stopPlaidDailySync } from './cron-plaid'
 import { scheduleSimplefinDailySync, stopSimplefinDailySync } from './cron-simplefin'
 import { getDb, getRawSqlite } from './db/client'
 import { appSettings, integrations } from './db/schema'
+import { syncFxRates } from './integrations/finance-fx-fetch'
 import { captureSnapshots } from './integrations/finance-snapshot'
 import { syncLinear } from './integrations/linear'
 import { syncNotion } from './integrations/notion'
@@ -23,6 +24,7 @@ import { syncAppleCalendar, syncGitHub, syncGoogle } from './ipc/sync'
 const scheduledTasks = new Map<string, cron.ScheduledTask>()
 let snapshotTask: cron.ScheduledTask | null = null
 let morningBriefTask: cron.ScheduledTask | null = null
+let fxRatesTask: cron.ScheduledTask | null = null
 
 // Daily at 00:05 local time. Runs the net-worth balance snapshot pass for
 // every account. Idempotent — captureSnapshots() skips accounts that
@@ -42,6 +44,24 @@ function scheduleFinanceSnapshot(): void {
   snapshotTask?.stop()
   snapshotTask = cron.schedule(SNAPSHOT_CRON, runFinanceSnapshot)
   snapshotTask.start()
+}
+
+// Daily at 00:15 local time — just after the balance snapshot. Pulls the latest
+// FX rates so foreign-currency net worth stays current (Phase 11.1b). Best
+// effort: a fetch failure (offline, provider down) logs and leaves the existing
+// rates in place; idempotent via the fx_rates UNIQUE key.
+const FX_REFRESH_CRON = '15 0 * * *'
+
+function runFxRefresh(): void {
+  void syncFxRates(getRawSqlite()).catch((err) => {
+    console.error('[cron] FX rate refresh failed:', err)
+  })
+}
+
+function scheduleFxRefresh(): void {
+  fxRatesTask?.stop()
+  fxRatesTask = cron.schedule(FX_REFRESH_CRON, runFxRefresh)
+  fxRatesTask.start()
 }
 
 // Daily Morning Brief notification at the user-chosen local time
@@ -142,6 +162,8 @@ function stopAllJobs(): void {
   snapshotTask = null
   morningBriefTask?.stop()
   morningBriefTask = null
+  fxRatesTask?.stop()
+  fxRatesTask = null
   // Plaid daily task is scheduled separately (see cron-plaid.ts for the
   // rationale on why it's not driven by the per-integration interval).
   stopPlaidDailySync()
@@ -212,6 +234,7 @@ export function startCronJobs(): void {
     console.warn('[cron] scheduling from integrations failed (DB not ready?)', err)
   }
   scheduleFinanceSnapshot()
+  scheduleFxRefresh()
   scheduleMorningBrief()
   schedulePlaidDailySync()
   scheduleSimplefinDailySync()

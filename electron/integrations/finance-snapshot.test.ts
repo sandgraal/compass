@@ -21,6 +21,7 @@ function makeDb(): Database.Database {
       type TEXT NOT NULL DEFAULT 'credit',
       is_debt INTEGER DEFAULT 0,
       balance REAL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'USD',
       asset_class TEXT NOT NULL DEFAULT 'spending'
     );
     CREATE TABLE finance_transactions (
@@ -28,6 +29,7 @@ function makeDb(): Database.Database {
       account_id INTEGER REFERENCES finance_accounts(id),
       date TEXT NOT NULL,
       amount REAL NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'USD',
       description TEXT NOT NULL DEFAULT ''
     );
     CREATE TABLE finance_balance_snapshots (
@@ -38,6 +40,21 @@ function makeDb(): Database.Database {
       source TEXT NOT NULL
     );
     CREATE INDEX idx_snap_acct_cap ON finance_balance_snapshots(account_id, captured_at);
+    CREATE TABLE app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER
+    );
+    CREATE TABLE fx_rates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      base TEXT NOT NULL,
+      quote TEXT NOT NULL,
+      rate REAL NOT NULL,
+      source TEXT NOT NULL DEFAULT 'manual',
+      fetched_at INTEGER
+    );
+    CREATE UNIQUE INDEX uq_fx_rates_date_base_quote ON fx_rates (date, base, quote);
   `)
   return sqlite
 }
@@ -359,6 +376,76 @@ describe('getNetWorthSnapshot', () => {
   })
 })
 
+describe('getNetWorthSnapshot — multi-currency (Phase 11.1)', () => {
+  function setBase(code: string): void {
+    sqlite
+      .prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('baseCurrency', ?)")
+      .run(code)
+  }
+  function addRate(date: string, base: string, quote: string, rate: number): void {
+    sqlite
+      .prepare('INSERT INTO fx_rates (date, base, quote, rate) VALUES (?, ?, ?, ?)')
+      .run(date, base, quote, rate)
+  }
+
+  it('defaults base to USD and leaves all-USD totals unchanged', () => {
+    sqlite.prepare("INSERT INTO finance_accounts (id, name) VALUES (1, 'Chase')").run()
+    setAccountBalance(sqlite, 1, 5000)
+    const snap = getNetWorthSnapshot(sqlite)
+    expect(snap.baseCurrency).toBe('USD')
+    expect(snap.assets).toBe(5000)
+    expect(snap.byAccount[0].currency).toBe('USD')
+    expect(snap.byAccount[0].baseBalance).toBe(5000)
+    expect(snap.unconverted).toEqual([])
+  })
+
+  it('converts a colón-denominated CR property into the USD base total', () => {
+    sqlite
+      .prepare(
+        "INSERT INTO finance_accounts (id, name, asset_class, currency) VALUES (1, 'CR Property', 'manual_asset', 'CRC')"
+      )
+      .run()
+    // ₡100,000,000 at ₡500/$1 = $200,000.
+    setAccountBalance(sqlite, 1, 100_000_000)
+    addRate('2026-06-27', 'USD', 'CRC', 500)
+
+    const snap = getNetWorthSnapshot(sqlite)
+    expect(snap.baseCurrency).toBe('USD')
+    expect(snap.byAccount[0].currency).toBe('CRC')
+    expect(snap.byAccount[0].balance).toBe(100_000_000) // native
+    expect(snap.byAccount[0].baseBalance).toBe(200_000) // converted
+    expect(snap.assets).toBe(200_000)
+    expect(snap.net).toBe(200_000)
+  })
+
+  it('flags a foreign account with no rate as unconverted and excludes it', () => {
+    sqlite.prepare("INSERT INTO finance_accounts (id, name) VALUES (1, 'Chase USD')").run()
+    sqlite
+      .prepare("INSERT INTO finance_accounts (id, name, currency) VALUES (2, 'BAC CR', 'CRC')")
+      .run()
+    setAccountBalance(sqlite, 1, 5000)
+    setAccountBalance(sqlite, 2, 1_000_000) // no CRC rate on file
+
+    const snap = getNetWorthSnapshot(sqlite)
+    expect(snap.assets).toBe(5000) // only the USD account counts
+    expect(snap.unconverted).toHaveLength(1)
+    expect(snap.unconverted[0]).toMatchObject({ currency: 'CRC', balance: 1_000_000 })
+    expect(snap.byAccount.find((a) => a.accountId === 2)?.baseBalance).toBeNull()
+  })
+
+  it('rolls up into a non-USD base currency from settings', () => {
+    setBase('EUR')
+    sqlite.prepare("INSERT INTO finance_accounts (id, name) VALUES (1, 'Chase USD')").run()
+    setAccountBalance(sqlite, 1, 1000)
+    addRate('2026-06-27', 'USD', 'EUR', 0.9) // $1 = €0.90
+
+    const snap = getNetWorthSnapshot(sqlite)
+    expect(snap.baseCurrency).toBe('EUR')
+    expect(snap.byAccount[0].baseBalance).toBe(900)
+    expect(snap.assets).toBe(900)
+  })
+})
+
 describe('getNetWorthTrajectory', () => {
   it('returns every snapshot in chronological order with account metadata', () => {
     sqlite
@@ -399,5 +486,25 @@ describe('getNetWorthTrajectory', () => {
     })
     expect(traj).toHaveLength(1)
     expect(traj[0].balance).toBe(200)
+  })
+
+  it('carries a base-converted value per point for mixed-currency totals (Phase 11.1)', () => {
+    sqlite
+      .prepare("INSERT INTO finance_accounts (id, name, currency) VALUES (1, 'BAC CR', 'CRC')")
+      .run()
+    sqlite
+      .prepare('INSERT INTO fx_rates (date, base, quote, rate) VALUES (?, ?, ?, ?)')
+      .run('2026-06-27', 'USD', 'CRC', 500)
+    const t1 = new Date('2026-02-01T00:00:00').getTime()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (1, ?, 5000000, 'manual')"
+      )
+      .run(t1)
+
+    const traj = getNetWorthTrajectory(sqlite)
+    expect(traj[0].currency).toBe('CRC')
+    expect(traj[0].balance).toBe(5_000_000) // native colones
+    expect(traj[0].baseBalance).toBe(10_000) // ₡5,000,000 / 500 = $10,000
   })
 })

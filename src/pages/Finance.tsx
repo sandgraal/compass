@@ -31,6 +31,7 @@ import {
 } from 'recharts'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
+import { formatMoney, formatMoneySigned } from '../lib/money'
 import { cn, isoDate, isoMonth } from '../lib/utils'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -1001,9 +1002,12 @@ const ASSET_CLASS_LABEL: Record<string, string> = {
   liability: 'Liability'
 }
 
+type CurrencySettings = Awaited<ReturnType<Window['api']['finance']['getCurrencySettings']>>
+
 function NetWorthTab(): JSX.Element {
   const [snapshot, setSnapshot] = useState<NetWorthSnapshot | null>(null)
   const [trajectory, setTrajectory] = useState<NetWorthTrajectory>([])
+  const [currencySettings, setCurrencySettings] = useState<CurrencySettings | null>(null)
   const [loading, setLoading] = useState(true)
   const [capturing, setCapturing] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -1015,12 +1019,14 @@ function NetWorthTab(): JSX.Element {
     if (!isElectron || !window.api.finance) return
     setLoading(true)
     try {
-      const [s, t] = await Promise.all([
+      const [s, t, c] = await Promise.all([
         window.api.finance.getNetWorthSnapshot(),
-        window.api.finance.getNetWorthTrajectory({ sinceDays: 365 })
+        window.api.finance.getNetWorthTrajectory({ sinceDays: 365 }),
+        window.api.finance.getCurrencySettings()
       ])
       setSnapshot(s)
       setTrajectory(t)
+      setCurrencySettings(c)
     } catch (err) {
       console.error('[networth] refresh failed', err)
       showToast('Failed to load net worth.', 'error')
@@ -1028,6 +1034,36 @@ function NetWorthTab(): JSX.Element {
       setLoading(false)
     }
   }, [showToast])
+
+  const changeBaseCurrency = async (code: string) => {
+    if (!window.api?.finance) return
+    try {
+      const res = await window.api.finance.setBaseCurrency(code)
+      if (!res.success) {
+        showToast(res.error ?? 'Failed to set base currency.', 'error')
+        return
+      }
+      await refresh()
+    } catch (err) {
+      console.error('[networth] set base currency failed', err)
+      showToast('Failed to set base currency.', 'error')
+    }
+  }
+
+  const changeAccountCurrency = async (accountId: number, code: string) => {
+    if (!window.api?.finance) return
+    try {
+      const res = await window.api.finance.setAccountCurrency(accountId, code)
+      if (!res.success) {
+        showToast(res.error ?? 'Failed to set account currency.', 'error')
+        return
+      }
+      await refresh()
+    } catch (err) {
+      console.error('[networth] set account currency failed', err)
+      showToast('Failed to set account currency.', 'error')
+    }
+  }
 
   useEffect(() => {
     void refresh()
@@ -1106,20 +1142,54 @@ function NetWorthTab(): JSX.Element {
     )
   }
 
+  const base = snapshot.baseCurrency
+  const supported = currencySettings?.supported ?? []
+  const fmtBase = (n: number): string => formatMoney(n, base, { decimals: 0 })
+  const fmtBaseSigned = (n: number): string => formatMoneySigned(n, base, { decimals: 0 })
+
   return (
     <div className="space-y-6">
+      {/* Base-currency control + unconverted warning (Phase 11.1) */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>Base currency</span>
+          <select
+            value={base}
+            onChange={(e) => void changeBaseCurrency(e.target.value)}
+            aria-label="Base currency"
+            className="bg-background border border-border rounded px-2 py-1 text-xs text-foreground"
+          >
+            {supported.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.code} · {c.name}
+              </option>
+            ))}
+          </select>
+          <span>— all totals shown in {base}</span>
+        </div>
+      </div>
+      {snapshot.unconverted.length > 0 && (
+        <div className="bg-amber-500/10 border border-amber-500/40 rounded-lg px-4 py-3 text-xs text-amber-700 dark:text-amber-400">
+          {snapshot.unconverted.length} account
+          {snapshot.unconverted.length === 1 ? '' : 's'} in a foreign currency (
+          {Array.from(new Set(snapshot.unconverted.map((u) => u.currency))).join(', ')}) couldn't be
+          valued in {base} — add an exchange rate below to include{' '}
+          {snapshot.unconverted.length === 1 ? 'it' : 'them'} in your net worth.
+        </div>
+      )}
+
       {/* 4-tile summary */}
       <div className="grid grid-cols-4 gap-4">
-        <NetWorthTile label="Assets" value={fmtMoney(snapshot.assets)} />
-        <NetWorthTile label="Liabilities" value={fmtMoney(snapshot.liabilities)} />
-        <NetWorthTile label="Net worth" value={fmtMoney(snapshot.net)} emphasize />
+        <NetWorthTile label="Assets" value={fmtBase(snapshot.assets)} />
+        <NetWorthTile label="Liabilities" value={fmtBase(snapshot.liabilities)} />
+        <NetWorthTile label="Net worth" value={fmtBase(snapshot.net)} emphasize />
         <NetWorthTile
           label="Δ 30d"
-          value={snapshot.deltas.d30 == null ? '—' : fmtSignedMoney(snapshot.deltas.d30)}
+          value={snapshot.deltas.d30 == null ? '—' : fmtBaseSigned(snapshot.deltas.d30)}
           sub={
             snapshot.deltas.d90 == null
               ? undefined
-              : `${fmtSignedMoney(snapshot.deltas.d90)} 90d · ${snapshot.deltas.d365 == null ? '—' : fmtSignedMoney(snapshot.deltas.d365)} 1y`
+              : `${fmtBaseSigned(snapshot.deltas.d90)} 90d · ${snapshot.deltas.d365 == null ? '—' : fmtBaseSigned(snapshot.deltas.d365)} 1y`
           }
         />
       </div>
@@ -1174,11 +1244,13 @@ function NetWorthTab(): JSX.Element {
                 />
                 <YAxis
                   tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-                  tickFormatter={(v) => fmtMoney(v as number)}
+                  tickFormatter={(v) =>
+                    formatMoney(v as number, base, { decimals: 0, compact: true })
+                  }
                   width={70}
                 />
                 <Tooltip
-                  formatter={(v) => fmtMoney(Number(v))}
+                  formatter={(v) => fmtBase(Number(v))}
                   contentStyle={{
                     background: 'hsl(var(--card))',
                     border: '1px solid hsl(var(--border))',
@@ -1211,6 +1283,7 @@ function NetWorthTab(): JSX.Element {
             <tr>
               <th className="text-left">Account</th>
               <th className="text-left">Class</th>
+              <th className="text-left">Currency</th>
               <th className="text-right">Balance</th>
               <th className="text-left">Last captured</th>
               <th />
@@ -1226,6 +1299,25 @@ function NetWorthTab(): JSX.Element {
                   <td className="text-muted-foreground">
                     {ASSET_CLASS_LABEL[a.assetClass] ?? a.assetClass}
                   </td>
+                  <td>
+                    <select
+                      value={a.currency}
+                      onChange={(e) => void changeAccountCurrency(a.accountId, e.target.value)}
+                      aria-label={`Currency for ${a.name}`}
+                      className="bg-background border border-border rounded px-1.5 py-1 text-xs text-foreground"
+                    >
+                      {/* Always include the account's current code even if it ever
+                          leaves the supported list, so the picker can't blank out. */}
+                      {(supported.some((c) => c.code === a.currency)
+                        ? supported
+                        : [{ code: a.currency, name: a.currency }, ...supported]
+                      ).map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.code}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
                   <td className="text-right tabular-nums">
                     {editing ? (
                       <input
@@ -1239,9 +1331,18 @@ function NetWorthTab(): JSX.Element {
                         className="w-28 bg-background border border-border rounded px-2 py-1 text-right text-sm"
                       />
                     ) : (
-                      <span className={a.isDebt ? 'text-foreground' : ''}>
-                        {fmtMoney(a.balance)}
-                      </span>
+                      <div>
+                        <span className={a.isDebt ? 'text-foreground' : ''}>
+                          {formatMoney(a.balance, a.currency, { decimals: 0 })}
+                        </span>
+                        {a.currency !== base && (
+                          <div className="text-[11px] text-muted-foreground">
+                            {a.baseBalance == null
+                              ? `no ${base} rate`
+                              : `≈ ${fmtBase(a.baseBalance)}`}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </td>
                   <td className="text-muted-foreground text-xs">
@@ -1282,6 +1383,181 @@ function NetWorthTab(): JSX.Element {
           </tbody>
         </table>
       </div>
+
+      {/* Manual FX rates (Phase 11.1) */}
+      <FxRatesCard base={base} supported={supported} onChange={refresh} />
+    </div>
+  )
+}
+
+function FxRatesCard({
+  base,
+  supported,
+  onChange
+}: {
+  base: string
+  supported: CurrencySettings['supported']
+  onChange: () => void | Promise<void>
+}): JSX.Element {
+  type FxRow = Awaited<ReturnType<Window['api']['finance']['getFxRates']>>[number]
+  const [rates, setRates] = useState<FxRow[]>([])
+  const [quote, setQuote] = useState('')
+  const [rateInput, setRateInput] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const { toast: showToast } = useToast()
+
+  const load = useCallback(async () => {
+    if (!window.api?.finance) return
+    try {
+      setRates(await window.api.finance.getFxRates())
+    } catch (err) {
+      console.error('[fx] load failed', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const quoteOptions = supported.filter((c) => c.code !== base)
+  const selectedQuote = quote || quoteOptions[0]?.code || ''
+
+  const addRate = async () => {
+    if (!window.api?.finance) return
+    const rate = Number(rateInput)
+    if (!selectedQuote) {
+      showToast('Pick a currency.', 'error')
+      return
+    }
+    if (!Number.isFinite(rate) || rate <= 0) {
+      showToast('Enter a positive rate.', 'error')
+      return
+    }
+    setSaving(true)
+    try {
+      const res = await window.api.finance.setFxRate({
+        date: isoDate(new Date()),
+        base,
+        quote: selectedQuote,
+        rate
+      })
+      if (!res.success) {
+        showToast(res.error ?? 'Failed to save rate.', 'error')
+        return
+      }
+      setRateInput('')
+      await load()
+      await onChange()
+    } catch (err) {
+      console.error('[fx] add failed', err)
+      showToast('Failed to save rate.', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const refreshRates = async () => {
+    if (!window.api?.finance) return
+    setRefreshing(true)
+    try {
+      const res = await window.api.finance.refreshFxRates()
+      if (!res.success) {
+        showToast(res.error ?? 'Failed to fetch rates.', 'error')
+        return
+      }
+      showToast(`Updated ${res.updated ?? 0} rate${res.updated === 1 ? '' : 's'}.`, 'success')
+      await load()
+      await onChange()
+    } catch (err) {
+      console.error('[fx] refresh failed', err)
+      showToast('Failed to fetch rates.', 'error')
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-5">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold">Exchange rates</h3>
+          <p className="text-xs text-muted-foreground">
+            Used to value foreign-currency accounts in {base}. Fetched automatically each day — or
+            pull now, or enter a rate manually.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void refreshRates()}
+          disabled={refreshing}
+          className="shrink-0 px-3 py-1.5 text-xs border border-border rounded-md hover:bg-muted disabled:opacity-50"
+        >
+          {refreshing ? 'Fetching…' : 'Refresh rates'}
+        </button>
+      </div>
+      <div className="flex flex-wrap items-end gap-2 mb-4">
+        <label className="text-xs text-muted-foreground">
+          <span className="block mb-1">1 {base} =</span>
+          <input
+            type="number"
+            step="any"
+            value={rateInput}
+            onChange={(e) => setRateInput(e.target.value)}
+            placeholder="512.30"
+            aria-label="Exchange rate"
+            className="w-32 bg-background border border-border rounded px-2 py-1 text-sm"
+          />
+        </label>
+        <select
+          value={selectedQuote}
+          onChange={(e) => setQuote(e.target.value)}
+          aria-label="Foreign currency"
+          className="bg-background border border-border rounded px-2 py-1 text-sm"
+        >
+          {quoteOptions.map((c) => (
+            <option key={c.code} value={c.code}>
+              {c.code} · {c.name}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => void addRate()}
+          disabled={saving}
+          className="px-3 py-1.5 text-xs border border-border rounded-md hover:bg-muted disabled:opacity-50"
+        >
+          {saving ? 'Saving…' : 'Add rate'}
+        </button>
+      </div>
+      {rates.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No rates yet.</p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="text-xs text-muted-foreground">
+            <tr>
+              <th className="text-left">Pair</th>
+              <th className="text-right">Rate</th>
+              <th className="text-left">As of</th>
+              <th className="text-left">Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rates.map((r) => (
+              <tr key={r.id} className="border-t border-border">
+                <td className="py-1.5">
+                  1 {r.base} = {r.quote}
+                </td>
+                <td className="text-right tabular-nums">
+                  {r.rate.toLocaleString('en-US', { maximumFractionDigits: 4 })}
+                </td>
+                <td className="text-muted-foreground text-xs">{r.date}</td>
+                <td className="text-muted-foreground text-xs">{r.source}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   )
 }
@@ -1332,9 +1608,13 @@ export function buildTrajectoryChartData(
   if (trajectory.length === 0) return []
 
   // Group all snapshots by date (sorted), then walk forward maintaining the
-  // latest known balance per account.
+  // latest known balance per account. The net line sums each account's
+  // BASE-currency value (Phase 11.1) so mixed-currency portfolios total
+  // correctly; for USD-only data `baseBalance` equals the native balance.
+  // Foreign accounts with no FX rate (`baseBalance === null`) are skipped —
+  // the same policy as the net-worth tiles' `unconverted` bucket.
   const dates = Array.from(new Set(trajectory.map((p) => p.date))).sort()
-  const latestByAccount = new Map<number, { balance: number; isDebt: boolean }>()
+  const latestByAccount = new Map<number, { baseBalance: number | null; isDebt: boolean }>()
 
   // Pre-index trajectory by (date → accountId → snapshot)
   const byDate = new Map<string, NetWorthTrajectory>()
@@ -1347,13 +1627,14 @@ export function buildTrajectoryChartData(
   const out: Array<{ date: string; net: number }> = []
   for (const date of dates) {
     for (const p of byDate.get(date) ?? []) {
-      latestByAccount.set(p.accountId, { balance: p.balance, isDebt: p.isDebt })
+      latestByAccount.set(p.accountId, { baseBalance: p.baseBalance, isDebt: p.isDebt })
     }
     let assets = 0
     let liabilities = 0
-    for (const { balance, isDebt } of latestByAccount.values()) {
-      if (isDebt) liabilities += balance
-      else assets += balance
+    for (const { baseBalance, isDebt } of latestByAccount.values()) {
+      if (baseBalance == null) continue // unconvertible foreign account — exclude
+      if (isDebt) liabilities += baseBalance
+      else assets += baseBalance
     }
     out.push({ date, net: Math.round((assets - liabilities) * 100) / 100 })
   }

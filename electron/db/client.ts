@@ -132,6 +132,18 @@ function ensureNewTables(sqlite: Database.Database): void {
       shift_to_date TEXT,
       created_at INTEGER
     );
+    -- FX-rate snapshots (Phase 11.1). Lives here (the always-run fallback) as
+    -- well as migration 0019 because the packaged app doesn't bundle migrations.
+    CREATE TABLE IF NOT EXISTS fx_rates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      base TEXT NOT NULL,
+      quote TEXT NOT NULL,
+      rate REAL NOT NULL,
+      source TEXT NOT NULL DEFAULT 'manual',
+      fetched_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_fx_rates_date_base_quote ON fx_rates (date, base, quote);
     CREATE TABLE IF NOT EXISTS plaid_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       item_id TEXT NOT NULL UNIQUE,
@@ -373,6 +385,13 @@ function ensureNewTables(sqlite: Database.Database): void {
   } catch {
     /* ignore */
   }
+  // Phase 11.1 — multi-currency foundation. Thread an ISO-4217 `currency`
+  // column onto legacy `finance_accounts` + `finance_transactions` rows. Both
+  // default 'USD' so every pre-existing row keeps its current (USD) meaning;
+  // foreign-currency accounts are opted in explicitly via the Accounts UI. The
+  // `fx_rates` table itself is created in the CREATE TABLE block above.
+  ensureColumn(sqlite, 'finance_accounts', 'currency', "TEXT NOT NULL DEFAULT 'USD'")
+  ensureColumn(sqlite, 'finance_transactions', 'currency', "TEXT NOT NULL DEFAULT 'USD'")
   if (addedSyncInterval) {
     // One-time migration: seed per-integration intervals from the legacy global setting so users
     // who tuned `syncInterval` keep their preference on existing connected integrations.
@@ -557,6 +576,7 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       type TEXT NOT NULL DEFAULT 'credit',
       is_debt INTEGER DEFAULT 0,
       balance REAL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'USD',
       apr REAL DEFAULT 0,
       min_payment REAL DEFAULT 0,
       credit_limit REAL,
@@ -602,6 +622,18 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       source TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS fx_rates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      base TEXT NOT NULL,
+      quote TEXT NOT NULL,
+      rate REAL NOT NULL,
+      source TEXT NOT NULL DEFAULT 'manual',
+      fetched_at INTEGER
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_fx_rates_date_base_quote ON fx_rates (date, base, quote);
+
     CREATE TABLE IF NOT EXISTS forecast_overrides (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       account_id INTEGER NOT NULL REFERENCES finance_accounts(id),
@@ -618,6 +650,7 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       hash TEXT NOT NULL UNIQUE,
       date TEXT NOT NULL,
       amount REAL NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'USD',
       description TEXT NOT NULL,
       account_id INTEGER REFERENCES finance_accounts(id),
       category TEXT DEFAULT 'Uncategorized',

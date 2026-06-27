@@ -524,11 +524,22 @@ deeper financial/health/comms sources (10.2–10.4) + full CRED (10.6).
 > `security-auditor` merge gates (FX network calls + foreign-account identifiers). Thresholds/forms are
 > jurisdiction-specific — *(verify at build time)*.
 
-- [ ] **11.1 Multi-currency foundation** (L) — *the keystone.* Today every amount is hard-coded USD
-  (`toLocaleString('en-US', { currency: 'USD' })`). Add a `currency` field on accounts/transactions, a
-  daily **FX-rate snapshot** table (main-process fetch, per-source CSP, no wildcard), base-currency net
-  worth + forecast, and FX gain/loss on cross-border transfers. Reuses the finance schema,
-  `finance-snapshot.ts`, and `buildForecast`. Everything else cross-border depends on this.
+- [~] **11.1 Multi-currency foundation** (L) — *the keystone.* 🟡 *foundation shipped; live FX fetch +
+  FX gain/loss remain.* **Done:** `currency` column on `finance_accounts` + `finance_transactions`
+  (migration `0019`, mirrored in `ensureNewTables`); an `fx_rates` snapshot table (UNIQUE `(date, base,
+  quote)`); a pure conversion module `electron/integrations/finance-fx.ts` (geo→currency defaults,
+  `convert`/`pickRate` with direct/inverse/USD-triangulation, base-currency setting); **base-currency net
+  worth** — `getNetWorthSnapshot`/trajectory/deltas convert each account's native balance and surface an
+  `unconverted` bucket when a foreign account has no rate; IPC (`finance:get-currency-settings` ·
+  `set-base-currency` · `set-account-currency` · `get-fx-rates` · `set-fx-rate`); a central renderer
+  formatter `src/lib/money.ts`; a currency-aware Net Worth tab (per-account currency picker, native +
+  base display, unconverted banner, FX-rate card). **Live FX fetch (Phase 11.1b):** main-process
+  `electron/integrations/finance-fx-fetch.ts` pulls USD-anchored rates from `open.er-api.com` (free,
+  no-key, covers CRC+COP), pinned in the CSP `connect-src` (no wildcard); `finance:refresh-fx-rates`
+  IPC + a "Refresh rates" button + a daily cron at 00:15; passed the inline `security-review` gate.
+  **Remaining:** **FX gain/loss** on cross-border transfers, ingest-time txn-currency inheritance, and
+  base-currency **forecast** rollup (forecast stays per-account-native today); run the `security-auditor`
+  subagent as the pre-merge gate.
 - [ ] **11.2 Foreign-account & expat-tax surface** (M) — the foreign side of a US expat return, absent
   today. **FBAR (FinCEN 114)** max-aggregate-foreign-balance-by-year tracker + threshold flag (>$10k
   *(verify)*), **FATCA (Form 8938)**, and a **foreign-tax-credit** ledger. Extends `finance-tax.ts` + the

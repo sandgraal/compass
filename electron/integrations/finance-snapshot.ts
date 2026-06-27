@@ -14,6 +14,8 @@
  * `better-sqlite3` directly without going through Drizzle.
  */
 
+import { getBaseCurrency, loadFxRates, pickRate } from './finance-fx'
+
 export type SnapshotSource = 'manual' | 'inferred' | 'plaid'
 
 export type SqliteForSnapshot = {
@@ -22,6 +24,36 @@ export type SqliteForSnapshot = {
     get(...params: unknown[]): unknown
     run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint }
   }
+}
+
+/**
+ * Base-currency converter (Phase 11.1). Loads the user's base currency + the FX
+ * snapshot once, then values native account balances in the base currency for
+ * net-worth rollups. `toBase` returns null when a FOREIGN balance has no rate —
+ * the caller keeps that account out of the totals and flags it, rather than
+ * misreporting it 1:1. For the common all-USD case base === 'USD' and every
+ * account converts trivially, so totals are byte-for-byte unchanged.
+ */
+function makeBaseConverter(sqlite: SqliteForSnapshot): {
+  base: string
+  toBase(amount: number, currency: string | null | undefined): number | null
+} {
+  const base = getBaseCurrency(sqlite)
+  const rates = loadFxRates(sqlite)
+  return {
+    base,
+    toBase(amount, currency) {
+      const cur = (currency || base).toUpperCase()
+      if (cur === base) return round2(amount)
+      const rate = pickRate(rates, cur, base)
+      if (rate == null) return null
+      return round2(amount * rate)
+    }
+  }
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
 }
 
 type AccountRow = {
@@ -193,24 +225,35 @@ export function setAccountBalance(
 }
 
 export type NetWorthSnapshot = {
-  assets: number
-  liabilities: number
-  net: number
+  // The currency every total below is expressed in (Phase 11.1). 'USD' unless
+  // the user picked a different base.
+  baseCurrency: string
+  assets: number // base currency
+  liabilities: number // base currency
+  net: number // base currency
   byAccount: Array<{
     accountId: number
     name: string
     assetClass: string
     isDebt: boolean
-    balance: number
+    currency: string // the account's NATIVE currency
+    balance: number // latest balance in the NATIVE currency
+    baseBalance: number | null // `balance` converted to base (null = no FX rate)
     capturedAt: number | null
   }>
+  // Foreign accounts that couldn't be valued in the base currency (no FX rate
+  // on file). Excluded from the totals above so they stay honest; surfaced so
+  // the UI can prompt the user to add a rate.
+  unconverted: Array<{ accountId: number; name: string; currency: string; balance: number }>
   deltas: { d30: number | null; d90: number | null; d365: number | null }
 }
 
 /**
- * Latest balance per account + net-worth totals + deltas. The account-side
- * balance comes from the most recent snapshot (or 0 if no snapshots exist
- * for that account yet, e.g. brand-new install).
+ * Latest balance per account + net-worth totals + deltas, rolled up into the
+ * user's base currency (Phase 11.1). Each account's balance is taken from its
+ * most recent snapshot in its NATIVE currency (or 0 if none yet), then converted
+ * to base via the latest FX snapshot. Foreign accounts with no rate are listed
+ * in `unconverted` and left out of the totals.
  */
 export function getNetWorthSnapshot(
   sqlite: SqliteForSnapshot,
@@ -218,12 +261,20 @@ export function getNetWorthSnapshot(
 ): NetWorthSnapshot {
   const accounts = sqlite
     .prepare(
-      `SELECT a.id, a.name, a.asset_class, a.is_debt
+      `SELECT a.id, a.name, a.asset_class, a.is_debt, a.currency
          FROM finance_accounts a`
     )
-    .all() as Array<{ id: number; name: string; asset_class: string; is_debt: number }>
+    .all() as Array<{
+    id: number
+    name: string
+    asset_class: string
+    is_debt: number
+    currency: string | null
+  }>
 
+  const { base, toBase } = makeBaseConverter(sqlite)
   const byAccount: NetWorthSnapshot['byAccount'] = []
+  const unconverted: NetWorthSnapshot['unconverted'] = []
   let assets = 0
   let liabilities = 0
 
@@ -236,27 +287,38 @@ export function getNetWorthSnapshot(
 
     const balance = last?.balance ?? 0
     const capturedAt = last?.captured_at ?? null
+    const currency = (a.currency || base).toUpperCase()
+    const baseBalance = toBase(balance, currency)
 
     byAccount.push({
       accountId: a.id,
       name: a.name,
       assetClass: a.asset_class,
       isDebt: a.is_debt === 1,
+      currency,
       balance,
+      baseBalance,
       capturedAt
     })
 
-    if (a.is_debt === 1) liabilities += balance
-    else assets += balance
+    if (baseBalance == null) {
+      // Foreign balance with no rate — keep it out of the totals, flag it.
+      unconverted.push({ accountId: a.id, name: a.name, currency, balance })
+      continue
+    }
+    if (a.is_debt === 1) liabilities += baseBalance
+    else assets += baseBalance
   }
 
   const net = assets - liabilities
 
   return {
-    assets: Math.round(assets * 100) / 100,
-    liabilities: Math.round(liabilities * 100) / 100,
-    net: Math.round(net * 100) / 100,
+    baseCurrency: base,
+    assets: round2(assets),
+    liabilities: round2(liabilities),
+    net: round2(net),
     byAccount,
+    unconverted,
     deltas: {
       d30: deltaSince(sqlite, 30, now, net),
       d90: deltaSince(sqlite, 90, now, net),
@@ -265,6 +327,12 @@ export function getNetWorthSnapshot(
   }
 }
 
+/**
+ * Net-worth change vs `days` ago, in the base currency. Past native balances
+ * are converted at the LATEST rate (constant FX) so the delta reflects real
+ * balance movement, not currency swings — FX gain/loss is tracked separately.
+ * Foreign accounts with no rate are skipped (same policy as the live totals).
+ */
 function deltaSince(
   sqlite: SqliteForSnapshot,
   days: number,
@@ -272,11 +340,15 @@ function deltaSince(
   currentNet: number
 ): number | null {
   const cutoff = now - days * 24 * 60 * 60 * 1000
-  const accounts = sqlite.prepare('SELECT id, is_debt FROM finance_accounts').all() as Array<{
+  const accounts = sqlite
+    .prepare('SELECT id, is_debt, currency FROM finance_accounts')
+    .all() as Array<{
     id: number
     is_debt: number
+    currency: string | null
   }>
 
+  const { toBase } = makeBaseConverter(sqlite)
   let assets = 0
   let liabilities = 0
   let foundAny = false
@@ -288,14 +360,16 @@ function deltaSince(
       )
       .get(a.id, cutoff) as { balance: number } | undefined
     if (!past) continue
+    const baseBalance = toBase(past.balance, a.currency)
+    if (baseBalance == null) continue
     foundAny = true
-    if (a.is_debt === 1) liabilities += past.balance
-    else assets += past.balance
+    if (a.is_debt === 1) liabilities += baseBalance
+    else assets += baseBalance
   }
 
   if (!foundAny) return null
   const pastNet = assets - liabilities
-  return Math.round((currentNet - pastNet) * 100) / 100
+  return round2(currentNet - pastNet)
 }
 
 export type TrajectoryPoint = {
@@ -309,12 +383,19 @@ export type TrajectoryPoint = {
   // tiles disagree about which buckets count as liabilities.
   isDebt: boolean
   date: string // 'YYYY-MM-DD'
-  balance: number
+  currency: string // the account's NATIVE currency (Phase 11.1)
+  balance: number // NATIVE-currency balance on that day
+  // `balance` converted to the base currency at the LATEST rate (constant FX),
+  // so a summed total line across mixed-currency accounts is valid. null when a
+  // foreign account has no rate. For USD-only data this equals `balance`.
+  baseBalance: number | null
 }
 
 /**
  * Returns every snapshot in the requested window, suitable for rendering a
- * trajectory chart. Caller groups by account/date as needed.
+ * trajectory chart. Caller groups by account/date as needed. Each point carries
+ * both its native balance and a base-currency value (Phase 11.1) so the caller
+ * can sum across accounts in one currency.
  */
 export function getNetWorthTrajectory(
   sqlite: SqliteForSnapshot,
@@ -325,7 +406,7 @@ export function getNetWorthTrajectory(
 
   const rows = sqlite
     .prepare(
-      `SELECT s.account_id, a.name, a.asset_class, a.is_debt, s.captured_at, s.balance
+      `SELECT s.account_id, a.name, a.asset_class, a.is_debt, a.currency, s.captured_at, s.balance
          FROM finance_balance_snapshots s
          JOIN finance_accounts a ON a.id = s.account_id
         WHERE s.captured_at >= ? AND s.captured_at <= ?
@@ -336,17 +417,25 @@ export function getNetWorthTrajectory(
     name: string
     asset_class: string
     is_debt: number
+    currency: string | null
     captured_at: number
     balance: number
   }>
 
-  return rows.map((r) => ({
-    accountId: r.account_id,
-    accountName: r.name,
-    assetClass: r.asset_class,
-    isDebt: r.is_debt === 1,
-    // Local-day formatter — matches the snapshot's local-day bucket.
-    date: localDateString(r.captured_at),
-    balance: r.balance
-  }))
+  const { base, toBase } = makeBaseConverter(sqlite)
+
+  return rows.map((r) => {
+    const currency = (r.currency || base).toUpperCase()
+    return {
+      accountId: r.account_id,
+      accountName: r.name,
+      assetClass: r.asset_class,
+      isDebt: r.is_debt === 1,
+      // Local-day formatter — matches the snapshot's local-day bucket.
+      date: localDateString(r.captured_at),
+      currency,
+      balance: r.balance,
+      baseBalance: toBase(r.balance, currency)
+    }
+  })
 }

@@ -121,6 +121,7 @@ beforeEach(() => {
       type TEXT NOT NULL DEFAULT 'credit',
       is_debt INTEGER DEFAULT 0,
       balance REAL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'USD',
       apr REAL DEFAULT 0,
       min_payment REAL DEFAULT 0,
       credit_limit REAL,
