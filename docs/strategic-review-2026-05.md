@@ -1,5 +1,8 @@
 # Strategic review — May 2026
 
+> **⚠️ Superseded by [`strategic-review-2026-06.md`](strategic-review-2026-06.md) (2026-06-26).** Kept as a
+> historical snapshot — it drove Phases 6–10, which have since largely shipped.
+>
 > Audit snapshot taken **2026-05-18**. Living document `docs/implementation_plan.md` is the operational tracker; this file is the *why* behind the current shape of that tracker.
 
 ## TL;DR

@@ -1,8 +1,10 @@
 # Compass — CRED Engine Design (the Portal Automation Sandbox)
 
-> **Status: DESIGN — no code yet.** This is the design gate for **Phase 10.6**, primitive **D** of the
-> Acquisition Engine. Nothing here ships until the open questions in §12 are answered and a
-> `security-auditor` pass signs off on the first slice.
+> **Status: v1 SHIPPED (gated off by default), DESIGN for the rest.** This is the design gate for **Phase
+> 10.6**, primitive **D** of the Acquisition Engine. The **assisted-login Mode A** slice (the Portal
+> Automation Sandbox + an **SSA** adapter, no stored credentials) shipped in `electron/integrations/cred/`,
+> **gated off behind `COMPASS_ENABLE_CRED`**. The remaining slices (stored-credential mode, more portals)
+> stay gated on the §12 open questions + a `security-auditor` pass before each.
 >
 > **Prereq reading:** [`storehouse-roadmap.md`](storehouse-roadmap.md) §3.D + §5 · [`architecture.md`](architecture.md)
 > (process boundary, vault) · [`integrations/plaid/link.ts`](../electron/integrations/plaid/link.ts) (the child-window precedent this extends).

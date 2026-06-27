@@ -1,6 +1,10 @@
 # Storehouse Roadmap — The Acquisition Engine (Phase 10)
 
-> **Status:** strategy + roadmap (no code yet). Directional accuracy is the bar; per-source legal/API
+> **Status (v0.14.0):** the spine + first waves **shipped.** The Drop Zone, the `records`/Timeline store
+> (migration `0016`), **~44 recognizers** (`electron/lib/recognizers.ts`), the Data-Rights Concierge
+> (`src/lib/data-rights.ts`, 16 sources), and the CRED sandbox (`electron/integrations/cred/`, SSA adapter,
+> gated off by default) are live — see [`implementation_plan.md`](implementation_plan.md) § Phase 10 for
+> per-wave status and §6 below. This doc remains the strategy + source catalog; per-source legal/API
 > specifics are marked *(verify at build time)* and resolved when each wave is greenlit.
 >
 > **Where this sits:** [Phase 9](implementation_plan.md) ("The Storehouse") built the *ingest → own →
@@ -196,22 +200,22 @@ Every item below is non-negotiable and consistent with [architecture.md](archite
 Builds on Phase 9's shipped spine; **does not renumber 9.x**. Each wave is its own PR(s) with tests + a
 `security-auditor` pass on any new credential or export path — the Phase 9 cadence.
 
-- [ ] **10.1 The acquisition spine** — the **Drop Zone** (universal archive import + format-recognizer
+- [x] **10.1 The acquisition spine** ✅ **shipped** — the **Drop Zone** (universal archive import + format-recognizer
   registry) + the unified **`records`/timeline store** (migration `0016`) + a basic **Timeline** view.
   Seed recognizers: a Google Takeout subset, Apple Health `export.xml`, and one credit-report PDF.
   *Everything else hangs off this — build first.*
-- [ ] **10.2 Financial & credit completeness** — credit reports (RIGHTS), brokerage/retirement
+- [~] **10.2 Financial & credit completeness** 🟡 *credit-report + tax-doc PDF recognizers shipped; holdings/IRS/crypto open (feeds Phase 11)* — credit reports (RIGHTS), brokerage/retirement
   (SnapTrade or Plaid Investments), IRS/tax transcripts, crypto. Extends Phase 4 net worth + forecast.
-- [ ] **10.3 Health & medical** — Apple Health (FILE) → FHIR/Blue Button (evaluate Fasten Health) →
+- [~] **10.3 Health & medical** 🟡 *Apple Health `export.xml` recognizer shipped; FHIR/genetics/wearables open* — Apple Health (FILE) → FHIR/Blue Button (evaluate Fasten Health) →
   genetics → wearables. Feeds the Phase 9.4 `medical_*` tables.
-- [ ] **10.4 Digital footprint & comms** — the big takeouts (Google/Meta/X/LinkedIn/Amazon/Spotify) +
+- [~] **10.4 Digital footprint & comms** 🟡 *Google/Meta/LinkedIn/Amazon/Spotify/Netflix/YouTube + browser + iMessage + email shipped; Apple/WhatsApp/Signal/Telegram open* — the big takeouts (Google/Meta/X/LinkedIn/Amazon/Spotify) +
   browser history + iMessage + email archive. Heavy reuse of `archive-importers.ts`.
-- [ ] **10.5 Government & official + Data-Rights Concierge** — SSA, IRS, property/court/travel, data-broker
+- [~] **10.5 Government & official + Data-Rights Concierge** 🟡 *Concierge (16 sources) + tax/SSA PDF recognizers shipped; IRS/bureau portal automation open* — SSA, IRS, property/court/travel, data-broker
   disclosures, and the request → track → ingest workflow (primitive C).
-- [ ] **10.6 Credential-Based Aggregation Engine** — the Portal Automation Sandbox (primitive D). Opt-in,
+- [~] **10.6 Credential-Based Aggregation Engine** 🟡 *sandbox + SSA assisted-login adapter shipped (`electron/integrations/cred/`, gated off by `COMPASS_ENABLE_CRED`); stored-credential mode + more portals open* — the Portal Automation Sandbox (primitive D). Opt-in,
   vault-backed, isolated. Cross-cutting (unlocks no-export sources across every domain) and riskiest →
   **last**, after the clean paths exist.
-- [ ] **10.7 Advanced leverage** — rich unified timeline, the cross-source insights/correlation engine,
+- [x] **10.7 Advanced leverage** ✅ *Converse (FTS + semantic) · Connect (People + "on this day") · Curate (firehose tiering) shipped; combined dashboards remain* — rich unified timeline, the cross-source insights/correlation engine,
   Ask-Compass-over-everything, combined dashboards. *(Basic timeline + Ask-over-it ship incrementally from
   10.1 — each wave must be immediately leverageable, not deferred to the end.)*
 
@@ -220,16 +224,22 @@ Builds on Phase 9's shipped spine; **does not renumber 9.x**. Each wave is its o
 
 ---
 
-## 7. Open decisions (resolve when each wave is greenlit)
+## 7. Decisions
 
-- **`records` schema shape** — single polymorphic table vs. per-type tables vs. hybrid (polymorphic log +
-  typed projections for heavy hitters).
-- **FHIR strategy** — adopt the open-source self-hosted **Fasten Health** aggregator vs. build a native
-  SMART-on-FHIR client.
-- **CRED automation framework** — sandboxed Electron `BrowserWindow` automation vs. bundled Playwright;
-  the MFA / assisted-login UX.
-- **Large media** — index metadata only, or copy originals into the `documents` attachments store?
-- **Legal/ToS posture note** for the CRED wave (scraping disclosure, per-source preference order).
+**Resolved (shipped):**
+- **`records` schema shape** → a single **polymorphic append-only `records` log** (dedup via a `hash`
+  UNIQUE, like `finance_transactions`) + a separate **`snapshot_facts`** table for the static "who you are
+  / what's set" facts; the heavy hitters keep their own typed tables (finance, calendar, contacts).
+- **CRED automation framework** → a sandboxed Electron `BrowserWindow` with **assisted-login Mode A and no
+  stored credentials** in v1 (`electron/integrations/cred/`), gated off by default. Stored-credential mode
+  is a later, separately-gated step. Full design in [`cred-engine-design.md`](cred-engine-design.md).
+
+**Still open (resolve when each wave is greenlit):**
+- **FHIR strategy** — adopt the self-hosted **Fasten Health** aggregator vs. a native SMART-on-FHIR client
+  (Phase 10.3).
+- **Large media** — index metadata only, or copy originals into the `documents` attachments store
+  (Phase 9.2, not yet built)? Today's recognizers store a content-light index, not blobs.
+- **Legal/ToS posture note** for the full-CRED wave (scraping disclosure, per-source preference order).
 
 ---
 

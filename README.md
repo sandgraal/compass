@@ -12,7 +12,7 @@ A **local-first personal life OS** that unifies your finances, knowledge, calend
 ![Platform](https://img.shields.io/badge/macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-Electron%2041-6272F1)
 ![Stack](https://img.shields.io/badge/React%2018%20%C2%B7%20TypeScript%20%C2%B7%20SQLite-informational)
 ![Privacy](https://img.shields.io/badge/encrypted%20vault-AES--256--GCM-22c55e)
-![Status](https://img.shields.io/badge/version-0.11.0-blue)
+![Status](https://img.shields.io/badge/version-0.14.0-blue)
 
 </div>
 
@@ -145,9 +145,9 @@ Primary target is **macOS** (signed releases via GitHub Actions); Windows (`nsis
 
 ## Roadmap
 
-Compass is **100% local today.** The roadmap below is an expert-team evaluation of what turns it into a daily driver and a platform. Items marked *(opt-in cloud)* are a deliberate, clearly-bounded departure from local-only — always opt-in, never the default. Full detail + sizing lives in [`docs/implementation_plan.md` § Phase 7](docs/implementation_plan.md).
+Compass is **100% local today.** The roadmap below is an expert-team evaluation of what turns it into a daily driver and a platform. Items marked *(opt-in cloud)* are a deliberate, clearly-bounded departure from local-only — always opt-in, never the default. Full detail + sizing lives in [`docs/implementation_plan.md`](docs/implementation_plan.md) (Phases 0–11). The latest direction — a cross-border / retirement layer (**Phase 11**) — comes from the June expert panel in [`docs/strategic-review-2026-06.md`](docs/strategic-review-2026-06.md).
 
-Shipped so far: Morning Brief digest, weekly/monthly review rituals, multi-type quick-capture, Notion import + Obsidian bridge, Todoist / Things / Linear, proactive insights, and the agentic "plan my week". What's still ahead:
+Shipped so far: Morning Brief digest, weekly/monthly review rituals, multi-type quick-capture, Notion import + Obsidian bridge, Todoist / Things / Linear, proactive insights, the agentic "plan my week", plus the **Storehouse** (Contacts · Subscriptions · Assets) and the **Acquisition Engine** (Drop Zone · Timeline · ~44 recognizers · People · Data-Rights Concierge). What's still ahead:
 
 ```mermaid
 timeline
@@ -174,7 +174,9 @@ See [`docs/architecture.md`](docs/architecture.md) for the full security model.
 - [`docs/architecture.md`](docs/architecture.md) — process boundary, DB schema, IPC map, security model
 - [`docs/conventions.md`](docs/conventions.md) — TS/React style, IPC + toast patterns
 - [`docs/integrations.md`](docs/integrations.md) — how to add a new integration
-- [`docs/implementation_plan.md`](docs/implementation_plan.md) — full feature ledger + roadmap (Phase 7)
+- [`docs/implementation_plan.md`](docs/implementation_plan.md) — full feature ledger + roadmap (Phases 0–11)
+- [`docs/storehouse-roadmap.md`](docs/storehouse-roadmap.md) — the Acquisition Engine (Phase 10) strategy + data-source catalog
+- [`docs/strategic-review-2026-06.md`](docs/strategic-review-2026-06.md) — the June expert panel + the Phase 11 proposal
 
 ## License
 
