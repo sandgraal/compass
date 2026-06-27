@@ -74,6 +74,7 @@ function createSchema(): void {
       type TEXT NOT NULL DEFAULT 'credit',
       is_debt INTEGER DEFAULT 0,
       balance REAL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'USD',
       apr REAL DEFAULT 0,
       min_payment REAL DEFAULT 0,
       credit_limit REAL,
@@ -94,6 +95,7 @@ function createSchema(): void {
       hash TEXT NOT NULL UNIQUE,
       date TEXT NOT NULL,
       amount REAL NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'USD',
       description TEXT NOT NULL,
       account_id INTEGER REFERENCES finance_accounts(id),
       category TEXT DEFAULT 'Uncategorized',
@@ -114,6 +116,21 @@ function createSchema(): void {
       subcategory TEXT,
       priority INTEGER DEFAULT 0
     );
+    CREATE TABLE app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER
+    );
+    CREATE TABLE fx_rates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      base TEXT NOT NULL,
+      quote TEXT NOT NULL,
+      rate REAL NOT NULL,
+      source TEXT NOT NULL DEFAULT 'manual',
+      fetched_at INTEGER
+    );
+    CREATE UNIQUE INDEX uq_fx_rates_date_base_quote ON fx_rates (date, base, quote);
   `)
 }
 
@@ -285,6 +302,193 @@ describe('finance:upsert-account', () => {
       .get(id) as { name: string; balance: number }
     expect(row.name).toBe('renamed')
     expect(row.balance).toBe(999)
+  })
+})
+
+// ── Multi-currency (Phase 11.1) ──────────────────────────────────────────────
+
+describe('finance:upsert-account currency', () => {
+  it('stores a supported currency (normalized) and defaults the rest to USD', async () => {
+    const h = await registerAndGet('finance:upsert-account')
+    const out = (await invoke(h, { name: 'BAC CR', type: 'checking', currency: 'crc' })) as {
+      id: number
+    }
+    const a = sqlite.prepare('SELECT currency FROM finance_accounts WHERE id = ?').get(out.id) as {
+      currency: string
+    }
+    expect(a.currency).toBe('CRC')
+
+    const def = (await invoke(h, { name: 'Plain', type: 'checking' })) as { id: number }
+    const b = sqlite.prepare('SELECT currency FROM finance_accounts WHERE id = ?').get(def.id) as {
+      currency: string
+    }
+    expect(b.currency).toBe('USD')
+  })
+
+  it('falls back to USD for an unsupported currency code', async () => {
+    const h = await registerAndGet('finance:upsert-account')
+    const out = (await invoke(h, { name: 'Weird', type: 'checking', currency: 'XYZ' })) as {
+      id: number
+    }
+    const a = sqlite.prepare('SELECT currency FROM finance_accounts WHERE id = ?').get(out.id) as {
+      currency: string
+    }
+    expect(a.currency).toBe('USD')
+  })
+})
+
+describe('finance:get-currency-settings', () => {
+  it('defaults base to USD and lists supported currencies', async () => {
+    const h = await registerAndGet('finance:get-currency-settings')
+    const out = (await invoke(h)) as {
+      baseCurrency: string
+      supported: Array<{ code: string }>
+    }
+    expect(out.baseCurrency).toBe('USD')
+    expect(out.supported.some((c) => c.code === 'CRC')).toBe(true)
+    expect(out.supported.some((c) => c.code === 'USD')).toBe(true)
+  })
+})
+
+describe('finance:set-base-currency', () => {
+  it('persists a supported base currency', async () => {
+    const h = await registerAndGet('finance:set-base-currency')
+    const out = (await invoke(h, 'eur')) as { success: boolean; baseCurrency?: string }
+    expect(out.success).toBe(true)
+    expect(out.baseCurrency).toBe('EUR')
+    const row = sqlite
+      .prepare("SELECT value FROM app_settings WHERE key = 'baseCurrency'")
+      .get() as { value: string }
+    expect(row.value).toBe('EUR')
+  })
+
+  it('rejects an unsupported currency', async () => {
+    const h = await registerAndGet('finance:set-base-currency')
+    const out = (await invoke(h, 'XYZ')) as { success: boolean; error?: string }
+    expect(out.success).toBe(false)
+    expect(out.error).toMatch(/Unsupported/)
+  })
+})
+
+describe('finance:set-account-currency', () => {
+  it('sets the account currency and cascades to its transactions', async () => {
+    const id = seedAccount('BAC CR')
+    seedTxn({ hash: 'a', accountId: id })
+    seedTxn({ hash: 'b', accountId: id })
+    const h = await registerAndGet('finance:set-account-currency')
+    const out = (await invoke(h, id, 'CRC')) as {
+      success: boolean
+      transactionsUpdated?: number
+    }
+    expect(out.success).toBe(true)
+    expect(out.transactionsUpdated).toBe(2)
+    const acct = sqlite.prepare('SELECT currency FROM finance_accounts WHERE id = ?').get(id) as {
+      currency: string
+    }
+    expect(acct.currency).toBe('CRC')
+    const txnCurrencies = sqlite
+      .prepare('SELECT DISTINCT currency FROM finance_transactions WHERE account_id = ?')
+      .all(id) as Array<{ currency: string }>
+    expect(txnCurrencies).toEqual([{ currency: 'CRC' }])
+  })
+
+  it('rejects a missing account and an unsupported currency', async () => {
+    const h = await registerAndGet('finance:set-account-currency')
+    expect((await invoke(h, 999, 'CRC')) as { success: boolean }).toMatchObject({
+      success: false
+    })
+    const id = seedAccount('Chase')
+    expect((await invoke(h, id, 'XYZ')) as { success: boolean }).toMatchObject({
+      success: false
+    })
+  })
+})
+
+describe('finance:set-fx-rate + finance:get-fx-rates', () => {
+  it('records a manual rate and reads it back', async () => {
+    const set = await registerAndGet('finance:set-fx-rate')
+    const out = (await invoke(set, {
+      date: '2026-06-27',
+      base: 'usd',
+      quote: 'crc',
+      rate: 512.3
+    })) as { success: boolean }
+    expect(out.success).toBe(true)
+
+    const get = await registerAndGet('finance:get-fx-rates')
+    const rows = (await invoke(get)) as Array<{
+      base: string
+      quote: string
+      rate: number
+      fetchedAt: number | null
+    }>
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ base: 'USD', quote: 'CRC', rate: 512.3 })
+    // `fetchedAt` must cross the wire as epoch ms (number), not a Drizzle Date.
+    expect(typeof rows[0].fetchedAt).toBe('number')
+  })
+
+  it('upserts the same (date, base, quote) in place', async () => {
+    const set = await registerAndGet('finance:set-fx-rate')
+    await invoke(set, { date: '2026-06-27', base: 'USD', quote: 'CRC', rate: 500 })
+    await invoke(set, { date: '2026-06-27', base: 'USD', quote: 'CRC', rate: 512.3 })
+    const count = sqlite.prepare('SELECT COUNT(*) AS n FROM fx_rates').get() as { n: number }
+    expect(count.n).toBe(1)
+  })
+
+  it('rejects bad dates, unsupported currencies, equal pairs, and bad rates', async () => {
+    const set = await registerAndGet('finance:set-fx-rate')
+    const bad = [
+      { date: 'nope', base: 'USD', quote: 'CRC', rate: 500 },
+      { date: '2026-06-27', base: 'USD', quote: 'XYZ', rate: 500 },
+      { date: '2026-06-27', base: 'USD', quote: 'USD', rate: 1 },
+      { date: '2026-06-27', base: 'USD', quote: 'CRC', rate: 0 },
+      { date: '2026-06-27', base: 'USD', quote: 'CRC', rate: Number.POSITIVE_INFINITY }
+    ]
+    for (const input of bad) {
+      expect((await invoke(set, input)) as { success: boolean }).toMatchObject({ success: false })
+    }
+    const count = sqlite.prepare('SELECT COUNT(*) AS n FROM fx_rates').get() as { n: number }
+    expect(count.n).toBe(0)
+  })
+})
+
+describe('finance:refresh-fx-rates', () => {
+  const realFetch = global.fetch
+  afterEach(() => {
+    global.fetch = realFetch
+  })
+
+  it('fetches + persists provider rates (source=erapi) and reports the count', async () => {
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ result: 'success', rates: { USD: 1, CRC: 512.3, EUR: 0.92 } })
+    })) as unknown as typeof fetch
+
+    const h = await registerAndGet('finance:refresh-fx-rates')
+    const out = (await invoke(h)) as { success: boolean; updated?: number }
+    expect(out.success).toBe(true)
+    expect(out.updated).toBe(2) // CRC + EUR (USD skipped)
+    const rows = sqlite
+      .prepare("SELECT quote, source FROM fx_rates WHERE base = 'USD' ORDER BY quote")
+      .all() as Array<{ quote: string; source: string }>
+    expect(rows.map((r) => r.quote)).toEqual(['CRC', 'EUR'])
+    expect(rows.every((r) => r.source === 'erapi')).toBe(true)
+  })
+
+  it('returns an error (and writes nothing) when the provider is down', async () => {
+    global.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 503,
+      json: async () => ({})
+    })) as unknown as typeof fetch
+
+    const h = await registerAndGet('finance:refresh-fx-rates')
+    const out = (await invoke(h)) as { success: boolean; error?: string }
+    expect(out.success).toBe(false)
+    const count = sqlite.prepare('SELECT COUNT(*) AS n FROM fx_rates').get() as { n: number }
+    expect(count.n).toBe(0)
   })
 })
 

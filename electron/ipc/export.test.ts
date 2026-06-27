@@ -76,10 +76,11 @@ beforeEach(async () => {
       start_at INTEGER, end_at INTEGER, all_day INTEGER DEFAULT 0,
       location TEXT, description TEXT, html_link TEXT, synced_at INTEGER
     );
-    CREATE TABLE finance_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
+    CREATE TABLE finance_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, currency TEXT NOT NULL DEFAULT 'USD');
     CREATE TABLE finance_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       hash TEXT NOT NULL UNIQUE, date TEXT NOT NULL, amount REAL NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'USD',
       description TEXT NOT NULL, account_id INTEGER,
       category TEXT DEFAULT 'Uncategorized', subcategory TEXT, notes TEXT,
       geo TEXT NOT NULL DEFAULT 'US', purpose TEXT,

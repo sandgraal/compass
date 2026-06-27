@@ -17,16 +17,22 @@ type Point = {
   assetClass: string
   isDebt: boolean
   date: string
+  currency: string
   balance: number
+  baseBalance: number | null
 }
 
+// USD-only helpers: baseBalance mirrors the native balance (1:1), matching the
+// main-process converter when account currency === base.
 const cash = (accountId: number, date: string, balance: number, name = 'Chase'): Point => ({
   accountId,
   accountName: name,
   assetClass: 'spending',
   isDebt: false,
   date,
-  balance
+  currency: 'USD',
+  balance,
+  baseBalance: balance
 })
 
 const debt = (accountId: number, date: string, balance: number, name = 'Amex'): Point => ({
@@ -35,7 +41,9 @@ const debt = (accountId: number, date: string, balance: number, name = 'Amex'): 
   assetClass: 'liability',
   isDebt: true,
   date,
-  balance
+  currency: 'USD',
+  balance,
+  baseBalance: balance
 })
 
 describe('buildTrajectoryChartData', () => {
@@ -86,7 +94,9 @@ describe('buildTrajectoryChartData', () => {
         assetClass: 'spending',
         isDebt: false,
         date: '2026-01-01',
-        balance: 100.001
+        currency: 'USD',
+        balance: 100.001,
+        baseBalance: 100.001
       },
       {
         accountId: 2,
@@ -94,7 +104,9 @@ describe('buildTrajectoryChartData', () => {
         assetClass: 'liability',
         isDebt: true,
         date: '2026-01-01',
-        balance: 0.005
+        currency: 'USD',
+        balance: 0.005,
+        baseBalance: 0.005
       }
     ])
     // 100.001 - 0.005 = 99.996 → round to 100.0 (two decimals)
@@ -116,11 +128,25 @@ describe('buildTrajectoryChartData', () => {
         assetClass: 'spending',
         isDebt: true,
         date: '2026-01-01',
-        balance: 300
+        currency: 'USD',
+        balance: 300,
+        baseBalance: 300
       }
     ])
     // 1000 - 300 = 700, NOT 1300.
     expect(out[0].net).toBe(700)
+  })
+
+  it('sums base-currency values and excludes unconvertible accounts (Phase 11.1)', () => {
+    // A CRC account already converted to base ($10k), a USD account ($5k), and a
+    // foreign account with no rate (baseBalance null → excluded from the net).
+    const out = buildTrajectoryChartData([
+      { ...cash(1, '2026-01-01', 5_000_000, 'BAC CR'), currency: 'CRC', baseBalance: 10_000 },
+      cash(2, '2026-01-01', 5000, 'Chase'),
+      { ...cash(3, '2026-01-01', 2_000_000, 'No-rate'), currency: 'COP', baseBalance: null }
+    ])
+    // 10,000 (CRC→USD) + 5,000 (USD) = 15,000; the COP account is skipped.
+    expect(out).toEqual([{ date: '2026-01-01', net: 15_000 }])
   })
 })
 

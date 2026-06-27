@@ -280,3 +280,109 @@ describe('initDb finance_accounts institution column', () => {
     expectInstitutionColumn(dbPath)
   })
 })
+
+describe('initDb multi-currency schema (Phase 11.1)', () => {
+  function tableColumns(dbPath: string, table: string): string[] {
+    const sqlite = new Database(dbPath)
+    try {
+      return (sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(
+        (c) => c.name
+      )
+    } finally {
+      sqlite.close()
+    }
+  }
+  function tableExists(dbPath: string, table: string): boolean {
+    const sqlite = new Database(dbPath)
+    try {
+      return !!sqlite
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?")
+        .get(table)
+    } finally {
+      sqlite.close()
+    }
+  }
+
+  it('adds currency columns + fx_rates on a fresh database (migration path)', async () => {
+    const home = makeTempHome()
+    const dbPath = dbPathForHome(home)
+    mkdirSync(dirname(dbPath), { recursive: true })
+    const { initDb } = await loadClientForHome(home)
+    await initDb()
+
+    expect(tableColumns(dbPath, 'finance_accounts')).toContain('currency')
+    expect(tableColumns(dbPath, 'finance_transactions')).toContain('currency')
+    expect(tableExists(dbPath, 'fx_rates')).toBe(true)
+
+    const sqlite = new Database(dbPath)
+    try {
+      sqlite.prepare("INSERT INTO finance_accounts (name, type) VALUES ('A', 'checking')").run()
+      const row = sqlite
+        .prepare("SELECT currency FROM finance_accounts WHERE name = 'A'")
+        .get() as { currency: string }
+      expect(row.currency).toBe('USD')
+      // The (date, base, quote) UNIQUE key is in place on both schema paths.
+      sqlite
+        .prepare(
+          "INSERT INTO fx_rates (date, base, quote, rate) VALUES ('2026-06-27','USD','CRC',500)"
+        )
+        .run()
+      expect(() =>
+        sqlite
+          .prepare(
+            "INSERT INTO fx_rates (date, base, quote, rate) VALUES ('2026-06-27','USD','CRC',512)"
+          )
+          .run()
+      ).toThrow()
+    } finally {
+      sqlite.close()
+    }
+  })
+
+  it('backfills currency + fx_rates onto a pre-existing finance schema (fallback path)', async () => {
+    const home = makeTempHome()
+    const dbPath = dbPathForHome(home)
+    mkdirSync(dirname(dbPath), { recursive: true })
+
+    const sqlite = new Database(dbPath)
+    try {
+      sqlite.exec(`
+        CREATE TABLE integrations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          service TEXT NOT NULL UNIQUE,
+          connected_at INTEGER,
+          last_synced_at INTEGER,
+          status TEXT NOT NULL DEFAULT 'disconnected',
+          scopes TEXT,
+          error_message TEXT,
+          sync_interval_minutes INTEGER NOT NULL DEFAULT 15
+        );
+        CREATE TABLE finance_accounts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          type TEXT NOT NULL DEFAULT 'credit',
+          is_debt INTEGER DEFAULT 0,
+          balance REAL DEFAULT 0,
+          updated_at INTEGER
+        );
+        CREATE TABLE finance_transactions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          hash TEXT NOT NULL UNIQUE,
+          date TEXT NOT NULL,
+          amount REAL NOT NULL,
+          description TEXT NOT NULL,
+          notes TEXT
+        );
+      `)
+    } finally {
+      sqlite.close()
+    }
+
+    const { initDb } = await loadClientForHome(home)
+    await initDb()
+
+    expect(tableColumns(dbPath, 'finance_accounts')).toContain('currency')
+    expect(tableColumns(dbPath, 'finance_transactions')).toContain('currency')
+    expect(tableExists(dbPath, 'fx_rates')).toBe(true)
+  })
+})

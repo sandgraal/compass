@@ -1108,6 +1108,7 @@ declare global {
           type: string
           isDebt?: boolean
           balance?: number
+          currency?: string
           apr?: number
           minPayment?: number
           creditLimit?: number
@@ -1233,8 +1234,9 @@ declare global {
           error?: string
         }>
 
-        // Net worth (Phase 4.4)
+        // Net worth (Phase 4.4) — rolled up into the base currency (Phase 11.1)
         getNetWorthSnapshot(): Promise<{
+          baseCurrency: string
           assets: number
           liabilities: number
           net: number
@@ -1243,8 +1245,16 @@ declare global {
             name: string
             assetClass: string
             isDebt: boolean
+            currency: string
             balance: number
+            baseBalance: number | null
             capturedAt: number | null
+          }>
+          unconverted: Array<{
+            accountId: number
+            name: string
+            currency: string
+            balance: number
           }>
           deltas: { d30: number | null; d90: number | null; d365: number | null }
         }>
@@ -1255,7 +1265,9 @@ declare global {
             assetClass: string
             isDebt: boolean
             date: string
+            currency: string
             balance: number
+            baseBalance: number | null
           }>
         >
         captureSnapshot(): Promise<{ written: number; skipped: number }>
@@ -1263,6 +1275,47 @@ declare global {
           accountId: number,
           balance: number
         ): Promise<{ success: boolean; error?: string }>
+
+        // Multi-currency (Phase 11.1)
+        getCurrencySettings(): Promise<{
+          baseCurrency: string
+          supported: Array<{ code: string; symbol: string; name: string; decimals: number }>
+        }>
+        setBaseCurrency(
+          code: string
+        ): Promise<{ success: boolean; baseCurrency?: string; error?: string }>
+        setAccountCurrency(
+          accountId: number,
+          code: string
+        ): Promise<{
+          success: boolean
+          currency?: string
+          transactionsUpdated?: number
+          error?: string
+        }>
+        getFxRates(): Promise<
+          Array<{
+            id: number
+            date: string
+            base: string
+            quote: string
+            rate: number
+            source: string
+            fetchedAt: number | null
+          }>
+        >
+        setFxRate(input: {
+          date: string
+          base: string
+          quote: string
+          rate: number
+        }): Promise<{ success: boolean; error?: string }>
+        refreshFxRates(): Promise<{
+          success: boolean
+          updated?: number
+          date?: string
+          error?: string
+        }>
 
         // Cash-flow forecast (Phase 4.5)
         getForecast(opts?: { windowDays?: number; lowCashThreshold?: number }): Promise<{

@@ -401,6 +401,7 @@ const api = {
       type: string
       isDebt?: boolean
       balance?: number
+      currency?: string
       apr?: number
       minPayment?: number
       creditLimit?: number
@@ -443,6 +444,16 @@ const api = {
     captureSnapshot: () => ipcRenderer.invoke('finance:capture-snapshot'),
     setAccountBalance: (accountId: number, balance: number) =>
       ipcRenderer.invoke('finance:set-account-balance', accountId, balance),
+
+    // Multi-currency (Phase 11.1)
+    getCurrencySettings: () => ipcRenderer.invoke('finance:get-currency-settings'),
+    setBaseCurrency: (code: string) => ipcRenderer.invoke('finance:set-base-currency', code),
+    setAccountCurrency: (accountId: number, code: string) =>
+      ipcRenderer.invoke('finance:set-account-currency', accountId, code),
+    getFxRates: () => ipcRenderer.invoke('finance:get-fx-rates'),
+    setFxRate: (input: { date: string; base: string; quote: string; rate: number }) =>
+      ipcRenderer.invoke('finance:set-fx-rate', input),
+    refreshFxRates: () => ipcRenderer.invoke('finance:refresh-fx-rates'),
 
     // Cash-flow forecast (Phase 4.5)
     getForecast: (opts?: { windowDays?: number; lowCashThreshold?: number }) =>

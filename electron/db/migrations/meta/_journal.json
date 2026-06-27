@@ -134,6 +134,13 @@
       "when": 1782920000000,
       "tag": "0018_silent_silver_surfer",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1782930000000,
+      "tag": "0019_curious_colossus",
+      "breakpoints": true
     }
   ]
 }

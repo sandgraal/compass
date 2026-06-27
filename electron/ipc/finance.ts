@@ -10,7 +10,8 @@ import {
   categorizationRules,
   financeAccounts,
   financeTransactions,
-  forecastOverrides
+  forecastOverrides,
+  fxRates
 } from '../db/schema'
 import { categorize, ingestCsvFolder } from '../integrations/finance'
 import {
@@ -19,6 +20,16 @@ import {
   mergeAccounts
 } from '../integrations/finance-cleanup'
 import { type ForecastResult, buildForecast } from '../integrations/finance-forecast'
+import {
+  BASE_CURRENCY_SETTING_KEY,
+  DEFAULT_BASE_CURRENCY,
+  SUPPORTED_CURRENCIES,
+  getBaseCurrency,
+  isSupportedCurrency,
+  normalizeCurrency,
+  upsertFxRate
+} from '../integrations/finance-fx'
+import { syncFxRates } from '../integrations/finance-fx-fetch'
 import {
   captureSnapshots,
   getNetWorthSnapshot,
@@ -259,17 +270,24 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
         type: string
         isDebt?: boolean
         balance?: number
+        currency?: string
         apr?: number
         minPayment?: number
         creditLimit?: number
       }
     ) => {
       const db = getDb()
+      // Phase 11.1 — accept a supported ISO-4217 currency; anything unsupported
+      // or blank falls back to USD so a bad code never lands in the ledger.
+      const currency = isSupportedCurrency(account.currency)
+        ? normalizeCurrency(account.currency)
+        : DEFAULT_BASE_CURRENCY
       const payload = {
         name: account.name,
         type: account.type,
         isDebt: account.isDebt ?? false,
         balance: account.balance ?? 0,
+        currency,
         apr: account.apr ?? 0,
         minPayment: account.minPayment ?? 0,
         creditLimit: account.creditLimit ?? null,
@@ -646,6 +664,122 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       return { success: false, error: `Failed to set balance: ${message}` }
+    }
+  })
+
+  // ── Multi-currency foundation (Phase 11.1) ───────────────────────────────
+  // Base currency = the one net worth + forecast roll up to. The supported
+  // list drives the Accounts/Settings currency pickers.
+  ipcMain.handle('finance:get-currency-settings', () => {
+    return {
+      baseCurrency: getBaseCurrency(getRawSqlite()),
+      supported: SUPPORTED_CURRENCIES
+    }
+  })
+
+  // Set the user's base currency. Rejects anything not in the supported set so
+  // a typo can't silently strand every total as "unconverted".
+  ipcMain.handle('finance:set-base-currency', (_event, code: string) => {
+    if (!isSupportedCurrency(code)) {
+      return { success: false, error: `Unsupported currency: ${code}` }
+    }
+    const normalized = normalizeCurrency(code)
+    const db = getDb()
+    db.insert(appSettings)
+      .values({ key: BASE_CURRENCY_SETTING_KEY, value: normalized, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: appSettings.key,
+        set: { value: normalized, updatedAt: new Date() }
+      })
+      .run()
+    return { success: true, baseCurrency: normalized }
+  })
+
+  // Set an account's native currency and cascade it to that account's
+  // transactions (which are denominated in the account's currency by design).
+  ipcMain.handle('finance:set-account-currency', (_event, accountId: number, code: string) => {
+    if (!Number.isInteger(accountId) || accountId <= 0) {
+      return { success: false, error: `Invalid account id: ${accountId}` }
+    }
+    if (!isSupportedCurrency(code)) {
+      return { success: false, error: `Unsupported currency: ${code}` }
+    }
+    const currency = normalizeCurrency(code)
+    const db = getDb()
+    const exists = db
+      .select({ id: financeAccounts.id })
+      .from(financeAccounts)
+      .where(eq(financeAccounts.id, accountId))
+      .get()
+    if (!exists) {
+      return { success: false, error: `Account not found: ${accountId}` }
+    }
+    db.update(financeAccounts)
+      .set({ currency, updatedAt: new Date() })
+      .where(eq(financeAccounts.id, accountId))
+      .run()
+    const updated = db
+      .update(financeTransactions)
+      .set({ currency })
+      .where(eq(financeTransactions.accountId, accountId))
+      .run()
+    return { success: true, currency, transactionsUpdated: Number(updated.changes ?? 0) }
+  })
+
+  // Every stored FX rate, latest day first. Powers the manual-rate panel and
+  // the "X accounts unconverted — add a rate" prompt.
+  ipcMain.handle('finance:get-fx-rates', () => {
+    const db = getDb()
+    const rows = db
+      .select()
+      .from(fxRates)
+      .orderBy(desc(fxRates.date), fxRates.base, fxRates.quote)
+      .all()
+    // `fetchedAt` is a Drizzle `timestamp_ms` column → a `Date` on select, but
+    // the preload/renderer contract is epoch ms (`number | null`). Normalize so
+    // consumers that treat it as a number don't break.
+    return rows.map((r) => ({ ...r, fetchedAt: r.fetchedAt ? r.fetchedAt.getTime() : null }))
+  })
+
+  // Manually record an FX rate (units of `quote` per 1 unit of `base`). The
+  // automated daily fetch (Phase 11.1b) writes the same table with source
+  // 'erapi'; this is the no-network path so conversion works immediately.
+  ipcMain.handle(
+    'finance:set-fx-rate',
+    (_event, input: { date: string; base: string; quote: string; rate: number }) => {
+      const date = input?.date ?? ''
+      if (!ISO_DATE_RE.test(date)) {
+        return { success: false, error: 'Invalid date. Expected YYYY-MM-DD.' }
+      }
+      if (!isSupportedCurrency(input?.base) || !isSupportedCurrency(input?.quote)) {
+        return { success: false, error: 'Unsupported base/quote currency.' }
+      }
+      const base = normalizeCurrency(input.base)
+      const quote = normalizeCurrency(input.quote)
+      if (base === quote) {
+        return { success: false, error: 'Base and quote must differ.' }
+      }
+      const rate = input?.rate
+      // Reject garbage: must be finite, positive, and within a sane band
+      // (covers ₡/$ ≈ 500 and COP/$ ≈ 4000 with headroom; rejects 0 / Infinity).
+      if (!Number.isFinite(rate) || rate <= 0 || rate > 1_000_000) {
+        return { success: false, error: `Invalid rate: ${rate}` }
+      }
+      upsertFxRate(getRawSqlite(), { date, base, quote, rate, source: 'manual' })
+      return { success: true }
+    }
+  )
+
+  // Pull today's rates from the FX provider (Phase 11.1b). Main-process network
+  // call; on failure the existing rates are left untouched and the error is
+  // surfaced to the UI. The daily cron calls the same `syncFxRates`.
+  ipcMain.handle('finance:refresh-fx-rates', async () => {
+    try {
+      const result = await syncFxRates(getRawSqlite())
+      return { success: true, updated: result.updated, date: result.date }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { success: false, error: `Failed to refresh rates: ${message}` }
     }
   })
 

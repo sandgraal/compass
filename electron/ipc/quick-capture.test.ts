@@ -70,6 +70,7 @@ beforeEach(() => {
       hash TEXT NOT NULL UNIQUE,
       date TEXT NOT NULL,
       amount REAL NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'USD',
       description TEXT NOT NULL,
       account_id INTEGER,
       category TEXT DEFAULT 'Uncategorized',
