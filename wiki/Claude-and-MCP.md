@@ -12,18 +12,19 @@ Full design: [`docs/claude-integration.md`](https://github.com/sandgraal/compass
 
 | Direction | What it is |
 |---|---|
-| **Claude → Compass (read)** | A **separate, read-only** MCP process that opens `compass.db` with `readonly: true`. Registered for **Claude Code** via `.mcp.json`. |
+| **Claude → Compass (read)** | A **separate, read-only** MCP process that opens `compass.db` with `readonly: true`. Registered for **Claude Code** (`.mcp.json`), **Claude Desktop** (a one-click `.mcpb` bundle), and **Cowork** (the end-user plugin). |
 | **Claude → Compass (write)** | **Propose-only** tools that enqueue changes to an append-only inbox; nothing is written without your approval (the **Claude Inbox**). |
-| **Compass → Claude** | **[Ask Compass](Ask-Compass)** — BYO-key RAG over your notes. |
+| **Compass → Claude** | **[Ask Compass](Ask-Compass)** — BYO-key RAG over your notes, plus an **agent mode** (Claude tool-use over your data → proposes changes to the Claude Inbox) and **5 Compass skills** (morning brief, weekly review, budget check, plan-my-week, capture-from-web). |
 
 ## The MCP tools
 
 **Read tools** (privacy-respecting — vault excluded, finance summaries only):
 
-- `compass_today_tasks` — today's checklist
+- `compass_today_tasks` / `compass_tasks` — today's checklist / a date-range of tasks
 - `compass_upcoming` — unified daily brief
-- `compass_search_knowledge` / `compass_read_knowledge_file` — your notes
+- `compass_search_knowledge` / `compass_read_knowledge_file` / `compass_recent_notes` — your notes
 - `compass_recent_calendar` — upcoming events
+- `compass_timeline` / `compass_search_timeline` — your **Timeline** (summary + record search — the user-opted-in detail relaxation, scoped to `records` only)
 - `compass_sync_status` / `compass_integration_health` — integration state
 - `compass_recent_commits` / `compass_test_status` — repo introspection
 - `compass_finance_summary` — **aggregates only, never raw rows**
@@ -73,10 +74,11 @@ The MCP is registered via `.mcp.json` in the repo, so a Claude Code session in t
 the `compass_*` tools directly. Set `COMPASS_HOME` to point at a specific data store if needed (see
 [FAQ & Troubleshooting](FAQ-and-Troubleshooting)).
 
-## Planned (not yet shipped)
+## Also shipped (since this page's first draft)
 
-Claude Desktop / Cowork connectors (DXT bundle), an embedded Claude Agent SDK for agentic *"plan my
-week"* and proactive insights, and a Compass skills library. See [Roadmap & Status](Roadmap-and-Status).
+The Claude **Desktop** (`.mcpb`) + **Cowork** (plugin) connectors, the embedded **agent mode** for agentic
+*"plan my week"* + proactive insights, and the **5-skill** Compass library all shipped in Phase 8. Build
+the Desktop bundle with `npm run build:mcpb`. See [Roadmap & Status](Roadmap-and-Status).
 
 ## Related
 

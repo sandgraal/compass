@@ -3,7 +3,9 @@
 > **Living document.** Updated whenever a feature ships or scope changes.
 > The `docs-keeper` subagent (`.claude/agents/docs-keeper.md`) is responsible for keeping this in sync with reality after each merge.
 >
-> See [`strategic-review-2026-05.md`](strategic-review-2026-05.md) for the latest snapshot of where we stand and why.
+> See [`strategic-review-2026-06.md`](strategic-review-2026-06.md) for the latest snapshot of where we
+> stand and why (the June expert panel that proposes Phase 11). The earlier
+> [`strategic-review-2026-05.md`](strategic-review-2026-05.md) is a historical snapshot (it drove Phases 6–10).
 
 ## Status snapshot
 
@@ -18,8 +20,11 @@
 | **Phase 4** — Finance forward roadmap | 9 items | 4.0–4.6 shipped; 4.7 closed early (Plaid source of truth, Excel retired 2026-05-21); **4.8 SimpleFIN Bridge shipped 2026-06-14** — recommended user-owned bank sync (Amex incl.), Plaid demoted to advanced |
 | **Phase 5 (cont.)** — Bounded UX wins | 5 items | 100% (5.10–5.14 shipped) |
 | **Phase 6** — Code-health debt (May 2026) | 5 items | 100% — 6.1 IPC test backfill (vault/auth/finance×3/sync/knowledge/settings/spotlight/habits/updater), 6.2 knowledge tests, 6.3 empty-catch sweep, 6.4 Biome 0-warning + `--error-on-warnings` CI gate (#139), 6.5 type-safety audit all shipped |
-| **Phase 7** — Daily-Driver & Platform Roadmap | 6 tracks | **Scheduled (2026-06-06).** Track A in progress: **Morning Brief** (digest card + scheduled notification), the **weekly review close-out** (`weekly-review:get` + carry-over), and the **monthly rollup** (`monthly-rollup:get`), and the **Morning Brief low-cash + price-hike alerts** (`computeLowCashAlert` over the cash-flow forecast; `computePriceHikeAlert` over the subscription audit), and the **multi-type capture bar** (task/note/expense via `quick-capture:submit`; voice deferred) shipped — Track A complete (minus deferred voice). Track B started: **Obsidian vault bridge** (2026-06-11) + **Notion import** (2026-06-12) shipped; Notion export + the other Track B services open. Track E started: **Proactive insights** shipped 2026-06-12. Tracks C, D, F still open. See § Phase 7. |
+| **Phase 7** — Daily-Driver & Platform Roadmap | 6 tracks | **In progress.** Track A ✅ (Morning Brief + low-cash/price-hike alerts, weekly/monthly review, multi-type capture; voice deferred) · Track B 🟡 (Obsidian + Notion-import + Linear + Todoist + Things shipped; Slack/Jira/Reminders/Outlook+CalDAV/IMAP/web-clipper/receipts open) · Track C 🟡 (MCP surface expanded; webhooks/plugin-API/marketplace/Zapier open) · Track D ⬜ (E2E sync, mobile, sharing — not started) · Track E ✅ (proactive insights + agentic plan-my-week) · Track F 🟡 (theming shipped; mobile-responsive + a11y open). See § Phase 7. |
 | **Phase 8** — Claude Integration (bidirectional) | 6 items | **100% — all shipped** (MCP read+propose tools, in-app Claude Inbox, one-click `.mcpb` Desktop bundle, end-user plugin, 5 skills, agentic Ask Compass) — see § Phase 8 + [`claude-integration.md`](claude-integration.md) |
+| **Phase 9** — The Storehouse (own everything, export anywhere) | 8 items | **~70%.** 9.0 Contacts + Universal Export ✅ · 9.1 archive importers ✅ (Google/macOS Contacts live-sync open) · 9.3 Subscriptions ✅ · 9.5 Assets ✅ · 9.6 Storehouse overview ✅ · **9.2 documents, 9.4 medical, 9.7 reverse-connectors open** — see § Phase 9 |
+| **Phase 10** — The Acquisition Engine (go get everything) | 7 waves | **~40%.** 10.1 spine ✅ (Drop Zone + `records`/Timeline + **~44 recognizers**) · 10.5 Data-Rights Concierge ✅ (+ tax/SSA PDF recognizers) · 10.6 CRED sandbox ✅ (SSA adapter, gated off by default) · 10.7 Converse/Connect/Curate ✅ · **10.2 holdings/IRS/crypto, 10.3 FHIR/wearables, 10.4 remaining takeouts, full 10.6 open** — see § Phase 10 + [`storehouse-roadmap.md`](storehouse-roadmap.md) |
+| **Phase 11** — Life Planning & Cross-Border (NEW) | 7 items | **Proposed (2026-06-26).** Output of the June expert panel ([`strategic-review-2026-06.md`](strategic-review-2026-06.md)): multi-currency, expat tax (FBAR/FATCA), Airbnb P&L, long-horizon retirement, residency/days-in-country, goals, estate. **Not started** — see § Phase 11 |
 
 PRD-completion of the running app: **~99%** (all Phases 1–3 + Phase 4.0–4.5 merged with UIs).
 
@@ -437,24 +442,30 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 > exported in plaintext; the assistant/MCP see summaries only — **except the `records` timeline, which the
 > user opted to make searchable in detail (Phase 10.7 "Converse"; vault + raw finance stay aggregates-only).**
 
-- [ ] **10.1 The acquisition spine** — the **Drop Zone** (universal archive import + format-recognizer
+**Status (v0.14.0):** the spine (10.1) and the leverage layer (10.7) shipped; **~44 recognizers** across
+CSV/JSON, archive, streaming (Apple Health, mbox), SQLite (browser/iMessage), and PDF dispatch
+(`electron/lib/recognizers.ts`); the Data-Rights Concierge (`src/lib/data-rights.ts`, 16 sources) and the
+CRED sandbox (`electron/integrations/cred/`, SSA adapter, **gated off by default**) shipped. Remaining:
+deeper financial/health/comms sources (10.2–10.4) + full CRED (10.6).
+
+- [x] **10.1 The acquisition spine** ✅ **shipped** (migration `0016`, `records`/Timeline, ~44 recognizers) — the **Drop Zone** (universal archive import + format-recognizer
   registry, generalizing `electron/lib/{vcard,ics,csv,archive-importers}.ts` + the finance CSV/PDF importers)
   + the unified **`records`/timeline store** (migration `0016`, dedup via a `hash` UNIQUE like
   `finance_transactions`) + a basic **Timeline** page. *Everything else hangs off this — build first.*
-- [ ] **10.2 Financial & credit completeness** — credit reports (AnnualCreditReport / FCRA), brokerage &
+- [~] **10.2 Financial & credit completeness** 🟡 *partial — credit-report + tax-doc PDF recognizers shipped; brokerage/retirement holdings, IRS-portal transcripts, crypto open (feeds Phase 11.2/11.4)* — credit reports (AnnualCreditReport / FCRA), brokerage &
   retirement holdings (SnapTrade or Plaid Investments), IRS/tax transcripts, crypto. Extends Phase 4.
-- [ ] **10.3 Health & medical** — Apple Health `export.xml` → FHIR / Blue Button patient access (evaluate
+- [~] **10.3 Health & medical** 🟡 *partial — Apple Health `export.xml` streaming recognizer shipped; FHIR/Blue Button, genetics, wearables open* — Apple Health `export.xml` → FHIR / Blue Button patient access (evaluate
   self-hosted Fasten Health) → genetics → wearables. Feeds the Phase 9.4 `medical_*` tables.
-- [ ] **10.4 Digital footprint & comms** — the big takeouts (Google/Meta/X/LinkedIn/Amazon/Spotify), browser
+- [~] **10.4 Digital footprint & comms** 🟡 *mostly shipped — Google/Meta/LinkedIn/Amazon/Spotify/Netflix/YouTube + browser history + iMessage + email (mbox) recognizers shipped; Apple Data&Privacy, WhatsApp/Signal/Telegram open* — the big takeouts (Google/Meta/X/LinkedIn/Amazon/Spotify), browser
   history, iMessage (`chat.db`), email archive. Heavy reuse of `archive-importers.ts`.
-- [ ] **10.5 Government & official + Data-Rights Concierge** — SSA, IRS, property/court/travel records,
+- [~] **10.5 Government & official + Data-Rights Concierge** 🟡 *partial — the Data-Rights Concierge (`src/lib/data-rights.ts`, 16 sources, request→track→ingest) + tax/SSA PDF recognizers shipped; IRS/bureau portal automation, property/court/travel open* — SSA, IRS, property/court/travel records,
   data-broker file disclosures + opt-outs, and the **request → track → ingest** workflow (reuses the Morning
   Brief scheduler).
-- [ ] **10.6 Credential-Based Aggregation Engine** — the **Portal Automation Sandbox** (extends the Plaid
+- [~] **10.6 Credential-Based Aggregation Engine** 🟡 *early — the Portal Automation Sandbox + SSA assisted-login adapter shipped (`electron/integrations/cred/`, Mode A / no-stored-credentials, **gated off by `COMPASS_ENABLE_CRED`**); stored-credential mode + more portals open* — the **Portal Automation Sandbox** (extends the Plaid
   Link child-window bridge): opt-in, vault-backed (`portal-credentials`), isolated, assisted-login for MFA.
   Cross-cutting + riskiest → **last**. **Design gate:** [`cred-engine-design.md`](cred-engine-design.md)
   (assisted-first / no-stored-creds v1, threat model, phased build, open questions).
-- [ ] **10.7 Advanced leverage** — rich unified timeline, cross-source insights (sleep vs. spending, "on this
+- [x] **10.7 Advanced leverage** ✅ *Converse (FTS + semantic search) · Connect (People + "on this day") · Curate (firehose tiering) all shipped — see sub-items; rich combined dashboards remain a follow-up* — rich unified timeline, cross-source insights (sleep vs. spending, "on this
   day"), Ask-Compass-over-everything (extends the Phase 5.9 semantic index + Phase 8.5 agent tools), combined
   dashboards. *(Basic timeline + Ask-over-it ship incrementally from 10.1.)*
   - [x] **"Converse" — full-text search + ask-over-everything (PR1).** `records_fts` external-content FTS5
@@ -501,6 +512,53 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 
 ---
 
+## Phase 11 — Life Planning & Cross-Border (proposed)
+
+> **Status: proposed, not scheduled (2026-06-26).** Output of the June expert panel — full evaluation in
+> [`strategic-review-2026-06.md`](strategic-review-2026-06.md). Compass tracks the past and the next 90
+> days well, but does little with the **multi-year future** or the user's **cross-border** shape (a
+> US-based owner of Costa Rica property run as an Airbnb; activity across US/CR/Spain/Colombia/Panama). The
+> app already *encodes* that shape — CR `geo` tags, a `capex-airbnb` tax tag, Schedule C/E, an ingested SSA
+> statement, a `retirement` `assetClass` no calculation reads — so most of this phase is **leverage over
+> data already in the DB**, not new ingestion. Every item reuses shipped machinery; 11.1 + 11.2 are
+> `security-auditor` merge gates (FX network calls + foreign-account identifiers). Thresholds/forms are
+> jurisdiction-specific — *(verify at build time)*.
+
+- [ ] **11.1 Multi-currency foundation** (L) — *the keystone.* Today every amount is hard-coded USD
+  (`toLocaleString('en-US', { currency: 'USD' })`). Add a `currency` field on accounts/transactions, a
+  daily **FX-rate snapshot** table (main-process fetch, per-source CSP, no wildcard), base-currency net
+  worth + forecast, and FX gain/loss on cross-border transfers. Reuses the finance schema,
+  `finance-snapshot.ts`, and `buildForecast`. Everything else cross-border depends on this.
+- [ ] **11.2 Foreign-account & expat-tax surface** (M) — the foreign side of a US expat return, absent
+  today. **FBAR (FinCEN 114)** max-aggregate-foreign-balance-by-year tracker + threshold flag (>$10k
+  *(verify)*), **FATCA (Form 8938)**, and a **foreign-tax-credit** ledger. Extends `finance-tax.ts` + the
+  tax-pack export; account identifiers go to a new vault category `foreign-accounts` (never across IPC).
+- [ ] **11.3 CR property / Airbnb P&L + depreciation** (M) — assemble a property P&L (revenue / operating /
+  capex→basis / net-yield) and a Schedule E **depreciation schedule** from rows *already* tagged with
+  `geo`/`purpose`/`taxTag` (incl. `capex-airbnb` and the CR ATM split). Adds a cost-basis accumulator.
+  Almost pure assembly — no new ingestion.
+- [ ] **11.4 Long-horizon retirement projection** (L) — extend `buildForecast` from 90 days to a
+  multi-year decumulation engine: **Social Security claiming-age** modeling from the ingested SSA statement
+  (the `SOCIAL_SECURITY_RECOGNIZER` already parses it into `records`), Airbnb net income + brokerage
+  holdings (Phase 10.2) as retirement cash flow, and sequence-of-returns. Turns the decorative `retirement`
+  asset class into a live projection.
+- [ ] **11.5 Days-in-country & residency readiness** (M) — per-country day counts derived from
+  `calendar_events` + the Timeline (and, later, CBP I-94 via RIGHTS) feeding the **US substantial-presence
+  test** and a future **CR 183-day** rule; a residency-pathway checklist (pensionado / rentista /
+  inversionista income thresholds *(verify)*); a CAJA cost estimate.
+- [ ] **11.6 Goals & milestones** (M) — target-date savings/goals (tax reserve, next capex draw, retirement
+  number) tying property + tax + retirement together. Reuses `appSettings` + the forecast engine.
+- [ ] **11.7 Estate & insurance readiness** (S/M) — cross-border beneficiaries, CR property title, and
+  insurance-adequacy surfacing over the vault (legal/medical) + the `assets` domain.
+
+> **Build order:** 11.1 (keystone) → 11.2 / 11.3 (independent; both ride the existing tag system) → 11.4
+> (needs 11.1 + holdings 10.2) → 11.5 → 11.6 → 11.7. **Re-prioritization of the existing backlog:** promote
+> **10.2** (brokerage/retirement holdings → feeds 11.4; IRS/tax transcripts → feeds 11.2); the shipped SSA
+> RIGHTS already feeds 11.4; keep 10.3 Apple Health lower for a US-based user; **10.6 full CRED stays gated
+> and last.**
+
+---
+
 ## Backlog (deferred, considered but out of scope this round)
 
 ## Phase 5 — Strategic-review follow-ups (May 2026)
@@ -528,7 +586,10 @@ Driven by the May 2026 strategic review (`/Users/christopherennis/.claude/plans/
 
 ---
 
-## Recommended PR sequence
+## Recommended PR sequence (historical — Phases 0–4, all shipped)
+
+> Kept for provenance. The live forward sequence is the per-phase **Build order** notes in Phases 7 / 9 /
+> 10 / 11 above.
 
 | # | Branch | Phase items | Owner |
 |---|---|---|---|

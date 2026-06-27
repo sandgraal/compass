@@ -18,7 +18,8 @@ Everything runs on your machine; raw transactions never leave it. Full design:
 
 Built-in CSV parsers cover **Chase, Amex, Capital One, Discover, Bank of America, USAA, Rocket
 Money, and a generic format**; PDF extractors cover **USAA, AMEX, and generic** statements. You
-can also link accounts via **[Plaid](#plaid-bank-linking)** to skip the file ritual entirely.
+can also link accounts via **[SimpleFIN or Plaid](#bank-sync-simplefin--plaid)** to skip the file
+ritual entirely.
 
 ## The tabs
 
@@ -82,24 +83,29 @@ Two reports in one tab:
   aggregation. Manual overrides are **sticky** (`taxTagSource='user'`) so re-tagging never clobbers
   your picks. You can export a **tax pack** (`finance:export-tax-pack`).
 
-## Plaid bank-linking
+## Bank sync (SimpleFIN + Plaid)
 
-Instead of dropping files, link a bank directly:
+Instead of dropping files, link a bank directly. Bank sync is the source of truth (the legacy Excel
+pipeline was retired 2026-05-21).
 
-- Connect an institution through Plaid; Compass tracks each **Plaid Item** and uses
-  `/transactions/sync` with a cursor for incremental pulls.
-- **Access tokens are stored encrypted in `.vault/plaid.enc` — never in the database.**
-- Accounts link back via `plaidItemId` / `plaidAccountId` / `mask`. Empty state when nothing's
-  linked: *"No banks connected yet."*
+- **SimpleFIN Bridge (recommended)** — *user-as-aggregator.* Sign up for SimpleFIN Bridge (~$15/yr), link
+  your own banks (16k+ institutions incl. **Amex**), and paste a one-time setup token. Only an encrypted
+  **Access URL** leaves the machine (`.vault/simplefin.enc`); the pull is date-windowed and credit-positive
+  (no sign flip). A conservative classifier lands cards/loans on the liability side at first link.
+- **Plaid (advanced / BYO-keys)** — bring your own `client_id` + secret (entered on the Integrations card).
+  Link runs in a sandboxed child window; `/transactions/sync` cursor for incremental pulls. **Access tokens
+  are encrypted in `.vault/plaid.enc` — never in the database.** Accounts link back via `plaidItemId` /
+  `plaidAccountId` / `mask`.
 
-Plaid is now the source of truth (the legacy Excel pipeline has been retired).
+Both dedupe through the same `finance_transactions.hash` constraint as a manual CSV drop, write
+`sync_events`, and run on a daily 06:00 cron. Empty state when nothing's linked: *"No banks connected yet."*
 
 ## Where the data lives
 
 | What | Where | Encrypted |
 |---|---|---|
 | Transactions, accounts, rules, budgets, snapshots, forecast overrides | `.data/compass.db` | No |
-| Account credentials, raw account numbers, Plaid access tokens | `.vault/financial.enc`, `.vault/plaid.enc` | **Yes** (AES-256-GCM) |
+| Account credentials, raw account numbers, bank-sync tokens | `.vault/financial.enc`, `.vault/simplefin.enc`, `.vault/plaid.enc` | **Yes** (AES-256-GCM) |
 | Markdown summaries (no PII) | `knowledge-base/profile/finances*.md` | No |
 | Source statements | read in place in the watched folder (not moved) | No |
 

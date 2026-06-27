@@ -1,19 +1,29 @@
 # Finance Module
 
 Local-first personal finance, integrated as a peer of Calendar / Gmail / GitHub.
-Owns ingest, categorization, debt tracking, budget, and dashboard for the user's
-financial life. Replaces the legacy Excel pipeline in a user-configured legacy
-finance project directory (in transition through 2026-06-10 — see
-[`finance/legacy-cutover.md`](finance/legacy-cutover.md)).
+Owns ingest, categorization, debt tracking, net worth, forecast, tax tagging, and
+the dashboard for the user's financial life. It **replaced** the legacy Excel
+pipeline, which was retired early on **2026-05-21** once bank sync became the source
+of truth (see [`finance/legacy-cutover.md`](finance/legacy-cutover.md)).
+
+> **Bank sync:** the recommended path is **SimpleFIN Bridge** (user-as-aggregator,
+> 16k+ institutions incl. Amex); **Plaid** is retained as an advanced /
+> bring-your-own-keys option. CSV/PDF drop + watched-folder ingest remain the
+> fallback for institutions neither reaches (e.g. CR Banco Popular). See § Bank sync.
+
+> **Forward roadmap:** the next finance work is the cross-border / retirement layer —
+> see [`strategic-review-2026-06.md`](strategic-review-2026-06.md) +
+> [`implementation_plan.md`](implementation_plan.md) § Phase 11.
 
 ## Surfaces
 
 | Layer | File | Purpose |
 |---|---|---|
-| Schema | `electron/db/schema.ts` (finance section) | `financeAccounts` (debts via `isDebt=true`, net-worth bucket via `assetClass`, debt pay day via `paymentDayOfMonth`, optional Plaid linkage via `plaidItemId`+`plaidAccountId`+`mask`), `financeTransactions` (with indexed `geo`, `purpose`, `taxTag`, `taxYear`), `categorizationRules`, `budgetRules`, `financeBalanceSnapshots`, `forecastOverrides`, `plaidItems` |
+| Schema | `electron/db/schema.ts` (finance section) | `financeAccounts` (debts via `isDebt=true`, net-worth bucket via `assetClass`, debt pay day via `paymentDayOfMonth`, optional Plaid/SimpleFIN linkage via `plaidItemId`+`plaidAccountId`+`mask`), `financeTransactions` (with indexed `geo`, `purpose`, `taxTag`, `taxYear`), `categorizationRules`, `budgetRules`, `financeBalanceSnapshots`, `forecastOverrides`, `plaidItems`, `simplefinConnections` |
 | Ingest | `electron/integrations/finance.ts` | CSV parsers (Chase, Amex, Cap One, Discover, BoA, USAA, Rocket Money, generic), categorizer, dedupe |
 | PDF | `electron/integrations/finance-pdf.ts` | Statement extractors (USAA, AMEX, generic) |
 | Watcher | `electron/integrations/finance-watcher.ts` | Chokidar watch on `~/Documents/Money/` (configurable), 3-level subfolder depth, `.csv` + `.xlsx` + `.pdf` allowlist |
+| Bank sync | `electron/integrations/simplefin/*` · `electron/integrations/plaid/*` | **SimpleFIN** (recommended; setup-token → encrypted Access URL, date-windowed pull, `classify.ts` card/loan detection, no sign-flip) and **Plaid** (advanced; Link child-window + `transactions/sync` cursor loop). Tokens encrypted in `.vault/{simplefin,plaid}.enc`; daily 06:00 cron; both normalize into the shared `RawTxn` pipeline. |
 | Geo / purpose | `electron/integrations/finance-geo.ts` | Classifies CR / US / SPAIN / etc. + capex/operating/etc. for CR rows. Sets indexed columns at ingest. |
 | Tax tagging | `electron/integrations/finance-tax.ts` | Schedule C / E / capex-airbnb / charitable / medical / investment / none. Auto-runs after geo; user overrides sticky via `taxTagSource='user'`. |
 | Net-worth snapshots | `electron/integrations/finance-snapshot.ts` | Nightly per-account balance capture. Inferred from snapshot baseline + Σ(txns since); manual_asset accounts edited via `setAccountBalance`. |
@@ -22,7 +32,7 @@ finance project directory (in transition through 2026-06-10 — see
 | Subscriptions | `electron/integrations/finance-subscriptions.ts` | Recurring detection, zombies, duplicates |
 | Knowledge | `electron/knowledge/finance-extractor.ts` | Writes `profile/finances.md`, `profile/finances-debt.md`, `profile/finances-monthly.md` |
 | IPC | `electron/ipc/finance.ts` | 35+ handlers — see `electron/preload.ts` for the full surface |
-| UI | `src/pages/Finance.tsx` | Overview / Transactions / Accounts / Rules / CR & Subs tabs (Net Worth + Forecast + Tax-summary tabs are pending UI follow-up PRs) |
+| UI | `src/pages/Finance.tsx` | Overview / Net Worth / Forecast / Transactions / Accounts / Rules / CR & Subs tabs — all shipped (incl. the YTD Tax summary card + tax-pack export button) |
 
 ## Sign convention
 
@@ -140,6 +150,26 @@ are post-processed after each ingest:
    `knowledge-base/profile/`.
 5. UI reloads via `finance-watcher:ingest-complete` event.
 
+## Bank sync (SimpleFIN + Plaid)
+
+Two paths pull transactions automatically; the CSV/PDF watcher stays the fallback for what neither reaches.
+
+- **SimpleFIN Bridge (recommended).** *User-as-aggregator*: the user signs up for SimpleFIN Bridge
+  (~$15/yr), links their own banks (16k+ institutions incl. **Amex** via MX), and pastes a one-time setup
+  token. Only an encrypted **Access URL** leaves the machine (`.vault/simplefin.enc`); the pull is
+  date-windowed (no cursor) and **not** sign-flipped (SimpleFIN is already credit-positive). `classify.ts`
+  lands a card/loan on the liability side at first link. No developer quota, no OAuth widget — the right
+  shape for a distributed app. Files:
+  `electron/integrations/simplefin/{config,vault,client,classify,match,normalize,sync}.ts`.
+- **Plaid (advanced / BYO-keys).** *Developer-as-aggregator*: needs your own `client_id` + secret (entered
+  in-app on the Integrations card). Link runs in a sandboxed child `BrowserWindow` (CSP-pinned to
+  `*.plaid.com`); `transactions/sync` cursor loop; encrypted tokens in `.vault/plaid.enc`. Files:
+  `electron/integrations/plaid/{config,client,link,normalize,cursor,sync,errors}.ts`.
+
+Both write `sync_events` + `integrations.lastSyncedAt`, run on a daily 06:00 cron, and dedupe through the
+same `finance_transactions.hash` UNIQUE constraint as a manual CSV drop (so a CSV→bank-sync migration
+never double-counts).
+
 ## Where the data lives
 
 | What | Where | Encrypted |
@@ -149,18 +179,18 @@ are post-processed after each ingest:
 | Markdown summaries (no PII) | `knowledge-base/profile/finances*.md` | No |
 | Source CSVs / PDFs after ingestion | Watched-folder mode reads in place (no auto-move). Inbox/drain ingest mode archives to `~/Documents/Money/archive/`. | No |
 
-## Legacy Excel pipeline (transition)
+## Legacy Excel pipeline (retired 2026-05-21)
 
-The original implementation lives in a user-configured legacy finance project
-directory and continues to run in parallel through **2026-06-10** as a
-reconciliation backstop. After that the Excel project is archived and Compass
-is the only active finance system. See
-[`finance/legacy-cutover.md`](finance/legacy-cutover.md) for the migration
-playbook.
+The original implementation lived in a user-configured legacy finance project
+directory and ran in parallel as a reconciliation backstop until **2026-05-21**,
+when bank sync became the source of truth and the Excel project was archived —
+ahead of the originally planned 2026-06-10 cutover. Compass is now the only active
+finance system. See [`finance/legacy-cutover.md`](finance/legacy-cutover.md) for the
+migration playbook.
 
-The one-shot importer at `scripts/import-from-excel.ts` reads JSON dumps the
-legacy project produces (`master_ledger.compass.json`,
-`debt_tracker.compass.json`). It's idempotent — safe to re-run.
+The one-shot importer at `scripts/import-from-excel.ts` (reads
+`master_ledger.compass.json` / `debt_tracker.compass.json`) remains idempotent and
+safe to re-run for historical backfill.
 
 ## Forward roadmap
 
@@ -169,11 +199,17 @@ the latest merge:
 
 - ✅ [`db-migrate-fix.md`](finance/db-migrate-fix.md) — `npm run db:migrate` works
 - ✅ [`geo-purpose-schema-promotion.md`](finance/geo-purpose-schema-promotion.md) — geo/purpose are indexed columns
-- ✅ [`tax-tagging.md`](finance/tax-tagging.md) — Schedule C / capex backend (UI follow-up pending)
-- ✅ [`net-worth.md`](finance/net-worth.md) — snapshot backend (UI follow-up pending)
-- ✅ [`cash-flow-forecast.md`](finance/cash-flow-forecast.md) — forecast backend (UI follow-up pending)
-- ⏳ [`plaid-integration.md`](finance/plaid-integration.md) — kill the manual CSV ritual (multi-PR, not started)
-- ⏳ [`legacy-cutover.md`](finance/legacy-cutover.md) — Excel pipeline retirement (operational, runs through 2026-06-10)
+- ✅ [`tax-tagging.md`](finance/tax-tagging.md) — Schedule C / E / capex tags + YTD Tax card + tax-pack export
+- ✅ [`net-worth.md`](finance/net-worth.md) — snapshot backend + Net Worth tab
+- ✅ [`cash-flow-forecast.md`](finance/cash-flow-forecast.md) — 90-day forecast + Forecast tab
+- ✅ [`plaid-integration.md`](finance/plaid-integration.md) — Plaid bank-linking (6 PRs, shipped; advanced / BYO-keys)
+- ✅ **SimpleFIN Bridge** — recommended user-as-aggregator bank/card sync (shipped 2026-06-14; `electron/integrations/simplefin/*`)
+- ✅ [`legacy-cutover.md`](finance/legacy-cutover.md) — Excel pipeline retired early (2026-05-21)
+
+**Next (proposed — Phase 11 "Life Planning & Cross-Border"):** multi-currency (USD/CRC + FX),
+foreign-account & expat-tax (FBAR/FATCA), CR property/Airbnb P&L + depreciation, and a long-horizon
+retirement projection. See [`strategic-review-2026-06.md`](strategic-review-2026-06.md) +
+[`implementation_plan.md`](implementation_plan.md) § Phase 11.
 
 The implementation plan's
 [Phase 4 — Finance forward](./implementation_plan.md#phase-4--finance-forward-roadmap)

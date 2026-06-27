@@ -19,8 +19,14 @@ The page renders one card per service with a **Connect** button and connection s
 | **Google Drive** | File index → `drive/index.md` | OAuth |
 | **Gmail** | Extracted action items → Daily view + `inbox/action-items.md` | OAuth |
 | **GitHub** | Issues, PRs, project items → Daily "Due Today" + `work/github-summary.md` | Personal Access Token |
-| **Plaid** | Bank/credit transactions → [Finance](Finance) | Plaid link (token in `.vault/plaid.enc`) |
+| **SimpleFIN** *(recommended)* | Bank/credit transactions → [Finance](Finance) | Setup token → encrypted Access URL (`.vault/simplefin.enc`) |
+| **Plaid** *(advanced)* | Bank/credit transactions → [Finance](Finance) | Plaid link (token in `.vault/plaid.enc`); BYO `client_id` + secret |
 | **Apple Calendar** | Local `.ics` events (with RRULE expansion) | Local file — no account |
+| **Linear** | Assigned issues → Dashboard | Personal API key |
+| **Todoist** | Overdue/today tasks → today's checklist | Personal API token |
+| **Things 3** | Open to-dos (due/scheduled ≤ today) → today's checklist | Local SQLite — no account |
+| **Notion** | Shared pages → `knowledge-base/notion/*.md` | Internal-integration token |
+| **Obsidian** | Two-way markdown bridge (vault ↔ knowledge base) | Local vault path — no account |
 
 ## Connecting Google (OAuth)
 
@@ -38,10 +44,20 @@ project, not a shared one). The card includes an inline setup guide:
 Simpler than OAuth: click **Generate token** (links you to GitHub's token page), create a PAT with
 the scopes shown, paste it, and **Connect**. The token is encrypted via `safeStorage`.
 
-## Connecting your bank (Plaid)
+## Connecting your bank (SimpleFIN / Plaid)
 
-See [Finance → Plaid bank-linking](Finance#plaid-bank-linking). Empty state before linking:
-*"No banks connected yet."* Access tokens live encrypted in `.vault/plaid.enc`, never in the DB.
+Two paths, both encrypted-at-rest and never in the DB. **SimpleFIN (recommended)** is
+*user-as-aggregator*: sign up for SimpleFIN Bridge (~$15/yr), link your own banks (incl. **Amex**),
+and paste a one-time setup token — only an encrypted Access URL leaves the machine
+(`.vault/simplefin.enc`). **Plaid (advanced)** needs your own `client_id` + secret and links through a
+sandboxed window (`.vault/plaid.enc`). See [Finance → Bank sync](Finance#bank-sync-simplefin--plaid).
+Empty state before linking: *"No banks connected yet."*
+
+## Local-token integrations (no OAuth)
+
+**Linear / Todoist / Notion** take a pasted personal token (encrypted via `safeStorage`); **Things 3**
+and **Apple Calendar** read a **local file** with no account at all; **Obsidian** mirrors to a local
+vault path. None widens the renderer CSP — these calls are main-process-only.
 
 ## Syncing
 
