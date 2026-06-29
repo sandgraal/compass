@@ -540,6 +540,16 @@ describe('finance:property (Phase 11.3)', () => {
     })
   })
 
+  it('treats a null / non-object payload as a no-op instead of crashing', async () => {
+    const setCfg = await registerAndGet('finance:set-property-config')
+    // A null/undefined/non-object IPC payload must not throw on the `in` checks.
+    for (const bad of [null, undefined, 'nope', 42]) {
+      const out = (await invoke(setCfg, bad)) as { success: boolean; config?: unknown }
+      expect(out.success).toBe(true)
+      expect(out.config).toBeDefined()
+    }
+  })
+
   it('clears the basis override with null', async () => {
     const setCfg = await registerAndGet('finance:set-property-config')
     await invoke(setCfg, { basisOverride: 400_000 })
