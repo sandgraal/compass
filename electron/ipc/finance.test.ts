@@ -492,6 +492,75 @@ describe('finance:refresh-fx-rates', () => {
   })
 })
 
+describe('finance:property (Phase 11.3)', () => {
+  function seedCapex(amount: number, taxTag = 'tax:capex-airbnb'): void {
+    sqlite
+      .prepare(
+        "INSERT INTO finance_transactions (hash, date, amount, description, tax_tag) VALUES (?, '2024-04-01', ?, 'build', ?)"
+      )
+      .run(`cx-${amount}-${taxTag}`, amount, taxTag)
+  }
+
+  it('set-property-config persists + validates, get-property-pnl assembles the basis', async () => {
+    seedCapex(-300_000)
+    const setCfg = await registerAndGet('finance:set-property-config')
+    const cfgOut = (await invoke(setCfg, {
+      placedInService: '2024-01-01',
+      landValue: 50_000,
+      recoveryYears: 30
+    })) as { success: boolean; config?: { recoveryYears: number } }
+    expect(cfgOut.success).toBe(true)
+    expect(cfgOut.config?.recoveryYears).toBe(30)
+
+    const getPnl = await registerAndGet('finance:get-property-pnl')
+    const pnl = (await invoke(getPnl)) as {
+      baseCurrency: string
+      basisToDate: number
+      depreciableBasis: number
+      depreciation: Array<{ year: number }>
+      totals: { capex: number }
+    }
+    expect(pnl.baseCurrency).toBe('USD')
+    expect(pnl.totals.capex).toBe(300_000)
+    expect(pnl.basisToDate).toBe(300_000)
+    expect(pnl.depreciableBasis).toBe(250_000) // 300k - 50k land
+    expect(pnl.depreciation[0].year).toBe(2024)
+  })
+
+  it('rejects a bad placed-in-service date and out-of-range values', async () => {
+    const setCfg = await registerAndGet('finance:set-property-config')
+    expect(
+      (await invoke(setCfg, { placedInService: '04/01/2024' })) as { success: boolean }
+    ).toMatchObject({ success: false })
+    expect((await invoke(setCfg, { recoveryYears: 0 })) as { success: boolean }).toMatchObject({
+      success: false
+    })
+    expect((await invoke(setCfg, { landValue: -5 })) as { success: boolean }).toMatchObject({
+      success: false
+    })
+  })
+
+  it('treats a null / non-object payload as a no-op instead of crashing', async () => {
+    const setCfg = await registerAndGet('finance:set-property-config')
+    // A null/undefined/non-object IPC payload must not throw on the `in` checks.
+    for (const bad of [null, undefined, 'nope', 42]) {
+      const out = (await invoke(setCfg, bad)) as { success: boolean; config?: unknown }
+      expect(out.success).toBe(true)
+      expect(out.config).toBeDefined()
+    }
+  })
+
+  it('clears the basis override with null', async () => {
+    const setCfg = await registerAndGet('finance:set-property-config')
+    await invoke(setCfg, { basisOverride: 400_000 })
+    let cfg = (await invoke(setCfg, {})) as { config?: { basisOverride: number | null } }
+    expect(cfg.config?.basisOverride).toBe(400_000)
+    await invoke(setCfg, { basisOverride: null })
+    cfg = (await invoke(setCfg, {})) as { config?: { basisOverride: number | null } }
+    expect(cfg.config?.basisOverride).toBeNull()
+  })
+})
+
 // ── finance:delete-account ───────────────────────────────────────────────────
 
 describe('finance:delete-account', () => {

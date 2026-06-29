@@ -455,6 +455,15 @@ const api = {
       ipcRenderer.invoke('finance:set-fx-rate', input),
     refreshFxRates: () => ipcRenderer.invoke('finance:refresh-fx-rates'),
 
+    // CR property / Airbnb P&L (Phase 11.3)
+    getPropertyPnl: () => ipcRenderer.invoke('finance:get-property-pnl'),
+    setPropertyConfig: (input: {
+      placedInService?: string | null
+      landValue?: number
+      recoveryYears?: number
+      basisOverride?: number | null
+    }) => ipcRenderer.invoke('finance:set-property-config', input),
+
     // Cash-flow forecast (Phase 4.5)
     getForecast: (opts?: { windowDays?: number; lowCashThreshold?: number }) =>
       ipcRenderer.invoke('finance:get-forecast', opts),

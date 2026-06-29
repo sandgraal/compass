@@ -1317,6 +1317,50 @@ declare global {
           error?: string
         }>
 
+        // CR property / Airbnb P&L (Phase 11.3)
+        getPropertyPnl(): Promise<{
+          baseCurrency: string
+          byYear: Array<{
+            year: number
+            revenue: number
+            operating: number
+            capex: number
+            netOperating: number
+          }>
+          totals: { revenue: number; operating: number; capex: number; netOperating: number }
+          basisToDate: number
+          depreciableBasis: number
+          netYieldOnBasis: number | null
+          depreciation: Array<{
+            year: number
+            depreciation: number
+            accumulated: number
+            remainingBasis: number
+          }>
+          unconvertedCount: number
+          config: {
+            placedInService: string | null
+            landValue: number
+            recoveryYears: number
+            basisOverride: number | null
+          }
+        }>
+        setPropertyConfig(input: {
+          placedInService?: string | null
+          landValue?: number
+          recoveryYears?: number
+          basisOverride?: number | null
+        }): Promise<{
+          success: boolean
+          error?: string
+          config?: {
+            placedInService: string | null
+            landValue: number
+            recoveryYears: number
+            basisOverride: number | null
+          }
+        }>
+
         // Cash-flow forecast (Phase 4.5)
         getForecast(opts?: { windowDays?: number; lowCashThreshold?: number }): Promise<{
           events: Array<{
