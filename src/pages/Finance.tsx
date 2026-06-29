@@ -1964,8 +1964,9 @@ function ExpatTaxTab(): JSX.Element {
   if (!summary)
     return <p className="text-sm text-muted-foreground p-4">Expat-tax summary unavailable.</p>
 
-  const base = summary.baseCurrency
-  const usd = (n: number): string => formatMoney(n, base, { decimals: 0 })
+  // FBAR/FATCA are USD filings — the summary always reports in USD regardless of
+  // the user's net-worth base currency, so the "USD" labels below are accurate.
+  const usd = (n: number): string => formatMoney(n, summary.reportingCurrency, { decimals: 0 })
 
   return (
     <div className="space-y-6">

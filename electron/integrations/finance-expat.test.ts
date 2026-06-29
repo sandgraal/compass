@@ -210,10 +210,24 @@ describe('getFatcaThreshold + buildExpatTaxSummary', () => {
     addSnap(sqlite, id, '2024-07-01', 9_000_000) // $18k
 
     const summary = buildExpatTaxSummary(sqlite, 2025)
-    expect(summary.baseCurrency).toBe('USD')
+    expect(summary.reportingCurrency).toBe('USD')
     expect(summary.fbarThreshold).toBe(FBAR_THRESHOLD_USD)
     expect(summary.hasForeignAccounts).toBe(true)
     expect(summary.fbar.find((y) => y.year === 2024)?.exceedsThreshold).toBe(true)
     expect(summary.fatca.find((y) => y.year === 2024)?.exceedsThreshold).toBe(false) // 18k < 50k
+  })
+
+  it('always reports in USD even when the net-worth base currency is non-USD', () => {
+    // FBAR/FATCA are USD filings; a EUR net-worth base must NOT change the figures
+    // (regression for the threshold-currency-mismatch bug).
+    sqlite.prepare("INSERT INTO app_settings (key, value) VALUES ('baseCurrency', 'EUR')").run()
+    const id = addAccount(sqlite, { name: 'CR', currency: 'CRC', isForeign: true })
+    addRate(sqlite, '2024-12-31', 'CRC', 500) // USD↔CRC only
+    addSnap(sqlite, id, '2024-07-01', 9_000_000)
+
+    const summary = buildExpatTaxSummary(sqlite, 2025)
+    expect(summary.reportingCurrency).toBe('USD')
+    // ₡9M valued in USD (÷500) = $18,000 — NOT routed through EUR.
+    expect(summary.fbar.find((y) => y.year === 2024)?.aggregateMaxUsd).toBe(18_000)
   })
 })

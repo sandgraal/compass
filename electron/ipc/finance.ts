@@ -865,6 +865,11 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     if (!Number.isInteger(accountId) || accountId <= 0) {
       return { success: false, error: `Invalid account id: ${accountId}` }
     }
+    // IPC input is untrusted: require a real boolean. `Boolean('false')` is
+    // truthy, so coercing a stray string could silently flip the flag to true.
+    if (typeof isForeign !== 'boolean') {
+      return { success: false, error: 'isForeign must be a boolean.' }
+    }
     const db = getDb()
     const exists = db
       .select({ id: financeAccounts.id })
@@ -875,10 +880,10 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       return { success: false, error: `Account not found: ${accountId}` }
     }
     db.update(financeAccounts)
-      .set({ isForeign: Boolean(isForeign), updatedAt: new Date() })
+      .set({ isForeign, updatedAt: new Date() })
       .where(eq(financeAccounts.id, accountId))
       .run()
-    return { success: true, isForeign: Boolean(isForeign) }
+    return { success: true, isForeign }
   })
 
   // Set the FATCA reporting threshold (varies by filing status + residence; the

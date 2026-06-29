@@ -23,11 +23,16 @@
  * you owe on isn't a reportable financial account).
  */
 
-import { type FxRate, type SqliteForFx, getBaseCurrency, loadFxRates, pickRate } from './finance-fx'
+import { type FxRate, type SqliteForFx, loadFxRates, pickRate } from './finance-fx'
 
 export const FBAR_THRESHOLD_USD = 10_000 // aggregate foreign value at any point (verify)
 export const FATCA_THRESHOLD_DEFAULT_USD = 50_000 // single/domestic year-end (verify; varies)
 export const FATCA_THRESHOLD_SETTING_KEY = 'fatcaThresholdUsd'
+
+// FBAR (FinCEN 114) + FATCA (8938) are US filings denominated in USD — the
+// thresholds above are USD. So this surface ALWAYS reports in USD, independent
+// of the user's configurable net-worth base currency (which could be EUR, etc.).
+const REPORTING_CURRENCY = 'USD'
 
 export type FbarAccountYear = {
   accountId: number
@@ -58,7 +63,7 @@ export type ForeignTaxCreditYear = {
 }
 
 export type ExpatTaxSummary = {
-  baseCurrency: string
+  reportingCurrency: string // always 'USD' — FBAR/FATCA are USD filings
   fbarThreshold: number
   fatcaThreshold: number
   fbar: FbarYear[]
@@ -205,17 +210,16 @@ export function getFatcaThreshold(sqlite: SqliteForFx): number {
 
 /** Assemble the full expat-tax summary. `currentYear` injected for determinism. */
 export function buildExpatTaxSummary(sqlite: SqliteForFx, currentYear: number): ExpatTaxSummary {
-  const base = getBaseCurrency(sqlite)
   const rates = loadFxRates(sqlite)
-  const fbar = buildFbarByYear(sqlite, base, rates, currentYear)
+  const fbar = buildFbarByYear(sqlite, REPORTING_CURRENCY, rates, currentYear)
   const fatcaThreshold = getFatcaThreshold(sqlite)
   return {
-    baseCurrency: base,
+    reportingCurrency: REPORTING_CURRENCY,
     fbarThreshold: FBAR_THRESHOLD_USD,
     fatcaThreshold,
     fbar,
     fatca: buildFatcaByYear(fbar, fatcaThreshold),
-    foreignTaxCredit: buildForeignTaxCredit(sqlite, base, rates),
+    foreignTaxCredit: buildForeignTaxCredit(sqlite, REPORTING_CURRENCY, rates),
     hasForeignAccounts:
       sqlite.prepare('SELECT 1 FROM finance_accounts WHERE is_foreign = 1 LIMIT 1').get() != null
   }

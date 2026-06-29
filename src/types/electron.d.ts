@@ -1365,7 +1365,7 @@ declare global {
 
         // Foreign-account & expat-tax surface (Phase 11.2)
         getExpatTaxSummary(): Promise<{
-          baseCurrency: string
+          reportingCurrency: string
           fbarThreshold: number
           fatcaThreshold: number
           fbar: Array<{

@@ -581,6 +581,13 @@ describe('finance:expat-tax (Phase 11.2)', () => {
     }
     expect(row.is_foreign).toBe(1)
     expect((await invoke(h, 999, true)) as { success: boolean }).toMatchObject({ success: false })
+    // Untrusted IPC: a non-boolean (e.g. the string 'false') must be rejected,
+    // not coerced via Boolean('false') === true.
+    expect((await invoke(h, id, 'false')) as { success: boolean }).toMatchObject({ success: false })
+    const after = sqlite
+      .prepare('SELECT is_foreign FROM finance_accounts WHERE id = ?')
+      .get(id) as { is_foreign: number }
+    expect(after.is_foreign).toBe(1) // unchanged by the rejected call
   })
 
   it('set-fatca-threshold persists + rejects junk', async () => {
