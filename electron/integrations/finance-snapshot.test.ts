@@ -23,7 +23,7 @@ function makeDb(): Database.Database {
       balance REAL DEFAULT 0,
       currency TEXT NOT NULL DEFAULT 'USD',
       asset_class TEXT NOT NULL DEFAULT 'spending'
-    );
+    , is_foreign INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE finance_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       account_id INTEGER REFERENCES finance_accounts(id),

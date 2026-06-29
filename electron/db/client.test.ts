@@ -312,6 +312,7 @@ describe('initDb multi-currency schema (Phase 11.1)', () => {
 
     expect(tableColumns(dbPath, 'finance_accounts')).toContain('currency')
     expect(tableColumns(dbPath, 'finance_transactions')).toContain('currency')
+    expect(tableColumns(dbPath, 'finance_accounts')).toContain('is_foreign') // Phase 11.2
     expect(tableExists(dbPath, 'fx_rates')).toBe(true)
 
     const sqlite = new Database(dbPath)
@@ -383,6 +384,50 @@ describe('initDb multi-currency schema (Phase 11.1)', () => {
 
     expect(tableColumns(dbPath, 'finance_accounts')).toContain('currency')
     expect(tableColumns(dbPath, 'finance_transactions')).toContain('currency')
+    expect(tableColumns(dbPath, 'finance_accounts')).toContain('is_foreign') // Phase 11.2
     expect(tableExists(dbPath, 'fx_rates')).toBe(true)
+  })
+
+  it('backfills is_foreign=true for non-USD accounts on a pre-existing table (fallback)', async () => {
+    const home = makeTempHome()
+    const dbPath = dbPathForHome(home)
+    mkdirSync(dirname(dbPath), { recursive: true })
+
+    // Pre-create a legacy finance_accounts that already has `currency` (Phase
+    // 11.1) but no `is_foreign` — the state of a DB upgraded to 11.1 then 11.2.
+    const seed = new Database(dbPath)
+    try {
+      seed.exec(`
+        CREATE TABLE integrations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, service TEXT NOT NULL UNIQUE,
+          status TEXT NOT NULL DEFAULT 'disconnected', sync_interval_minutes INTEGER NOT NULL DEFAULT 15
+        );
+        CREATE TABLE finance_accounts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+          type TEXT NOT NULL DEFAULT 'credit', is_debt INTEGER DEFAULT 0, balance REAL DEFAULT 0,
+          currency TEXT NOT NULL DEFAULT 'USD', updated_at INTEGER
+        );
+      `)
+      seed.prepare("INSERT INTO finance_accounts (name, currency) VALUES ('CR', 'CRC')").run()
+      seed.prepare("INSERT INTO finance_accounts (name, currency) VALUES ('US', 'USD')").run()
+    } finally {
+      seed.close()
+    }
+
+    const { initDb } = await loadClientForHome(home)
+    await initDb()
+
+    const sqlite = new Database(dbPath)
+    try {
+      const rows = sqlite
+        .prepare('SELECT currency, is_foreign FROM finance_accounts ORDER BY name')
+        .all() as Array<{ currency: string; is_foreign: number }>
+      expect(rows).toEqual([
+        { currency: 'CRC', is_foreign: 1 }, // backfilled foreign
+        { currency: 'USD', is_foreign: 0 } // domestic stays false
+      ])
+    } finally {
+      sqlite.close()
+    }
   })
 })

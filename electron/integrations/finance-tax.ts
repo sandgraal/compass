@@ -29,6 +29,9 @@ export type TaxTag =
   | 'tax:home-office'
   | 'tax:personal'
   | 'tax:investment'
+  // Foreign income/property tax paid (Phase 11.2) — feeds the Form 1116
+  // foreign-tax-credit ledger. Manual-only (the auto-classifier never assigns it).
+  | 'tax:foreign-tax'
   | 'tax:none'
 
 export type TaxTagSource = 'auto' | 'user'

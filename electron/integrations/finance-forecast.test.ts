@@ -517,7 +517,7 @@ describe('detectRecurringIncome', () => {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         is_debt INTEGER DEFAULT 0
-      );
+      , is_foreign INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE finance_transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         account_id INTEGER,

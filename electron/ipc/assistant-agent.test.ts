@@ -57,7 +57,7 @@ beforeEach(() => {
     CREATE TABLE finance_accounts (
       id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, type TEXT, is_debt INTEGER DEFAULT 0,
       asset_class TEXT, balance REAL, payment_due_date TEXT
-    );
+    , is_foreign INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE finance_transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, amount REAL, category TEXT);
     CREATE TABLE claude_proposals (
       id INTEGER PRIMARY KEY AUTOINCREMENT, proposal_id TEXT NOT NULL UNIQUE, type TEXT NOT NULL,

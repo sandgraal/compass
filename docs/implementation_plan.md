@@ -540,10 +540,15 @@ deeper financial/health/comms sources (10.2–10.4) + full CRED (10.6).
   **Remaining:** **FX gain/loss** on cross-border transfers, ingest-time txn-currency inheritance, and
   base-currency **forecast** rollup (forecast stays per-account-native today); run the `security-auditor`
   subagent as the pre-merge gate.
-- [ ] **11.2 Foreign-account & expat-tax surface** (M) — the foreign side of a US expat return, absent
-  today. **FBAR (FinCEN 114)** max-aggregate-foreign-balance-by-year tracker + threshold flag (>$10k
-  *(verify)*), **FATCA (Form 8938)**, and a **foreign-tax-credit** ledger. Extends `finance-tax.ts` + the
-  tax-pack export; account identifiers go to a new vault category `foreign-accounts` (never across IPC).
+- [x] **11.2 Foreign-account & expat-tax surface** (M) — **shipped (security-gated).** `is_foreign` flag
+  on accounts (migration `0020`, backfilled true for non-USD; BOTH paths) drives a pure
+  `electron/integrations/finance-expat.ts`: **FBAR (FinCEN 114)** max-aggregate-foreign-balance-by-year
+  (from snapshots, valued at the year-end FX rate) + threshold flag (>$10k *(verify)*), **FATCA (Form
+  8938)** against a configurable threshold (default $50k *(verify)*), and a **foreign-tax-credit** (Form
+  1116) ledger from a new `tax:foreign-tax` tag. IPC `finance:get-expat-tax-summary` ·
+  `set-account-foreign` · `set-fatca-threshold`; a new **Expat Tax** tab. Account IDENTIFIERS go to a new
+  encrypted vault category **`foreign-accounts`** (reuses the vault crypto; never flow through the summary
+  or exports). Passed the inline `security-review`; run `security-auditor` pre-merge.
 - [x] **11.3 CR property / Airbnb P&L + depreciation** (M) — **shipped.** Pure assembly in
   `electron/integrations/finance-property.ts` over rows already tagged `geo`/`purpose`/`taxTag`: a
   base-currency property P&L (revenue from `tax:schedule-e-income` · operating from

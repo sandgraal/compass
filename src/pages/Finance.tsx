@@ -99,6 +99,7 @@ export type Tab =
   | 'rules'
   | 'crsubs'
   | 'property'
+  | 'expat'
 
 /**
  * Whitelist of tab values the command palette can deep-link to. Exported
@@ -114,7 +115,8 @@ export const VALID_FINANCE_TABS: ReadonlySet<Tab> = new Set<Tab>([
   'accounts',
   'rules',
   'crsubs',
-  'property'
+  'property',
+  'expat'
 ])
 
 /**
@@ -638,7 +640,8 @@ export default function Finance(): JSX.Element {
             ['accounts', 'Accounts'],
             ['rules', 'Rules'],
             ['crsubs', 'CR & Subs'],
-            ['property', 'Property']
+            ['property', 'Property'],
+            ['expat', 'Expat Tax']
           ] as const
         ).map(([key, label]) => (
           <button
@@ -679,6 +682,8 @@ export default function Finance(): JSX.Element {
       {tab === 'networth' && <NetWorthTab />}
 
       {tab === 'property' && <PropertyTab />}
+
+      {tab === 'expat' && <ExpatTaxTab />}
 
       {tab === 'forecast' && <ForecastTab accounts={accounts} />}
 
@@ -1873,6 +1878,267 @@ function PropertyTab(): JSX.Element {
                   <td className="text-right">{fmt(d.depreciation)}</td>
                   <td className="text-right text-muted-foreground">{fmt(d.accumulated)}</td>
                   <td className="text-right text-muted-foreground">{fmt(d.remainingBasis)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Expat Tax Tab (Phase 11.2 — FBAR/FATCA) ─────────────────────────────────
+
+type ExpatSummary = Awaited<ReturnType<Window['api']['finance']['getExpatTaxSummary']>>
+type AccountLite = Awaited<ReturnType<Window['api']['finance']['getAccounts']>>[number]
+
+function ExpatTaxTab(): JSX.Element {
+  const [summary, setSummary] = useState<ExpatSummary | null>(null)
+  const [accounts, setAccounts] = useState<AccountLite[]>([])
+  const [loading, setLoading] = useState(true)
+  const [fatcaInput, setFatcaInput] = useState('')
+  const { toast: showToast } = useToast()
+
+  const refresh = useCallback(async () => {
+    if (!window.api?.finance) return
+    setLoading(true)
+    try {
+      const [s, a] = await Promise.all([
+        window.api.finance.getExpatTaxSummary(),
+        window.api.finance.getAccounts()
+      ])
+      setSummary(s)
+      setAccounts(a)
+      setFatcaInput(String(s.fatcaThreshold))
+    } catch (err) {
+      console.error('[expat] refresh failed', err)
+      showToast('Failed to load expat-tax summary.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }, [showToast])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const toggleForeign = async (id: number, next: boolean) => {
+    if (!window.api?.finance) return
+    try {
+      const res = await window.api.finance.setAccountForeign(id, next)
+      if (!res.success) {
+        showToast(res.error ?? 'Failed to update account.', 'error')
+        return
+      }
+      await refresh()
+    } catch (err) {
+      console.error('[expat] toggle failed', err)
+      showToast('Failed to update account.', 'error')
+    }
+  }
+
+  const saveFatca = async () => {
+    if (!window.api?.finance) return
+    const v = Number(fatcaInput)
+    if (!Number.isFinite(v) || v <= 0) {
+      showToast('Enter a positive threshold.', 'error')
+      return
+    }
+    try {
+      const res = await window.api.finance.setFatcaThreshold(v)
+      if (!res.success) {
+        showToast(res.error ?? 'Failed to save.', 'error')
+        return
+      }
+      await refresh()
+      showToast('Saved.', 'success')
+    } catch (err) {
+      console.error('[expat] fatca save failed', err)
+      showToast('Failed to save.', 'error')
+    }
+  }
+
+  if (loading)
+    return <p className="text-sm text-muted-foreground p-4">Loading expat-tax summary…</p>
+  if (!summary)
+    return <p className="text-sm text-muted-foreground p-4">Expat-tax summary unavailable.</p>
+
+  const base = summary.baseCurrency
+  const usd = (n: number): string => formatMoney(n, base, { decimals: 0 })
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-card border border-border rounded-lg px-4 py-3 text-xs text-muted-foreground">
+        FBAR/FATCA figures are estimates from your tracked balances, converted to USD — verify
+        against official year-end Treasury rates and current thresholds before filing. Store actual
+        account numbers in the encrypted <strong>Foreign Accounts</strong> vault category; they're
+        never included here or in exports.
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="text-sm font-semibold mb-1">Foreign financial accounts</h3>
+        <p className="text-xs text-muted-foreground mb-3">
+          Mark which accounts are held at foreign institutions. Non-debt foreign accounts feed FBAR
+          + FATCA.
+        </p>
+        <table className="w-full text-sm">
+          <thead className="text-xs text-muted-foreground">
+            <tr>
+              <th className="text-left">Account</th>
+              <th className="text-left">Currency</th>
+              <th className="text-right">Foreign</th>
+            </tr>
+          </thead>
+          <tbody>
+            {accounts.map((a) => (
+              <tr key={a.id} className="border-t border-border">
+                <td className="py-1.5">{a.name}</td>
+                <td className="text-muted-foreground">{a.currency ?? 'USD'}</td>
+                <td className="text-right">
+                  <input
+                    type="checkbox"
+                    checked={!!a.isForeign}
+                    onChange={(e) => void toggleForeign(a.id, e.target.checked)}
+                    aria-label={`Mark ${a.name} as a foreign account`}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {!summary.hasForeignAccounts ? (
+        <div className="bg-card border border-border rounded-xl p-5 text-sm text-muted-foreground">
+          No foreign accounts marked yet. Check one above to see FBAR/FATCA estimates.
+        </div>
+      ) : (
+        <>
+          <div className="bg-card border border-border rounded-xl p-5">
+            <h3 className="text-sm font-semibold mb-1">FBAR (FinCEN 114)</h3>
+            <p className="text-xs text-muted-foreground mb-3">
+              Required when aggregate foreign-account value exceeds {usd(summary.fbarThreshold)} at
+              any point in the year. Each account shows its max value during the year.
+            </p>
+            {summary.fbar.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No foreign-account history yet.</p>
+            ) : (
+              [...summary.fbar].reverse().map((y) => (
+                <div key={y.year} className="mb-4 last:mb-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm font-medium">{y.year}</span>
+                    <span
+                      className={cn(
+                        'text-xs px-2 py-0.5 rounded',
+                        y.exceedsThreshold
+                          ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                          : 'bg-muted text-muted-foreground'
+                      )}
+                    >
+                      {usd(y.aggregateMaxUsd)} aggregate ·{' '}
+                      {y.exceedsThreshold ? 'FBAR likely required' : 'under threshold'}
+                    </span>
+                  </div>
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {y.accounts.map((acc) => (
+                        <tr key={acc.accountId} className="border-t border-border tabular-nums">
+                          <td className="py-1">{acc.name}</td>
+                          <td className="text-right text-muted-foreground">
+                            {acc.maxNative.toLocaleString('en-US')} {acc.currency}
+                          </td>
+                          <td className="text-right w-28">
+                            {acc.maxBaseUsd == null ? 'no rate' : usd(acc.maxBaseUsd)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="bg-card border border-border rounded-xl p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+              <h3 className="text-sm font-semibold">FATCA (Form 8938)</h3>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">Threshold (USD)</span>
+                <input
+                  type="number"
+                  value={fatcaInput}
+                  onChange={(e) => setFatcaInput(e.target.value)}
+                  aria-label="FATCA threshold"
+                  className="w-28 bg-background border border-border rounded px-2 py-1 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => void saveFatca()}
+                  className="px-2 py-1 border border-border rounded hover:bg-muted"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">
+              Threshold varies by filing status + residence — set the one that applies to you.
+            </p>
+            {summary.fatca.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No data yet.</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="text-xs text-muted-foreground">
+                  <tr>
+                    <th className="text-left">Year</th>
+                    <th className="text-right">Aggregate (USD)</th>
+                    <th className="text-right">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...summary.fatca].reverse().map((y) => (
+                    <tr key={y.year} className="border-t border-border tabular-nums">
+                      <td className="py-1.5">{y.year}</td>
+                      <td className="text-right">{usd(y.aggregateMaxUsd)}</td>
+                      <td className="text-right text-xs">
+                        {y.exceedsThreshold ? (
+                          <span className="text-amber-700 dark:text-amber-400">
+                            8938 likely required
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">under threshold</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
+
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="text-sm font-semibold mb-1">Foreign tax credit (Form 1116)</h3>
+        <p className="text-xs text-muted-foreground mb-3">
+          Foreign income/property tax paid per year. Tag those payments as{' '}
+          <code>tax:foreign-tax</code> on the Transactions tab.
+        </p>
+        {summary.foreignTaxCredit.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No foreign-tax payments tagged yet.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="text-xs text-muted-foreground">
+              <tr>
+                <th className="text-left">Year</th>
+                <th className="text-right">Foreign tax paid (USD)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...summary.foreignTaxCredit].reverse().map((y) => (
+                <tr key={y.year} className="border-t border-border tabular-nums">
+                  <td className="py-1.5">{y.year}</td>
+                  <td className="text-right">{usd(y.foreignTaxPaidUsd)}</td>
                 </tr>
               ))}
             </tbody>

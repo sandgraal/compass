@@ -464,6 +464,12 @@ const api = {
       basisOverride?: number | null
     }) => ipcRenderer.invoke('finance:set-property-config', input),
 
+    // Foreign-account & expat-tax surface (Phase 11.2)
+    getExpatTaxSummary: () => ipcRenderer.invoke('finance:get-expat-tax-summary'),
+    setAccountForeign: (accountId: number, isForeign: boolean) =>
+      ipcRenderer.invoke('finance:set-account-foreign', accountId, isForeign),
+    setFatcaThreshold: (value: number) => ipcRenderer.invoke('finance:set-fatca-threshold', value),
+
     // Cash-flow forecast (Phase 4.5)
     getForecast: (opts?: { windowDays?: number; lowCashThreshold?: number }) =>
       ipcRenderer.invoke('finance:get-forecast', opts),

@@ -88,7 +88,7 @@ function createSchema(): void {
       mask TEXT,
       simplefin_connection_id INTEGER,
       simplefin_account_id TEXT
-    );
+    , is_foreign INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE finance_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       hash TEXT NOT NULL UNIQUE,

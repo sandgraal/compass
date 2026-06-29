@@ -264,7 +264,7 @@ describe('backfillTaxTags', () => {
       CREATE TABLE finance_accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL
-      );
+      , is_foreign INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE finance_transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         amount REAL NOT NULL,

@@ -36,7 +36,7 @@ function makeDb(): ReturnType<typeof drizzle<typeof schema>> {
       simplefin_connection_id INTEGER,
       simplefin_account_id TEXT,
       updated_at INTEGER
-    );
+    , is_foreign INTEGER NOT NULL DEFAULT 0);
   `)
   return drizzle(sqlite, { schema })
 }

@@ -75,6 +75,7 @@ function createSchema(): void {
       is_debt INTEGER DEFAULT 0,
       balance REAL DEFAULT 0,
       currency TEXT NOT NULL DEFAULT 'USD',
+      is_foreign INTEGER NOT NULL DEFAULT 0,
       apr REAL DEFAULT 0,
       min_payment REAL DEFAULT 0,
       credit_limit REAL,
@@ -131,6 +132,13 @@ function createSchema(): void {
       fetched_at INTEGER
     );
     CREATE UNIQUE INDEX uq_fx_rates_date_base_quote ON fx_rates (date, base, quote);
+    CREATE TABLE finance_balance_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL,
+      captured_at INTEGER NOT NULL,
+      balance REAL NOT NULL,
+      source TEXT NOT NULL DEFAULT 'manual'
+    );
   `)
 }
 
@@ -558,6 +566,58 @@ describe('finance:property (Phase 11.3)', () => {
     await invoke(setCfg, { basisOverride: null })
     cfg = (await invoke(setCfg, {})) as { config?: { basisOverride: number | null } }
     expect(cfg.config?.basisOverride).toBeNull()
+  })
+})
+
+describe('finance:expat-tax (Phase 11.2)', () => {
+  it('set-account-foreign toggles the flag + validates the account', async () => {
+    const id = seedAccount('BAC CR')
+    const h = await registerAndGet('finance:set-account-foreign')
+    const out = (await invoke(h, id, true)) as { success: boolean; isForeign?: boolean }
+    expect(out.success).toBe(true)
+    expect(out.isForeign).toBe(true)
+    const row = sqlite.prepare('SELECT is_foreign FROM finance_accounts WHERE id = ?').get(id) as {
+      is_foreign: number
+    }
+    expect(row.is_foreign).toBe(1)
+    expect((await invoke(h, 999, true)) as { success: boolean }).toMatchObject({ success: false })
+  })
+
+  it('set-fatca-threshold persists + rejects junk', async () => {
+    const h = await registerAndGet('finance:set-fatca-threshold')
+    expect((await invoke(h, 200_000)) as { success: boolean }).toMatchObject({ success: true })
+    const row = sqlite
+      .prepare("SELECT value FROM app_settings WHERE key = 'fatcaThresholdUsd'")
+      .get() as { value: string }
+    expect(row.value).toBe('200000')
+    expect((await invoke(h, -1)) as { success: boolean }).toMatchObject({ success: false })
+  })
+
+  it('get-expat-tax-summary assembles FBAR from foreign-account snapshots', async () => {
+    const id = seedAccount('CR Savings')
+    sqlite
+      .prepare('UPDATE finance_accounts SET is_foreign = 1, currency = ? WHERE id = ?')
+      .run('CRC', id)
+    sqlite
+      .prepare(
+        "INSERT INTO fx_rates (date, base, quote, rate) VALUES ('2024-12-31','USD','CRC',500)"
+      )
+      .run()
+    sqlite
+      .prepare(
+        'INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (?, ?, ?, ?)'
+      )
+      .run(id, new Date('2024-07-01T12:00:00').getTime(), 9_000_000, 'manual')
+
+    const h = await registerAndGet('finance:get-expat-tax-summary')
+    const summary = (await invoke(h)) as {
+      hasForeignAccounts: boolean
+      fbar: Array<{ year: number; aggregateMaxUsd: number; exceedsThreshold: boolean }>
+    }
+    expect(summary.hasForeignAccounts).toBe(true)
+    const y2024 = summary.fbar.find((y) => y.year === 2024)
+    expect(y2024?.aggregateMaxUsd).toBe(18_000) // ₡9M / 500
+    expect(y2024?.exceedsThreshold).toBe(true)
   })
 })
 

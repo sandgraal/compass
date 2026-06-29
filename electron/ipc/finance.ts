@@ -19,6 +19,7 @@ import {
   dedupeTransactions,
   mergeAccounts
 } from '../integrations/finance-cleanup'
+import { FATCA_THRESHOLD_SETTING_KEY, buildExpatTaxSummary } from '../integrations/finance-expat'
 import { type ForecastResult, buildForecast } from '../integrations/finance-forecast'
 import {
   BASE_CURRENCY_SETTING_KEY,
@@ -88,6 +89,7 @@ export const TAX_TAGS: ReadonlySet<string> = new Set([
   'tax:home-office',
   'tax:personal',
   'tax:investment',
+  'tax:foreign-tax',
   'tax:none'
 ])
 
@@ -849,6 +851,53 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       return { success: true, config: getPropertyConfig(getRawSqlite()) }
     }
   )
+
+  // ── Foreign-account & expat-tax surface (Phase 11.2) ─────────────────────
+  // FBAR/FATCA aggregation + foreign-tax-credit ledger, assembled from balances
+  // + tagged rows. Account IDENTIFIERS live in the `foreign-accounts` vault
+  // category — they never flow through this summary.
+  ipcMain.handle('finance:get-expat-tax-summary', () => {
+    return buildExpatTaxSummary(getRawSqlite(), new Date().getFullYear())
+  })
+
+  // Mark/unmark an account as a foreign financial account (drives FBAR/FATCA).
+  ipcMain.handle('finance:set-account-foreign', (_event, accountId: number, isForeign: boolean) => {
+    if (!Number.isInteger(accountId) || accountId <= 0) {
+      return { success: false, error: `Invalid account id: ${accountId}` }
+    }
+    const db = getDb()
+    const exists = db
+      .select({ id: financeAccounts.id })
+      .from(financeAccounts)
+      .where(eq(financeAccounts.id, accountId))
+      .get()
+    if (!exists) {
+      return { success: false, error: `Account not found: ${accountId}` }
+    }
+    db.update(financeAccounts)
+      .set({ isForeign: Boolean(isForeign), updatedAt: new Date() })
+      .where(eq(financeAccounts.id, accountId))
+      .run()
+    return { success: true, isForeign: Boolean(isForeign) }
+  })
+
+  // Set the FATCA reporting threshold (varies by filing status + residence; the
+  // user picks the value that applies to them).
+  ipcMain.handle('finance:set-fatca-threshold', (_event, value: number) => {
+    const v = Number(value)
+    if (!Number.isFinite(v) || v <= 0 || v > 100_000_000) {
+      return { success: false, error: `Invalid FATCA threshold: ${value}` }
+    }
+    const db = getDb()
+    db.insert(appSettings)
+      .values({ key: FATCA_THRESHOLD_SETTING_KEY, value: String(v), updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: appSettings.key,
+        set: { value: String(v), updatedAt: new Date() }
+      })
+      .run()
+    return { success: true, threshold: v }
+  })
 
   // ── 90-day cash-flow forecast (Phase 4.5) ─────────────────────────────────
   // Combines subscriptions + recurring income + debt minimums + calendar

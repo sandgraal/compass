@@ -71,6 +71,16 @@ const VAULT_CATEGORIES = [
     label: 'Legal',
     icon: 'scale',
     description: 'Contracts, wills, property documents'
+  },
+  {
+    // Phase 11.2 — foreign financial account identifiers for FBAR/FATCA. Account
+    // numbers + institution addresses are secrets: encrypted at rest like every
+    // vault category, never logged, and EXCLUDED from exports. The FBAR/FATCA
+    // summary computes max-aggregate values WITHOUT these identifiers.
+    id: 'foreign-accounts',
+    label: 'Foreign Accounts',
+    icon: 'globe',
+    description: 'FBAR/FATCA — foreign bank/securities account numbers + institutions'
   }
 ]
 

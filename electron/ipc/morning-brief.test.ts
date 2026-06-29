@@ -136,7 +136,7 @@ beforeEach(() => {
       mask TEXT,
       simplefin_connection_id INTEGER,
       simplefin_account_id TEXT
-    );
+    , is_foreign INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE gmail_actions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       thread_id TEXT NOT NULL UNIQUE,

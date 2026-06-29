@@ -160,6 +160,11 @@ export const financeAccounts = sqliteTable('finance_accounts', {
   // the user's base currency via the `fx_rates` snapshot. Default 'USD' so every
   // pre-multi-currency account keeps working unchanged.
   currency: text('currency').notNull().default('USD'),
+  // Foreign financial account flag (Phase 11.2). Drives the FBAR/FATCA
+  // aggregation (a US person's foreign bank/securities accounts). Defaults false;
+  // backfilled to true for non-USD accounts as a sensible starting guess the user
+  // can correct (a USD-denominated account at a foreign bank is still foreign).
+  isForeign: integer('is_foreign', { mode: 'boolean' }).notNull().default(false),
   apr: real('apr').default(0), // annual rate as decimal e.g. 0.2499
   minPayment: real('min_payment').default(0),
   creditLimit: real('credit_limit'),
