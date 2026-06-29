@@ -544,10 +544,16 @@ deeper financial/health/comms sources (10.2–10.4) + full CRED (10.6).
   today. **FBAR (FinCEN 114)** max-aggregate-foreign-balance-by-year tracker + threshold flag (>$10k
   *(verify)*), **FATCA (Form 8938)**, and a **foreign-tax-credit** ledger. Extends `finance-tax.ts` + the
   tax-pack export; account identifiers go to a new vault category `foreign-accounts` (never across IPC).
-- [ ] **11.3 CR property / Airbnb P&L + depreciation** (M) — assemble a property P&L (revenue / operating /
-  capex→basis / net-yield) and a Schedule E **depreciation schedule** from rows *already* tagged with
-  `geo`/`purpose`/`taxTag` (incl. `capex-airbnb` and the CR ATM split). Adds a cost-basis accumulator.
-  Almost pure assembly — no new ingestion.
+- [x] **11.3 CR property / Airbnb P&L + depreciation** (M) — **shipped.** Pure assembly in
+  `electron/integrations/finance-property.ts` over rows already tagged `geo`/`purpose`/`taxTag`: a
+  base-currency property P&L (revenue from `tax:schedule-e-income` · operating from
+  `tax:schedule-e-expense`/CR-operating · capex→basis from `tax:capex-airbnb`/CR-capex), a cost-basis
+  accumulator, and a Schedule E straight-line **depreciation schedule** (mid-month convention; defaults to
+  **30-yr foreign-residential ADS** — *verify* — with 27.5/40 options, land excluded, optional basis
+  override). Colón amounts value in base currency at the txn-date FX rate (latest fallback). IPC
+  `finance:get-property-pnl` + `finance:set-property-config` (config in `app_settings`); a new **Property**
+  tab renders the P&L, basis, depreciation schedule, and net-yield, prompting to tag Schedule E income
+  when revenue is empty. No new ingestion.
 - [ ] **11.4 Long-horizon retirement projection** (L) — extend `buildForecast` from 90 days to a
   multi-year decumulation engine: **Social Security claiming-age** modeling from the ingested SSA statement
   (the `SOCIAL_SECURITY_RECOGNIZER` already parses it into `records`), Airbnb net income + brokerage

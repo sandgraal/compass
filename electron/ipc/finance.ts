@@ -31,6 +31,12 @@ import {
 } from '../integrations/finance-fx'
 import { syncFxRates } from '../integrations/finance-fx-fetch'
 import {
+  type PropertyConfig,
+  buildPropertyPnl,
+  getPropertyConfig,
+  setPropertyConfig
+} from '../integrations/finance-property'
+import {
   captureSnapshots,
   getNetWorthSnapshot,
   getNetWorthTrajectory,
@@ -781,6 +787,59 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       const message = err instanceof Error ? err.message : String(err)
       return { success: false, error: `Failed to refresh rates: ${message}` }
     }
+  })
+
+  // ── CR property / Airbnb P&L + depreciation (Phase 11.3) ─────────────────
+  // Pure assembly over already-tagged rows (geo/purpose/taxTag), valued in the
+  // base currency via the FX snapshot. Config (placed-in-service / land / basis /
+  // recovery years) lives in app_settings.
+  ipcMain.handle('finance:get-property-pnl', () => {
+    const sqlite = getRawSqlite()
+    return buildPropertyPnl(sqlite, getPropertyConfig(sqlite))
+  })
+
+  ipcMain.handle('finance:set-property-config', (_event, input: Partial<PropertyConfig>) => {
+    const patch: Partial<PropertyConfig> = {}
+    const MAX = 1_000_000_000
+
+    if ('placedInService' in input) {
+      const v = input.placedInService
+      if (v != null && v !== '' && !ISO_DATE_RE.test(v)) {
+        return { success: false, error: 'Invalid placed-in-service date. Expected YYYY-MM-DD.' }
+      }
+      patch.placedInService = v ? v : null
+    }
+    if ('landValue' in input) {
+      const v = Number(input.landValue)
+      if (!Number.isFinite(v) || v < 0 || v > MAX) {
+        return { success: false, error: `Invalid land value: ${input.landValue}` }
+      }
+      patch.landValue = v
+    }
+    if ('recoveryYears' in input) {
+      const v = Number(input.recoveryYears)
+      // 27.5 (US GDS) / 30 (foreign ADS) / 40 (pre-2018 ADS) are the real values;
+      // bound to a sane (0, 100] band.
+      if (!Number.isFinite(v) || v <= 0 || v > 100) {
+        return { success: false, error: `Invalid recovery years: ${input.recoveryYears}` }
+      }
+      patch.recoveryYears = v
+    }
+    if ('basisOverride' in input) {
+      const raw = input.basisOverride
+      if (raw == null) {
+        patch.basisOverride = null
+      } else {
+        const v = Number(raw)
+        if (!Number.isFinite(v) || v < 0 || v > MAX) {
+          return { success: false, error: `Invalid basis override: ${raw}` }
+        }
+        patch.basisOverride = v
+      }
+    }
+
+    setPropertyConfig(getRawSqlite(), patch)
+    return { success: true, config: getPropertyConfig(getRawSqlite()) }
   })
 
   // ── 90-day cash-flow forecast (Phase 4.5) ─────────────────────────────────

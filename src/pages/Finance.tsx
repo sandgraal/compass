@@ -98,6 +98,7 @@ export type Tab =
   | 'accounts'
   | 'rules'
   | 'crsubs'
+  | 'property'
 
 /**
  * Whitelist of tab values the command palette can deep-link to. Exported
@@ -112,7 +113,8 @@ export const VALID_FINANCE_TABS: ReadonlySet<Tab> = new Set<Tab>([
   'transactions',
   'accounts',
   'rules',
-  'crsubs'
+  'crsubs',
+  'property'
 ])
 
 /**
@@ -635,7 +637,8 @@ export default function Finance(): JSX.Element {
             ['transactions', 'Transactions'],
             ['accounts', 'Accounts'],
             ['rules', 'Rules'],
-            ['crsubs', 'CR & Subs']
+            ['crsubs', 'CR & Subs'],
+            ['property', 'Property']
           ] as const
         ).map(([key, label]) => (
           <button
@@ -674,6 +677,8 @@ export default function Finance(): JSX.Element {
       )}
 
       {tab === 'networth' && <NetWorthTab />}
+
+      {tab === 'property' && <PropertyTab />}
 
       {tab === 'forecast' && <ForecastTab accounts={accounts} />}
 
@@ -1645,6 +1650,237 @@ export function buildTrajectoryChartData(
     out.push({ date, net: Math.round((assets - liabilities) * 100) / 100 })
   }
   return out
+}
+
+// ─── Property / Airbnb P&L Tab (Phase 11.3) ──────────────────────────────────
+
+type PropertyPnl = Awaited<ReturnType<Window['api']['finance']['getPropertyPnl']>>
+
+const RECOVERY_OPTIONS = [
+  { value: '30', label: '30 yr — foreign residential (ADS)' },
+  { value: '27.5', label: '27.5 yr — US residential (GDS)' },
+  { value: '40', label: '40 yr — pre-2018 ADS' }
+]
+
+function PropertyTab(): JSX.Element {
+  const [pnl, setPnl] = useState<PropertyPnl | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [placed, setPlaced] = useState('')
+  const [land, setLand] = useState('')
+  const [recovery, setRecovery] = useState('30')
+  const [basisOverride, setBasisOverride] = useState('')
+  const { toast: showToast } = useToast()
+
+  const refresh = useCallback(async () => {
+    if (!window.api?.finance) return
+    setLoading(true)
+    try {
+      const p = await window.api.finance.getPropertyPnl()
+      setPnl(p)
+      setPlaced(p.config.placedInService ?? '')
+      setLand(p.config.landValue ? String(p.config.landValue) : '')
+      setRecovery(String(p.config.recoveryYears))
+      setBasisOverride(p.config.basisOverride != null ? String(p.config.basisOverride) : '')
+    } catch (err) {
+      console.error('[property] refresh failed', err)
+      showToast('Failed to load property P&L.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }, [showToast])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const saveConfig = async () => {
+    if (!window.api?.finance) return
+    setSaving(true)
+    try {
+      const res = await window.api.finance.setPropertyConfig({
+        placedInService: placed || null,
+        landValue: land === '' ? 0 : Number(land),
+        recoveryYears: Number(recovery),
+        basisOverride: basisOverride === '' ? null : Number(basisOverride)
+      })
+      if (!res.success) {
+        showToast(res.error ?? 'Failed to save.', 'error')
+        return
+      }
+      await refresh()
+      showToast('Saved.', 'success')
+    } catch (err) {
+      console.error('[property] save failed', err)
+      showToast('Failed to save.', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) return <p className="text-sm text-muted-foreground p-4">Loading property P&L…</p>
+  if (!pnl) return <p className="text-sm text-muted-foreground p-4">Property P&L unavailable.</p>
+
+  const base = pnl.baseCurrency
+  const fmt = (n: number): string => formatMoney(n, base, { decimals: 0 })
+  const pct = pnl.netYieldOnBasis == null ? '—' : `${(pnl.netYieldOnBasis * 100).toFixed(2)}%`
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-4 gap-4">
+        <NetWorthTile label="Revenue (Sch. E)" value={fmt(pnl.totals.revenue)} />
+        <NetWorthTile label="Operating exp" value={fmt(pnl.totals.operating)} />
+        <NetWorthTile label="Net operating" value={fmt(pnl.totals.netOperating)} emphasize />
+        <NetWorthTile
+          label="Net yield / basis"
+          value={pct}
+          sub={`cost basis ${fmt(pnl.basisToDate)}`}
+        />
+      </div>
+
+      {pnl.unconvertedCount > 0 && (
+        <div className="bg-amber-500/10 border border-amber-500/40 rounded-lg px-4 py-3 text-xs text-amber-700 dark:text-amber-400">
+          {pnl.unconvertedCount} property transaction{pnl.unconvertedCount === 1 ? '' : 's'}{' '}
+          couldn't be valued in {base} (no FX rate on file) and{' '}
+          {pnl.unconvertedCount === 1 ? 'is' : 'are'} excluded — add a rate on the Net Worth tab.
+        </div>
+      )}
+      {pnl.totals.revenue === 0 && (
+        <div className="bg-card border border-border rounded-lg px-4 py-3 text-xs text-muted-foreground">
+          No rental revenue yet. Tag your Airbnb payouts as <code>tax:schedule-e-income</code> on
+          the Transactions tab to populate revenue + net yield.
+        </div>
+      )}
+
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="text-sm font-semibold mb-3">P&amp;L by year ({base})</h3>
+        {pnl.byYear.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No tagged property activity yet.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="text-xs text-muted-foreground">
+              <tr>
+                <th className="text-left">Year</th>
+                <th className="text-right">Revenue</th>
+                <th className="text-right">Operating</th>
+                <th className="text-right">Net operating</th>
+                <th className="text-right">Capex → basis</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pnl.byYear.map((y) => (
+                <tr key={y.year} className="border-t border-border tabular-nums">
+                  <td className="py-1.5">{y.year}</td>
+                  <td className="text-right">{fmt(y.revenue)}</td>
+                  <td className="text-right">{fmt(y.operating)}</td>
+                  <td className="text-right">{fmt(y.netOperating)}</td>
+                  <td className="text-right text-muted-foreground">{fmt(y.capex)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="text-sm font-semibold mb-1">Depreciation basis</h3>
+        <p className="text-xs text-muted-foreground mb-4">
+          A US taxpayer's foreign rental depreciates straight-line over 30 years (ADS) — verify your
+          situation. Land isn't depreciable. Basis defaults to accumulated capex; override if you
+          have a purchase-price basis.
+        </p>
+        <div className="grid grid-cols-2 gap-4 mb-4 max-w-xl">
+          <label className="text-xs text-muted-foreground">
+            <span className="block mb-1">Placed in service</span>
+            <input
+              type="date"
+              value={placed}
+              onChange={(e) => setPlaced(e.target.value)}
+              className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
+            />
+          </label>
+          <label className="text-xs text-muted-foreground">
+            <span className="block mb-1">Recovery period</span>
+            <select
+              value={recovery}
+              onChange={(e) => setRecovery(e.target.value)}
+              className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
+            >
+              {RECOVERY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs text-muted-foreground">
+            <span className="block mb-1">Land value ({base}, excluded)</span>
+            <input
+              type="number"
+              value={land}
+              onChange={(e) => setLand(e.target.value)}
+              placeholder="0"
+              className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
+            />
+          </label>
+          <label className="text-xs text-muted-foreground">
+            <span className="block mb-1">Basis override ({base}, optional)</span>
+            <input
+              type="number"
+              value={basisOverride}
+              onChange={(e) => setBasisOverride(e.target.value)}
+              placeholder={`auto: ${fmt(pnl.basisToDate)}`}
+              className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
+            />
+          </label>
+        </div>
+        <div className="flex items-center gap-3 text-xs">
+          <button
+            type="button"
+            onClick={() => void saveConfig()}
+            disabled={saving}
+            className="px-3 py-1.5 border border-border rounded-md hover:bg-muted disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <span className="text-muted-foreground">
+            Depreciable basis:{' '}
+            <span className="text-foreground tabular-nums">{fmt(pnl.depreciableBasis)}</span>
+          </span>
+        </div>
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="text-sm font-semibold mb-3">Schedule E depreciation</h3>
+        {pnl.depreciation.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Set a placed-in-service date and a basis above to generate the schedule.
+          </p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="text-xs text-muted-foreground">
+              <tr>
+                <th className="text-left">Year</th>
+                <th className="text-right">Depreciation</th>
+                <th className="text-right">Accumulated</th>
+                <th className="text-right">Remaining basis</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pnl.depreciation.map((d) => (
+                <tr key={d.year} className="border-t border-border tabular-nums">
+                  <td className="py-1.5">{d.year}</td>
+                  <td className="text-right">{fmt(d.depreciation)}</td>
+                  <td className="text-right text-muted-foreground">{fmt(d.accumulated)}</td>
+                  <td className="text-right text-muted-foreground">{fmt(d.remainingBasis)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  )
 }
 
 // ─── Forecast Tab (Phase 4.5 UI) ─────────────────────────────────────────────
