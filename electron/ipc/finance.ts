@@ -38,6 +38,11 @@ import {
   setPropertyConfig
 } from '../integrations/finance-property'
 import {
+  type RetirementConfig,
+  buildRetirementProjection,
+  setRetirementConfig
+} from '../integrations/finance-retirement'
+import {
   captureSnapshots,
   getNetWorthSnapshot,
   getNetWorthTrajectory,
@@ -903,6 +908,63 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       .run()
     return { success: true, threshold: v }
   })
+
+  // ── Long-horizon retirement projection (Phase 11.4) ──────────────────────
+  // Multi-decade accumulation → decumulation against SS + Airbnb income, with a
+  // sequence-of-returns stress path. Config in app_settings; starting balance
+  // auto-sourced from net worth unless overridden.
+  ipcMain.handle('finance:get-retirement-projection', () => {
+    return buildRetirementProjection(getRawSqlite(), new Date().getFullYear())
+  })
+
+  ipcMain.handle(
+    'finance:set-retirement-config',
+    (_event, raw?: Partial<RetirementConfig> | null) => {
+      // Guard the IPC boundary (a non-object would break the field loop below).
+      const input: Partial<RetirementConfig> = raw && typeof raw === 'object' ? raw : {}
+      const patch: Partial<RetirementConfig> = {}
+
+      // (key, min, max) bounds. `startingAssets` is special (nullable override).
+      const NUMERIC: Array<[keyof RetirementConfig, number, number]> = [
+        ['currentAge', 0, 120],
+        ['retirementAge', 0, 120],
+        ['horizonAge', 1, 120],
+        ['annualContribution', 0, 100_000_000],
+        ['realReturnPct', -50, 50],
+        ['annualSpending', 0, 100_000_000],
+        ['ssMonthlyAtFra', 0, 1_000_000],
+        ['ssClaimAge', 62, 70],
+        ['fra', 62, 70],
+        ['airbnbAnnualNet', 0, 100_000_000],
+        ['otherAnnualIncome', 0, 100_000_000],
+        ['stressReturnPct', -50, 50],
+        ['stressYears', 0, 60]
+      ]
+      for (const [key, min, max] of NUMERIC) {
+        if (!(key in input)) continue
+        const v = Number(input[key])
+        if (!Number.isFinite(v) || v < min || v > max) {
+          return { success: false, error: `Invalid ${key}: ${input[key]}` }
+        }
+        patch[key] = v as never
+      }
+      if ('startingAssets' in input) {
+        const raw2 = input.startingAssets
+        if (raw2 == null) {
+          patch.startingAssets = null
+        } else {
+          const v = Number(raw2)
+          if (!Number.isFinite(v) || v < 0 || v > 1_000_000_000) {
+            return { success: false, error: `Invalid startingAssets: ${raw2}` }
+          }
+          patch.startingAssets = v
+        }
+      }
+
+      setRetirementConfig(getRawSqlite(), patch)
+      return { success: true }
+    }
+  )
 
   // ── 90-day cash-flow forecast (Phase 4.5) ─────────────────────────────────
   // Combines subscriptions + recurring income + debt minimums + calendar

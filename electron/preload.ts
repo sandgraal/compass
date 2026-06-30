@@ -470,6 +470,11 @@ const api = {
       ipcRenderer.invoke('finance:set-account-foreign', accountId, isForeign),
     setFatcaThreshold: (value: number) => ipcRenderer.invoke('finance:set-fatca-threshold', value),
 
+    // Long-horizon retirement projection (Phase 11.4)
+    getRetirementProjection: () => ipcRenderer.invoke('finance:get-retirement-projection'),
+    setRetirementConfig: (input: Record<string, number | null>) =>
+      ipcRenderer.invoke('finance:set-retirement-config', input),
+
     // Cash-flow forecast (Phase 4.5)
     getForecast: (opts?: { windowDays?: number; lowCashThreshold?: number }) =>
       ipcRenderer.invoke('finance:get-forecast', opts),

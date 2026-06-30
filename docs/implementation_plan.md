@@ -559,11 +559,17 @@ deeper financial/health/comms sources (10.2–10.4) + full CRED (10.6).
   `finance:get-property-pnl` + `finance:set-property-config` (config in `app_settings`); a new **Property**
   tab renders the P&L, basis, depreciation schedule, and net-yield, prompting to tag Schedule E income
   when revenue is empty. No new ingestion.
-- [ ] **11.4 Long-horizon retirement projection** (L) — extend `buildForecast` from 90 days to a
-  multi-year decumulation engine: **Social Security claiming-age** modeling from the ingested SSA statement
-  (the `SOCIAL_SECURITY_RECOGNIZER` already parses it into `records`), Airbnb net income + brokerage
-  holdings (Phase 10.2) as retirement cash flow, and sequence-of-returns. Turns the decorative `retirement`
-  asset class into a live projection.
+- [x] **11.4 Long-horizon retirement projection** (L) — **shipped.** A pure annual accumulation→decumulation
+  engine `electron/integrations/finance-retirement.ts` (separate from the daily 90-day `buildForecast` — the
+  granularity differs): grows the portfolio to `retirementAge`, then draws spending net of **Social Security**
+  (with **claiming-age** math — 62/FRA/70 reduction + delayed-credit factors), **Airbnb** net income, and
+  other income, flagging the depletion age. Runs a **sequence-of-returns stress** path (a poor early market)
+  alongside the baseline. Works in real (today's) dollars. Starting balance auto-sources from the
+  `retirement`+`savings` net-worth assets (override-able); config in `app_settings`. The SSA PIA is a manual
+  input — the statement recognizer is **content-light by design** (no benefit/earnings stored), so
+  `hasSsaStatement()` only detects ingestion to prompt the user. IPC `finance:get-retirement-projection` +
+  `finance:set-retirement-config`; a new **Retirement** tab charts the baseline + stress balance trajectory
+  with a config form. (Brokerage-holdings auto-import — Phase 10.2 — remains a future feed.)
 - [ ] **11.5 Days-in-country & residency readiness** (M) — per-country day counts derived from
   `calendar_events` + the Timeline (and, later, CBP I-94 via RIGHTS) feeding the **US substantial-presence
   test** and a future **CR 183-day** rule; a residency-pathway checklist (pensionado / rentista /
