@@ -1327,6 +1327,22 @@ declare global {
             fetchedAt: number | null
           }>
         >
+        getFxGainLoss(year?: number): Promise<{
+          baseCurrency: string
+          baselineDate: string
+          positions: Array<{
+            accountId: number
+            name: string
+            currency: string
+            balance: number
+            baseValueThen: number | null
+            baseValueNow: number | null
+            gainLoss: number | null
+          }>
+          totalGainLoss: number
+          pricedCount: number
+          unpricedCount: number
+        }>
         setFxRate(input: {
           date: string
           base: string

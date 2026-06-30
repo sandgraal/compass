@@ -24,7 +24,7 @@
 | **Phase 8** — Claude Integration (bidirectional) | 6 items | **100% — all shipped** (MCP read+propose tools, in-app Claude Inbox, one-click `.mcpb` Desktop bundle, end-user plugin, 5 skills, agentic Ask Compass) — see § Phase 8 + [`claude-integration.md`](claude-integration.md) |
 | **Phase 9** — The Storehouse (own everything, export anywhere) | 8 items | **~70%.** 9.0 Contacts + Universal Export ✅ · 9.1 archive importers ✅ (Google/macOS Contacts live-sync open) · 9.3 Subscriptions ✅ · 9.5 Assets ✅ · 9.6 Storehouse overview ✅ · **9.2 documents, 9.4 medical, 9.7 reverse-connectors open** — see § Phase 9 |
 | **Phase 10** — The Acquisition Engine (go get everything) | 7 waves | **~40%.** 10.1 spine ✅ (Drop Zone + `records`/Timeline + **~44 recognizers**) · 10.5 Data-Rights Concierge ✅ (+ tax/SSA PDF recognizers) · 10.6 CRED sandbox ✅ (SSA adapter, gated off by default) · 10.7 Converse/Connect/Curate ✅ · **10.2 holdings/IRS/crypto, 10.3 FHIR/wearables, 10.4 remaining takeouts, full 10.6 open** — see § Phase 10 + [`storehouse-roadmap.md`](storehouse-roadmap.md) |
-| **Phase 11** — Life Planning & Cross-Border (NEW) | 7 items | **✅ Complete (2026-06-30).** Output of the June expert panel ([`strategic-review-2026-06.md`](strategic-review-2026-06.md)): all 7 items shipped — 11.1 multi-currency, 11.2 expat tax (FBAR/FATCA), 11.3 Airbnb P&L, 11.4 long-horizon retirement, 11.5 residency/days-in-country, 11.6 goals, 11.7 estate. Remaining: optional 11.1 follow-ups (FX gain/loss, base-currency forecast rollup, ingest-time txn currency). See § Phase 11 |
+| **Phase 11** — Life Planning & Cross-Border (NEW) | 7 items | **✅ Complete (2026-06-30).** Output of the June expert panel ([`strategic-review-2026-06.md`](strategic-review-2026-06.md)): all 7 items shipped — 11.1 multi-currency, 11.2 expat tax (FBAR/FATCA), 11.3 Airbnb P&L, 11.4 long-horizon retirement, 11.5 residency/days-in-country, 11.6 goals, 11.7 estate. The optional 11.1 follow-ups (ingest-time txn currency, base-currency forecast rollup, unrealized FX gain/loss) are now implemented — PRs #268/#269 + the FX-gain/loss change. See § Phase 11 |
 
 PRD-completion of the running app: **~99%** (all Phases 1–3 + Phase 4.0–4.5 merged with UIs).
 
@@ -524,8 +524,8 @@ deeper financial/health/comms sources (10.2–10.4) + full CRED (10.6).
 > `security-auditor` merge gates (FX network calls + foreign-account identifiers). Thresholds/forms are
 > jurisdiction-specific — *(verify at build time)*.
 
-- [~] **11.1 Multi-currency foundation** (L) — *the keystone.* 🟡 *foundation shipped; live FX fetch +
-  FX gain/loss remain.* **Done:** `currency` column on `finance_accounts` + `finance_transactions`
+- [x] **11.1 Multi-currency foundation** (L) — *the keystone.* ✅ *foundation + live FX fetch + all
+  three follow-ups implemented.* **Done:** `currency` column on `finance_accounts` + `finance_transactions`
   (migration `0019`, mirrored in `ensureNewTables`); an `fx_rates` snapshot table (UNIQUE `(date, base,
   quote)`); a pure conversion module `electron/integrations/finance-fx.ts` (geo→currency defaults,
   `convert`/`pickRate` with direct/inverse/USD-triangulation, base-currency setting); **base-currency net
@@ -537,9 +537,15 @@ deeper financial/health/comms sources (10.2–10.4) + full CRED (10.6).
   `electron/integrations/finance-fx-fetch.ts` pulls USD-anchored rates from `open.er-api.com` (free,
   no-key, covers CRC+COP), pinned in the CSP `connect-src` (no wildcard); `finance:refresh-fx-rates`
   IPC + a "Refresh rates" button + a daily cron at 00:15; passed the inline `security-review` gate.
-  **Remaining:** **FX gain/loss** on cross-border transfers, ingest-time txn-currency inheritance, and
-  base-currency **forecast** rollup (forecast stays per-account-native today); run the `security-auditor`
-  subagent as the pre-merge gate.
+  **Follow-ups (implemented — PRs #268 / #269 + this change):** (1) **ingest-time txn-currency
+  inheritance** — `reconcileTransactionCurrency` in `electron/integrations/finance-currency.ts` relabels
+  each account-linked txn with its account's currency, run after every ingest/sync next to
+  `applyAtmSplit`; (2) **base-currency forecast rollup** — `buildForecast` converts each account's
+  projected balance to base via a `toBase` converter, so every trajectory point + low-cash date carries
+  `balanceBase` and the threshold compares apples-to-apples (a colón account's dip is finally caught); (3)
+  **unrealized FX gain/loss** — `electron/integrations/finance-fx-gainloss.ts` values each foreign
+  position at a year-start baseline vs the latest rate (`finance:get-fx-gain-loss`), surfaced on the Net
+  Worth tab.
 - [x] **11.2 Foreign-account & expat-tax surface** (M) — **shipped (security-gated).** `is_foreign` flag
   on accounts (migration `0020`, backfilled true for non-USD; BOTH paths) drives a pure
   `electron/integrations/finance-expat.ts`: **FBAR (FinCEN 114)** max-aggregate-foreign-balance-by-year

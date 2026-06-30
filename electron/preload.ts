@@ -451,6 +451,7 @@ const api = {
     setAccountCurrency: (accountId: number, code: string) =>
       ipcRenderer.invoke('finance:set-account-currency', accountId, code),
     getFxRates: () => ipcRenderer.invoke('finance:get-fx-rates'),
+    getFxGainLoss: (year?: number) => ipcRenderer.invoke('finance:get-fx-gain-loss', year),
     setFxRate: (input: { date: string; base: string; quote: string; rate: number }) =>
       ipcRenderer.invoke('finance:set-fx-rate', input),
     refreshFxRates: () => ipcRenderer.invoke('finance:refresh-fx-rates'),
