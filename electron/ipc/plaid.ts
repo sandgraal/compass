@@ -241,8 +241,18 @@ const LINK_PARTITION = 'plaid-link'
 export async function serveLinkPageOnLoopback(
   html: string
 ): Promise<{ url: string; server: Server }> {
-  const server = createServer((_req: IncomingMessage, res: ServerResponse) => {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+    if (req.method !== 'GET' || (req.url ?? '/') !== '/') {
+      res.writeHead(404)
+      res.end()
+      return
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff'
+    })
     res.end(html)
   })
 
