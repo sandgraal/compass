@@ -151,8 +151,13 @@ export function summarizeHoldings(holdings: ParsedHolding[]): HoldingsSummary {
 
 // ─── DB layer (records-backed; no dedicated table) ───────────────────────────
 
+// Content-addressed dedup key for the snapshot row (one per symbol+account per
+// as-of day). Not a security primitive — no secret, no signature. Uses SHA-256
+// (vs the legacy `finance.ts` SHA-1, which is pinned only because its existing
+// hashes can't be recomputed) since this feature is new and carries no stored
+// hashes to preserve — so there's no weak-crypto finding to suppress.
 function dedupHash(asOf: string, symbol: string, account: string | null): string {
-  return createHash('sha1')
+  return createHash('sha256')
     .update(`${HOLDINGS_SOURCE}|${asOf}|${symbol}|${account ?? ''}`)
     .digest('hex')
     .slice(0, 16)
