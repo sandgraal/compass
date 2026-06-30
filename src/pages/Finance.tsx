@@ -103,6 +103,7 @@ export type Tab =
   | 'expat'
   | 'retirement'
   | 'residency'
+  | 'goals'
 
 /**
  * Whitelist of tab values the command palette can deep-link to. Exported
@@ -121,7 +122,8 @@ export const VALID_FINANCE_TABS: ReadonlySet<Tab> = new Set<Tab>([
   'property',
   'expat',
   'retirement',
-  'residency'
+  'residency',
+  'goals'
 ])
 
 /**
@@ -648,7 +650,8 @@ export default function Finance(): JSX.Element {
             ['property', 'Property'],
             ['expat', 'Expat Tax'],
             ['retirement', 'Retirement'],
-            ['residency', 'Residency']
+            ['residency', 'Residency'],
+            ['goals', 'Goals']
           ] as const
         ).map(([key, label]) => (
           <button
@@ -695,6 +698,8 @@ export default function Finance(): JSX.Element {
       {tab === 'retirement' && <RetirementTab />}
 
       {tab === 'residency' && <ResidencyTab />}
+
+      {tab === 'goals' && <GoalsTab />}
 
       {tab === 'forecast' && <ForecastTab accounts={accounts} />}
 
@@ -2753,6 +2758,351 @@ function ResidencyConfigCard({
       >
         {saving ? 'Saving…' : 'Save & recompute'}
       </button>
+    </div>
+  )
+}
+
+// ─── Goals & Milestones Tab (Phase 11.6) ─────────────────────────────────────
+
+type GoalsSummary = Awaited<ReturnType<Window['api']['finance']['getGoalsSummary']>>
+type GoalProgress = GoalsSummary['goals'][number]
+
+const GOAL_CATEGORIES = ['tax-reserve', 'capex', 'retirement', 'emergency', 'savings', 'other']
+const GOAL_SOURCES: Array<{ value: string; label: string }> = [
+  { value: 'manual', label: 'Manual (enter current)' },
+  { value: 'net-worth', label: 'Net worth (auto)' },
+  { value: 'retirement', label: 'Retirement assets (auto)' },
+  { value: 'property-basis', label: 'Property cost basis (auto)' }
+]
+
+const GOAL_STATUS_STYLE: Record<string, string> = {
+  reached: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
+  'on-track': 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
+  behind: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
+  'no-date': 'bg-muted text-muted-foreground'
+}
+
+const EMPTY_GOAL_FORM = {
+  name: '',
+  category: 'other',
+  source: 'manual',
+  targetAmount: '',
+  targetDate: '',
+  manualCurrent: '',
+  monthlyContribution: ''
+}
+
+function GoalsTab(): JSX.Element {
+  const [summary, setSummary] = useState<GoalsSummary | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [adding, setAdding] = useState(false)
+  const [form, setForm] = useState({ ...EMPTY_GOAL_FORM })
+  const { toast: showToast } = useToast()
+
+  const refresh = useCallback(async () => {
+    if (!window.api?.finance) {
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    try {
+      setSummary(await window.api.finance.getGoalsSummary())
+    } catch (err) {
+      console.error('[goals] refresh failed', err)
+      showToast('Failed to load goals.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }, [showToast])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const addGoal = async () => {
+    if (!window.api?.finance) return
+    if (!form.name.trim()) {
+      showToast('Name is required.', 'error')
+      return
+    }
+    const target = Number(form.targetAmount)
+    if (!Number.isFinite(target) || target <= 0) {
+      showToast('Enter a target amount.', 'error')
+      return
+    }
+    try {
+      const res = await window.api.finance.addGoal({
+        name: form.name.trim(),
+        category: form.category,
+        source: form.source,
+        targetAmount: target,
+        targetDate: form.targetDate || null,
+        manualCurrent: form.manualCurrent === '' ? 0 : Number(form.manualCurrent),
+        monthlyContribution: form.monthlyContribution === '' ? 0 : Number(form.monthlyContribution)
+      })
+      if (!res.success) {
+        showToast(res.error ?? 'Failed to add goal.', 'error')
+        return
+      }
+      setForm({ ...EMPTY_GOAL_FORM })
+      setAdding(false)
+      await refresh()
+    } catch (err) {
+      console.error('[goals] add failed', err)
+      showToast('Failed to add goal.', 'error')
+    }
+  }
+
+  const patchGoal = async (id: number, patch: Record<string, number | string | null>) => {
+    if (!window.api?.finance) return
+    try {
+      const res = await window.api.finance.updateGoal(id, patch)
+      if (!res.success) {
+        showToast(res.error ?? 'Failed to update goal.', 'error')
+        return
+      }
+      await refresh()
+    } catch (err) {
+      console.error('[goals] update failed', err)
+      showToast('Failed to update goal.', 'error')
+    }
+  }
+
+  const removeGoal = async (id: number) => {
+    if (!window.api?.finance) return
+    try {
+      await window.api.finance.deleteGoal(id)
+      await refresh()
+    } catch (err) {
+      console.error('[goals] delete failed', err)
+      showToast('Failed to delete goal.', 'error')
+    }
+  }
+
+  if (loading) return <p className="text-sm text-muted-foreground p-4">Loading goals…</p>
+  if (!summary) return <p className="text-sm text-muted-foreground p-4">Goals unavailable.</p>
+
+  const base = summary.baseCurrency
+  const fmt = (n: number): string => formatMoney(n, base, { decimals: 0 })
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-3 gap-4">
+        <NetWorthTile label="Total target" value={fmt(summary.totals.target)} />
+        <NetWorthTile label="Current" value={fmt(summary.totals.current)} />
+        <NetWorthTile label="Remaining" value={fmt(summary.totals.remaining)} emphasize />
+      </div>
+
+      {summary.goals.length === 0 ? (
+        <div className="bg-card border border-border rounded-xl p-5 text-sm text-muted-foreground">
+          No goals yet. Add a tax reserve, the next capex draw, or your retirement number below.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {summary.goals.map((g) => (
+            <GoalCard key={g.id} goal={g} base={base} onPatch={patchGoal} onRemove={removeGoal} />
+          ))}
+        </div>
+      )}
+
+      <div className="bg-card border border-border rounded-xl p-5">
+        {!adding ? (
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="text-sm text-primary hover:underline"
+          >
+            + Add a goal
+          </button>
+        ) : (
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold">New goal</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="text-xs text-muted-foreground">
+                <span className="block mb-1">Name</span>
+                <input
+                  value={form.name}
+                  onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                  className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
+                />
+              </label>
+              <label className="text-xs text-muted-foreground">
+                <span className="block mb-1">Category</span>
+                <select
+                  value={form.category}
+                  onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))}
+                  className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
+                >
+                  {GOAL_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs text-muted-foreground">
+                <span className="block mb-1">Current value from</span>
+                <select
+                  value={form.source}
+                  onChange={(e) => setForm((p) => ({ ...p, source: e.target.value }))}
+                  className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
+                >
+                  {GOAL_SOURCES.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs text-muted-foreground">
+                <span className="block mb-1">Target ({base})</span>
+                <input
+                  type="number"
+                  value={form.targetAmount}
+                  onChange={(e) => setForm((p) => ({ ...p, targetAmount: e.target.value }))}
+                  className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
+                />
+              </label>
+              <label className="text-xs text-muted-foreground">
+                <span className="block mb-1">Target date (optional)</span>
+                <input
+                  type="date"
+                  value={form.targetDate}
+                  onChange={(e) => setForm((p) => ({ ...p, targetDate: e.target.value }))}
+                  className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
+                />
+              </label>
+              {form.source === 'manual' && (
+                <label className="text-xs text-muted-foreground">
+                  <span className="block mb-1">Current ({base})</span>
+                  <input
+                    type="number"
+                    value={form.manualCurrent}
+                    onChange={(e) => setForm((p) => ({ ...p, manualCurrent: e.target.value }))}
+                    className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
+                  />
+                </label>
+              )}
+              <label className="text-xs text-muted-foreground">
+                <span className="block mb-1">Planned monthly</span>
+                <input
+                  type="number"
+                  value={form.monthlyContribution}
+                  onChange={(e) => setForm((p) => ({ ...p, monthlyContribution: e.target.value }))}
+                  className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
+                />
+              </label>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => void addGoal()}
+                className="px-3 py-1.5 text-xs border border-border rounded-md hover:bg-muted"
+              >
+                Add goal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAdding(false)
+                  setForm({ ...EMPTY_GOAL_FORM })
+                }}
+                className="px-3 py-1.5 text-xs text-muted-foreground hover:underline"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function GoalCard({
+  goal,
+  base,
+  onPatch,
+  onRemove
+}: {
+  goal: GoalProgress
+  base: string
+  onPatch: (id: number, patch: Record<string, number | string | null>) => void | Promise<void>
+  onRemove: (id: number) => void | Promise<void>
+}): JSX.Element {
+  const fmt = (n: number): string => formatMoney(n, base, { decimals: 0 })
+  const pct = Math.round(goal.pct * 100)
+  return (
+    <div className="bg-card border border-border rounded-xl p-4">
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">{goal.name}</span>
+          <span className="text-[11px] text-muted-foreground">
+            {goal.category}
+            {goal.source !== 'manual' ? ' · auto' : ''}
+          </span>
+        </div>
+        <span
+          className={cn(
+            'text-xs px-2 py-0.5 rounded',
+            GOAL_STATUS_STYLE[goal.status] ?? 'bg-muted text-muted-foreground'
+          )}
+        >
+          {goal.status === 'no-date' ? `${pct}%` : goal.status}
+          {goal.targetDate ? ` · ${goal.targetDate}` : ''}
+        </span>
+      </div>
+      <div className="h-2 bg-muted rounded overflow-hidden mb-2">
+        {/* width is dynamic (runtime %) — not expressible as a static class */}
+        <div className="h-2 bg-primary rounded" style={{ width: `${Math.min(100, pct)}%` }} />
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span>
+          <span className="text-foreground tabular-nums">{fmt(goal.current)}</span> of{' '}
+          {fmt(goal.targetAmount)} · {fmt(goal.remaining)} to go
+        </span>
+        <div className="flex items-center gap-3">
+          {goal.requiredMonthly != null && <span>need {fmt(goal.requiredMonthly)}/mo</span>}
+          <label className="flex items-center gap-1">
+            save
+            <input
+              type="number"
+              defaultValue={goal.monthlyContribution || ''}
+              onBlur={(e) => {
+                const v = Number(e.target.value)
+                if (Number.isFinite(v) && v !== goal.monthlyContribution) {
+                  void onPatch(goal.id, { monthlyContribution: v })
+                }
+              }}
+              className="w-20 bg-background border border-border rounded px-1.5 py-0.5 text-right"
+            />
+            /mo
+          </label>
+          {goal.source === 'manual' && (
+            <label className="flex items-center gap-1">
+              current
+              <input
+                type="number"
+                defaultValue={goal.current || ''}
+                onBlur={(e) => {
+                  const v = Number(e.target.value)
+                  if (Number.isFinite(v) && v !== goal.current) {
+                    void onPatch(goal.id, { manualCurrent: v })
+                  }
+                }}
+                className="w-24 bg-background border border-border rounded px-1.5 py-0.5 text-right"
+              />
+            </label>
+          )}
+          <button
+            type="button"
+            onClick={() => void onRemove(goal.id)}
+            className="text-muted-foreground hover:text-destructive"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

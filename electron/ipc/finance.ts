@@ -32,6 +32,14 @@ import {
 } from '../integrations/finance-fx'
 import { syncFxRates } from '../integrations/finance-fx-fetch'
 import {
+  type GoalInput,
+  type GoalSource,
+  addGoal,
+  buildGoalsSummary,
+  deleteGoal,
+  updateGoal
+} from '../integrations/finance-goals'
+import {
   type PropertyConfig,
   buildPropertyPnl,
   getPropertyConfig,
@@ -972,6 +980,88 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       return { success: true }
     }
   )
+
+  // ── Financial goals & milestones (Phase 11.6) ────────────────────────────
+  // Target-date goals that auto-link to net worth / retirement / property, or
+  // track a manual current value. Amounts are in the base currency.
+  ipcMain.handle('finance:get-goals-summary', () => {
+    return buildGoalsSummary(getRawSqlite(), localYmd())
+  })
+
+  // Validate an add/update payload into a clean patch. `requireName` is true for
+  // add (a goal must have a name + a target).
+  const buildGoalPatch = (
+    input: Partial<GoalInput> | null | undefined,
+    requireName: boolean
+  ): { ok: true; value: Partial<GoalInput> } | { ok: false; error: string } => {
+    const src = input && typeof input === 'object' ? input : {}
+    const out: Partial<GoalInput> = {}
+    const MAX = 1_000_000_000_000
+    const SOURCES = new Set<GoalSource>(['manual', 'net-worth', 'retirement', 'property-basis'])
+
+    if (requireName || 'name' in src) {
+      const name = typeof src.name === 'string' ? src.name.trim() : ''
+      if (!name || name.length > 200) return { ok: false, error: 'Goal name is required.' }
+      out.name = name
+    }
+    if (requireName || 'targetAmount' in src) {
+      const v = Number(src.targetAmount)
+      if (!Number.isFinite(v) || v < 0 || v > MAX) {
+        return { ok: false, error: `Invalid target amount: ${src.targetAmount}` }
+      }
+      out.targetAmount = v
+    }
+    if ('category' in src) out.category = String(src.category ?? 'other').slice(0, 40)
+    if ('source' in src) {
+      if (!SOURCES.has(src.source as GoalSource)) {
+        return { ok: false, error: `Invalid source: ${src.source}` }
+      }
+      out.source = src.source
+    }
+    if ('targetDate' in src) {
+      const d = src.targetDate
+      if (d != null && d !== '' && !ISO_DATE_RE.test(String(d))) {
+        return { ok: false, error: 'Invalid target date. Expected YYYY-MM-DD.' }
+      }
+      out.targetDate = d ? String(d) : null
+    }
+    for (const k of ['manualCurrent', 'monthlyContribution'] as const) {
+      if (k in src) {
+        const v = Number(src[k])
+        if (!Number.isFinite(v) || v < 0 || v > MAX) {
+          return { ok: false, error: `Invalid ${k}: ${src[k]}` }
+        }
+        out[k] = v
+      }
+    }
+    if ('notes' in src) out.notes = src.notes == null ? null : String(src.notes).slice(0, 2000)
+    return { ok: true, value: out }
+  }
+
+  ipcMain.handle('finance:add-goal', (_event, input: Partial<GoalInput>) => {
+    const res = buildGoalPatch(input, true)
+    if (!res.ok) return { success: false, error: res.error }
+    const id = addGoal(getRawSqlite(), res.value as GoalInput)
+    return { success: true, id }
+  })
+
+  ipcMain.handle('finance:update-goal', (_event, id: number, input: Partial<GoalInput>) => {
+    if (!Number.isInteger(id) || id <= 0) {
+      return { success: false, error: `Invalid goal id: ${id}` }
+    }
+    const res = buildGoalPatch(input, false)
+    if (!res.ok) return { success: false, error: res.error }
+    updateGoal(getRawSqlite(), id, res.value)
+    return { success: true }
+  })
+
+  ipcMain.handle('finance:delete-goal', (_event, id: number) => {
+    if (!Number.isInteger(id) || id <= 0) {
+      return { success: false, error: `Invalid goal id: ${id}` }
+    }
+    deleteGoal(getRawSqlite(), id)
+    return { success: true }
+  })
 
   // ── Days-in-country & residency readiness (Phase 11.5) ───────────────────
   // Per-country day counts from logged travel → US substantial-presence test +

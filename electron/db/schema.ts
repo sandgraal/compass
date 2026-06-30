@@ -582,3 +582,26 @@ export const travelSegments = sqliteTable('travel_segments', {
   source: text('source').notNull().default('manual'), // 'manual' | 'calendar' | 'i94'
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
+
+// ---- Financial goals (Phase 11.6 — "Goals & milestones") ----
+// Target-date savings goals that tie the cross-border picture together: a tax
+// reserve, the next CR capex draw, the retirement number, an emergency fund.
+// `source` says how the CURRENT value is resolved — 'manual' (user-entered
+// `manualCurrent`) or an auto-link to a live aggregate ('net-worth' /
+// 'retirement' / 'property-basis') so a goal tracks itself. All amounts are in
+// the user's base currency (Phase 11.1).
+export const financialGoals = sqliteTable('financial_goals', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  // Display/grouping only: 'tax-reserve' | 'capex' | 'retirement' | 'emergency' | 'savings' | 'other'
+  category: text('category').notNull().default('other'),
+  targetAmount: real('target_amount').notNull().default(0),
+  targetDate: text('target_date'), // ISO 'YYYY-MM-DD'; null = open-ended
+  // 'manual' | 'net-worth' | 'retirement' | 'property-basis'
+  source: text('source').notNull().default('manual'),
+  manualCurrent: real('manual_current').notNull().default(0), // current value when source='manual'
+  monthlyContribution: real('monthly_contribution').notNull().default(0), // planned monthly savings
+  notes: text('notes'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})

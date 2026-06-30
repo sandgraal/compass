@@ -1499,6 +1499,38 @@ declare global {
           input: Record<string, string | number | null>
         ): Promise<{ success: boolean; error?: string }>
 
+        // Financial goals & milestones (Phase 11.6)
+        getGoalsSummary(): Promise<{
+          baseCurrency: string
+          goals: Array<{
+            id: number
+            name: string
+            category: string
+            source: string
+            targetAmount: number
+            targetDate: string | null
+            current: number
+            remaining: number
+            pct: number
+            reached: boolean
+            monthlyContribution: number
+            requiredMonthly: number | null
+            projectedMonths: number | null
+            onTrack: boolean | null
+            status: 'reached' | 'on-track' | 'behind' | 'no-date'
+            notes: string | null
+          }>
+          totals: { target: number; current: number; remaining: number }
+        }>
+        addGoal(
+          input: Record<string, string | number | null>
+        ): Promise<{ success: boolean; id?: number; error?: string }>
+        updateGoal(
+          id: number,
+          input: Record<string, string | number | null>
+        ): Promise<{ success: boolean; error?: string }>
+        deleteGoal(id: number): Promise<{ success: boolean; error?: string }>
+
         // Cash-flow forecast (Phase 4.5)
         getForecast(opts?: { windowDays?: number; lowCashThreshold?: number }): Promise<{
           events: Array<{

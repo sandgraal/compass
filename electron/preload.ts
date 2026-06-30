@@ -487,6 +487,14 @@ const api = {
     setResidencyConfig: (input: Record<string, string | number | null>) =>
       ipcRenderer.invoke('finance:set-residency-config', input),
 
+    // Financial goals & milestones (Phase 11.6)
+    getGoalsSummary: () => ipcRenderer.invoke('finance:get-goals-summary'),
+    addGoal: (input: Record<string, string | number | null>) =>
+      ipcRenderer.invoke('finance:add-goal', input),
+    updateGoal: (id: number, input: Record<string, string | number | null>) =>
+      ipcRenderer.invoke('finance:update-goal', id, input),
+    deleteGoal: (id: number) => ipcRenderer.invoke('finance:delete-goal', id),
+
     // Cash-flow forecast (Phase 4.5)
     getForecast: (opts?: { windowDays?: number; lowCashThreshold?: number }) =>
       ipcRenderer.invoke('finance:get-forecast', opts),
