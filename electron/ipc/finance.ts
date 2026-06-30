@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { and, desc, eq, gt, gte, isNull, lt, ne, or, sql } from 'drizzle-orm'
 import { BrowserWindow, type IpcMain, dialog } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
@@ -13,7 +13,7 @@ import {
   forecastOverrides,
   fxRates
 } from '../db/schema'
-import { categorize, ingestCsvFolder } from '../integrations/finance'
+import { categorize, ingestCsvFolder, readCsv } from '../integrations/finance'
 import {
   countDuplicateTransactions,
   dedupeTransactions,
@@ -45,6 +45,12 @@ import {
   deleteGoal,
   updateGoal
 } from '../integrations/finance-goals'
+import {
+  getLatestHoldings,
+  importHoldings,
+  parseHoldingsCsv,
+  summarizeHoldings
+} from '../integrations/finance-holdings'
 import {
   type PropertyConfig,
   buildPropertyPnl,
@@ -642,6 +648,41 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     const y = typeof year === 'number' && Number.isInteger(year) ? year : undefined
     return buildFxGainLossFromDb(getRawSqlite(), y ? { year: y } : {})
   })
+
+  // ── Brokerage holdings import (Phase 10.2 — FILE path) ────────────────────
+  // Generic positions-CSV importer → a dated snapshot stored as `records`
+  // (source `brokerage-holdings`). Re-import next month adds a new snapshot;
+  // `get-holdings` returns the most recent one + its totals.
+  ipcMain.handle('finance:import-holdings', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: 'Choose a brokerage positions CSV',
+      properties: ['openFile'],
+      filters: [{ name: 'CSV', extensions: ['csv'] }]
+    })
+    if (canceled || filePaths.length === 0) return { success: false, canceled: true }
+    const fp = filePaths[0]
+    try {
+      const { headers, rows } = readCsv(fp)
+      const holdings = parseHoldingsCsv(headers, rows)
+      if (holdings.length === 0) {
+        return {
+          success: false,
+          error:
+            'No positions found — is this a brokerage holdings CSV (it needs a Symbol/Ticker column)?'
+        }
+      }
+      const d = new Date()
+      const asOf = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+        d.getDate()
+      ).padStart(2, '0')}`
+      const { imported, duplicates } = importHoldings(getDb(), holdings, asOf, basename(fp))
+      return { success: true, imported, duplicates, asOf, summary: summarizeHoldings(holdings) }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('finance:get-holdings', () => getLatestHoldings(getRawSqlite()))
 
   // ── Net-worth trajectory ─────────────────────────────────────────────────
   // Returns every snapshot in the requested window. Caller (UI) groups by

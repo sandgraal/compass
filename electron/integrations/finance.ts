@@ -441,7 +441,7 @@ const generic: Parser = {
 const PARSERS: Parser[] = [rocketMoney, chase, capitalOne, discover, amex, boa, usaa, generic]
 
 // ---------- CSV reader (minimal, no external dep) ----------
-function readCsv(path: string): { headers: string[]; rows: string[][] } {
+export function readCsv(path: string): { headers: string[]; rows: string[][] } {
   const text = readFileSync(path, 'utf8').replace(/^﻿/, '')
   const out: string[][] = []
   let row: string[] = []
