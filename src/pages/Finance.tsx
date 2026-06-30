@@ -2185,7 +2185,12 @@ function RetirementTab(): JSX.Element {
   const { toast: showToast } = useToast()
 
   const refresh = useCallback(async () => {
-    if (!window.api?.finance) return
+    // Outside Electron (or if preload wiring breaks) clear the spinner instead
+    // of leaving the tab stuck on "Loading…" forever.
+    if (!window.api?.finance) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const r = await window.api.finance.getRetirementProjection()
@@ -2214,10 +2219,20 @@ function RetirementTab(): JSX.Element {
     try {
       const patch: Record<string, number | null> = {}
       for (const fd of RET_FIELDS) {
-        const v = Number(form[fd.key])
+        const raw = form[fd.key]
+        // Skip blank fields: Number('') is 0, which would silently overwrite a
+        // value with 0 instead of leaving it unchanged.
+        if (raw === undefined || raw.trim() === '') continue
+        const v = Number(raw)
         if (Number.isFinite(v)) patch[fd.key] = v
       }
-      patch.startingAssets = startingOverride === '' ? null : Number(startingOverride)
+      // Empty override → clear (null); otherwise send only a finite number (never NaN).
+      if (startingOverride.trim() === '') {
+        patch.startingAssets = null
+      } else {
+        const v = Number(startingOverride)
+        if (Number.isFinite(v)) patch.startingAssets = v
+      }
       const res = await window.api.finance.setRetirementConfig(patch)
       if (!res.success) {
         showToast(res.error ?? 'Failed to save.', 'error')
@@ -2287,7 +2302,7 @@ function RetirementTab(): JSX.Element {
 
       <div className="bg-card border border-border rounded-xl p-5">
         <h3 className="text-sm font-semibold mb-3">Portfolio balance by age ({base}, today's $)</h3>
-        <div style={{ width: '100%', height: 260 }}>
+        <div className="h-[260px] w-full">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />

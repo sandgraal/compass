@@ -26,7 +26,11 @@
  */
 
 import type { SqliteForFx } from './finance-fx'
-import { type SqliteForSnapshot, getNetWorthSnapshot } from './finance-snapshot'
+import {
+  type NetWorthSnapshot,
+  type SqliteForSnapshot,
+  getNetWorthSnapshot
+} from './finance-snapshot'
 
 export type RetirementConfig = {
   currentAge: number
@@ -223,14 +227,18 @@ export const RETIREMENT_CONFIG_KEYS: Record<keyof RetirementConfig, string> = {
   stressYears: 'retStressYears'
 }
 
-/** Sum of liquid/invested net-worth assets (retirement + savings), base currency. */
-export function defaultStartingAssets(sqlite: SqliteForSnapshot): number {
-  const snap = getNetWorthSnapshot(sqlite)
+/** Sum of liquid/invested assets (retirement + savings) from a net-worth snapshot. */
+function sumStartingAssets(snap: NetWorthSnapshot): number {
   return round2(
     snap.byAccount
       .filter((a) => a.assetClass === 'retirement' || a.assetClass === 'savings')
       .reduce((sum, a) => sum + (a.baseBalance ?? 0), 0)
   )
+}
+
+/** Sum of liquid/invested net-worth assets (retirement + savings), base currency. */
+export function defaultStartingAssets(sqlite: SqliteForSnapshot): number {
+  return sumStartingAssets(getNetWorthSnapshot(sqlite))
 }
 
 /** True when an SSA statement has been ingested (records source 'social-security'). */
@@ -333,12 +341,12 @@ export function buildRetirementProjection(
   currentYear: number
 ): RetirementResult {
   const config = getRetirementConfig(sqlite)
+  // One snapshot serves both the starting-balance default and the base currency.
+  const snap = getNetWorthSnapshot(sqlite)
   const startingAssets =
-    config.startingAssets != null ? config.startingAssets : defaultStartingAssets(sqlite)
+    config.startingAssets != null ? config.startingAssets : sumStartingAssets(snap)
   const baseline = projectRetirement(config, startingAssets, currentYear, { stress: false })
   const stress = projectRetirement(config, startingAssets, currentYear, { stress: true })
-  // Net worth is reported in the user's base currency; the projection inherits it.
-  const snap = getNetWorthSnapshot(sqlite)
   return {
     baseCurrency: snap.baseCurrency,
     config,
