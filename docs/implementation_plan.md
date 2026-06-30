@@ -24,7 +24,7 @@
 | **Phase 8** — Claude Integration (bidirectional) | 6 items | **100% — all shipped** (MCP read+propose tools, in-app Claude Inbox, one-click `.mcpb` Desktop bundle, end-user plugin, 5 skills, agentic Ask Compass) — see § Phase 8 + [`claude-integration.md`](claude-integration.md) |
 | **Phase 9** — The Storehouse (own everything, export anywhere) | 8 items | **~70%.** 9.0 Contacts + Universal Export ✅ · 9.1 archive importers ✅ (Google/macOS Contacts live-sync open) · 9.3 Subscriptions ✅ · 9.5 Assets ✅ · 9.6 Storehouse overview ✅ · **9.2 documents, 9.4 medical, 9.7 reverse-connectors open** — see § Phase 9 |
 | **Phase 10** — The Acquisition Engine (go get everything) | 7 waves | **~40%.** 10.1 spine ✅ (Drop Zone + `records`/Timeline + **~44 recognizers**) · 10.5 Data-Rights Concierge ✅ (+ tax/SSA PDF recognizers) · 10.6 CRED sandbox ✅ (SSA adapter, gated off by default) · 10.7 Converse/Connect/Curate ✅ · **10.2 holdings/IRS/crypto, 10.3 FHIR/wearables, 10.4 remaining takeouts, full 10.6 open** — see § Phase 10 + [`storehouse-roadmap.md`](storehouse-roadmap.md) |
-| **Phase 11** — Life Planning & Cross-Border (NEW) | 7 items | **Proposed (2026-06-26).** Output of the June expert panel ([`strategic-review-2026-06.md`](strategic-review-2026-06.md)): multi-currency, expat tax (FBAR/FATCA), Airbnb P&L, long-horizon retirement, residency/days-in-country, goals, estate. **Not started** — see § Phase 11 |
+| **Phase 11** — Life Planning & Cross-Border (NEW) | 7 items | **✅ Complete (2026-06-30).** Output of the June expert panel ([`strategic-review-2026-06.md`](strategic-review-2026-06.md)): all 7 items shipped — 11.1 multi-currency, 11.2 expat tax (FBAR/FATCA), 11.3 Airbnb P&L, 11.4 long-horizon retirement, 11.5 residency/days-in-country, 11.6 goals, 11.7 estate. Remaining: optional 11.1 follow-ups (FX gain/loss, base-currency forecast rollup, ingest-time txn currency). See § Phase 11 |
 
 PRD-completion of the running app: **~99%** (all Phases 1–3 + Phase 4.0–4.5 merged with UIs).
 
@@ -587,8 +587,14 @@ deeper financial/health/comms sources (10.2–10.4) + full CRED (10.6).
   picture together. IPC `finance:get-goals-summary` · `add-goal` · `update-goal` · `delete-goal`; a new
   **Goals** tab (progress cards with inline current/contribution editing + an add form). Base-currency
   amounts.
-- [ ] **11.7 Estate & insurance readiness** (S/M) — cross-border beneficiaries, CR property title, and
-  insurance-adequacy surfacing over the vault (legal/medical) + the `assets` domain.
+- [x] **11.7 Estate & insurance readiness** (S/M) — **shipped.** A readiness dashboard in pure
+  `electron/integrations/finance-estate.ts`: a manual estate-document **checklist** (will · healthcare
+  directive · POA · trust · beneficiary designations · a cross-border CR/US plan · digital estate) stored
+  in `app_settings`, plus **insurance adequacy** (coverage, expiring-soon renewals, gaps vs. a recommended
+  set) and **property** surfacing assembled from the `assets` domain. IPC `finance:get-estate-readiness` +
+  `finance:set-estate-item`; a new **Estate** tab. Deliberately reads **no vault data** (no decryption, no
+  secrets) — it directs the user to store documents in Vault → Legal. Cross-border heirship/estate-tax
+  caveats surfaced *(verify with counsel)*.
 
 > **Build order:** 11.1 (keystone) → 11.2 / 11.3 (independent; both ride the existing tag system) → 11.4
 > (needs 11.1 + holdings 10.2) → 11.5 → 11.6 → 11.7. **Re-prioritization of the existing backlog:** promote
