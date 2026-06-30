@@ -99,7 +99,7 @@ vi.mock('../integrations/plaid/config', () => ({
   writePlaidConfig: (...args: unknown[]) => writePlaidConfigMock(...args)
 }))
 
-const { handleCallback, registerPlaidHandlers } = await import('./plaid')
+const { handleCallback, registerPlaidHandlers, serveLinkPageOnLoopback } = await import('./plaid')
 
 beforeEach(() => {
   exchangePublicTokenMock.mockReset()
@@ -504,5 +504,33 @@ describe('registerPlaidHandlers — plaid:disconnect row deletion', () => {
     await invoke(handlers.get('plaid:disconnect')!, 'item-a')
     expect(removeAccessTokenMock).toHaveBeenCalledWith('item-a')
     expect(dbDeleteSpy).toHaveBeenCalledOnce()
+  })
+})
+
+// ─── serveLinkPageOnLoopback (the data:-URL → loopback-origin fix) ────────────
+
+describe('serveLinkPageOnLoopback', () => {
+  it('serves the page over a real http://127.0.0.1 origin (not an opaque data: URL)', async () => {
+    const { url, server } = await serveLinkPageOnLoopback('<html data-token="abc"></html>')
+    try {
+      // A real loopback origin is the whole point of the fix: Plaid's
+      // postMessage handshake rejects the "null" origin a data: URL reports.
+      expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/)
+      expect(new URL(url).origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
+
+      const res = await fetch(url)
+      expect(res.status).toBe(200)
+      expect(res.headers.get('content-type')).toContain('text/html')
+      expect(await res.text()).toBe('<html data-token="abc"></html>')
+    } finally {
+      server.close()
+    }
+  })
+
+  it('stops serving once the caller closes the server (one-shot lifecycle)', async () => {
+    const { url, server } = await serveLinkPageOnLoopback('<html></html>')
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+    // Nothing is listening on the freed port anymore → the fetch fails.
+    await expect(fetch(url)).rejects.toThrow()
   })
 })
