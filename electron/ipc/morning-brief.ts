@@ -168,7 +168,9 @@ export function buildLowCashAlert(
         accountId: first.accountId,
         accountName: cashNameById.get(first.accountId) as string,
         date: first.date,
-        balance: first.balance,
+        // Base-currency dip — consistent with the base-currency threshold.
+        // Identical to the native balance for base-currency accounts.
+        balance: first.balanceBase,
         daysRemaining: daysBetweenYmd(opts.today, first.date)
       }
     : null

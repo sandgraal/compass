@@ -29,7 +29,7 @@ vi.mock('../db/client', () => ({
 type ForecastReturn = {
   events: unknown[]
   trajectory: unknown[]
-  lowDates: Array<{ accountId: number; date: string; balance: number }>
+  lowDates: Array<{ accountId: number; date: string; balance: number; balanceBase: number }>
 }
 const buildForecastMock = vi.fn<(...args: unknown[]) => ForecastReturn>(() => ({
   events: [],
@@ -406,11 +406,15 @@ describe('buildLowCashAlert', () => {
 
   it('returns a disabled empty alert when disabled (ignores lowDates)', async () => {
     const { buildLowCashAlert } = await import('./morning-brief')
-    const r = buildLowCashAlert([{ accountId: 1, date: '2026-05-20', balance: 12 }], names, {
-      enabled: false,
-      threshold: 500,
-      today: '2026-05-15'
-    })
+    const r = buildLowCashAlert(
+      [{ accountId: 1, date: '2026-05-20', balance: 12, balanceBase: 12 }],
+      names,
+      {
+        enabled: false,
+        threshold: 500,
+        today: '2026-05-15'
+      }
+    )
     expect(r).toEqual({ enabled: false, threshold: 500, count: 0, soonest: null })
   })
 
@@ -418,8 +422,8 @@ describe('buildLowCashAlert', () => {
     const { buildLowCashAlert } = await import('./morning-brief')
     const r = buildLowCashAlert(
       [
-        { accountId: 2, date: '2026-05-25', balance: 100 },
-        { accountId: 1, date: '2026-05-19', balance: -50 }
+        { accountId: 2, date: '2026-05-25', balance: 100, balanceBase: 100 },
+        { accountId: 1, date: '2026-05-19', balance: -50, balanceBase: -50 }
       ],
       names,
       { enabled: true, threshold: 500, today: '2026-05-15' }
@@ -439,8 +443,8 @@ describe('buildLowCashAlert', () => {
     const { buildLowCashAlert } = await import('./morning-brief')
     const r = buildLowCashAlert(
       [
-        { accountId: 9, date: '2026-05-16', balance: 5 }, // unknown → excluded
-        { accountId: 2, date: '2026-05-22', balance: 200 }
+        { accountId: 9, date: '2026-05-16', balance: 5, balanceBase: 5 }, // unknown → excluded
+        { accountId: 2, date: '2026-05-22', balance: 200, balanceBase: 200 }
       ],
       names,
       { enabled: true, threshold: 500, today: '2026-05-15' }
@@ -501,8 +505,8 @@ describe('computeLowCashAlert', () => {
       events: [],
       trajectory: [],
       lowDates: [
-        { accountId: 1, date: '2026-05-21', balance: 120 },
-        { accountId: 2, date: '2026-05-18', balance: 3 } // debt → must be ignored
+        { accountId: 1, date: '2026-05-21', balance: 120, balanceBase: 120 },
+        { accountId: 2, date: '2026-05-18', balance: 3, balanceBase: 3 } // debt → must be ignored
       ]
     })
     const r = await compute(NOW)
