@@ -43,6 +43,7 @@ import {
 } from '../../db/schema'
 import { type RawTxn, categorize } from '../finance'
 import { applyAtmSplit } from '../finance-atm-split'
+import { reconcileTransactionCurrency } from '../finance-currency'
 import { tagGeoAndPurpose } from '../finance-geo'
 import { tagTax } from '../finance-tax'
 import { classifySimplefinAccount } from './classify'
@@ -328,8 +329,13 @@ export async function syncSimplefin(
     else duplicates++
   }
 
-  // 9. CR ATM split (only if we added rows), mirroring the Plaid + CSV paths.
-  if (added > 0) applyAtmSplit(db)
+  // 9. CR ATM split + currency reconcile (only if we added rows), mirroring
+  //    the Plaid + CSV paths. Reconcile runs after the split so the split
+  //    sibling rows inherit their account's currency too.
+  if (added > 0) {
+    applyAtmSplit(db)
+    reconcileTransactionCurrency(db)
+  }
 
   // 10. Record outcome. SimpleFIN's top-level `errors[]` mixes genuine failures
   //     with non-fatal warnings (e.g. USAA's "exceeds recommended range of 45
