@@ -170,7 +170,12 @@ export function getEstateChecklist(sqlite: SqliteForEstate): EstateChecklistStat
       .get(ESTATE_CHECKLIST_KEY) as { value?: string } | undefined
     if (!row?.value) return {}
     const parsed = JSON.parse(row.value)
-    return parsed && typeof parsed === 'object' ? (parsed as EstateChecklistState) : {}
+    // Must be a plain object — reject arrays (JSON.stringify would drop the
+    // string-keyed props `setEstateItem` writes onto them, silently losing edits)
+    // and primitives, so corrupted settings degrade to {} and self-repair.
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as EstateChecklistState)
+      : {}
   } catch {
     return {}
   }

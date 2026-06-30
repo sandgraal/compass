@@ -3220,6 +3220,7 @@ function EstateTab(): JSX.Element {
                 type="text"
                 defaultValue={e.notes}
                 placeholder="notes"
+                aria-label={`Notes for ${e.label}`}
                 onBlur={(ev) => {
                   if (ev.target.value !== e.notes) void setItem(e.key, { notes: ev.target.value })
                 }}
@@ -3248,8 +3249,8 @@ function EstateTab(): JSX.Element {
               </tr>
             </thead>
             <tbody>
-              {data.insurance.policies.map((p) => (
-                <tr key={p.name} className="border-t border-border">
+              {data.insurance.policies.map((p, i) => (
+                <tr key={`${p.name}:${p.provider ?? ''}:${i}`} className="border-t border-border">
                   <td className="py-1.5">{p.name}</td>
                   <td className="text-muted-foreground">{p.provider ?? '—'}</td>
                   <td className="text-right tabular-nums">{fmt(p.coverage)}</td>
@@ -3279,8 +3280,11 @@ function EstateTab(): JSX.Element {
           </p>
           <table className="w-full text-sm">
             <tbody>
-              {data.properties.map((p) => (
-                <tr key={p.name} className="border-t border-border first:border-0">
+              {data.properties.map((p, i) => (
+                <tr
+                  key={`${p.name}:${p.reference ?? ''}:${i}`}
+                  className="border-t border-border first:border-0"
+                >
                   <td className="py-1.5">{p.name}</td>
                   <td className="text-muted-foreground text-xs">{p.reference ?? ''}</td>
                   <td className="text-right tabular-nums">{fmt(p.value)}</td>

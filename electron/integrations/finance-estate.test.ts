@@ -117,6 +117,15 @@ describe('estate checklist persistence', () => {
     expect(state.will).toEqual({ present: true, notes: 'in the safe' })
     expect(state.trust).toEqual({ present: false })
   })
+
+  it('degrades a corrupted (array / non-object) stored value to {} and self-repairs', () => {
+    // An array would silently drop string-keyed writes under JSON.stringify.
+    sqlite.prepare("INSERT INTO app_settings (key, value) VALUES ('estateChecklist', '[]')").run()
+    expect(getEstateChecklist(sqlite)).toEqual({})
+    // A subsequent write repairs it into a real object.
+    setEstateItem(sqlite, 'will', { present: true })
+    expect(getEstateChecklist(sqlite).will).toEqual({ present: true })
+  })
 })
 
 describe('buildEstateReadinessFromDb', () => {
