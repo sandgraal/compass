@@ -49,6 +49,7 @@ import {
 import { categorizationRules } from '../../db/schema'
 import { categorize } from '../finance'
 import { applyAtmSplit } from '../finance-atm-split'
+import { reconcileTransactionCurrency } from '../finance-currency'
 import { tagGeoAndPurpose } from '../finance-geo'
 import { tagTax } from '../finance-tax'
 import { getPlaidClient } from './client'
@@ -406,7 +407,10 @@ export async function syncPlaid(
   //    on both plaid_items and integrations.
   //    On cap-hit: leave error_code untouched, record a partial-sync error
   //    so the next sync resumes from the persisted cursor.
-  if (totals.added > 0) applyAtmSplit(db)
+  if (totals.added > 0) {
+    applyAtmSplit(db)
+    reconcileTransactionCurrency(db)
+  }
 
   if (completed) {
     db.update(plaidItems)

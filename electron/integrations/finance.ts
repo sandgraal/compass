@@ -14,6 +14,7 @@ import { eq, inArray } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
 import { applyAtmSplit } from './finance-atm-split'
+import { reconcileTransactionCurrency } from './finance-currency'
 import { tagGeoAndPurpose } from './finance-geo'
 import { tagTax } from './finance-tax'
 
@@ -575,6 +576,7 @@ export async function ingestCsvFolder(
   // After all files are ingested, run the CR ATM 70/30 split. Idempotent.
   if (result.newTransactions > 0) {
     applyAtmSplit(db)
+    reconcileTransactionCurrency(db)
   }
 
   return result
@@ -1326,6 +1328,7 @@ export async function ingestFinanceFiles(
 
   if (result.newTransactions > 0) {
     applyAtmSplit(db)
+    reconcileTransactionCurrency(db)
   }
 
   return { result, detectedAccounts: detected }
