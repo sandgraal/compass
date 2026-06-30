@@ -207,22 +207,26 @@ export function getLatestHoldings(sqlite: SqliteForHoldings): {
 } {
   let rows: Array<{ occurred_at: number | null; payload: string | null }> = []
   try {
+    // Scope to the latest snapshot only — don't pull every historical snapshot
+    // into memory just to use the most recent one.
     rows = sqlite
       .prepare(
-        'SELECT occurred_at, payload FROM records WHERE source = ? ORDER BY occurred_at DESC'
+        `SELECT occurred_at, payload FROM records
+           WHERE source = ? AND occurred_at = (SELECT MAX(occurred_at) FROM records WHERE source = ?)`
       )
-      .all(HOLDINGS_SOURCE) as Array<{ occurred_at: number | null; payload: string | null }>
+      .all(HOLDINGS_SOURCE, HOLDINGS_SOURCE) as Array<{
+      occurred_at: number | null
+      payload: string | null
+    }>
   } catch {
     // `records` may not exist on a very old DB — degrade to empty.
     return { asOf: null, holdings: [], summary: summarizeHoldings([]) }
   }
   if (rows.length === 0) return { asOf: null, holdings: [], summary: summarizeHoldings([]) }
 
-  const latest = rows[0].occurred_at
   const holdings: ParsedHolding[] = []
   let asOf: string | null = null
   for (const r of rows) {
-    if (r.occurred_at !== latest) break // rows are sorted desc → stop at older snapshot
     if (!r.payload) continue
     try {
       const p = JSON.parse(r.payload) as ParsedHolding & { asOf?: string }

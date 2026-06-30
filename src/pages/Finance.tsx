@@ -1059,8 +1059,12 @@ function NetWorthTab(): JSX.Element {
         window.api.finance.getNetWorthSnapshot(),
         window.api.finance.getNetWorthTrajectory({ sinceDays: 365 }),
         window.api.finance.getCurrencySettings(),
-        window.api.finance.getFxGainLoss(),
-        window.api.finance.getHoldings()
+        // Optional extras — a failure here must not take down the core net-worth
+        // load, so each degrades to null (its card simply doesn't render).
+        window.api.finance
+          .getFxGainLoss()
+          .catch(() => null),
+        window.api.finance.getHoldings().catch(() => null)
       ])
       setSnapshot(s)
       setTrajectory(t)
@@ -1346,9 +1350,9 @@ function NetWorthTab(): JSX.Element {
               </div>
             </div>
             <ul className="mt-3 space-y-1 text-xs">
-              {holdings.holdings.map((h) => (
+              {holdings.holdings.map((h, i) => (
                 <li
-                  key={`${h.symbol}:${h.account ?? ''}`}
+                  key={`${h.symbol}:${h.account ?? ''}:${i}`}
                   className="flex items-center justify-between"
                 >
                   <span className="font-medium">
