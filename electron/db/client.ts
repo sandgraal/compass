@@ -143,6 +143,21 @@ function ensureNewTables(sqlite: Database.Database): void {
       source TEXT NOT NULL DEFAULT 'manual',
       created_at INTEGER
     );
+    -- Financial goals (Phase 11.6). Mirrors migration 0022 here (the always-run
+    -- fallback) since packaged builds skip migrations.
+    CREATE TABLE IF NOT EXISTS financial_goals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'other',
+      target_amount REAL NOT NULL DEFAULT 0,
+      target_date TEXT,
+      source TEXT NOT NULL DEFAULT 'manual',
+      manual_current REAL NOT NULL DEFAULT 0,
+      monthly_contribution REAL NOT NULL DEFAULT 0,
+      notes TEXT,
+      created_at INTEGER,
+      updated_at INTEGER
+    );
     -- FX-rate snapshots (Phase 11.1). Lives here (the always-run fallback) as
     -- well as migration 0019 because the packaged app doesn't bundle migrations.
     CREATE TABLE IF NOT EXISTS fx_rates (
@@ -669,6 +684,20 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       notes TEXT,
       source TEXT NOT NULL DEFAULT 'manual',
       created_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS financial_goals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'other',
+      target_amount REAL NOT NULL DEFAULT 0,
+      target_date TEXT,
+      source TEXT NOT NULL DEFAULT 'manual',
+      manual_current REAL NOT NULL DEFAULT 0,
+      monthly_contribution REAL NOT NULL DEFAULT 0,
+      notes TEXT,
+      created_at INTEGER,
+      updated_at INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS forecast_overrides (

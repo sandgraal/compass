@@ -579,8 +579,14 @@ deeper financial/health/comms sources (10.2–10.4) + full CRED (10.6).
   `finance:get-residency-summary` + `add`/`delete-travel-segment` + `set-residency-config`; a new **Residency**
   tab with a travel log, day-count-by-year, the SPT/CR results, the pathway checklist, and a settings card.
   (Calendar/Timeline + CBP I-94 auto-fill via the `source` column remains a future feed.)
-- [ ] **11.6 Goals & milestones** (M) — target-date savings/goals (tax reserve, next capex draw, retirement
-  number) tying property + tax + retirement together. Reuses `appSettings` + the forecast engine.
+- [x] **11.6 Goals & milestones** (M) — **shipped.** A `financial_goals` table (migration `0022`, BOTH
+  paths) + pure `electron/integrations/finance-goals.ts`: each goal has a target amount, optional target
+  date, and a planned monthly contribution → `computeGoalProgress` derives remaining / % / required-monthly
+  / on-track / status. A goal's CURRENT value is either manual or **auto-linked** to a live aggregate
+  (`net-worth` / `retirement` assets / `property-basis`) so it tracks itself — tying the cross-border
+  picture together. IPC `finance:get-goals-summary` · `add-goal` · `update-goal` · `delete-goal`; a new
+  **Goals** tab (progress cards with inline current/contribution editing + an add form). Base-currency
+  amounts.
 - [ ] **11.7 Estate & insurance readiness** (S/M) — cross-border beneficiaries, CR property title, and
   insurance-adequacy surfacing over the vault (legal/medical) + the `assets` domain.
 

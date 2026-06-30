@@ -148,6 +148,12 @@ function createSchema(): void {
       start_date TEXT NOT NULL, end_date TEXT NOT NULL, notes TEXT,
       source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER
     );
+    CREATE TABLE financial_goals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'other',
+      target_amount REAL NOT NULL DEFAULT 0, target_date TEXT, source TEXT NOT NULL DEFAULT 'manual',
+      manual_current REAL NOT NULL DEFAULT 0, monthly_contribution REAL NOT NULL DEFAULT 0,
+      notes TEXT, created_at INTEGER, updated_at INTEGER
+    );
   `)
 }
 
@@ -743,6 +749,62 @@ describe('finance:residency (Phase 11.5)', () => {
     expect((await invoke(setCfg, { cajaRatePct: 500 })) as { success: boolean }).toMatchObject({
       success: false
     })
+  })
+})
+
+describe('finance:goals (Phase 11.6)', () => {
+  it('add → summary (with auto-linked current) → update → delete', async () => {
+    // A retirement account so a 'retirement'-source goal resolves a current value.
+    const acct = seedAccount('401k')
+    sqlite.prepare("UPDATE finance_accounts SET asset_class = 'retirement' WHERE id = ?").run(acct)
+    sqlite
+      .prepare(
+        'INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (?, ?, ?, ?)'
+      )
+      .run(acct, Date.now(), 350_000, 'manual')
+
+    const add = await registerAndGet('finance:add-goal')
+    const added = (await invoke(add, {
+      name: 'Retirement number',
+      source: 'retirement',
+      targetAmount: 1_000_000,
+      monthlyContribution: 2_000
+    })) as { success: boolean; id: number }
+    expect(added.success).toBe(true)
+
+    const getSummary = await registerAndGet('finance:get-goals-summary')
+    const summary = (await invoke(getSummary)) as {
+      goals: Array<{ id: number; current: number; remaining: number }>
+      totals: { target: number }
+    }
+    expect(summary.goals[0].current).toBe(350_000) // auto from retirement assets
+    expect(summary.goals[0].remaining).toBe(650_000)
+    expect(summary.totals.target).toBe(1_000_000)
+
+    const upd = await registerAndGet('finance:update-goal')
+    expect(
+      (await invoke(upd, added.id, { monthlyContribution: 3_000 })) as { success: boolean }
+    ).toMatchObject({ success: true })
+
+    const del = await registerAndGet('finance:delete-goal')
+    expect((await invoke(del, added.id)) as { success: boolean }).toMatchObject({ success: true })
+    expect(((await invoke(getSummary)) as { goals: unknown[] }).goals).toHaveLength(0)
+  })
+
+  it('rejects a goal with no name / bad target / bad source', async () => {
+    const add = await registerAndGet('finance:add-goal')
+    expect(
+      (await invoke(add, { name: '', targetAmount: 100 })) as { success: boolean }
+    ).toMatchObject({ success: false })
+    expect(
+      (await invoke(add, { name: 'X', targetAmount: -5 })) as { success: boolean }
+    ).toMatchObject({ success: false })
+    expect(
+      (await invoke(add, { name: 'X', targetAmount: 0 })) as { success: boolean }
+    ).toMatchObject({ success: false }) // strictly positive
+    expect(
+      (await invoke(add, { name: 'X', targetAmount: 100, source: 'bogus' })) as { success: boolean }
+    ).toMatchObject({ success: false })
   })
 })
 
