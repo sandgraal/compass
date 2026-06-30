@@ -1343,6 +1343,40 @@ declare global {
           pricedCount: number
           unpricedCount: number
         }>
+        importHoldings(): Promise<{
+          success: boolean
+          canceled?: boolean
+          error?: string
+          imported?: number
+          duplicates?: number
+          asOf?: string
+          summary?: {
+            count: number
+            totalMarketValue: number
+            totalCostBasis: number | null
+            totalGain: number | null
+            totalGainPct: number | null
+          }
+        }>
+        getHoldings(): Promise<{
+          asOf: string | null
+          holdings: Array<{
+            symbol: string
+            description: string | null
+            quantity: number | null
+            price: number | null
+            marketValue: number | null
+            costBasis: number | null
+            account: string | null
+          }>
+          summary: {
+            count: number
+            totalMarketValue: number
+            totalCostBasis: number | null
+            totalGain: number | null
+            totalGainPct: number | null
+          }
+        }>
         setFxRate(input: {
           date: string
           base: string

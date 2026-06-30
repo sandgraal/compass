@@ -1035,12 +1035,15 @@ const ASSET_CLASS_LABEL: Record<string, string> = {
 
 type CurrencySettings = Awaited<ReturnType<Window['api']['finance']['getCurrencySettings']>>
 type FxGainLoss = Awaited<ReturnType<Window['api']['finance']['getFxGainLoss']>>
+type Holdings = Awaited<ReturnType<Window['api']['finance']['getHoldings']>>
 
 function NetWorthTab(): JSX.Element {
   const [snapshot, setSnapshot] = useState<NetWorthSnapshot | null>(null)
   const [trajectory, setTrajectory] = useState<NetWorthTrajectory>([])
   const [currencySettings, setCurrencySettings] = useState<CurrencySettings | null>(null)
   const [fxGainLoss, setFxGainLoss] = useState<FxGainLoss | null>(null)
+  const [holdings, setHoldings] = useState<Holdings | null>(null)
+  const [importingHoldings, setImportingHoldings] = useState(false)
   const [loading, setLoading] = useState(true)
   const [capturing, setCapturing] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -1052,16 +1055,22 @@ function NetWorthTab(): JSX.Element {
     if (!isElectron || !window.api.finance) return
     setLoading(true)
     try {
-      const [s, t, c, fx] = await Promise.all([
+      const [s, t, c, fx, h] = await Promise.all([
         window.api.finance.getNetWorthSnapshot(),
         window.api.finance.getNetWorthTrajectory({ sinceDays: 365 }),
         window.api.finance.getCurrencySettings(),
-        window.api.finance.getFxGainLoss()
+        // Optional extras — a failure here must not take down the core net-worth
+        // load, so each degrades to null (its card simply doesn't render).
+        window.api.finance
+          .getFxGainLoss()
+          .catch(() => null),
+        window.api.finance.getHoldings().catch(() => null)
       ])
       setSnapshot(s)
       setTrajectory(t)
       setCurrencySettings(c)
       setFxGainLoss(fx)
+      setHoldings(h)
     } catch (err) {
       console.error('[networth] refresh failed', err)
       showToast('Failed to load net worth.', 'error')
@@ -1097,6 +1106,31 @@ function NetWorthTab(): JSX.Element {
     } catch (err) {
       console.error('[networth] set account currency failed', err)
       showToast('Failed to set account currency.', 'error')
+    }
+  }
+
+  const importHoldingsFile = async () => {
+    if (!window.api?.finance) return
+    setImportingHoldings(true)
+    try {
+      const res = await window.api.finance.importHoldings()
+      if (res.canceled) return
+      if (!res.success) {
+        showToast(res.error ?? 'Holdings import failed.', 'error')
+        return
+      }
+      showToast(
+        `Imported ${res.imported} position${res.imported === 1 ? '' : 's'}${
+          res.duplicates ? ` (${res.duplicates} already on file)` : ''
+        }.`,
+        'success'
+      )
+      await refresh()
+    } catch (err) {
+      console.error('[networth] import holdings failed', err)
+      showToast('Holdings import failed.', 'error')
+    } finally {
+      setImportingHoldings(false)
     }
   }
 
@@ -1260,6 +1294,87 @@ function NetWorthTab(): JSX.Element {
           )}
         </div>
       )}
+
+      {/* Brokerage holdings (Phase 10.2 — generic positions-CSV import) */}
+      <div className="bg-card border border-border rounded-lg px-4 py-3">
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-muted-foreground">
+            Brokerage holdings
+            {holdings?.asOf && <span className="opacity-60"> · as of {holdings.asOf}</span>}
+          </div>
+          <button
+            type="button"
+            onClick={() => void importHoldingsFile()}
+            disabled={importingHoldings}
+            className="text-xs px-2 py-1 rounded border border-border hover:bg-accent disabled:opacity-50"
+          >
+            {importingHoldings ? 'Importing…' : 'Import positions CSV'}
+          </button>
+        </div>
+        {holdings && holdings.holdings.length > 0 ? (
+          <>
+            <div className="mt-3 grid grid-cols-3 gap-3 text-center">
+              <div>
+                <div className="text-[11px] text-muted-foreground">Market value</div>
+                <div className="text-sm font-semibold">
+                  {fmtBase(holdings.summary.totalMarketValue)}
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] text-muted-foreground">Cost basis</div>
+                <div className="text-sm font-semibold">
+                  {holdings.summary.totalCostBasis != null
+                    ? fmtBase(holdings.summary.totalCostBasis)
+                    : '—'}
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] text-muted-foreground">Unrealized</div>
+                <div
+                  className={`text-sm font-semibold ${
+                    holdings.summary.totalGain == null
+                      ? ''
+                      : holdings.summary.totalGain >= 0
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-red-600 dark:text-red-400'
+                  }`}
+                >
+                  {holdings.summary.totalGain != null
+                    ? `${fmtBaseSigned(holdings.summary.totalGain)}${
+                        holdings.summary.totalGainPct != null
+                          ? ` (${holdings.summary.totalGainPct >= 0 ? '+' : ''}${holdings.summary.totalGainPct}%)`
+                          : ''
+                      }`
+                    : '—'}
+                </div>
+              </div>
+            </div>
+            <ul className="mt-3 space-y-1 text-xs">
+              {holdings.holdings.map((h, i) => (
+                <li
+                  key={`${h.symbol}:${h.account ?? ''}:${i}`}
+                  className="flex items-center justify-between"
+                >
+                  <span className="font-medium">
+                    {h.symbol}
+                    {h.quantity != null && (
+                      <span className="text-muted-foreground font-normal"> · {h.quantity} sh</span>
+                    )}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {h.marketValue != null ? fmtBase(h.marketValue) : '—'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <p className="mt-2 text-xs text-muted-foreground opacity-70">
+            No holdings yet — import a positions CSV from your broker (Schwab, Fidelity, Vanguard,
+            …) to track market value, cost basis, and unrealized gain.
+          </p>
+        )}
+      </div>
 
       {/* 4-tile summary */}
       <div className="grid grid-cols-4 gap-4">
