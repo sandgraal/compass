@@ -20,6 +20,7 @@
 
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type * as schema from '../db/schema'
+import { convert, getBaseCurrency, loadFxRates } from './finance-fx'
 import { type Cadence, type Subscription, auditSubscriptions } from './finance-subscriptions'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -57,13 +58,18 @@ export type ForecastOverride = {
 export type TrajectoryPoint = {
   date: string // YYYY-MM-DD
   accountId: number
-  balance: number
+  balance: number // in the account's NATIVE currency
+  // The same balance converted to the user's base currency (Phase 11.1 rollup).
+  // Equals `balance` for base-currency accounts and when no FX rate is available.
+  balanceBase: number
 }
 
 export type ForecastResult = {
   events: ForecastEvent[]
   trajectory: TrajectoryPoint[]
-  lowDates: Array<{ accountId: number; date: string; balance: number }>
+  // `balance` is native; `balanceBase` is the base-currency value the low-cash
+  // threshold is actually compared against (so a colón account's dip is caught).
+  lowDates: Array<{ accountId: number; date: string; balance: number; balanceBase: number }>
 }
 
 const LOW_CASH_DEFAULT = 500
@@ -504,7 +510,8 @@ export function projectCashflow(
   startingBalances: Record<number, number>,
   today: Date,
   windowDays: number,
-  lowCashThreshold: number = LOW_CASH_DEFAULT
+  lowCashThreshold: number = LOW_CASH_DEFAULT,
+  toBase: (accountId: number, amount: number) => number | null = () => null
 ): ForecastResult {
   const sorted = [...events].sort((a, b) => a.date.localeCompare(b.date))
   const balances: Record<number, number> = { ...startingBalances }
@@ -512,13 +519,24 @@ export function projectCashflow(
   const lowDates: ForecastResult['lowDates'] = []
   const seenLow = new Set<number>()
 
+  // Convert an account-native balance to base currency for the rollup + the
+  // low-cash check; fall back to the native value when no rate is available
+  // (best effort — matches pre-multi-currency behaviour for that account).
+  const inBase = (accountId: number, amount: number): number =>
+    round2(toBase(accountId, amount) ?? amount)
+
   const todayKey = localDateString(today)
   const horizonKey = localDateString(addDays(today, windowDays))
 
   // Seed: today's balance for every known account.
   for (const [acctIdStr, bal] of Object.entries(balances)) {
     const acctId = Number(acctIdStr)
-    trajectory.push({ date: todayKey, accountId: acctId, balance: round2(bal) })
+    trajectory.push({
+      date: todayKey,
+      accountId: acctId,
+      balance: round2(bal),
+      balanceBase: inBase(acctId, bal)
+    })
   }
 
   // Aggregate by (date, accountId) so same-day events fold into one net change.
@@ -544,10 +562,21 @@ export function projectCashflow(
     const prev = balances[day.accountId] ?? 0
     const next = prev + day.netAmount
     balances[day.accountId] = next
-    trajectory.push({ date: day.date, accountId: day.accountId, balance: round2(next) })
-    if (next < lowCashThreshold && !seenLow.has(day.accountId)) {
+    const nextBase = inBase(day.accountId, next)
+    trajectory.push({
+      date: day.date,
+      accountId: day.accountId,
+      balance: round2(next),
+      balanceBase: nextBase
+    })
+    if (nextBase < lowCashThreshold && !seenLow.has(day.accountId)) {
       seenLow.add(day.accountId)
-      lowDates.push({ accountId: day.accountId, date: day.date, balance: round2(next) })
+      lowDates.push({
+        accountId: day.accountId,
+        date: day.date,
+        balance: round2(next),
+        balanceBase: nextBase
+      })
     }
   }
 
@@ -588,11 +617,12 @@ export function buildForecast(
   const audit = auditSubscriptions(db, { today })
   const accounts = sqlite
     .prepare(
-      'SELECT id, name, is_debt, min_payment, payment_day_of_month, payment_due_date FROM finance_accounts'
+      'SELECT id, name, currency, is_debt, min_payment, payment_day_of_month, payment_due_date FROM finance_accounts'
     )
     .all() as Array<{
     id: number
     name: string
+    currency: string
     is_debt: number
     min_payment: number | null
     payment_day_of_month: number | null
@@ -659,5 +689,20 @@ export function buildForecast(
     overrides
   )
 
-  return projectCashflow(allEvents, startingBalances, today, windowDays, lowCashThreshold)
+  // Base-currency rollup: convert each account's projected balance into the
+  // user's base currency so the low-cash threshold (a base-currency number) is
+  // compared apples-to-apples across a multi-currency ledger. A colón account
+  // whose huge CRC balances never tripped a $500 threshold now does once its
+  // USD-equivalent dips. Accounts already in the base currency, or with no FX
+  // rate available, pass through unconverted.
+  const baseCurrency = getBaseCurrency(sqlite)
+  const fxRates = loadFxRates(sqlite)
+  const currencyByAccount = new Map<number, string>()
+  for (const a of accounts) currencyByAccount.set(a.id, a.currency)
+  const toBase = (accountId: number, amount: number): number | null => {
+    const cur = currencyByAccount.get(accountId) ?? baseCurrency
+    return cur === baseCurrency ? amount : convert(amount, cur, baseCurrency, fxRates)
+  }
+
+  return projectCashflow(allEvents, startingBalances, today, windowDays, lowCashThreshold, toBase)
 }

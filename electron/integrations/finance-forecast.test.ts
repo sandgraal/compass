@@ -509,6 +509,60 @@ describe('projectCashflow', () => {
   })
 })
 
+describe('projectCashflow — base-currency rollup (Phase 11.1)', () => {
+  const today = new Date(2026, 4, 1)
+  const colonDip: ForecastEvent[] = [
+    {
+      date: '2026-05-10',
+      accountId: 1,
+      amount: -50_000,
+      label: 'gasto',
+      source: 'calendar',
+      confidence: 'low'
+    }
+  ]
+
+  it('compares the BASE-currency balance against the threshold, not the native one', () => {
+    // Colón account: 200,000 CRC − 50,000 = 150,000 CRC. Natively that towers
+    // over a 500 threshold, but it's ~300 USD once converted — a genuine dip.
+    const toBase = (_id: number, amount: number) => amount / 500 // CRC→USD ≈
+    const result = projectCashflow(colonDip, { 1: 200_000 }, today, 30, 500, toBase)
+    expect(result.lowDates).toHaveLength(1)
+    expect(result.lowDates[0].balance).toBe(150_000) // native CRC preserved
+    expect(result.lowDates[0].balanceBase).toBe(300) // 150_000 / 500
+  })
+
+  it('does NOT flag that same colón dip when currency-blind (no converter)', () => {
+    const result = projectCashflow(colonDip, { 1: 200_000 }, today, 30, 500)
+    expect(result.lowDates).toHaveLength(0) // 150,000 > 500 natively → missed
+    const final = result.trajectory[result.trajectory.length - 1]
+    expect(final.balanceBase).toBe(final.balance) // mirrors native with no converter
+  })
+
+  it('falls back to the native balance when the converter returns null (no FX rate)', () => {
+    const result = projectCashflow(
+      [
+        {
+          date: '2026-05-10',
+          accountId: 1,
+          amount: -800,
+          label: 'x',
+          source: 'calendar',
+          confidence: 'low'
+        }
+      ],
+      { 1: 1000 },
+      today,
+      30,
+      500,
+      () => null // unconvertible
+    )
+    expect(result.lowDates).toHaveLength(1)
+    expect(result.lowDates[0].balance).toBe(200)
+    expect(result.lowDates[0].balanceBase).toBe(200) // fell back to native
+  })
+})
+
 describe('detectRecurringIncome', () => {
   function makeDb(): Database.Database {
     const sqlite = new Database(':memory:')
