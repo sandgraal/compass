@@ -36,6 +36,7 @@ import {
   upsertFxRate
 } from '../integrations/finance-fx'
 import { syncFxRates } from '../integrations/finance-fx-fetch'
+import { buildFxGainLossFromDb } from '../integrations/finance-fx-gainloss'
 import {
   type GoalInput,
   type GoalSource,
@@ -631,6 +632,15 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   // Returns latest balance per account + assets/liabilities/net totals + 30/90/365-day deltas.
   ipcMain.handle('finance:get-net-worth-snapshot', () => {
     return getNetWorthSnapshot(getRawSqlite())
+  })
+
+  // ── Unrealized FX gain/loss (Phase 11.1 follow-up) ────────────────────────
+  // Values each foreign-currency position at the year-start rate vs the latest
+  // and differences them — "how much of my foreign holdings' USD value is the
+  // exchange rate, not deposits?". Optional `year` overrides the baseline year.
+  ipcMain.handle('finance:get-fx-gain-loss', (_event, year?: unknown) => {
+    const y = typeof year === 'number' && Number.isInteger(year) ? year : undefined
+    return buildFxGainLossFromDb(getRawSqlite(), y ? { year: y } : {})
   })
 
   // ── Net-worth trajectory ─────────────────────────────────────────────────

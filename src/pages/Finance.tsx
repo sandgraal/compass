@@ -1034,11 +1034,13 @@ const ASSET_CLASS_LABEL: Record<string, string> = {
 }
 
 type CurrencySettings = Awaited<ReturnType<Window['api']['finance']['getCurrencySettings']>>
+type FxGainLoss = Awaited<ReturnType<Window['api']['finance']['getFxGainLoss']>>
 
 function NetWorthTab(): JSX.Element {
   const [snapshot, setSnapshot] = useState<NetWorthSnapshot | null>(null)
   const [trajectory, setTrajectory] = useState<NetWorthTrajectory>([])
   const [currencySettings, setCurrencySettings] = useState<CurrencySettings | null>(null)
+  const [fxGainLoss, setFxGainLoss] = useState<FxGainLoss | null>(null)
   const [loading, setLoading] = useState(true)
   const [capturing, setCapturing] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -1050,14 +1052,16 @@ function NetWorthTab(): JSX.Element {
     if (!isElectron || !window.api.finance) return
     setLoading(true)
     try {
-      const [s, t, c] = await Promise.all([
+      const [s, t, c, fx] = await Promise.all([
         window.api.finance.getNetWorthSnapshot(),
         window.api.finance.getNetWorthTrajectory({ sinceDays: 365 }),
-        window.api.finance.getCurrencySettings()
+        window.api.finance.getCurrencySettings(),
+        window.api.finance.getFxGainLoss()
       ])
       setSnapshot(s)
       setTrajectory(t)
       setCurrencySettings(c)
+      setFxGainLoss(fx)
     } catch (err) {
       console.error('[networth] refresh failed', err)
       showToast('Failed to load net worth.', 'error')
@@ -1206,6 +1210,54 @@ function NetWorthTab(): JSX.Element {
           {Array.from(new Set(snapshot.unconverted.map((u) => u.currency))).join(', ')}) couldn't be
           valued in {base} — add an exchange rate below to include{' '}
           {snapshot.unconverted.length === 1 ? 'it' : 'them'} in your net worth.
+        </div>
+      )}
+
+      {/* Unrealized FX gain/loss (Phase 11.1 follow-up) — only when there are
+          foreign positions to value. */}
+      {fxGainLoss && fxGainLoss.positions.length > 0 && (
+        <div className="bg-card border border-border rounded-lg px-4 py-3 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">
+              Unrealized FX gain/loss since {fxGainLoss.baselineDate.slice(0, 4)} start
+            </span>
+            <span
+              className={`font-semibold ${
+                fxGainLoss.totalGainLoss >= 0
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-red-600 dark:text-red-400'
+              }`}
+            >
+              {fmtBaseSigned(fxGainLoss.totalGainLoss)}
+            </span>
+          </div>
+          <ul className="mt-2 space-y-1">
+            {fxGainLoss.positions.map((p) => (
+              <li
+                key={p.accountId}
+                className="flex items-center justify-between text-muted-foreground"
+              >
+                <span>
+                  {p.name} <span className="opacity-60">({p.currency})</span>
+                </span>
+                <span>
+                  {p.gainLoss == null ? (
+                    <span className="opacity-60">no rate</span>
+                  ) : (
+                    fmtBaseSigned(p.gainLoss)
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {fxGainLoss.unpricedCount > 0 && (
+            <p className="mt-2 text-[11px] text-muted-foreground opacity-70">
+              {fxGainLoss.unpricedCount} position
+              {fxGainLoss.unpricedCount === 1 ? '' : 's'} couldn't be valued at the{' '}
+              {fxGainLoss.baselineDate.slice(0, 4)} baseline — add an earlier rate to include{' '}
+              {fxGainLoss.unpricedCount === 1 ? 'it' : 'them'}.
+            </p>
+          )}
         </div>
       )}
 
