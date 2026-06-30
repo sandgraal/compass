@@ -2798,6 +2798,7 @@ function GoalsTab(): JSX.Element {
   const [adding, setAdding] = useState(false)
   const [form, setForm] = useState({ ...EMPTY_GOAL_FORM })
   const { toast: showToast } = useToast()
+  const confirm = useConfirm()
 
   const refresh = useCallback(async () => {
     if (!window.api?.finance) {
@@ -2868,10 +2869,21 @@ function GoalsTab(): JSX.Element {
     }
   }
 
-  const removeGoal = async (id: number) => {
+  const removeGoal = async (id: number, name: string) => {
     if (!window.api?.finance) return
+    const ok = await confirm({
+      title: 'Delete goal?',
+      description: `"${name}" will be removed. This can't be undone.`,
+      confirmLabel: 'Delete',
+      destructive: true
+    })
+    if (!ok) return
     try {
-      await window.api.finance.deleteGoal(id)
+      const res = await window.api.finance.deleteGoal(id)
+      if (!res.success) {
+        showToast(res.error ?? 'Failed to delete goal.', 'error')
+        return
+      }
       await refresh()
     } catch (err) {
       console.error('[goals] delete failed', err)
@@ -3028,7 +3040,7 @@ function GoalCard({
   goal: GoalProgress
   base: string
   onPatch: (id: number, patch: Record<string, number | string | null>) => void | Promise<void>
-  onRemove: (id: number) => void | Promise<void>
+  onRemove: (id: number, name: string) => void | Promise<void>
 }): JSX.Element {
   const fmt = (n: number): string => formatMoney(n, base, { decimals: 0 })
   const pct = Math.round(goal.pct * 100)
@@ -3096,7 +3108,7 @@ function GoalCard({
           )}
           <button
             type="button"
-            onClick={() => void onRemove(goal.id)}
+            onClick={() => void onRemove(goal.id, goal.name)}
             className="text-muted-foreground hover:text-destructive"
           >
             Delete

@@ -800,6 +800,9 @@ describe('finance:goals (Phase 11.6)', () => {
       (await invoke(add, { name: 'X', targetAmount: -5 })) as { success: boolean }
     ).toMatchObject({ success: false })
     expect(
+      (await invoke(add, { name: 'X', targetAmount: 0 })) as { success: boolean }
+    ).toMatchObject({ success: false }) // strictly positive
+    expect(
       (await invoke(add, { name: 'X', targetAmount: 100, source: 'bogus' })) as { success: boolean }
     ).toMatchObject({ success: false })
   })

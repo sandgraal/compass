@@ -1006,8 +1006,10 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     }
     if (requireName || 'targetAmount' in src) {
       const v = Number(src.targetAmount)
-      if (!Number.isFinite(v) || v < 0 || v > MAX) {
-        return { ok: false, error: `Invalid target amount: ${src.targetAmount}` }
+      // Strictly positive — a 0 target makes the progress/status math meaningless
+      // (the UI already rejects <= 0). Consistent for both add and update.
+      if (!Number.isFinite(v) || v <= 0 || v > MAX) {
+        return { ok: false, error: 'Target amount must be greater than 0.' }
       }
       out.targetAmount = v
     }
