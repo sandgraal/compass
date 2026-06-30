@@ -986,9 +986,12 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       _event,
       seg: { country: string; startDate: string; endDate: string; notes?: string | null }
     ) => {
-      const country = (seg?.country ?? '').trim()
-      if (!country || country.length > 32) {
-        return { success: false, error: 'Country is required.' }
+      // ISO-3166 alpha-2 only — the residency math keys on 2-letter codes
+      // (counts.US / counts.CR), so 'USA' / 'Costa Rica' would silently count
+      // as separate countries and skew SPT/CR.
+      const country = (seg?.country ?? '').trim().toUpperCase()
+      if (!/^[A-Z]{2}$/.test(country)) {
+        return { success: false, error: 'Country must be a 2-letter ISO code (e.g. US, CR).' }
       }
       if (!ISO_DATE_RE.test(seg?.startDate ?? '') || !ISO_DATE_RE.test(seg?.endDate ?? '')) {
         return { success: false, error: 'Dates must be YYYY-MM-DD.' }
@@ -1022,9 +1025,11 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       const patch: Partial<ResidencyConfig> = {}
 
       if ('homeCountry' in input) {
-        const v = typeof input.homeCountry === 'string' ? input.homeCountry.trim() : ''
-        if (!v || v.length > 32) {
-          return { success: false, error: 'Invalid home country.' }
+        const v =
+          typeof input.homeCountry === 'string' ? input.homeCountry.trim().toUpperCase() : ''
+        // ISO-2 only — the whole residency pipeline keys on 2-letter codes.
+        if (!/^[A-Z]{2}$/.test(v)) {
+          return { success: false, error: 'Home country must be a 2-letter ISO code.' }
         }
         patch.homeCountry = v
       }

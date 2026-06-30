@@ -55,9 +55,10 @@ export function segmentDaysInYear(seg: TravelSegment, year: number): number {
 }
 
 /**
- * Days per country for a year. Each logged (non-home) segment contributes its
- * in-year days; the remainder of the year is the home country. Home-country
- * segments are ignored (home is the implicit default).
+ * Days per country for a year, counted as UNIQUE calendar days so overlapping
+ * segments can't inflate a total past the year length (which would clamp the
+ * home remainder to 0 and skew SPT/CR). Home-country segments are ignored (home
+ * is the implicit default = the days no segment covers).
  */
 export function dayCountsForYear(
   segments: TravelSegment[],
@@ -65,17 +66,33 @@ export function dayCountsForYear(
   year: number
 ): Record<string, number> {
   const home = homeCountry.toUpperCase()
-  const byCountry: Record<string, number> = {}
-  let away = 0
+  const yearStart = Date.UTC(year, 0, 1)
+  const yearEnd = Date.UTC(year, 11, 31)
+  const perCountry: Record<string, Set<number>> = {}
+  const awayDays = new Set<number>() // unique day-indices abroad (any non-home country)
+
   for (const seg of segments) {
     const c = (seg.country || '').toUpperCase()
     if (!c || c === home) continue
-    const d = segmentDaysInYear(seg, year)
-    if (d <= 0) continue
-    byCountry[c] = (byCountry[c] ?? 0) + d
-    away += d
+    if (!isYmd(seg.startDate) || !isYmd(seg.endDate)) continue
+    const start = Math.max(utcDay(seg.startDate), yearStart)
+    const end = Math.min(utcDay(seg.endDate), yearEnd)
+    if (end < start) continue
+    let set = perCountry[c]
+    if (!set) {
+      set = new Set<number>()
+      perCountry[c] = set
+    }
+    for (let t = start; t <= end; t += DAY_MS) {
+      const dayIdx = Math.round((t - yearStart) / DAY_MS)
+      set.add(dayIdx)
+      awayDays.add(dayIdx)
+    }
   }
-  byCountry[home] = Math.max(0, daysInYear(year) - away)
+
+  const byCountry: Record<string, number> = {}
+  for (const [c, set] of Object.entries(perCountry)) byCountry[c] = set.size
+  byCountry[home] = Math.max(0, daysInYear(year) - awayDays.size)
   return byCountry
 }
 

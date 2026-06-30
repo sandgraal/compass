@@ -49,6 +49,18 @@ describe('day counting', () => {
     expect(counts.ES).toBe(10)
     expect(counts.US).toBe(366 - 101) // remainder
   })
+
+  it('counts unique days so overlapping segments cannot inflate totals', () => {
+    // Two overlapping CR trips: Jan 1–31 (31d) and Jan 15–Feb 14 (overlap 15–31).
+    const segs = [
+      { country: 'CR', startDate: '2024-01-01', endDate: '2024-01-31' },
+      { country: 'CR', startDate: '2024-01-15', endDate: '2024-02-14' }
+    ]
+    const counts = dayCountsForYear(segs, 'US', 2024)
+    // Union = Jan 1–Feb 14 = 31 + 14 = 45 unique days (NOT 31 + 31).
+    expect(counts.CR).toBe(45)
+    expect(counts.US).toBe(366 - 45) // home remainder stays correct
+  })
 })
 
 describe('substantialPresenceTest', () => {

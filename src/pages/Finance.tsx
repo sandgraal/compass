@@ -2542,8 +2542,15 @@ function ResidencyTab(): JSX.Element {
             <span className="block mb-1">Country (ISO-2)</span>
             <input
               value={segCountry}
-              onChange={(e) => setSegCountry(e.target.value.toUpperCase())}
-              maxLength={3}
+              onChange={(e) =>
+                setSegCountry(
+                  e.target.value
+                    .replace(/[^a-zA-Z]/g, '')
+                    .toUpperCase()
+                    .slice(0, 2)
+                )
+              }
+              maxLength={2}
               className="w-20 bg-background border border-border rounded px-2 py-1 text-sm uppercase"
             />
           </label>
@@ -2672,7 +2679,18 @@ function ResidencyConfigCard({
       if (p !== undefined) patch.pensionMonthly = p
       const r = num(renta)
       if (r !== undefined) patch.rentaMonthly = r
-      patch.investmentUsd = investment.trim() === '' ? null : (num(investment) ?? null)
+      // Empty clears the override; a non-numeric entry is rejected (don't
+      // silently null it out — that would lose the user's intended value).
+      if (investment.trim() === '') {
+        patch.investmentUsd = null
+      } else {
+        const inv = num(investment)
+        if (inv === undefined) {
+          showToast('Investment override must be a number.', 'error')
+          return
+        }
+        patch.investmentUsd = inv
+      }
       const ci = num(cajaIncome)
       if (ci !== undefined) patch.cajaMonthlyIncome = ci
       const cr = num(cajaRate)
@@ -2713,7 +2731,14 @@ function ResidencyConfigCard({
     <div className="bg-card border border-border rounded-xl p-5">
       <h3 className="text-sm font-semibold mb-3">Residency settings</h3>
       <div className="grid grid-cols-3 gap-3 mb-4">
-        {field('Home country (ISO-2)', home, (v) => setHome(v.toUpperCase()))}
+        {field('Home country (ISO-2)', home, (v) =>
+          setHome(
+            v
+              .replace(/[^a-zA-Z]/g, '')
+              .toUpperCase()
+              .slice(0, 2)
+          )
+        )}
         {field('Pension / mo (USD)', pension, setPension)}
         {field('Unearned income / mo (USD)', renta, setRenta)}
         {field('Investment override (USD)', investment, setInvestment, 'auto from net worth')}

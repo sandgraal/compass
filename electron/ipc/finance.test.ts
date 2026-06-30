@@ -733,6 +733,11 @@ describe('finance:residency (Phase 11.5)', () => {
         success: boolean
       }
     ).toMatchObject({ success: false }) // no country
+    expect(
+      (await invoke(add, { country: 'USA', startDate: '2024-01-01', endDate: '2024-02-01' })) as {
+        success: boolean
+      }
+    ).toMatchObject({ success: false }) // not ISO-2
 
     const setCfg = await registerAndGet('finance:set-residency-config')
     expect((await invoke(setCfg, { cajaRatePct: 500 })) as { success: boolean }).toMatchObject({
