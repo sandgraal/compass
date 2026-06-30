@@ -1447,6 +1447,58 @@ declare global {
           input: Record<string, number | null>
         ): Promise<{ success: boolean; error?: string }>
 
+        // Days-in-country & residency (Phase 11.5)
+        getResidencySummary(): Promise<{
+          config: {
+            homeCountry: string
+            pensionMonthly: number
+            rentaMonthly: number
+            investmentUsd: number | null
+            cajaMonthlyIncome: number
+            cajaRatePct: number
+          }
+          investmentUsd: number
+          segments: Array<{
+            id: number
+            country: string
+            startDate: string
+            endDate: string
+            notes: string | null
+          }>
+          years: Array<{
+            year: number
+            countries: Array<{ country: string; days: number }>
+          }>
+          substantialPresence: {
+            usCurrent: number
+            usPrior1: number
+            usPrior2: number
+            weightedDays: number
+            meetsTest: boolean
+          }
+          crResidency: { days: number; meets: boolean }
+          pathways: Array<{
+            id: 'pensionado' | 'rentista' | 'inversionista'
+            label: string
+            requirement: string
+            threshold: number
+            period: 'monthly' | 'total'
+            actual: number
+            meets: boolean
+          }>
+          caja: { monthlyUsd: number; annualUsd: number; ratePct: number }
+        }>
+        addTravelSegment(seg: {
+          country: string
+          startDate: string
+          endDate: string
+          notes?: string | null
+        }): Promise<{ success: boolean; id?: number; error?: string }>
+        deleteTravelSegment(id: number): Promise<{ success: boolean; error?: string }>
+        setResidencyConfig(
+          input: Record<string, string | number | null>
+        ): Promise<{ success: boolean; error?: string }>
+
         // Cash-flow forecast (Phase 4.5)
         getForecast(opts?: { windowDays?: number; lowCashThreshold?: number }): Promise<{
           events: Array<{

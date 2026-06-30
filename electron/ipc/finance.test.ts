@@ -143,6 +143,11 @@ function createSchema(): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, type TEXT NOT NULL,
       title TEXT NOT NULL, dedup_hash TEXT NOT NULL UNIQUE
     );
+    CREATE TABLE travel_segments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, country TEXT NOT NULL,
+      start_date TEXT NOT NULL, end_date TEXT NOT NULL, notes TEXT,
+      source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER
+    );
   `)
 }
 
@@ -674,6 +679,70 @@ describe('finance:retirement (Phase 11.4)', () => {
     })
     // A non-object payload is a safe no-op, not a crash.
     expect((await invoke(h, null)) as { success: boolean }).toMatchObject({ success: true })
+  })
+})
+
+describe('finance:residency (Phase 11.5)', () => {
+  it('adds/deletes travel segments + assembles the summary (SPT + CR + pathways)', async () => {
+    // The handler computes for the real current year, so log a current-year trip.
+    const yr = new Date().getFullYear()
+    const add = await registerAndGet('finance:add-travel-segment')
+    const ok = (await invoke(add, {
+      country: 'cr',
+      startDate: `${yr}-01-01`,
+      endDate: `${yr}-10-31`
+    })) as { success: boolean; id: number }
+    expect(ok.success).toBe(true)
+
+    const setCfg = await registerAndGet('finance:set-residency-config')
+    await invoke(setCfg, { investmentUsd: 200_000, cajaMonthlyIncome: 3000 })
+
+    const get = await registerAndGet('finance:get-residency-summary')
+    const s = (await invoke(get)) as {
+      segments: Array<{ id: number; country: string }>
+      years: Array<{ year: number; countries: Array<{ country: string; days: number }> }>
+      crResidency: { meets: boolean }
+      pathways: Array<{ id: string; meets: boolean }>
+      caja: { monthlyUsd: number }
+    }
+    expect(s.segments).toHaveLength(1)
+    expect(s.segments[0].country).toBe('CR')
+    // Jan–Oct is ~304–305 days (leap-dependent) → comfortably over the 183 line.
+    const crDays = s.years[0].countries.find((c) => c.country === 'CR')?.days ?? 0
+    expect(crDays).toBeGreaterThanOrEqual(183)
+    expect(s.crResidency.meets).toBe(true)
+    expect(s.pathways.find((p) => p.id === 'inversionista')?.meets).toBe(true)
+    expect(s.caja.monthlyUsd).toBe(330)
+
+    const del = await registerAndGet('finance:delete-travel-segment')
+    expect((await invoke(del, s.segments[0].id)) as { success: boolean }).toMatchObject({
+      success: true
+    })
+    expect(((await invoke(get)) as { segments: unknown[] }).segments).toHaveLength(0)
+  })
+
+  it('rejects bad segment dates + out-of-range config', async () => {
+    const add = await registerAndGet('finance:add-travel-segment')
+    expect(
+      (await invoke(add, { country: 'CR', startDate: '2024-05-01', endDate: '2024-04-01' })) as {
+        success: boolean
+      }
+    ).toMatchObject({ success: false }) // start after end
+    expect(
+      (await invoke(add, { country: '', startDate: '2024-01-01', endDate: '2024-02-01' })) as {
+        success: boolean
+      }
+    ).toMatchObject({ success: false }) // no country
+    expect(
+      (await invoke(add, { country: 'USA', startDate: '2024-01-01', endDate: '2024-02-01' })) as {
+        success: boolean
+      }
+    ).toMatchObject({ success: false }) // not ISO-2
+
+    const setCfg = await registerAndGet('finance:set-residency-config')
+    expect((await invoke(setCfg, { cajaRatePct: 500 })) as { success: boolean }).toMatchObject({
+      success: false
+    })
   })
 })
 

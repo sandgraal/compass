@@ -55,6 +55,13 @@ import {
   startFinanceWatcher,
   stopFinanceWatcher
 } from '../integrations/finance-watcher'
+import {
+  type ResidencyConfig,
+  addTravelSegment,
+  buildResidencySummary,
+  deleteTravelSegment,
+  setResidencyConfig
+} from '../integrations/residency'
 import { writeAllFinanceKnowledge } from '../knowledge/finance-extractor'
 import { localYm, localYmd } from '../lib/dates'
 import { DATA_DIR } from '../paths'
@@ -962,6 +969,98 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       }
 
       setRetirementConfig(getRawSqlite(), patch)
+      return { success: true }
+    }
+  )
+
+  // ── Days-in-country & residency readiness (Phase 11.5) ───────────────────
+  // Per-country day counts from logged travel → US substantial-presence test +
+  // CR 183-day rule + residency-pathway checklist + CAJA estimate.
+  ipcMain.handle('finance:get-residency-summary', () => {
+    return buildResidencySummary(getRawSqlite(), new Date().getFullYear())
+  })
+
+  ipcMain.handle(
+    'finance:add-travel-segment',
+    (
+      _event,
+      seg: { country: string; startDate: string; endDate: string; notes?: string | null }
+    ) => {
+      // ISO-3166 alpha-2 only — the residency math keys on 2-letter codes
+      // (counts.US / counts.CR), so 'USA' / 'Costa Rica' would silently count
+      // as separate countries and skew SPT/CR.
+      const country = (seg?.country ?? '').trim().toUpperCase()
+      if (!/^[A-Z]{2}$/.test(country)) {
+        return { success: false, error: 'Country must be a 2-letter ISO code (e.g. US, CR).' }
+      }
+      if (!ISO_DATE_RE.test(seg?.startDate ?? '') || !ISO_DATE_RE.test(seg?.endDate ?? '')) {
+        return { success: false, error: 'Dates must be YYYY-MM-DD.' }
+      }
+      if (seg.startDate > seg.endDate) {
+        return { success: false, error: 'Start date must be on or before the end date.' }
+      }
+      const notes = typeof seg.notes === 'string' ? seg.notes.slice(0, 500) : null
+      const id = addTravelSegment(getRawSqlite(), {
+        country,
+        startDate: seg.startDate,
+        endDate: seg.endDate,
+        notes
+      })
+      return { success: true, id }
+    }
+  )
+
+  ipcMain.handle('finance:delete-travel-segment', (_event, id: number) => {
+    if (!Number.isInteger(id) || id <= 0) {
+      return { success: false, error: `Invalid id: ${id}` }
+    }
+    deleteTravelSegment(getRawSqlite(), id)
+    return { success: true }
+  })
+
+  ipcMain.handle(
+    'finance:set-residency-config',
+    (_event, raw?: Partial<ResidencyConfig> | null) => {
+      const input: Partial<ResidencyConfig> = raw && typeof raw === 'object' ? raw : {}
+      const patch: Partial<ResidencyConfig> = {}
+
+      if ('homeCountry' in input) {
+        const v =
+          typeof input.homeCountry === 'string' ? input.homeCountry.trim().toUpperCase() : ''
+        // ISO-2 only — the whole residency pipeline keys on 2-letter codes.
+        if (!/^[A-Z]{2}$/.test(v)) {
+          return { success: false, error: 'Home country must be a 2-letter ISO code.' }
+        }
+        patch.homeCountry = v
+      }
+      const NUMERIC: Array<[keyof ResidencyConfig, number, number]> = [
+        ['pensionMonthly', 0, 100_000_000],
+        ['rentaMonthly', 0, 100_000_000],
+        ['cajaMonthlyIncome', 0, 100_000_000],
+        ['cajaRatePct', 0, 100]
+      ]
+      for (const [key, min, max] of NUMERIC) {
+        if (!(key in input)) continue
+        const v = Number(input[key])
+        if (!Number.isFinite(v) || v < min || v > max) {
+          return { success: false, error: `Invalid ${key}: ${input[key]}` }
+        }
+        patch[key] = v as never
+      }
+      if ('investmentUsd' in input) {
+        const r = input.investmentUsd
+        if (r == null) {
+          patch.investmentUsd = null
+        } else {
+          const v = Number(r)
+          if (!Number.isFinite(v) || v < 0 || v > 1_000_000_000) {
+            return { success: false, error: `Invalid investmentUsd: ${r}` }
+          }
+          patch.investmentUsd = v
+        }
+      }
+
+      setResidencyConfig(getRawSqlite(), patch)
       return { success: true }
     }
   )

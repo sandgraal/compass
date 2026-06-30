@@ -132,6 +132,17 @@ function ensureNewTables(sqlite: Database.Database): void {
       shift_to_date TEXT,
       created_at INTEGER
     );
+    -- Travel segments (Phase 11.5) — lives here (the always-run fallback) as
+    -- well as migration 0021 because the packaged app doesn't bundle migrations.
+    CREATE TABLE IF NOT EXISTS travel_segments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      country TEXT NOT NULL,
+      start_date TEXT NOT NULL,
+      end_date TEXT NOT NULL,
+      notes TEXT,
+      source TEXT NOT NULL DEFAULT 'manual',
+      created_at INTEGER
+    );
     -- FX-rate snapshots (Phase 11.1). Lives here (the always-run fallback) as
     -- well as migration 0019 because the packaged app doesn't bundle migrations.
     CREATE TABLE IF NOT EXISTS fx_rates (
@@ -649,6 +660,16 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
     );
 
     CREATE UNIQUE INDEX IF NOT EXISTS uq_fx_rates_date_base_quote ON fx_rates (date, base, quote);
+
+    CREATE TABLE IF NOT EXISTS travel_segments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      country TEXT NOT NULL,
+      start_date TEXT NOT NULL,
+      end_date TEXT NOT NULL,
+      notes TEXT,
+      source TEXT NOT NULL DEFAULT 'manual',
+      created_at INTEGER
+    );
 
     CREATE TABLE IF NOT EXISTS forecast_overrides (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
