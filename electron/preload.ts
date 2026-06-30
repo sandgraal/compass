@@ -495,6 +495,11 @@ const api = {
       ipcRenderer.invoke('finance:update-goal', id, input),
     deleteGoal: (id: number) => ipcRenderer.invoke('finance:delete-goal', id),
 
+    // Estate & insurance readiness (Phase 11.7)
+    getEstateReadiness: () => ipcRenderer.invoke('finance:get-estate-readiness'),
+    setEstateItem: (key: string, patch: { present?: boolean; notes?: string }) =>
+      ipcRenderer.invoke('finance:set-estate-item', key, patch),
+
     // Cash-flow forecast (Phase 4.5)
     getForecast: (opts?: { windowDays?: number; lowCashThreshold?: number }) =>
       ipcRenderer.invoke('finance:get-forecast', opts),

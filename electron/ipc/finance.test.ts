@@ -154,6 +154,12 @@ function createSchema(): void {
       manual_current REAL NOT NULL DEFAULT 0, monthly_contribution REAL NOT NULL DEFAULT 0,
       notes TEXT, created_at INTEGER, updated_at INTEGER
     );
+    CREATE TABLE assets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE,
+      type TEXT NOT NULL DEFAULT 'other', name TEXT NOT NULL, value REAL, provider TEXT,
+      reference TEXT, renewal_date TEXT, status TEXT NOT NULL DEFAULT 'active', notes TEXT,
+      created_at INTEGER, updated_at INTEGER
+    );
   `)
 }
 
@@ -805,6 +811,39 @@ describe('finance:goals (Phase 11.6)', () => {
     expect(
       (await invoke(add, { name: 'X', targetAmount: 100, source: 'bogus' })) as { success: boolean }
     ).toMatchObject({ success: false })
+  })
+})
+
+describe('finance:estate (Phase 11.7)', () => {
+  it('set-estate-item persists + validates; get assembles from checklist + assets', async () => {
+    sqlite
+      .prepare(
+        "INSERT INTO assets (external_id, type, name, value, status) VALUES ('m:1', 'insurance', 'Health PPO', 0, 'active')"
+      )
+      .run()
+
+    const set = await registerAndGet('finance:set-estate-item')
+    expect((await invoke(set, 'will', { present: true })) as { success: boolean }).toMatchObject({
+      success: true
+    })
+    // Unknown key + non-boolean present are rejected.
+    expect((await invoke(set, 'bogus', { present: true })) as { success: boolean }).toMatchObject({
+      success: false
+    })
+    expect((await invoke(set, 'trust', { present: 'yes' })) as { success: boolean }).toMatchObject({
+      success: false
+    })
+
+    const get = await registerAndGet('finance:get-estate-readiness')
+    const r = (await invoke(get)) as {
+      estate: Array<{ key: string; present: boolean }>
+      insurance: { policies: unknown[]; gaps: Array<{ key: string }> }
+      score: { estateDone: number }
+    }
+    expect(r.estate.find((e) => e.key === 'will')?.present).toBe(true)
+    expect(r.score.estateDone).toBe(1)
+    expect(r.insurance.policies).toHaveLength(1)
+    expect(r.insurance.gaps.some((g) => g.key === 'health')).toBe(false) // covered
   })
 })
 

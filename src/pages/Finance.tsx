@@ -104,6 +104,7 @@ export type Tab =
   | 'retirement'
   | 'residency'
   | 'goals'
+  | 'estate'
 
 /**
  * Whitelist of tab values the command palette can deep-link to. Exported
@@ -123,7 +124,8 @@ export const VALID_FINANCE_TABS: ReadonlySet<Tab> = new Set<Tab>([
   'expat',
   'retirement',
   'residency',
-  'goals'
+  'goals',
+  'estate'
 ])
 
 /**
@@ -651,7 +653,8 @@ export default function Finance(): JSX.Element {
             ['expat', 'Expat Tax'],
             ['retirement', 'Retirement'],
             ['residency', 'Residency'],
-            ['goals', 'Goals']
+            ['goals', 'Goals'],
+            ['estate', 'Estate']
           ] as const
         ).map(([key, label]) => (
           <button
@@ -700,6 +703,8 @@ export default function Finance(): JSX.Element {
       {tab === 'residency' && <ResidencyTab />}
 
       {tab === 'goals' && <GoalsTab />}
+
+      {tab === 'estate' && <EstateTab />}
 
       {tab === 'forecast' && <ForecastTab accounts={accounts} />}
 
@@ -3115,6 +3120,176 @@ function GoalCard({
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ─── Estate & Insurance Readiness Tab (Phase 11.7) ───────────────────────────
+
+type EstateReadiness = Awaited<ReturnType<Window['api']['finance']['getEstateReadiness']>>
+
+function EstateTab(): JSX.Element {
+  const [data, setData] = useState<EstateReadiness | null>(null)
+  const [loading, setLoading] = useState(true)
+  const { toast: showToast } = useToast()
+
+  const refresh = useCallback(async () => {
+    if (!window.api?.finance) {
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    try {
+      setData(await window.api.finance.getEstateReadiness())
+    } catch (err) {
+      console.error('[estate] refresh failed', err)
+      showToast('Failed to load estate readiness.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }, [showToast])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const setItem = async (key: string, patch: { present?: boolean; notes?: string }) => {
+    if (!window.api?.finance) return
+    try {
+      const res = await window.api.finance.setEstateItem(key, patch)
+      if (!res.success) {
+        showToast(res.error ?? 'Failed to save.', 'error')
+        return
+      }
+      await refresh()
+    } catch (err) {
+      console.error('[estate] set failed', err)
+      showToast('Failed to save.', 'error')
+    }
+  }
+
+  if (loading) return <p className="text-sm text-muted-foreground p-4">Loading estate readiness…</p>
+  if (!data)
+    return <p className="text-sm text-muted-foreground p-4">Estate readiness unavailable.</p>
+
+  // Asset values are user-entered USD figures (matches the Assets page).
+  const fmt = (n: number | null): string =>
+    n == null ? '—' : formatMoney(n, 'USD', { decimals: 0 })
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-card border border-border rounded-lg px-4 py-3 text-xs text-muted-foreground">
+        A readiness checklist — not legal advice. Cross-border estates (US + Costa Rica) have
+        different forced-heirship and estate-tax rules; verify with counsel. Store the actual
+        documents in the encrypted <strong>Vault → Legal</strong> — this page never reads them.
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <NetWorthTile
+          label="Estate documents"
+          value={`${data.score.estateDone}/${data.score.estateTotal}`}
+          emphasize
+        />
+        <NetWorthTile
+          label="Insurance coverage"
+          value={`${data.score.insuranceCovered}/${data.score.insuranceTotal}`}
+        />
+        <NetWorthTile label="Properties" value={String(data.properties.length)} />
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="text-sm font-semibold mb-3">Estate documents</h3>
+        <div className="space-y-2">
+          {data.estate.map((e) => (
+            <div
+              key={e.key}
+              className="flex items-start gap-3 border-t border-border pt-2 first:border-0 first:pt-0"
+            >
+              <input
+                type="checkbox"
+                checked={e.present}
+                onChange={(ev) => void setItem(e.key, { present: ev.target.checked })}
+                aria-label={e.label}
+                className="mt-1"
+              />
+              <div className="flex-1">
+                <div className="text-sm">{e.label}</div>
+                {e.hint && <div className="text-[11px] text-muted-foreground">{e.hint}</div>}
+              </div>
+              <input
+                type="text"
+                defaultValue={e.notes}
+                placeholder="notes"
+                onBlur={(ev) => {
+                  if (ev.target.value !== e.notes) void setItem(e.key, { notes: ev.target.value })
+                }}
+                className="w-48 bg-background border border-border rounded px-2 py-1 text-xs"
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="text-sm font-semibold mb-1">Insurance</h3>
+        <p className="text-xs text-muted-foreground mb-3">
+          From your Assets (type "insurance"). Add or edit policies on the Assets page.
+        </p>
+        {data.insurance.policies.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No active insurance policies tracked.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="text-xs text-muted-foreground">
+              <tr>
+                <th className="text-left">Policy</th>
+                <th className="text-left">Provider</th>
+                <th className="text-right">Coverage</th>
+                <th className="text-left">Renews</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.insurance.policies.map((p) => (
+                <tr key={p.name} className="border-t border-border">
+                  <td className="py-1.5">{p.name}</td>
+                  <td className="text-muted-foreground">{p.provider ?? '—'}</td>
+                  <td className="text-right tabular-nums">{fmt(p.coverage)}</td>
+                  <td className="text-xs">
+                    {p.renewalDate ?? '—'}
+                    {p.expiringSoon && (
+                      <span className="ml-1 text-amber-700 dark:text-amber-400">soon</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {data.insurance.gaps.length > 0 && (
+          <div className="mt-3 text-xs text-amber-700 dark:text-amber-400">
+            Gaps: {data.insurance.gaps.map((g) => g.label).join(', ')}
+          </div>
+        )}
+      </div>
+
+      {data.properties.length > 0 && (
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h3 className="text-sm font-semibold mb-1">Property</h3>
+          <p className="text-xs text-muted-foreground mb-3">
+            Confirm title + a beneficiary / heirship plan for each (cross-border).
+          </p>
+          <table className="w-full text-sm">
+            <tbody>
+              {data.properties.map((p) => (
+                <tr key={p.name} className="border-t border-border first:border-0">
+                  <td className="py-1.5">{p.name}</td>
+                  <td className="text-muted-foreground text-xs">{p.reference ?? ''}</td>
+                  <td className="text-right tabular-nums">{fmt(p.value)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }

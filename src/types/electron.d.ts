@@ -1531,6 +1531,43 @@ declare global {
         ): Promise<{ success: boolean; error?: string }>
         deleteGoal(id: number): Promise<{ success: boolean; error?: string }>
 
+        // Estate & insurance readiness (Phase 11.7)
+        getEstateReadiness(): Promise<{
+          estate: Array<{
+            key: string
+            label: string
+            hint?: string
+            present: boolean
+            notes: string
+          }>
+          insurance: {
+            policies: Array<{
+              name: string
+              provider: string | null
+              coverage: number | null
+              renewalDate: string | null
+              expiringSoon: boolean
+            }>
+            gaps: Array<{ key: string; label: string }>
+          }
+          properties: Array<{
+            name: string
+            value: number | null
+            provider: string | null
+            reference: string | null
+          }>
+          score: {
+            estateDone: number
+            estateTotal: number
+            insuranceCovered: number
+            insuranceTotal: number
+          }
+        }>
+        setEstateItem(
+          key: string,
+          patch: { present?: boolean; notes?: string }
+        ): Promise<{ success: boolean; error?: string }>
+
         // Cash-flow forecast (Phase 4.5)
         getForecast(opts?: { windowDays?: number; lowCashThreshold?: number }): Promise<{
           events: Array<{

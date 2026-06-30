@@ -19,6 +19,11 @@ import {
   dedupeTransactions,
   mergeAccounts
 } from '../integrations/finance-cleanup'
+import {
+  ESTATE_ITEMS,
+  buildEstateReadinessFromDb,
+  setEstateItem
+} from '../integrations/finance-estate'
 import { FATCA_THRESHOLD_SETTING_KEY, buildExpatTaxSummary } from '../integrations/finance-expat'
 import { type ForecastResult, buildForecast } from '../integrations/finance-forecast'
 import {
@@ -1064,6 +1069,35 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     deleteGoal(getRawSqlite(), id)
     return { success: true }
   })
+
+  // ── Estate & insurance readiness (Phase 11.7) ────────────────────────────
+  // A readiness dashboard over the assets domain + a manual estate checklist.
+  // Does NOT read the vault — the actual documents live in Vault → Legal.
+  ipcMain.handle('finance:get-estate-readiness', () => {
+    return buildEstateReadinessFromDb(getRawSqlite(), localYmd())
+  })
+
+  ipcMain.handle(
+    'finance:set-estate-item',
+    (_event, key: string, patch: { present?: boolean; notes?: string } | null) => {
+      if (!ESTATE_ITEMS.some((i) => i.key === key)) {
+        return { success: false, error: `Unknown estate item: ${key}` }
+      }
+      const input = patch && typeof patch === 'object' ? patch : {}
+      const clean: { present?: boolean; notes?: string } = {}
+      if ('present' in input) {
+        if (typeof input.present !== 'boolean') {
+          return { success: false, error: 'present must be a boolean.' }
+        }
+        clean.present = input.present
+      }
+      if ('notes' in input) {
+        clean.notes = input.notes == null ? '' : String(input.notes).slice(0, 2000)
+      }
+      setEstateItem(getRawSqlite(), key, clean)
+      return { success: true }
+    }
+  )
 
   // ── Days-in-country & residency readiness (Phase 11.5) ───────────────────
   // Per-country day counts from logged travel → US substantial-presence test +
