@@ -1084,6 +1084,8 @@ declare global {
             type: string
             isDebt: boolean | null
             balance: number | null
+            currency?: string
+            isForeign?: boolean | null
             apr: number | null
             minPayment: number | null
             creditLimit: number | null
@@ -1360,6 +1362,41 @@ declare global {
             basisOverride: number | null
           }
         }>
+
+        // Foreign-account & expat-tax surface (Phase 11.2)
+        getExpatTaxSummary(): Promise<{
+          reportingCurrency: string
+          fbarThreshold: number
+          fatcaThreshold: number
+          fbar: Array<{
+            year: number
+            accounts: Array<{
+              accountId: number
+              name: string
+              currency: string
+              maxNative: number
+              maxBaseUsd: number | null
+            }>
+            aggregateMaxUsd: number
+            exceedsThreshold: boolean
+            unconvertedCount: number
+          }>
+          fatca: Array<{
+            year: number
+            aggregateMaxUsd: number
+            threshold: number
+            exceedsThreshold: boolean
+          }>
+          foreignTaxCredit: Array<{ year: number; foreignTaxPaidUsd: number }>
+          hasForeignAccounts: boolean
+        }>
+        setAccountForeign(
+          accountId: number,
+          isForeign: boolean
+        ): Promise<{ success: boolean; isForeign?: boolean; error?: string }>
+        setFatcaThreshold(
+          value: number
+        ): Promise<{ success: boolean; threshold?: number; error?: string }>
 
         // Cash-flow forecast (Phase 4.5)
         getForecast(opts?: { windowDays?: number; lowCashThreshold?: number }): Promise<{

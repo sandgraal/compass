@@ -97,7 +97,7 @@ function createSchema(): void {
       plaid_item_id INTEGER,
       plaid_account_id TEXT,
       mask TEXT
-    );
+    , is_foreign INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE finance_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       hash TEXT NOT NULL UNIQUE,

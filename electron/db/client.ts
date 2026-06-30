@@ -392,6 +392,21 @@ function ensureNewTables(sqlite: Database.Database): void {
   // `fx_rates` table itself is created in the CREATE TABLE block above.
   ensureColumn(sqlite, 'finance_accounts', 'currency', "TEXT NOT NULL DEFAULT 'USD'")
   ensureColumn(sqlite, 'finance_transactions', 'currency', "TEXT NOT NULL DEFAULT 'USD'")
+  // Phase 11.2 — foreign-account flag for FBAR/FATCA. Backfill non-USD accounts
+  // to foreign as a starting guess (the user can correct in the Accounts UI).
+  const addedIsForeign = ensureColumn(
+    sqlite,
+    'finance_accounts',
+    'is_foreign',
+    'INTEGER NOT NULL DEFAULT 0'
+  )
+  if (addedIsForeign) {
+    try {
+      sqlite.prepare("UPDATE finance_accounts SET is_foreign = 1 WHERE currency != 'USD'").run()
+    } catch {
+      /* ignore */
+    }
+  }
   if (addedSyncInterval) {
     // One-time migration: seed per-integration intervals from the legacy global setting so users
     // who tuned `syncInterval` keep their preference on existing connected integrations.
@@ -577,6 +592,7 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       is_debt INTEGER DEFAULT 0,
       balance REAL DEFAULT 0,
       currency TEXT NOT NULL DEFAULT 'USD',
+      is_foreign INTEGER NOT NULL DEFAULT 0,
       apr REAL DEFAULT 0,
       min_payment REAL DEFAULT 0,
       credit_limit REAL,

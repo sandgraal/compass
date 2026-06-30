@@ -67,7 +67,7 @@ beforeEach(() => {
       simplefin_connection_id INTEGER REFERENCES simplefin_connections(id),
       simplefin_account_id TEXT,
       updated_at INTEGER
-    );
+    , is_foreign INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE finance_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       hash TEXT NOT NULL UNIQUE,

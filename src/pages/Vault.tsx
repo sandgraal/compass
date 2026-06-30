@@ -4,6 +4,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  Globe,
   HeartPulse,
   History,
   IdCard,
@@ -26,7 +27,8 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   identity: <IdCard size={16} />,
   credentials: <Key size={16} />,
   medical: <HeartPulse size={16} />,
-  legal: <Scale size={16} />
+  legal: <Scale size={16} />,
+  'foreign-accounts': <Globe size={16} />
 }
 
 const FIELD_TEMPLATES: Record<
@@ -66,6 +68,14 @@ const FIELD_TEMPLATES: Record<
     { key: 'parties', label: 'Parties Involved' },
     { key: 'date', label: 'Date' },
     { key: 'location', label: 'Stored Location' },
+    { key: 'notes', label: 'Notes' }
+  ],
+  'foreign-accounts': [
+    { key: 'institution', label: 'Institution' },
+    { key: 'country', label: 'Country' },
+    { key: 'accountNumber', label: 'Account Number', sensitive: true },
+    { key: 'accountType', label: 'Account Type (bank / securities)' },
+    { key: 'maxValueUsd', label: 'Max Value During Year (USD)' },
     { key: 'notes', label: 'Notes' }
   ]
 }
@@ -200,7 +210,13 @@ export default function Vault(): JSX.Element {
           icon: 'heart-pulse',
           description: 'Insurance, prescriptions'
         },
-        { id: 'legal', label: 'Legal', icon: 'scale', description: 'Contracts, wills' }
+        { id: 'legal', label: 'Legal', icon: 'scale', description: 'Contracts, wills' },
+        {
+          id: 'foreign-accounts',
+          label: 'Foreign Accounts',
+          icon: 'globe',
+          description: 'FBAR/FATCA account numbers + institutions'
+        }
       ])
     }
   }, [])
