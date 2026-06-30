@@ -565,3 +565,20 @@ export const assets = sqliteTable('assets', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
+
+// ---- Travel segments (Phase 11.5 — days-in-country & residency) ----
+// One row per trip the user logs OUTSIDE their home country: a country + an
+// inclusive [startDate, endDate] window. Per-country day counts (the rest of the
+// year defaults to the home country) feed the US substantial-presence test and a
+// CR 183-day residency check. `source` allows a future calendar/I-94 auto-fill;
+// for now everything is `manual`. Dates are date-only ISO strings (local day),
+// matching the finance/habits idiom.
+export const travelSegments = sqliteTable('travel_segments', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  country: text('country').notNull(), // ISO-3166 alpha-2 (e.g. 'CR', 'US', 'ES')
+  startDate: text('start_date').notNull(), // ISO 'YYYY-MM-DD' (inclusive)
+  endDate: text('end_date').notNull(), // ISO 'YYYY-MM-DD' (inclusive)
+  notes: text('notes'),
+  source: text('source').notNull().default('manual'), // 'manual' | 'calendar' | 'i94'
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})

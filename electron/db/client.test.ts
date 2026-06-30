@@ -314,6 +314,7 @@ describe('initDb multi-currency schema (Phase 11.1)', () => {
     expect(tableColumns(dbPath, 'finance_transactions')).toContain('currency')
     expect(tableColumns(dbPath, 'finance_accounts')).toContain('is_foreign') // Phase 11.2
     expect(tableExists(dbPath, 'fx_rates')).toBe(true)
+    expect(tableExists(dbPath, 'travel_segments')).toBe(true) // Phase 11.5
 
     const sqlite = new Database(dbPath)
     try {
@@ -386,6 +387,7 @@ describe('initDb multi-currency schema (Phase 11.1)', () => {
     expect(tableColumns(dbPath, 'finance_transactions')).toContain('currency')
     expect(tableColumns(dbPath, 'finance_accounts')).toContain('is_foreign') // Phase 11.2
     expect(tableExists(dbPath, 'fx_rates')).toBe(true)
+    expect(tableExists(dbPath, 'travel_segments')).toBe(true) // Phase 11.5
   })
 
   it('backfills is_foreign=true for non-USD accounts on a pre-existing table (fallback)', async () => {

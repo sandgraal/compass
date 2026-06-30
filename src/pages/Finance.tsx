@@ -102,6 +102,7 @@ export type Tab =
   | 'property'
   | 'expat'
   | 'retirement'
+  | 'residency'
 
 /**
  * Whitelist of tab values the command palette can deep-link to. Exported
@@ -119,7 +120,8 @@ export const VALID_FINANCE_TABS: ReadonlySet<Tab> = new Set<Tab>([
   'crsubs',
   'property',
   'expat',
-  'retirement'
+  'retirement',
+  'residency'
 ])
 
 /**
@@ -645,7 +647,8 @@ export default function Finance(): JSX.Element {
             ['crsubs', 'CR & Subs'],
             ['property', 'Property'],
             ['expat', 'Expat Tax'],
-            ['retirement', 'Retirement']
+            ['retirement', 'Retirement'],
+            ['residency', 'Residency']
           ] as const
         ).map(([key, label]) => (
           <button
@@ -690,6 +693,8 @@ export default function Finance(): JSX.Element {
       {tab === 'expat' && <ExpatTaxTab />}
 
       {tab === 'retirement' && <RetirementTab />}
+
+      {tab === 'residency' && <ResidencyTab />}
 
       {tab === 'forecast' && <ForecastTab accounts={accounts} />}
 
@@ -2390,6 +2395,339 @@ function RetirementTab(): JSX.Element {
           {saving ? 'Saving…' : 'Save & recompute'}
         </button>
       </div>
+    </div>
+  )
+}
+
+// ─── Residency Tab (Phase 11.5 — days-in-country) ────────────────────────────
+
+type ResidencySummary = Awaited<ReturnType<Window['api']['finance']['getResidencySummary']>>
+
+function ResidencyTab(): JSX.Element {
+  const [summary, setSummary] = useState<ResidencySummary | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [segCountry, setSegCountry] = useState('CR')
+  const [segStart, setSegStart] = useState('')
+  const [segEnd, setSegEnd] = useState('')
+  const { toast: showToast } = useToast()
+
+  const refresh = useCallback(async () => {
+    if (!window.api?.finance) {
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    try {
+      setSummary(await window.api.finance.getResidencySummary())
+    } catch (err) {
+      console.error('[residency] refresh failed', err)
+      showToast('Failed to load residency summary.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }, [showToast])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const addSegment = async () => {
+    if (!window.api?.finance) return
+    if (!segStart || !segEnd) {
+      showToast('Pick start + end dates.', 'error')
+      return
+    }
+    try {
+      const res = await window.api.finance.addTravelSegment({
+        country: segCountry,
+        startDate: segStart,
+        endDate: segEnd
+      })
+      if (!res.success) {
+        showToast(res.error ?? 'Failed to add trip.', 'error')
+        return
+      }
+      setSegStart('')
+      setSegEnd('')
+      await refresh()
+    } catch (err) {
+      console.error('[residency] add failed', err)
+      showToast('Failed to add trip.', 'error')
+    }
+  }
+
+  const removeSegment = async (id: number) => {
+    if (!window.api?.finance) return
+    try {
+      await window.api.finance.deleteTravelSegment(id)
+      await refresh()
+    } catch (err) {
+      console.error('[residency] delete failed', err)
+      showToast('Failed to remove trip.', 'error')
+    }
+  }
+
+  if (loading)
+    return <p className="text-sm text-muted-foreground p-4">Loading residency summary…</p>
+  if (!summary)
+    return <p className="text-sm text-muted-foreground p-4">Residency summary unavailable.</p>
+
+  const usd = (n: number): string => formatMoney(n, 'USD', { decimals: 0 })
+  const { substantialPresence: spt, crResidency, pathways, caja, config } = summary
+  const home = config.homeCountry
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-card border border-border rounded-lg px-4 py-3 text-xs text-muted-foreground">
+        Log trips outside your home country ({home}); the remaining days count as {home}. Day counts
+        feed the US substantial-presence test + a CR 183-day check. Estimates only — thresholds are
+        jurisdiction-specific; verify before relying on them.
+      </div>
+
+      <div className="grid grid-cols-4 gap-4">
+        <NetWorthTile
+          label="US substantial presence"
+          value={spt.meetsTest ? 'Likely a US resident' : 'Under threshold'}
+          sub={`${spt.weightedDays} weighted days (need 183)`}
+          emphasize
+        />
+        <NetWorthTile
+          label="CR 183-day"
+          value={crResidency.meets ? 'Met' : 'Not met'}
+          sub={`${crResidency.days} days in CR this year`}
+        />
+        <NetWorthTile
+          label="CAJA est. / yr"
+          value={usd(caja.annualUsd)}
+          sub={`${caja.ratePct}% of income`}
+        />
+        <NetWorthTile
+          label="Investment (CR)"
+          value={usd(summary.investmentUsd)}
+          sub="inversionista basis"
+        />
+      </div>
+
+      {/* Day counts by year */}
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="text-sm font-semibold mb-3">Days in country by year</h3>
+        <div className="grid grid-cols-3 gap-4">
+          {summary.years.map((y) => (
+            <div key={y.year}>
+              <div className="text-xs font-medium mb-1">{y.year}</div>
+              <table className="w-full text-sm">
+                <tbody>
+                  {y.countries.map((c) => (
+                    <tr key={c.country} className="tabular-nums">
+                      <td className="py-0.5">{c.country}</td>
+                      <td className="text-right text-muted-foreground">{c.days}d</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground mt-2">
+          Substantial-presence weighting: this year ({spt.usCurrent}) + ⅓ prior ({spt.usPrior1}) + ⅙
+          prior ({spt.usPrior2}) = {spt.weightedDays} US days.
+        </p>
+      </div>
+
+      {/* Travel log */}
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="text-sm font-semibold mb-3">Travel log</h3>
+        <div className="flex flex-wrap items-end gap-2 mb-4">
+          <label className="text-xs text-muted-foreground">
+            <span className="block mb-1">Country (ISO-2)</span>
+            <input
+              value={segCountry}
+              onChange={(e) => setSegCountry(e.target.value.toUpperCase())}
+              maxLength={3}
+              className="w-20 bg-background border border-border rounded px-2 py-1 text-sm uppercase"
+            />
+          </label>
+          <label className="text-xs text-muted-foreground">
+            <span className="block mb-1">Entered</span>
+            <input
+              type="date"
+              value={segStart}
+              onChange={(e) => setSegStart(e.target.value)}
+              className="bg-background border border-border rounded px-2 py-1 text-sm"
+            />
+          </label>
+          <label className="text-xs text-muted-foreground">
+            <span className="block mb-1">Left</span>
+            <input
+              type="date"
+              value={segEnd}
+              onChange={(e) => setSegEnd(e.target.value)}
+              className="bg-background border border-border rounded px-2 py-1 text-sm"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => void addSegment()}
+            className="px-3 py-1.5 text-xs border border-border rounded-md hover:bg-muted"
+          >
+            Add trip
+          </button>
+        </div>
+        {summary.segments.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No trips logged yet.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <tbody>
+              {summary.segments.map((s) => (
+                <tr key={s.id} className="border-t border-border">
+                  <td className="py-1.5">{s.country}</td>
+                  <td className="text-muted-foreground">
+                    {s.startDate} → {s.endDate}
+                  </td>
+                  <td className="text-right">
+                    <button
+                      type="button"
+                      onClick={() => void removeSegment(s.id)}
+                      className="text-xs text-muted-foreground hover:text-destructive hover:underline"
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* CR residency pathways */}
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="text-sm font-semibold mb-3">CR residency pathways</h3>
+        <table className="w-full text-sm">
+          <tbody>
+            {pathways.map((p) => (
+              <tr key={p.id} className="border-t border-border">
+                <td className="py-1.5">{p.label}</td>
+                <td className="text-muted-foreground text-xs">{p.requirement}</td>
+                <td className="text-right text-muted-foreground tabular-nums">
+                  {usd(p.actual)} / {usd(p.threshold)}
+                  {p.period === 'monthly' ? '/mo' : ''}
+                </td>
+                <td className="text-right w-20">
+                  <span
+                    className={cn(
+                      'text-xs px-2 py-0.5 rounded',
+                      p.meets
+                        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                        : 'bg-muted text-muted-foreground'
+                    )}
+                  >
+                    {p.meets ? 'Qualifies' : 'Short'}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="text-xs text-muted-foreground mt-2">
+          Set your pension / unearned income / investment in Settings below. Inversionista defaults
+          to your CR property + manual-asset value.
+        </p>
+      </div>
+
+      <ResidencyConfigCard config={config} onSaved={refresh} />
+    </div>
+  )
+}
+
+function ResidencyConfigCard({
+  config,
+  onSaved
+}: {
+  config: ResidencySummary['config']
+  onSaved: () => void | Promise<void>
+}): JSX.Element {
+  const [home, setHome] = useState(config.homeCountry)
+  const [pension, setPension] = useState(String(config.pensionMonthly))
+  const [renta, setRenta] = useState(String(config.rentaMonthly))
+  const [investment, setInvestment] = useState(
+    config.investmentUsd != null ? String(config.investmentUsd) : ''
+  )
+  const [cajaIncome, setCajaIncome] = useState(String(config.cajaMonthlyIncome))
+  const [cajaRate, setCajaRate] = useState(String(config.cajaRatePct))
+  const [saving, setSaving] = useState(false)
+  const { toast: showToast } = useToast()
+
+  const save = async () => {
+    if (!window.api?.finance) return
+    setSaving(true)
+    try {
+      const patch: Record<string, string | number | null> = { homeCountry: home }
+      const num = (s: string): number | undefined => {
+        if (s.trim() === '') return undefined
+        const v = Number(s)
+        return Number.isFinite(v) ? v : undefined
+      }
+      const p = num(pension)
+      if (p !== undefined) patch.pensionMonthly = p
+      const r = num(renta)
+      if (r !== undefined) patch.rentaMonthly = r
+      patch.investmentUsd = investment.trim() === '' ? null : (num(investment) ?? null)
+      const ci = num(cajaIncome)
+      if (ci !== undefined) patch.cajaMonthlyIncome = ci
+      const cr = num(cajaRate)
+      if (cr !== undefined) patch.cajaRatePct = cr
+      const res = await window.api.finance.setResidencyConfig(patch)
+      if (!res.success) {
+        showToast(res.error ?? 'Failed to save.', 'error')
+        return
+      }
+      await onSaved()
+      showToast('Saved.', 'success')
+    } catch (err) {
+      console.error('[residency] config save failed', err)
+      showToast('Failed to save.', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const field = (
+    label: string,
+    value: string,
+    setter: (v: string) => void,
+    placeholder?: string
+  ): JSX.Element => (
+    <label className="text-xs text-muted-foreground">
+      <span className="block mb-1">{label}</span>
+      <input
+        value={value}
+        onChange={(e) => setter(e.target.value)}
+        placeholder={placeholder}
+        className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
+      />
+    </label>
+  )
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-5">
+      <h3 className="text-sm font-semibold mb-3">Residency settings</h3>
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        {field('Home country (ISO-2)', home, (v) => setHome(v.toUpperCase()))}
+        {field('Pension / mo (USD)', pension, setPension)}
+        {field('Unearned income / mo (USD)', renta, setRenta)}
+        {field('Investment override (USD)', investment, setInvestment, 'auto from net worth')}
+        {field('CAJA monthly income (USD)', cajaIncome, setCajaIncome)}
+        {field('CAJA rate %', cajaRate, setCajaRate)}
+      </div>
+      <button
+        type="button"
+        onClick={() => void save()}
+        disabled={saving}
+        className="px-3 py-1.5 text-xs border border-border rounded-md hover:bg-muted disabled:opacity-50"
+      >
+        {saving ? 'Saving…' : 'Save & recompute'}
+      </button>
     </div>
   )
 }

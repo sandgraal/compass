@@ -570,10 +570,15 @@ deeper financial/health/comms sources (10.2–10.4) + full CRED (10.6).
   `hasSsaStatement()` only detects ingestion to prompt the user. IPC `finance:get-retirement-projection` +
   `finance:set-retirement-config`; a new **Retirement** tab charts the baseline + stress balance trajectory
   with a config form. (Brokerage-holdings auto-import — Phase 10.2 — remains a future feed.)
-- [ ] **11.5 Days-in-country & residency readiness** (M) — per-country day counts derived from
-  `calendar_events` + the Timeline (and, later, CBP I-94 via RIGHTS) feeding the **US substantial-presence
-  test** and a future **CR 183-day** rule; a residency-pathway checklist (pensionado / rentista /
-  inversionista income thresholds *(verify)*); a CAJA cost estimate.
+- [x] **11.5 Days-in-country & residency readiness** (M) — **shipped.** A new `travel_segments` table
+  (migration `0021`, BOTH paths) holds trips OUTSIDE the home country; pure `electron/integrations/residency.ts`
+  computes per-country day counts (home = the year remainder) and feeds the **US substantial-presence test**
+  (`thisYear + ⅓ prior + ⅙ prior ≥ 183`, with the 31-day gate *(verify)*) + a **CR 183-day** check, a
+  **pathway checklist** (pensionado $1k/mo · rentista $2.5k/mo · inversionista $150k *(verify)*; inversionista
+  defaults to the CR property net-worth value), and a **CAJA** estimate (% of declared income). IPC
+  `finance:get-residency-summary` + `add`/`delete-travel-segment` + `set-residency-config`; a new **Residency**
+  tab with a travel log, day-count-by-year, the SPT/CR results, the pathway checklist, and a settings card.
+  (Calendar/Timeline + CBP I-94 auto-fill via the `source` column remains a future feed.)
 - [ ] **11.6 Goals & milestones** (M) — target-date savings/goals (tax reserve, next capex draw, retirement
   number) tying property + tax + retirement together. Reuses `appSettings` + the forecast engine.
 - [ ] **11.7 Estate & insurance readiness** (S/M) — cross-border beneficiaries, CR property title, and

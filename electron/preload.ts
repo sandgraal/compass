@@ -475,6 +475,18 @@ const api = {
     setRetirementConfig: (input: Record<string, number | null>) =>
       ipcRenderer.invoke('finance:set-retirement-config', input),
 
+    // Days-in-country & residency (Phase 11.5)
+    getResidencySummary: () => ipcRenderer.invoke('finance:get-residency-summary'),
+    addTravelSegment: (seg: {
+      country: string
+      startDate: string
+      endDate: string
+      notes?: string | null
+    }) => ipcRenderer.invoke('finance:add-travel-segment', seg),
+    deleteTravelSegment: (id: number) => ipcRenderer.invoke('finance:delete-travel-segment', id),
+    setResidencyConfig: (input: Record<string, string | number | null>) =>
+      ipcRenderer.invoke('finance:set-residency-config', input),
+
     // Cash-flow forecast (Phase 4.5)
     getForecast: (opts?: { windowDays?: number; lowCashThreshold?: number }) =>
       ipcRenderer.invoke('finance:get-forecast', opts),
