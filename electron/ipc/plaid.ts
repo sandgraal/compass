@@ -22,6 +22,8 @@
  * spinner it was showing.
  */
 
+import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { eq } from 'drizzle-orm'
 import {
   BrowserWindow,
@@ -219,9 +221,49 @@ export function registerPlaidHandlers(ipcMain: IpcMain): void {
  */
 const LINK_PARTITION = 'plaid-link'
 
+/**
+ * Serve a one-shot HTML page from an ephemeral 127.0.0.1 HTTP server and
+ * resolve its `http://127.0.0.1:<port>/` URL.
+ *
+ * Plaid Link refuses to initialize inside a document with an OPAQUE
+ * origin: its CDN-hosted iframe runs an origin-checked postMessage
+ * handshake with the host page, and a `data:` (or `file:`) URL reports
+ * its origin as the literal string "null", so the handshake target never
+ * matches and the Link iframe sits on its loading spinner forever
+ * (exactly the "Loading Plaid Link…" → endless spinner symptom).
+ *
+ * Serving the page over loopback HTTP gives the document a real, stable
+ * origin that Plaid explicitly accepts. The server binds to 127.0.0.1
+ * only and serves nothing but `html`; the caller owns the returned
+ * `server` and must `server.close()` once the flow settles. Mirrors the
+ * OAuth loopback in `electron/ipc/auth.ts`. Exported for tests.
+ */
+export async function serveLinkPageOnLoopback(
+  html: string
+): Promise<{ url: string; server: Server }> {
+  const server = createServer((_req: IncomingMessage, res: ServerResponse) => {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end(html)
+  })
+
+  const url = await new Promise<string>((resolve, reject) => {
+    server.once('error', reject)
+    // Port 0 → the OS hands us a free ephemeral port, avoiding the
+    // EADDRINUSE class of failures a fixed port invites.
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as AddressInfo
+      resolve(`http://127.0.0.1:${port}/`)
+    })
+  })
+
+  return { url, server }
+}
+
 export async function runLinkFlow(linkToken: string): Promise<StartLinkResult> {
-  const html = buildLinkHtml(linkToken)
-  const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
+  // Serve Link over a loopback HTTP origin rather than a `data:` URL, so the
+  // document's origin is real and Plaid's postMessage handshake matches (see
+  // serveLinkPageOnLoopback). The server is torn down in `finish`.
+  const { url: linkUrl, server } = await serveLinkPageOnLoopback(buildLinkHtml(linkToken))
 
   const win = new BrowserWindow({
     width: 480,
@@ -240,20 +282,14 @@ export async function runLinkFlow(linkToken: string): Promise<StartLinkResult> {
     }
   })
 
-  // CSP enforcement for the document lives in the HTML itself, via
-  // `<meta http-equiv="Content-Security-Policy">` (see buildLinkHtml).
-  // We CANNOT enforce it via session.webRequest.onHeadersReceived on
-  // the document load: the document is loaded from a `data:` URL,
-  // which produces no HTTP response, so onHeadersReceived never fires
-  // for the navigation and any header-based CSP would be silently
-  // unenforced. The meta-tag form is read by the parser and applied
-  // from the first script execution onward.
-  //
-  // We still install the header hook here as a belt for subresources
-  // (the cdn.plaid.com script load, fonts, images). It's safe to do
-  // unconditionally because the hook is scoped to the isolated Link
-  // partition session — it cannot clobber the default-session hook
-  // that `electron/main.ts` installed for the main window's CSP.
+  // CSP is enforced two ways, belt and suspenders. The page itself
+  // carries `<meta http-equiv="Content-Security-Policy">` (see
+  // buildLinkHtml), AND this header hook stamps the same policy onto the
+  // loopback document response and every subresource (the cdn.plaid.com
+  // script, fonts, images). The header hook is safe to install
+  // unconditionally because it is scoped to the isolated Link partition
+  // session — it cannot clobber the default-session hook that
+  // `electron/main.ts` installed for the main window's CSP.
   win.webContents.session.webRequest.onHeadersReceived((details, cb) => {
     cb({
       responseHeaders: {
@@ -268,6 +304,7 @@ export async function runLinkFlow(linkToken: string): Promise<StartLinkResult> {
     const finish = (r: StartLinkResult): void => {
       if (settled) return
       settled = true
+      server.close()
       if (!win.isDestroyed()) win.destroy()
       resolve(r)
     }
@@ -292,7 +329,7 @@ export async function runLinkFlow(linkToken: string): Promise<StartLinkResult> {
     })
 
     win.once('ready-to-show', () => win.show())
-    void win.loadURL(dataUrl)
+    void win.loadURL(linkUrl)
   })
 }
 
