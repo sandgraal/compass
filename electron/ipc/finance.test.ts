@@ -139,6 +139,10 @@ function createSchema(): void {
       balance REAL NOT NULL,
       source TEXT NOT NULL DEFAULT 'manual'
     );
+    CREATE TABLE records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, type TEXT NOT NULL,
+      title TEXT NOT NULL, dedup_hash TEXT NOT NULL UNIQUE
+    );
   `)
 }
 
@@ -625,6 +629,51 @@ describe('finance:expat-tax (Phase 11.2)', () => {
     const y2024 = summary.fbar.find((y) => y.year === 2024)
     expect(y2024?.aggregateMaxUsd).toBe(18_000) // ₡9M / 500
     expect(y2024?.exceedsThreshold).toBe(true)
+  })
+})
+
+describe('finance:retirement (Phase 11.4)', () => {
+  it('set-retirement-config persists + validates; get returns baseline + stress', async () => {
+    // A retirement account → net-worth starting balance.
+    const id = seedAccount('401k')
+    sqlite.prepare("UPDATE finance_accounts SET asset_class = 'retirement' WHERE id = ?").run(id)
+    sqlite
+      .prepare(
+        'INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (?, ?, ?, ?)'
+      )
+      .run(id, Date.now(), 500_000, 'manual')
+
+    const setCfg = await registerAndGet('finance:set-retirement-config')
+    const ok = (await invoke(setCfg, {
+      currentAge: 60,
+      retirementAge: 65,
+      horizonAge: 85,
+      ssMonthlyAtFra: 2000,
+      annualSpending: 50_000
+    })) as { success: boolean }
+    expect(ok.success).toBe(true)
+
+    const getProj = await registerAndGet('finance:get-retirement-projection')
+    const res = (await invoke(getProj)) as {
+      startingAssets: number
+      baseline: { rows: unknown[]; ssAnnual: number }
+      stress: { endBalance: number }
+    }
+    expect(res.startingAssets).toBe(500_000) // sourced from net worth
+    expect(res.baseline.ssAnnual).toBe(24_000) // 2000/mo at FRA, claimed at FRA
+    expect(res.baseline.rows.length).toBe(26) // ages 60..85 inclusive
+  })
+
+  it('rejects out-of-range config + a non-object payload', async () => {
+    const h = await registerAndGet('finance:set-retirement-config')
+    expect((await invoke(h, { ssClaimAge: 80 })) as { success: boolean }).toMatchObject({
+      success: false // claim age must be 62-70
+    })
+    expect((await invoke(h, { realReturnPct: 999 })) as { success: boolean }).toMatchObject({
+      success: false
+    })
+    // A non-object payload is a safe no-op, not a crash.
+    expect((await invoke(h, null)) as { success: boolean }).toMatchObject({ success: true })
   })
 })
 

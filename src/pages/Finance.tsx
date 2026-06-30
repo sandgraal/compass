@@ -24,6 +24,7 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -100,6 +101,7 @@ export type Tab =
   | 'crsubs'
   | 'property'
   | 'expat'
+  | 'retirement'
 
 /**
  * Whitelist of tab values the command palette can deep-link to. Exported
@@ -116,7 +118,8 @@ export const VALID_FINANCE_TABS: ReadonlySet<Tab> = new Set<Tab>([
   'rules',
   'crsubs',
   'property',
-  'expat'
+  'expat',
+  'retirement'
 ])
 
 /**
@@ -641,7 +644,8 @@ export default function Finance(): JSX.Element {
             ['rules', 'Rules'],
             ['crsubs', 'CR & Subs'],
             ['property', 'Property'],
-            ['expat', 'Expat Tax']
+            ['expat', 'Expat Tax'],
+            ['retirement', 'Retirement']
           ] as const
         ).map(([key, label]) => (
           <button
@@ -684,6 +688,8 @@ export default function Finance(): JSX.Element {
       {tab === 'property' && <PropertyTab />}
 
       {tab === 'expat' && <ExpatTaxTab />}
+
+      {tab === 'retirement' && <RetirementTab />}
 
       {tab === 'forecast' && <ForecastTab accounts={accounts} />}
 
@@ -2145,6 +2151,244 @@ function ExpatTaxTab(): JSX.Element {
             </tbody>
           </table>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Retirement Projection Tab (Phase 11.4) ──────────────────────────────────
+
+type RetirementResult = Awaited<ReturnType<Window['api']['finance']['getRetirementProjection']>>
+
+const RET_FIELDS: Array<{ key: string; label: string; step?: string }> = [
+  { key: 'currentAge', label: 'Current age' },
+  { key: 'retirementAge', label: 'Retirement age' },
+  { key: 'horizonAge', label: 'Plan to age' },
+  { key: 'annualSpending', label: "Annual spending (today's $)" },
+  { key: 'realReturnPct', label: 'Real return %', step: '0.1' },
+  { key: 'annualContribution', label: 'Annual contribution' },
+  { key: 'ssMonthlyAtFra', label: 'SS monthly at FRA' },
+  { key: 'ssClaimAge', label: 'SS claim age (62–70)' },
+  { key: 'fra', label: 'Full retirement age' },
+  { key: 'airbnbAnnualNet', label: 'Airbnb net / yr' },
+  { key: 'otherAnnualIncome', label: 'Other income / yr' },
+  { key: 'stressReturnPct', label: 'Stress return %', step: '0.1' },
+  { key: 'stressYears', label: 'Stress years' }
+]
+
+function RetirementTab(): JSX.Element {
+  const [result, setResult] = useState<RetirementResult | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState<Record<string, string>>({})
+  const [startingOverride, setStartingOverride] = useState('')
+  const { toast: showToast } = useToast()
+
+  const refresh = useCallback(async () => {
+    // Outside Electron (or if preload wiring breaks) clear the spinner instead
+    // of leaving the tab stuck on "Loading…" forever.
+    if (!window.api?.finance) {
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    try {
+      const r = await window.api.finance.getRetirementProjection()
+      setResult(r)
+      const f: Record<string, string> = {}
+      for (const fd of RET_FIELDS) {
+        f[fd.key] = String((r.config as unknown as Record<string, number>)[fd.key])
+      }
+      setForm(f)
+      setStartingOverride(r.config.startingAssets != null ? String(r.config.startingAssets) : '')
+    } catch (err) {
+      console.error('[retirement] refresh failed', err)
+      showToast('Failed to load retirement projection.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }, [showToast])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const save = async () => {
+    if (!window.api?.finance) return
+    setSaving(true)
+    try {
+      const patch: Record<string, number | null> = {}
+      for (const fd of RET_FIELDS) {
+        const raw = form[fd.key]
+        // Skip blank fields: Number('') is 0, which would silently overwrite a
+        // value with 0 instead of leaving it unchanged.
+        if (raw === undefined || raw.trim() === '') continue
+        const v = Number(raw)
+        if (Number.isFinite(v)) patch[fd.key] = v
+      }
+      // Empty override → clear (null); otherwise send only a finite number (never NaN).
+      if (startingOverride.trim() === '') {
+        patch.startingAssets = null
+      } else {
+        const v = Number(startingOverride)
+        if (Number.isFinite(v)) patch.startingAssets = v
+      }
+      const res = await window.api.finance.setRetirementConfig(patch)
+      if (!res.success) {
+        showToast(res.error ?? 'Failed to save.', 'error')
+        return
+      }
+      await refresh()
+      showToast('Saved.', 'success')
+    } catch (err) {
+      console.error('[retirement] save failed', err)
+      showToast('Failed to save.', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading)
+    return <p className="text-sm text-muted-foreground p-4">Loading retirement projection…</p>
+  if (!result)
+    return <p className="text-sm text-muted-foreground p-4">Retirement projection unavailable.</p>
+
+  const base = result.baseCurrency
+  const fmt = (n: number): string => formatMoney(n, base, { decimals: 0 })
+  const { baseline, stress, config } = result
+
+  const chartData = baseline.rows.map((r, i) => ({
+    age: r.age,
+    Baseline: r.endBalance,
+    Stress: stress.rows[i]?.endBalance ?? null
+  }))
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-card border border-border rounded-lg px-4 py-3 text-xs text-muted-foreground">
+        A long-horizon projection in today's dollars (real return = return above inflation).
+        Estimates only — your assumptions drive everything.{' '}
+        {result.hasSsaStatement
+          ? "You've ingested an SSA statement — enter your monthly benefit at full retirement age from it below."
+          : 'Enter your monthly Social Security benefit at full retirement age (from ssa.gov) below.'}
+      </div>
+
+      <div className="grid grid-cols-4 gap-4">
+        <NetWorthTile
+          label="Starting assets"
+          value={fmt(result.startingAssets)}
+          sub={config.startingAssets == null ? 'from net worth' : 'manual override'}
+        />
+        <NetWorthTile label={`SS / yr at ${config.ssClaimAge}`} value={fmt(baseline.ssAnnual)} />
+        <NetWorthTile
+          label="Outcome"
+          value={
+            baseline.depletionAge == null
+              ? `Lasts to ${config.horizonAge}`
+              : `Depletes at ${baseline.depletionAge}`
+          }
+          emphasize
+        />
+        <NetWorthTile
+          label="Stress outcome"
+          value={
+            stress.depletionAge == null
+              ? `Lasts to ${config.horizonAge}`
+              : `Depletes at ${stress.depletionAge}`
+          }
+          sub={`${config.stressReturnPct}% first ${config.stressYears}y`}
+        />
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="text-sm font-semibold mb-3">Portfolio balance by age ({base}, today's $)</h3>
+        <div className="h-[260px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis
+                dataKey="age"
+                tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                tickMargin={6}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                tickFormatter={(v) =>
+                  formatMoney(v as number, base, { decimals: 0, compact: true })
+                }
+                width={70}
+              />
+              <Tooltip
+                formatter={(v) => fmt(Number(v))}
+                contentStyle={{
+                  background: 'hsl(var(--card))',
+                  border: '1px solid hsl(var(--border))',
+                  fontSize: 12
+                }}
+              />
+              <ReferenceLine
+                x={config.retirementAge}
+                stroke="hsl(var(--muted-foreground))"
+                strokeDasharray="4 4"
+              />
+              <Line
+                type="monotone"
+                dataKey="Baseline"
+                stroke="hsl(var(--primary))"
+                strokeWidth={2}
+                dot={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="Stress"
+                stroke="hsl(var(--destructive))"
+                strokeWidth={1.5}
+                strokeDasharray="4 3"
+                dot={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+        <p className="text-xs text-muted-foreground mt-2">
+          Dashed vertical = retirement age. Red dashed = sequence-of-returns stress (a poor early
+          market).
+        </p>
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="text-sm font-semibold mb-3">Assumptions</h3>
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          {RET_FIELDS.map((fd) => (
+            <label key={fd.key} className="text-xs text-muted-foreground">
+              <span className="block mb-1">{fd.label}</span>
+              <input
+                type="number"
+                step={fd.step ?? '1'}
+                value={form[fd.key] ?? ''}
+                onChange={(e) => setForm((p) => ({ ...p, [fd.key]: e.target.value }))}
+                className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
+              />
+            </label>
+          ))}
+          <label className="text-xs text-muted-foreground">
+            <span className="block mb-1">Starting assets override</span>
+            <input
+              type="number"
+              value={startingOverride}
+              onChange={(e) => setStartingOverride(e.target.value)}
+              placeholder={`auto: ${fmt(result.startingAssets)}`}
+              className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
+            />
+          </label>
+        </div>
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={saving}
+          className="px-3 py-1.5 text-xs border border-border rounded-md hover:bg-muted disabled:opacity-50"
+        >
+          {saving ? 'Saving…' : 'Save & recompute'}
+        </button>
       </div>
     </div>
   )

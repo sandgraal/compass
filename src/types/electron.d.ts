@@ -3,6 +3,27 @@
 declare global {
   type AppSettings = Record<string, string> & { appVersion: string }
 
+  // One projection path (baseline or sequence-of-returns stress) — Phase 11.4.
+  interface RetirementProjectionData {
+    rows: Array<{
+      age: number
+      year: number
+      startBalance: number
+      contribution: number
+      growth: number
+      ssIncome: number
+      otherIncome: number
+      withdrawal: number
+      endBalance: number
+      phase: 'accumulation' | 'decumulation'
+    }>
+    ssAnnual: number
+    retirementYear: number
+    depletionAge: number | null
+    endBalance: number
+    peakBalance: number
+  }
+
   type UpdaterStatusPayload =
     | { phase: 'checking' }
     | { phase: 'available'; version: string; releaseDate: string }
@@ -1397,6 +1418,34 @@ declare global {
         setFatcaThreshold(
           value: number
         ): Promise<{ success: boolean; threshold?: number; error?: string }>
+
+        // Long-horizon retirement projection (Phase 11.4)
+        getRetirementProjection(): Promise<{
+          baseCurrency: string
+          startingAssets: number
+          hasSsaStatement: boolean
+          config: {
+            currentAge: number
+            retirementAge: number
+            horizonAge: number
+            startingAssets: number | null
+            annualContribution: number
+            realReturnPct: number
+            annualSpending: number
+            ssMonthlyAtFra: number
+            ssClaimAge: number
+            fra: number
+            airbnbAnnualNet: number
+            otherAnnualIncome: number
+            stressReturnPct: number
+            stressYears: number
+          }
+          baseline: RetirementProjectionData
+          stress: RetirementProjectionData
+        }>
+        setRetirementConfig(
+          input: Record<string, number | null>
+        ): Promise<{ success: boolean; error?: string }>
 
         // Cash-flow forecast (Phase 4.5)
         getForecast(opts?: { windowDays?: number; lowCashThreshold?: number }): Promise<{
