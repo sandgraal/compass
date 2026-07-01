@@ -27,6 +27,13 @@
 
 import type { SqliteForFx } from './finance-fx'
 import {
+  DEFAULT_INPUTS,
+  type RetireInputs,
+  type RetirementPlan,
+  computePlan
+} from './finance-retire-engine'
+import { type MonteCarloResult, makeRng, runMonteCarlo } from './finance-retire-math'
+import {
   type NetWorthSnapshot,
   type SqliteForSnapshot,
   getNetWorthSnapshot
@@ -354,5 +361,135 @@ export function buildRetirementProjection(
     hasSsaStatement: hasSsaStatement(sqlite),
     baseline,
     stress
+  }
+}
+
+// ─── Rich engine (Phase 11.4 supersession) ───────────────────────────────────
+//
+// The deterministic `buildRetirementProjection` above still backs the legacy
+// Finance→Retirement sub-tab. `buildRetirementPlan` below is the richer engine
+// (Monte-Carlo + tax-aware bucket drawdown, ported from retire-early-hub) that
+// the new Retirement surface consumes and that will supersede the legacy tab.
+// It reuses the SAME connectors — starting balances come from the net-worth
+// snapshot, base currency from the same snapshot — so no displayed figure moves.
+
+// Fixed seed so the plan's Monte Carlo / success rate is reproducible (matches
+// the optimizer's seed). Determinism keeps the UI stable and tests exact.
+const RETIRE_MC_SEED = 20290101
+
+/** Split the net-worth snapshot into engine seed buckets (base currency). */
+function bucketsFromSnapshot(snap: NetWorthSnapshot): { taxDeferred: number; taxable: number } {
+  let taxDeferred = 0
+  let taxable = 0
+  for (const a of snap.byAccount) {
+    if (a.isDebt) continue
+    const bal = a.baseBalance ?? 0
+    if (a.assetClass === 'retirement') taxDeferred += bal
+    else if (a.assetClass === 'savings') taxable += bal
+    // real_estate / manual_asset / spending are excluded from investable buckets.
+  }
+  return { taxDeferred: round2(taxDeferred), taxable: round2(taxable) }
+}
+
+/**
+ * Map the legacy 14-field config + snapshot-derived buckets into the rich
+ * engine's inputs. The legacy config carries demographic/income continuity; the
+ * snapshot seeds current balances (retirement→tax-deferred, savings→taxable);
+ * everything else uses the engine's neutral defaults until the richer config
+ * surface sets it. NOTE: the legacy `realReturnPct` (a REAL return) is
+ * deliberately NOT mapped onto the engine's NOMINAL return fields — that would
+ * double-count inflation; the engine uses its own nominal defaults instead.
+ */
+function engineInputsFromLegacy(
+  config: RetirementConfig,
+  buckets: { taxDeferred: number; taxable: number }
+): RetireInputs {
+  const override = config.startingAssets
+  // A single-number override is treated as liquid taxable; else use the buckets.
+  const k401CurrentBalance = override != null ? 0 : buckets.taxDeferred
+  const currentSavings = override != null ? override : buckets.taxable
+  const horizonYears = Math.max(0, config.horizonAge - config.retirementAge)
+  return {
+    ...DEFAULT_INPUTS,
+    currentAge: config.currentAge,
+    retirementAge: config.retirementAge,
+    planToAge: config.horizonAge,
+    annualExpenses: config.annualSpending,
+    ssMonthly: config.ssMonthlyAtFra,
+    ssStartAge: config.ssClaimAge,
+    salary: 0, // no new-earnings assumption by default
+    annualSavingsExtra: config.annualContribution,
+    k401CurrentBalance,
+    currentSavings,
+    // Legacy constant income streams → engine streams spanning retirement.
+    rentalNetMonthly: config.airbnbAnnualNet / 12,
+    rentalYears: config.airbnbAnnualNet > 0 ? horizonYears : 0,
+    includeRental: config.airbnbAnnualNet > 0,
+    freelanceMonthly: config.otherAnnualIncome / 12,
+    freelanceYears: config.otherAnnualIncome > 0 ? horizonYears : 0
+  }
+}
+
+export type RetirementPlanResult = {
+  baseCurrency: string
+  startingAssets: number // today's-dollars investable total (snapshot sum or override)
+  hasSsaStatement: boolean
+  inputs: RetireInputs
+  plan: RetirementPlan
+  monteCarlo: MonteCarloResult
+}
+
+/**
+ * Assemble the rich retirement plan: seed the tax-aware engine from the
+ * net-worth snapshot + legacy config, run `computePlan` + a seeded fat-tailed
+ * Monte Carlo. Pure over the DB; the seed is pinned so the result is
+ * deterministic (stable UI, exact tests).
+ */
+export function buildRetirementPlan(sqlite: SqliteForFx & SqliteForSnapshot): RetirementPlanResult {
+  const config = getRetirementConfig(sqlite)
+  const snap = getNetWorthSnapshot(sqlite)
+  const buckets = bucketsFromSnapshot(snap)
+  const inputs = engineInputsFromLegacy(config, buckets)
+  const plan = computePlan(inputs)
+  const i = plan.inputs
+  const inflationMean = (1 + i.crInflationRate) * (1 + i.fxDriftPct) - 1
+  const years = Math.max(1, i.planToAge - i.retirementAge)
+  const monteCarlo = runMonteCarlo({
+    startBalance: plan.startBalance,
+    annualExpenses: i.annualExpenses,
+    meanReturn: i.postRetireReturn,
+    stdDev: i.stdDev,
+    inflationMean,
+    inflationStd: 0.02,
+    years,
+    simulations: 1000,
+    ssStartAge: i.ssStartAge,
+    ssMonthly: i.ssMonthly,
+    ssColaRate: i.ssColaRate,
+    currentAge: i.retirementAge,
+    additionalIncome: i.freelanceMonthly,
+    freelanceYears: i.freelanceYears,
+    rentalNetMonthly: i.includeRental ? i.rentalNetMonthly : 0,
+    rentalYears: i.includeRental ? i.rentalYears : 0,
+    healthMonthly: i.cajaMonthly + i.privateMonthly,
+    medicalInflationRate: i.medicalInflationRate,
+    ltcEnabled: i.ltcEnabled,
+    ltcMonthly: i.ltcMonthly,
+    ltcStartAge: i.ltcStartAge,
+    ltcYears: i.ltcYears,
+    taxDrag: plan.taxDrag,
+    rng: makeRng(RETIRE_MC_SEED)
+  })
+  const startingAssets =
+    config.startingAssets != null
+      ? config.startingAssets
+      : round2(buckets.taxDeferred + buckets.taxable)
+  return {
+    baseCurrency: snap.baseCurrency,
+    startingAssets,
+    hasSsaStatement: hasSsaStatement(sqlite),
+    inputs: i,
+    plan,
+    monteCarlo
   }
 }

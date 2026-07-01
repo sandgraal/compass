@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   DEFAULT_RETIREMENT_CONFIG,
   type RetirementConfig,
+  buildRetirementPlan,
   buildRetirementProjection,
   defaultStartingAssets,
   getRetirementConfig,
@@ -142,6 +143,64 @@ function addAccount(
 let sqlite: Database.Database
 beforeEach(() => {
   sqlite = makeDb()
+})
+
+describe('buildRetirementPlan (rich engine, deep integration)', () => {
+  it('seeds the engine from the net-worth snapshot and runs a deterministic Monte Carlo', () => {
+    addAccount(sqlite, '401k', 'retirement', 400_000)
+    addAccount(sqlite, 'Brokerage', 'savings', 200_000)
+    addAccount(sqlite, 'Checking', 'spending', 9_000) // excluded from investable buckets
+    addAccount(sqlite, 'CR Property', 'real_estate', 300_000) // excluded
+    setRetirementConfig(sqlite, {
+      currentAge: 55,
+      retirementAge: 56,
+      horizonAge: 90,
+      annualSpending: 40_000,
+      ssMonthlyAtFra: 2000,
+      ssClaimAge: 67
+    })
+    const a = buildRetirementPlan(sqlite)
+    const b = buildRetirementPlan(sqlite)
+
+    // Deep integration: starting assets = retirement + savings (others excluded).
+    expect(a.startingAssets).toBe(600_000)
+    // Engine inputs seeded from the snapshot buckets + legacy config.
+    expect(a.inputs.k401CurrentBalance).toBe(400_000)
+    expect(a.inputs.currentSavings).toBe(200_000)
+    expect(a.inputs.annualExpenses).toBe(40_000)
+    expect(a.inputs.retirementAge).toBe(56)
+    // Rich outputs present + deterministic (pinned seed).
+    expect(a.plan.projection.length).toBeGreaterThan(0)
+    expect(Number.isFinite(a.plan.startBalance)).toBe(true)
+    expect(Number.parseFloat(a.monteCarlo.successRate)).toBeGreaterThanOrEqual(0)
+    expect(Number.parseFloat(a.monteCarlo.successRate)).toBeLessThanOrEqual(100)
+    expect(a.monteCarlo.successRate).toBe(b.monteCarlo.successRate)
+    expect(a.baseCurrency).toBe('USD')
+  })
+
+  it('respects a startingAssets override (treated as liquid taxable)', () => {
+    addAccount(sqlite, '401k', 'retirement', 400_000)
+    setRetirementConfig(sqlite, { startingAssets: 1_000_000 })
+    const r = buildRetirementPlan(sqlite)
+    expect(r.startingAssets).toBe(1_000_000)
+    expect(r.inputs.currentSavings).toBe(1_000_000)
+    expect(r.inputs.k401CurrentBalance).toBe(0)
+  })
+
+  it('flows legacy airbnbAnnualNet into the projection as rental income', () => {
+    addAccount(sqlite, '401k', 'retirement', 800_000)
+    setRetirementConfig(sqlite, {
+      currentAge: 56,
+      retirementAge: 56,
+      horizonAge: 90,
+      annualSpending: 48_000,
+      airbnbAnnualNet: 24_000
+    })
+    const r = buildRetirementPlan(sqlite)
+    expect(r.inputs.includeRental).toBe(true)
+    expect(r.inputs.rentalNetMonthly).toBe(2000) // 24k / 12
+    expect(r.plan.projection[0].rentalIncome).toBe(24_000)
+  })
 })
 
 describe('retirement config + sourcing', () => {
