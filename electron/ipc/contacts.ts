@@ -269,6 +269,39 @@ function upsertContacts(inputs: ContactInput[]): { imported: number; updated: nu
   return { imported, updated }
 }
 
+/**
+ * Promote a person the cross-reference engine derived from the timeline into the
+ * owned contacts table. Idempotent by a stable `derived:person:<matchKey>`
+ * external id (so re-promoting the same person is a no-op) and `source:'derived'`
+ * so it's distinguishable from a hand-added / imported contact. Returns the
+ * contact id — existing or newly created — so `entities:promote` can record the
+ * link back on the derived-entity row.
+ */
+export function promoteDerivedContact(
+  displayName: string,
+  matchKey: string
+): { id: number; alreadyExisted: boolean } {
+  const db = getDb()
+  const externalId = `derived:person:${matchKey}`
+  const existing = db
+    .select({ id: contacts.id })
+    .from(contacts)
+    .where(eq(contacts.externalId, externalId))
+    .all()[0]
+  if (existing) return { id: existing.id, alreadyExisted: true }
+  const result = db
+    .insert(contacts)
+    .values({
+      ...toStorage({ displayName }),
+      externalId,
+      source: 'derived',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    })
+    .run()
+  return { id: Number(result.lastInsertRowid), alreadyExisted: false }
+}
+
 // ─── CSV import header mapping ────────────────────────────────────────────────
 
 /** Find the first non-empty value among a row's keys that match `test`. */

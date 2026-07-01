@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { BrowserWindow, app, ipcMain, nativeTheme, shell } from 'electron'
 import { startCronJobs } from './cron'
-import { initDb } from './db/client'
+import { getDb, initDb } from './db/client'
 import { registerAssetsHandlers } from './ipc/assets'
 import { registerAssistantHandlers } from './ipc/assistant'
 import { registerAuthHandlers } from './ipc/auth'
@@ -12,6 +12,7 @@ import { registerBackupHandlers } from './ipc/backup'
 import { registerClaudeHandlers } from './ipc/claude'
 import { registerContactsHandlers } from './ipc/contacts'
 import { registerCredHandlers } from './ipc/cred'
+import { registerEntitiesHandlers } from './ipc/entities'
 import { registerExportHandlers } from './ipc/export'
 import { registerFinanceHandlers } from './ipc/finance'
 import { registerHabitsHandlers } from './ipc/habits'
@@ -34,6 +35,7 @@ import { registerSyncHandlers } from './ipc/sync'
 import { initAutoUpdater, registerUpdaterHandlers, scheduleUpdateChecks } from './ipc/updater'
 import { registerVaultHandlers } from './ipc/vault'
 import { registerWeeklyReviewHandlers } from './ipc/weekly-review'
+import { ensureDerivedEntities } from './lib/entities-projection'
 import { initMenuBar } from './menu-bar'
 import { APP_DATA_DIR, DATA_DIR, KNOWLEDGE_DIR, VAULT_DIR } from './paths'
 import { registerCompassUrlScheme } from './url-scheme'
@@ -134,6 +136,16 @@ app.whenReady().then(async () => {
     console.log('[main] directories ensured')
     await initDb()
     console.log('[main] db initialized')
+    // Backfill the derived-entity cross-reference cache once for DBs whose
+    // records predate it (deferred + best-effort so it never blocks startup).
+    setImmediate(() => {
+      try {
+        const { built, count } = ensureDerivedEntities(getDb())
+        if (built) console.log(`[main] derived-entity cache built (${count} entities)`)
+      } catch (err) {
+        console.error('[main] derived-entity backfill failed:', err)
+      }
+    })
     await seedKnowledgeBase()
     console.log('[main] knowledge base seeded')
   } catch (err) {
@@ -155,6 +167,7 @@ app.whenReady().then(async () => {
   registerStorehouseHandlers(ipcMain)
   registerRecordsHandlers(ipcMain)
   registerPeopleHandlers(ipcMain)
+  registerEntitiesHandlers(ipcMain)
   registerCredHandlers(ipcMain)
   registerClaudeHandlers(ipcMain)
   registerUpdaterHandlers(ipcMain)

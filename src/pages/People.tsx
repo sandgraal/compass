@@ -3,9 +3,11 @@ import {
   Linkedin,
   MessageSquare,
   Network,
+  Phone,
   Search,
   User,
   UserCheck,
+  UserPlus,
   Wallet
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -18,7 +20,9 @@ const SOURCE_META: Record<string, { label: string; icon: JSX.Element }> = {
   linkedin: { label: 'LinkedIn', icon: <Linkedin size={12} /> },
   facebook: { label: 'Facebook', icon: <Facebook size={12} /> },
   imessage: { label: 'Messages', icon: <MessageSquare size={12} /> },
-  paypal: { label: 'PayPal', icon: <Wallet size={12} /> }
+  paypal: { label: 'PayPal', icon: <Wallet size={12} /> },
+  venmo: { label: 'Venmo', icon: <Wallet size={12} /> },
+  'google-voice': { label: 'Voice', icon: <Phone size={12} /> }
 }
 function sourceMeta(s: string): { label: string; icon: JSX.Element } {
   return SOURCE_META[s] ?? { label: s, icon: <User size={12} /> }
@@ -38,8 +42,31 @@ export default function People(): JSX.Element {
   const [people, setPeople] = useState<Person[]>([])
   const [query, setQuery] = useState('')
   const [loaded, setLoaded] = useState(false)
+  const [promoting, setPromoting] = useState<string | null>(null)
   const navigate = useNavigate()
   const { toast } = useToast()
+
+  /** Promote a derived person into the owned contacts table (idempotent). */
+  async function addToContacts(p: Person): Promise<void> {
+    if (!isElectron() || promoting) return
+    setPromoting(p.key)
+    try {
+      const res = await window.api.entities.promote({ kind: 'person', key: p.key })
+      // Only mark "in contacts" with a REAL contact id — never a `-1` sentinel that
+      // would point the UI at a non-existent row.
+      if (res.success && res.promotedId != null) {
+        const id = res.promotedId
+        setPeople((prev) => prev.map((x) => (x.key === p.key ? { ...x, contactId: id } : x)))
+        toast(`Added ${p.name} to your contacts`, 'success')
+      } else {
+        toast(res.error ?? 'Could not add to contacts', 'error')
+      }
+    } catch {
+      toast('Could not add to contacts', 'error')
+    } finally {
+      setPromoting(null)
+    }
+  }
 
   useEffect(() => {
     if (!isElectron()) {
@@ -110,12 +137,15 @@ export default function People(): JSX.Element {
       ) : (
         <ul className="flex flex-col gap-1.5">
           {shown.map((p) => (
-            <li key={p.key}>
+            <li
+              key={p.key}
+              className="flex items-center gap-2 rounded-lg border border-border bg-card pr-2 hover:border-primary/40 hover:bg-card/80 transition-colors"
+            >
               <button
                 type="button"
                 onClick={() => navigate(`/timeline?q=${encodeURIComponent(p.name)}`)}
                 title={`See everything involving ${p.name} on the timeline`}
-                className="w-full flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-2.5 text-left hover:border-primary/40 hover:bg-card/80 transition-colors"
+                className="flex-1 min-w-0 flex items-center gap-3 px-4 py-2.5 text-left"
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
@@ -146,6 +176,18 @@ export default function People(): JSX.Element {
                   </div>
                 </div>
               </button>
+              {p.contactId == null && (
+                <button
+                  type="button"
+                  onClick={() => addToContacts(p)}
+                  disabled={promoting === p.key}
+                  title={`Add ${p.name} to your contacts`}
+                  aria-label={`Add ${p.name} to your contacts`}
+                  className="shrink-0 flex items-center gap-1 text-[11px] text-primary border border-primary/30 rounded px-2 py-1 hover:bg-primary/10 disabled:opacity-50 transition-colors"
+                >
+                  <UserPlus size={12} /> Add
+                </button>
+              )}
             </li>
           ))}
           {shown.length === 0 && query && (

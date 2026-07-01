@@ -222,6 +222,18 @@ function ensureNewTables(sqlite: Database.Database): void {
       position INTEGER NOT NULL DEFAULT 0, dedup_hash TEXT NOT NULL, provenance TEXT, ingested_at INTEGER
     );
     CREATE UNIQUE INDEX IF NOT EXISTS snapshot_facts_dedup_hash_unique ON snapshot_facts (dedup_hash);
+    -- Derived-entity projection cache (cross-reference engine). Recomputable from
+    -- records + owned tables; lives here (the always-run fallback) as well as
+    -- migration 0023 because the packaged app doesn't always bundle migrations.
+    CREATE TABLE IF NOT EXISTS derived_entities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL, match_key TEXT NOT NULL, name TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0, sources TEXT NOT NULL DEFAULT '[]',
+      first_seen INTEGER, last_seen INTEGER, attrs TEXT,
+      promoted_kind TEXT, promoted_id INTEGER, refreshed_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS derived_entities_kind_key ON derived_entities (kind, match_key);
+    CREATE INDEX IF NOT EXISTS derived_entities_kind_count ON derived_entities (kind, count);
     -- Full-text index over the timeline (Phase 10.7 "Converse"). External-content
     -- FTS5 mirroring records by rowid; the triggers keep it in sync for EVERY writer
     -- (import + the future per-source delete). Lives here (the always-run fallback) as

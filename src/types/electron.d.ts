@@ -480,6 +480,31 @@ declare global {
     contactId: number | null
   }
 
+  type EntityKind = 'person' | 'merchant' | 'place' | 'subscription-candidate'
+
+  interface EntityAttrs {
+    totalSpend?: number
+    currency?: string | null
+    cadence?: string
+    medianAmount?: number
+    annualCost?: number
+    primarySource?: string
+    address?: string | null
+  }
+
+  interface DerivedEntity {
+    kind: EntityKind
+    name: string
+    key: string
+    count: number
+    sources: string[]
+    firstSeen: number | null
+    lastSeen: number | null
+    attrs: EntityAttrs
+    promotedId: number | null
+    promotedKind: 'contact' | 'subscription' | 'place' | null
+  }
+
   interface TimelineSearchHit {
     id: number
     source: string
@@ -937,6 +962,21 @@ declare global {
       }
       people: {
         list(): Promise<Person[]>
+      }
+      entities: {
+        list(opts: {
+          kind: EntityKind
+          q?: string
+          limit?: number
+          offset?: number
+        }): Promise<DerivedEntity[]>
+        promote(req: { kind: EntityKind; key: string }): Promise<{
+          success: boolean
+          error?: string
+          promotedKind?: 'contact' | 'subscription' | 'place'
+          promotedId?: number
+        }>
+        refresh(): Promise<{ count: number }>
       }
       snapshot: {
         list(opts?: { source?: string; category?: string }): Promise<SnapshotFactRecord[]>

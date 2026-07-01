@@ -1,5 +1,6 @@
 import {
   type AnySQLiteColumn,
+  index,
   integer,
   real,
   sqliteTable,
@@ -565,6 +566,35 @@ export const assets = sqliteTable('assets', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
+
+// ---- Derived entities (cross-reference engine) ----
+// A CACHE, not user data: the people / merchants / places / subscription
+// candidates the engine (`electron/lib/entities.ts`) derives from the `records`
+// timeline, refreshed after every import (like the records semantic index).
+// Fully recomputable from `records` + owned tables, so it carries no authority —
+// the source of truth for "is this promoted" stays the owned row's `externalId`.
+// `promotedId`/`promotedKind` are denormalized convenience, recomputed each refresh.
+export const derivedEntities = sqliteTable(
+  'derived_entities',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    kind: text('kind').notNull(), // 'person' | 'merchant' | 'place' | 'subscription-candidate'
+    matchKey: text('match_key').notNull(), // normalized key, unique within a kind
+    name: text('name').notNull(), // canonical display
+    count: integer('count').notNull().default(0), // total record touchpoints
+    sources: text('sources').notNull().default('[]'), // JSON string[]
+    firstSeen: integer('first_seen', { mode: 'timestamp_ms' }),
+    lastSeen: integer('last_seen', { mode: 'timestamp_ms' }),
+    attrs: text('attrs'), // JSON EntityAttrs (spend, cadence, …)
+    promotedKind: text('promoted_kind'), // 'contact' | 'subscription' | 'place' | null
+    promotedId: integer('promoted_id'), // owned-row id when promoted/matched
+    refreshedAt: integer('refreshed_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+  },
+  (t) => ({
+    kindKeyUnique: uniqueIndex('derived_entities_kind_key').on(t.kind, t.matchKey),
+    kindCountIdx: index('derived_entities_kind_count').on(t.kind, t.count)
+  })
+)
 
 // ---- Travel segments (Phase 11.5 — days-in-country & residency) ----
 // One row per trip the user logs OUTSIDE their home country: a country + an
