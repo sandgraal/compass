@@ -11,6 +11,7 @@
  * what the user already owns in their Storehouse tables.
  */
 
+import { sql } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
@@ -55,8 +56,10 @@ export function buildStorehouseSummary(
   db: BetterSQLite3Database<typeof schema>,
   today: Date
 ): StorehouseSummary {
-  const contactRows = db.select({ id: contacts.id }).from(contacts).all()
-  const recordRows = db.select({ id: records.id }).from(records).all()
+  // count(*) rather than fetching every id — records can be 100k+ rows, and this
+  // runs on the Overview landing page.
+  const contactCount = db.select({ n: sql<number>`count(*)` }).from(contacts).get()?.n ?? 0
+  const recordCount = db.select({ n: sql<number>`count(*)` }).from(records).get()?.n ?? 0
 
   const subRows = db.select().from(subscriptions).all()
   const activeSubs = subRows.filter((s) => s.status === 'active')
@@ -99,10 +102,10 @@ export function buildStorehouseSummary(
   renewals.sort((x, y) => x.daysUntil - y.daysUntil)
 
   return {
-    contacts: { count: contactRows.length },
+    contacts: { count: contactCount },
     subscriptions: { activeCount: activeSubs.length, annualTotal },
     assets: { count: assetRows.length, totalValue, byType },
-    records: { count: recordRows.length },
+    records: { count: recordCount },
     upcomingRenewals: renewals
   }
 }

@@ -34,22 +34,34 @@ export default function Overview(): JSX.Element {
       .catch(() => setSummary(null))
   }, [])
 
-  // Debounced "search everything" over the timeline (reuses records:search).
+  // Debounced "search everything" over the timeline (reuses records:search). The
+  // `cancelled` guard drops results from a superseded query so an older in-flight
+  // request resolving late can't overwrite the current results (out-of-order).
   useEffect(() => {
     const q = query.trim()
     if (!isElectron() || q.length < 2) {
       setResults([])
       return
     }
+    let cancelled = false
     setSearching(true)
     const h = setTimeout(() => {
       window.api.records
         .search({ q, limit: 8 })
-        .then(setResults)
-        .catch(() => setResults([]))
-        .finally(() => setSearching(false))
+        .then((r) => {
+          if (!cancelled) setResults(r)
+        })
+        .catch(() => {
+          if (!cancelled) setResults([])
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false)
+        })
     }, 250)
-    return () => clearTimeout(h)
+    return () => {
+      cancelled = true
+      clearTimeout(h)
+    }
   }, [query])
 
   const s = summary
