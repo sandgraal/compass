@@ -694,6 +694,76 @@ describe('finance:retirement (Phase 11.4)', () => {
   })
 })
 
+describe('finance:retirement-plan (Phase 11.4 rich engine)', () => {
+  function seedRetirement(balance: number): void {
+    const id = seedAccount('401k')
+    sqlite.prepare("UPDATE finance_accounts SET asset_class = 'retirement' WHERE id = ?").run(id)
+    sqlite
+      .prepare(
+        'INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (?, ?, ?, ?)'
+      )
+      .run(id, Date.now(), balance, 'manual')
+  }
+
+  it('get-retirement-plan seeds from net worth + returns Monte Carlo + both configs', async () => {
+    seedRetirement(800_000)
+    const getPlan = await registerAndGet('finance:get-retirement-plan')
+    const res = (await invoke(getPlan)) as {
+      startingAssets: number
+      engineConfig: { ltcEnabled: boolean }
+      monteCarlo: { successRate: string }
+      plan: { projection: unknown[]; startBalance: number }
+    }
+    expect(res.startingAssets).toBe(800_000) // sourced from net worth
+    expect(res.engineConfig.ltcEnabled).toBe(false) // engine-config default
+    expect(res.plan.projection.length).toBeGreaterThan(0)
+    expect(res.plan.startBalance).toBeGreaterThan(0)
+    expect(Number.parseFloat(res.monteCarlo.successRate)).toBeGreaterThanOrEqual(0)
+  })
+
+  it('set-retirement-engine-config persists + validates numbers / enum / boolean', async () => {
+    const setEng = await registerAndGet('finance:set-retirement-engine-config')
+    expect(
+      (await invoke(setEng, {
+        postRetireReturn: 0.045,
+        ltcEnabled: true,
+        filingStatus: 'mfj'
+      })) as {
+        success: boolean
+      }
+    ).toMatchObject({ success: true })
+    // Out-of-range number rejected.
+    expect((await invoke(setEng, { postRetireReturn: 5 })) as { success: boolean }).toMatchObject({
+      success: false
+    })
+    // Bad filing-status enum rejected.
+    expect((await invoke(setEng, { filingStatus: 'joint' })) as { success: boolean }).toMatchObject(
+      {
+        success: false
+      }
+    )
+    // Non-boolean ltcEnabled rejected.
+    expect((await invoke(setEng, { ltcEnabled: 'yes' })) as { success: boolean }).toMatchObject({
+      success: false
+    })
+    // A non-object payload is a safe no-op.
+    expect((await invoke(setEng, null)) as { success: boolean }).toMatchObject({ success: true })
+  })
+
+  it('engine config flows through to the plan', async () => {
+    seedRetirement(800_000)
+    const setEng = await registerAndGet('finance:set-retirement-engine-config')
+    await invoke(setEng, { ltcEnabled: true, ltcMonthly: 4000, ltcStartAge: 82, ltcYears: 5 })
+    const getPlan = await registerAndGet('finance:get-retirement-plan')
+    const res = (await invoke(getPlan)) as {
+      engineConfig: { ltcEnabled: boolean }
+      inputs: { ltcEnabled: boolean }
+    }
+    expect(res.engineConfig.ltcEnabled).toBe(true)
+    expect(res.inputs.ltcEnabled).toBe(true)
+  })
+})
+
 describe('finance:residency (Phase 11.5)', () => {
   it('adds/deletes travel segments + assembles the summary (SPT + CR + pathways)', async () => {
     // The handler computes for the real current year, so log a current-year trip.

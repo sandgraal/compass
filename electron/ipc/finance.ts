@@ -58,8 +58,11 @@ import {
   setPropertyConfig
 } from '../integrations/finance-property'
 import {
+  type RetireEngineConfig,
   type RetirementConfig,
+  buildRetirementPlan,
   buildRetirementProjection,
+  setRetireEngineConfig,
   setRetirementConfig
 } from '../integrations/finance-retirement'
 import {
@@ -1033,6 +1036,72 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       }
 
       setRetirementConfig(getRawSqlite(), patch)
+      return { success: true }
+    }
+  )
+
+  // ── Rich retirement plan (Phase 11.4 supersession) ───────────────────────
+  // Monte-Carlo + tax-aware engine seeded from the net-worth snapshot; consumed
+  // by the new Retirement page. Additive — the legacy get-retirement-projection
+  // above is untouched so the current Finance→Retirement tab keeps working.
+  ipcMain.handle('finance:get-retirement-plan', () => {
+    return buildRetirementPlan(getRawSqlite())
+  })
+
+  ipcMain.handle(
+    'finance:set-retirement-engine-config',
+    (_event, raw?: Partial<RetireEngineConfig> | null) => {
+      const input: Partial<RetireEngineConfig> = raw && typeof raw === 'object' ? raw : {}
+      const patch: Partial<RetireEngineConfig> = {}
+
+      // (key, min, max) bounds — mirror the engine's own sanitize clamps.
+      const NUMERIC: Array<[keyof RetireEngineConfig, number, number]> = [
+        ['meanReturn', 0, 0.5],
+        ['postRetireReturn', 0, 0.5],
+        ['stdDev', 0, 1],
+        ['inflationRate', 0, 0.5],
+        ['crInflationRate', 0, 0.5],
+        ['fxDriftPct', -0.1, 0.1],
+        ['salary', 0, 100_000_000],
+        ['k401ContribPct', 0, 1],
+        ['employerMatchPct', 0, 0.5],
+        ['condoValue', 0, 1_000_000_000],
+        ['condoPurchasePrice', 0, 1_000_000_000],
+        ['primaryResidenceSince', 1900, 2200],
+        ['condoSaleYear', 1900, 2200],
+        ['ssColaRate', 0, 0.5],
+        ['cajaMonthly', 0, 1_000_000],
+        ['privateMonthly', 0, 1_000_000],
+        ['medicalInflationRate', 0, 0.5],
+        ['ltcMonthly', 0, 1_000_000],
+        ['ltcStartAge', 50, 110],
+        ['ltcYears', 0, 30],
+        ['lifeExpectancy', 70, 110]
+      ]
+      for (const [key, min, max] of NUMERIC) {
+        if (!(key in input)) continue
+        const v = Number(input[key])
+        if (!Number.isFinite(v) || v < min || v > max) {
+          return { success: false, error: `Invalid ${key}: ${String(input[key])}` }
+        }
+        patch[key] = v as never
+      }
+      if ('filingStatus' in input) {
+        const fs = input.filingStatus
+        if (fs !== 'single' && fs !== 'mfj') {
+          return { success: false, error: `Invalid filingStatus: ${String(fs)}` }
+        }
+        patch.filingStatus = fs
+      }
+      if ('ltcEnabled' in input) {
+        const le = input.ltcEnabled
+        if (typeof le !== 'boolean') {
+          return { success: false, error: `Invalid ltcEnabled: ${String(le)}` }
+        }
+        patch.ltcEnabled = le
+      }
+
+      setRetireEngineConfig(getRawSqlite(), patch)
       return { success: true }
     }
   )

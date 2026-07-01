@@ -2,13 +2,16 @@ import Database from 'better-sqlite3'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   DEFAULT_RETIREMENT_CONFIG,
+  DEFAULT_RETIRE_ENGINE_CONFIG,
   type RetirementConfig,
   buildRetirementPlan,
   buildRetirementProjection,
   defaultStartingAssets,
+  getRetireEngineConfig,
   getRetirementConfig,
   hasSsaStatement,
   projectRetirement,
+  setRetireEngineConfig,
   setRetirementConfig,
   ssAnnualBenefit
 } from './finance-retirement'
@@ -200,6 +203,51 @@ describe('buildRetirementPlan (rich engine, deep integration)', () => {
     expect(r.inputs.includeRental).toBe(true)
     expect(r.inputs.rentalNetMonthly).toBe(2000) // 24k / 12
     expect(r.plan.projection[0].rentalIncome).toBe(24_000)
+  })
+})
+
+describe('retire engine config (rich fields)', () => {
+  it('round-trips engine config (numbers, boolean, filingStatus)', () => {
+    expect(getRetireEngineConfig(sqlite).postRetireReturn).toBe(
+      DEFAULT_RETIRE_ENGINE_CONFIG.postRetireReturn
+    )
+    setRetireEngineConfig(sqlite, {
+      postRetireReturn: 0.045,
+      ltcEnabled: true,
+      filingStatus: 'mfj',
+      cajaMonthly: 300
+    })
+    const c = getRetireEngineConfig(sqlite)
+    expect(c.postRetireReturn).toBe(0.045)
+    expect(c.ltcEnabled).toBe(true)
+    expect(c.filingStatus).toBe('mfj')
+    expect(c.cajaMonthly).toBe(300)
+    // Untouched fields keep their defaults.
+    expect(c.meanReturn).toBe(DEFAULT_RETIRE_ENGINE_CONFIG.meanReturn)
+  })
+
+  it('engine-config overrides flow into buildRetirementPlan (LTC lowers success)', () => {
+    addAccount(sqlite, '401k', 'retirement', 800_000)
+    setRetirementConfig(sqlite, {
+      currentAge: 56,
+      retirementAge: 56,
+      horizonAge: 90,
+      annualSpending: 40_000
+    })
+    const base = buildRetirementPlan(sqlite)
+    setRetireEngineConfig(sqlite, {
+      ltcEnabled: true,
+      ltcMonthly: 4000,
+      ltcStartAge: 82,
+      ltcYears: 5
+    })
+    const withLtc = buildRetirementPlan(sqlite)
+    expect(withLtc.engineConfig.ltcEnabled).toBe(true)
+    expect(withLtc.inputs.ltcEnabled).toBe(true)
+    // A late-life LTC shock never raises the success rate (seeded MC → comparable).
+    expect(Number.parseFloat(withLtc.monteCarlo.successRate)).toBeLessThanOrEqual(
+      Number.parseFloat(base.monteCarlo.successRate)
+    )
   })
 })
 

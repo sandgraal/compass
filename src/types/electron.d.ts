@@ -1578,6 +1578,122 @@ declare global {
           input: Record<string, number | null>
         ): Promise<{ success: boolean; error?: string }>
 
+        // Rich Monte-Carlo / tax-aware retirement plan (Phase 11.4 supersession)
+        getRetirementPlan(): Promise<{
+          baseCurrency: string
+          startingAssets: number
+          hasSsaStatement: boolean
+          config: {
+            currentAge: number
+            retirementAge: number
+            horizonAge: number
+            startingAssets: number | null
+            annualContribution: number
+            realReturnPct: number
+            annualSpending: number
+            ssMonthlyAtFra: number
+            ssClaimAge: number
+            fra: number
+            airbnbAnnualNet: number
+            otherAnnualIncome: number
+            stressReturnPct: number
+            stressYears: number
+          }
+          engineConfig: {
+            meanReturn: number
+            postRetireReturn: number
+            stdDev: number
+            inflationRate: number
+            crInflationRate: number
+            fxDriftPct: number
+            salary: number
+            k401ContribPct: number
+            employerMatchPct: number
+            condoValue: number
+            condoPurchasePrice: number
+            primaryResidenceSince: number
+            condoSaleYear: number
+            filingStatus: 'single' | 'mfj'
+            ssColaRate: number
+            cajaMonthly: number
+            privateMonthly: number
+            medicalInflationRate: number
+            ltcEnabled: boolean
+            ltcMonthly: number
+            ltcStartAge: number
+            ltcYears: number
+            lifeExpectancy: number
+          }
+          // Fully-resolved engine inputs (kept loose; the form reads config/engineConfig).
+          inputs: Record<string, number | string | boolean>
+          plan: {
+            startBalance: number
+            buckets: { taxDeferred: number; taxable: number; taxableBasis: number; roth: number }
+            swr: {
+              swr: string
+              safeThreshold: number
+              status: 'safe' | 'caution' | 'risky'
+              maxSafeWithdrawal: number
+            }
+            bridge: {
+              accessAge: number
+              fundedFromTaxable: boolean
+              firstTapAge: number | null
+              spendingToAccess: number
+              taxableAtRetirement: number
+              taxableAtAccess: number | null
+              yearsToAccess: number
+            }
+            taxDrag: number[]
+            projection: Array<{
+              year: number
+              age: number
+              balance: number
+              realBalance: number
+              withdrawal: number
+              expenses: number
+              realExpenses: number
+              ssIncome: number
+              freelanceIncome: number
+              rentalIncome: number
+              healthCost: number
+              ltcCost: number
+              deferredWithdrawal: number
+              taxableWithdrawal: number
+              rmd: number
+              capitalGains: number
+              ordinaryTaxable: number
+              ltcg0Headroom: number
+              usTax: number
+              crTax: number
+              netIncome: number
+              effectiveRate: number
+              taxableBalance: number
+              taxDeferredBalance: number
+              depleted: boolean
+            }>
+          }
+          monteCarlo: {
+            successRate: string
+            percentiles: { p10: number; p25: number; p50: number; p75: number; p90: number }
+            downside: {
+              failRate: number
+              medianFailAge: number | null
+              earliestFailAge: number | null
+            }
+            paths?: {
+              p10: Array<{ year: number; age: number; value: number }>
+              p25: Array<{ year: number; age: number; value: number }>
+              p50: Array<{ year: number; age: number; value: number }>
+              p75: Array<{ year: number; age: number; value: number }>
+              p90: Array<{ year: number; age: number; value: number }>
+            }
+          }
+        }>
+        setRetirementEngineConfig(
+          input: Record<string, number | string | boolean>
+        ): Promise<{ success: boolean; error?: string }>
+
         // Days-in-country & residency (Phase 11.5)
         getResidencySummary(): Promise<{
           config: {
