@@ -20,6 +20,7 @@ import { derivedEntities, subscriptions } from '../db/schema'
 import type { EntityAttrs, EntityKind } from '../lib/entities'
 import { refreshDerivedEntities } from '../lib/entities-projection'
 import { promoteDerivedContact } from './contacts'
+import { promoteDerivedPlace } from './places'
 import { trackDetectedSubscription } from './subscriptions'
 
 const KINDS: EntityKind[] = ['person', 'merchant', 'place', 'subscription-candidate']
@@ -136,8 +137,13 @@ export function registerEntitiesHandlers(ipcMain: IpcMain): void {
       }
       promotedKind = 'subscription'
     } else {
-      // merchant / place: the owned `places` table lands in a later phase.
-      return { success: false, error: `promote not supported for ${kind} yet` }
+      // merchant / place → the owned `places` table.
+      const res = promoteDerivedPlace(kind, row.name, row.matchKey, {
+        totalSpend: attrs.totalSpend ?? null,
+        address: attrs.address ?? null
+      })
+      promotedKind = 'place'
+      promotedId = res.id
     }
 
     db.update(derivedEntities)

@@ -505,6 +505,19 @@ declare global {
     promotedKind: 'contact' | 'subscription' | 'place' | null
   }
 
+  interface PlaceRecord {
+    id: number
+    externalId: string
+    kind: string
+    name: string
+    category: string | null
+    address: string | null
+    url: string | null
+    totalSpend: number | null
+    notes: string | null
+    source: string
+  }
+
   interface TimelineSearchHit {
     id: number
     source: string
@@ -977,6 +990,10 @@ declare global {
           promotedId?: number
         }>
         refresh(): Promise<{ count: number }>
+      }
+      places: {
+        list(): Promise<PlaceRecord[]>
+        delete(id: number): Promise<{ success: boolean }>
       }
       snapshot: {
         list(opts?: { source?: string; category?: string }): Promise<SnapshotFactRecord[]>

@@ -65,6 +65,11 @@ beforeEach(async () => {
       attrs TEXT, promoted_kind TEXT, promoted_id INTEGER, refreshed_at INTEGER
     );
     CREATE UNIQUE INDEX derived_entities_kind_key ON derived_entities (kind, match_key);
+    CREATE TABLE places (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, kind TEXT NOT NULL DEFAULT 'merchant',
+      name TEXT NOT NULL, category TEXT, address TEXT, url TEXT, total_spend REAL, notes TEXT,
+      source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER
+    );
   `)
   for (const k of Object.keys(handlers)) delete handlers[k]
   const mod = await import('./entities')
@@ -200,14 +205,32 @@ describe('entities:promote', () => {
     expect(() => invoke('entities:promote', { kind: 'person', key: 'ghost' })).toThrow()
   })
 
-  it('does not support promoting a merchant yet', () => {
+  it('promotes a merchant into the places table, and the projection reflects it on refresh', () => {
     addRecord('amazon', 'order', 'Widget', '$9.99', day('2026-01-01'))
     refreshDerivedEntities(drizzle(sqlite, { schema }))
+
     const res = invoke('entities:promote', { kind: 'merchant', key: 'amazon' }) as {
       success: boolean
-      error: string
+      promotedKind: string
+      promotedId: number
     }
-    expect(res.success).toBe(false)
-    expect(res.error).toMatch(/merchant/)
+    expect(res.success).toBe(true)
+    expect(res.promotedKind).toBe('place')
+
+    const place = sqlite
+      .prepare('SELECT external_id, kind, name, source FROM places WHERE id = ?')
+      .get(res.promotedId) as { external_id: string; kind: string; name: string; source: string }
+    expect(place.external_id).toBe('derived:merchant:amazon')
+    expect(place.kind).toBe('merchant')
+    expect(place.name).toBe('Amazon')
+    expect(place.source).toBe('derived')
+
+    // After a rebuild the merchant entity is matched back to the owned place.
+    refreshDerivedEntities(drizzle(sqlite, { schema }))
+    const row = sqlite
+      .prepare("SELECT promoted_kind, promoted_id FROM derived_entities WHERE kind='merchant'")
+      .get() as { promoted_kind: string; promoted_id: number }
+    expect(row.promoted_kind).toBe('place')
+    expect(row.promoted_id).toBe(res.promotedId)
   })
 })

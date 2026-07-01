@@ -22,6 +22,7 @@ import { registerMonthlyRollupHandlers } from './ipc/monthly-rollup'
 import { registerMorningBriefHandlers } from './ipc/morning-brief'
 import { registerObsidianHandlers } from './ipc/obsidian'
 import { registerPeopleHandlers } from './ipc/people'
+import { registerPlacesHandlers } from './ipc/places'
 import { registerPlaidHandlers } from './ipc/plaid'
 import { registerQuickCaptureHandlers } from './ipc/quick-capture'
 import { registerRecordsHandlers } from './ipc/records'
@@ -168,6 +169,7 @@ app.whenReady().then(async () => {
   registerRecordsHandlers(ipcMain)
   registerPeopleHandlers(ipcMain)
   registerEntitiesHandlers(ipcMain)
+  registerPlacesHandlers(ipcMain)
   registerCredHandlers(ipcMain)
   registerClaudeHandlers(ipcMain)
   registerUpdaterHandlers(ipcMain)

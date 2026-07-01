@@ -335,6 +335,10 @@ const api = {
       ipcRenderer.invoke('entities:promote', req),
     refresh: () => ipcRenderer.invoke('entities:refresh')
   },
+  places: {
+    list: () => ipcRenderer.invoke('places:list'),
+    delete: (id: number) => ipcRenderer.invoke('places:delete', id)
+  },
   snapshot: {
     list: (opts?: { source?: string; category?: string }) =>
       ipcRenderer.invoke('snapshot:list', opts)
