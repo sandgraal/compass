@@ -4,6 +4,7 @@ import type { AssetInput } from './ipc/assets'
 import type { ContactInput } from './ipc/contacts'
 import type { SubscriptionInput } from './ipc/subscriptions'
 import type { UpdaterStatusPayload } from './ipc/updater'
+import type { EntityKind } from './lib/entities'
 
 type SubscriptionDraft = SubscriptionInput
 type DetectedSubscriptionInput = {
@@ -328,9 +329,10 @@ const api = {
     list: () => ipcRenderer.invoke('people:list')
   },
   entities: {
-    list: (opts: { kind: string; q?: string; limit?: number; offset?: number }) =>
+    list: (opts: { kind: EntityKind; q?: string; limit?: number; offset?: number }) =>
       ipcRenderer.invoke('entities:list', opts),
-    promote: (req: { kind: string; key: string }) => ipcRenderer.invoke('entities:promote', req),
+    promote: (req: { kind: EntityKind; key: string }) =>
+      ipcRenderer.invoke('entities:promote', req),
     refresh: () => ipcRenderer.invoke('entities:refresh')
   },
   snapshot: {

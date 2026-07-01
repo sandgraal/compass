@@ -115,6 +115,21 @@ export function subscriptionKey(merchantKey: string, account: string): string {
   return `detected:${merchantKey}::${account}`
 }
 
+/**
+ * Pull the merchant key out of a `detected:<merchant>::<account>` external id
+ * (the account may itself be a source id OR a bank-account display name). Used to
+ * dedupe a records-derived subscription candidate against an already-tracked one
+ * BY MERCHANT, since the finance audit keys the account on the bank name while a
+ * records candidate keys it on the source — the accounts won't match, but the
+ * merchant does. Returns null for a non-`detected:` id.
+ */
+export function detectedMerchant(externalId: string): string | null {
+  if (!externalId.startsWith('detected:')) return null
+  const rest = externalId.slice('detected:'.length)
+  const idx = rest.indexOf('::')
+  return idx === -1 ? rest : rest.slice(0, idx)
+}
+
 // ── Extractors ────────────────────────────────────────────────────────────────
 // Each is pure and individually testable. A source that yields both a person and
 // a merchant (PayPal) does so by emitting the right ref per record.
@@ -385,7 +400,15 @@ export function deriveEntities(records: EntityRecordRow[], owned: OwnedRefs): De
     const k = normalizeName(c.displayName)
     if (k && !contactByKey.has(k)) contactByKey.set(k, c.id)
   }
-  const subExternalIds = new Set(owned.subscriptionExternalIds)
+  // A merchant is "already tracked" if ANY owned detected subscription shares its
+  // merchant key — regardless of the account it was tracked under (see
+  // `detectedMerchant`), so a records-derived candidate for an already-tracked
+  // service reports as tracked instead of looking promotable.
+  const trackedMerchantKeys = new Set<string>()
+  for (const ext of owned.subscriptionExternalIds) {
+    const m = detectedMerchant(ext)
+    if (m) trackedMerchantKeys.add(m)
+  }
 
   const out: DerivedEntity[] = []
   for (const [mapKey, e] of acc) {
@@ -423,7 +446,6 @@ export function deriveEntities(records: EntityRecordRow[], owned: OwnedRefs): De
       const cadence = detectCadence(sorted.map((d) => new Date(d)))
       if (cadence) {
         const medAmount = e.amounts.length > 0 ? Math.round(median(e.amounts) * 100) / 100 : 0
-        const externalId = subscriptionKey(key, src)
         out.push({
           kind: 'subscription-candidate',
           name,
@@ -441,7 +463,7 @@ export function deriveEntities(records: EntityRecordRow[], owned: OwnedRefs): De
             totalSpend: attrs.totalSpend
           },
           promotedId: null,
-          promotedKind: subExternalIds.has(externalId) ? 'subscription' : null
+          promotedKind: trackedMerchantKeys.has(key) ? 'subscription' : null
         })
       }
     }

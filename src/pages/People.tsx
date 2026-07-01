@@ -52,10 +52,11 @@ export default function People(): JSX.Element {
     setPromoting(p.key)
     try {
       const res = await window.api.entities.promote({ kind: 'person', key: p.key })
-      if (res.success) {
-        setPeople((prev) =>
-          prev.map((x) => (x.key === p.key ? { ...x, contactId: res.promotedId ?? -1 } : x))
-        )
+      // Only mark "in contacts" with a REAL contact id — never a `-1` sentinel that
+      // would point the UI at a non-existent row.
+      if (res.success && res.promotedId != null) {
+        const id = res.promotedId
+        setPeople((prev) => prev.map((x) => (x.key === p.key ? { ...x, contactId: id } : x)))
         toast(`Added ${p.name} to your contacts`, 'success')
       } else {
         toast(res.error ?? 'Could not add to contacts', 'error')

@@ -120,7 +120,7 @@ describe('deriveEntities — merchants & subscriptions', () => {
     expect(sub?.promotedKind).toBeNull()
   })
 
-  it('flags a subscription candidate as tracked when its detected key is already owned', () => {
+  it('flags a subscription candidate as tracked by MERCHANT, even under a different account', () => {
     const rows = [
       rec({
         source: 'paypal',
@@ -144,9 +144,10 @@ describe('deriveEntities — merchants & subscriptions', () => {
         occurredAt: day('2026-03-15')
       })
     ]
+    // Finance audit already tracked Netflix under a BANK-ACCOUNT name (not 'paypal').
     const owned: OwnedRefs = {
       contacts: [],
-      subscriptionExternalIds: [subscriptionKey('netflix', 'paypal')]
+      subscriptionExternalIds: [subscriptionKey('netflix', 'Chase Sapphire')]
     }
     const sub = deriveEntities(rows, owned).find((e) => e.kind === 'subscription-candidate')
     expect(sub?.promotedKind).toBe('subscription')

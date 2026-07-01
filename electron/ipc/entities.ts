@@ -16,7 +16,7 @@
 import { type SQL, and, asc, desc, eq, like } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
-import { derivedEntities } from '../db/schema'
+import { derivedEntities, subscriptions } from '../db/schema'
 import type { EntityAttrs, EntityKind } from '../lib/entities'
 import { refreshDerivedEntities } from '../lib/entities-projection'
 import { promoteDerivedContact } from './contacts'
@@ -65,7 +65,13 @@ export function registerEntitiesHandlers(ipcMain: IpcMain): void {
         .select()
         .from(derivedEntities)
         .where(and(...where))
-        .orderBy(desc(derivedEntities.count), asc(derivedEntities.id))
+        // Stable sort keys (the engine's order) — NOT `id`, which is a delete+insert
+        // cache rowid that shuffles between refreshes and would jitter the UI.
+        .orderBy(
+          desc(derivedEntities.count),
+          desc(derivedEntities.lastSeen),
+          asc(derivedEntities.name)
+        )
         .limit(limit)
         .offset(offset)
         .all()
@@ -108,14 +114,27 @@ export function registerEntitiesHandlers(ipcMain: IpcMain): void {
       promotedKind = 'contact'
       promotedId = res.id
     } else if (kind === 'subscription-candidate') {
-      const res = trackDetectedSubscription({
-        merchant: row.matchKey,
-        account: attrs.primarySource ?? '—',
-        cadence: attrs.cadence,
-        medianAmount: attrs.medianAmount
-      })
+      // Dedupe BY MERCHANT: if a subscription for this merchant is already tracked
+      // (from the finance audit under a bank-account name, or a prior promote),
+      // link to it instead of creating a second row — the account strings differ
+      // (source id vs bank name) so an exact-key check would miss it.
+      const existing = db
+        .select({ id: subscriptions.id })
+        .from(subscriptions)
+        .where(like(subscriptions.externalId, `detected:${row.matchKey}::%`))
+        .all()[0]
+      if (existing) {
+        promotedId = existing.id
+      } else {
+        const res = trackDetectedSubscription({
+          merchant: row.matchKey,
+          account: attrs.primarySource ?? '—',
+          cadence: attrs.cadence,
+          medianAmount: attrs.medianAmount
+        })
+        promotedId = res.id
+      }
       promotedKind = 'subscription'
-      promotedId = res.id
     } else {
       // merchant / place: the owned `places` table lands in a later phase.
       return { success: false, error: `promote not supported for ${kind} yet` }

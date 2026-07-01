@@ -25,7 +25,13 @@ export function registerPeopleHandlers(ipcMain: IpcMain): void {
       .select()
       .from(derivedEntities)
       .where(eq(derivedEntities.kind, 'person'))
-      .orderBy(desc(derivedEntities.count), asc(derivedEntities.id))
+      // Stable sort keys (the engine's order) — NOT `id`, which is a delete+insert
+      // cache rowid that shuffles between refreshes and would jitter the UI.
+      .orderBy(
+        desc(derivedEntities.count),
+        desc(derivedEntities.lastSeen),
+        asc(derivedEntities.name)
+      )
       .all()
     return rows.map((r) => {
       let sources: string[] = []

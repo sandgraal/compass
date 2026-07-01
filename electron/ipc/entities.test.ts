@@ -172,6 +172,30 @@ describe('entities:promote', () => {
     expect(sub.source).toBe('detected')
   })
 
+  it('dedupes by merchant — does not create a 2nd row when already tracked under another account', () => {
+    // A finance-audit subscription for the same merchant, but under a bank account.
+    sqlite
+      .prepare(
+        "INSERT INTO subscriptions (external_id, name) VALUES ('detected:netflix::Chase', 'netflix')"
+      )
+      .run()
+    for (const d of ['2026-01-15', '2026-02-15', '2026-03-15'])
+      addRecord('paypal', 'payment', 'Netflix', '-15.99 USD', day(d))
+    refreshDerivedEntities(drizzle(sqlite, { schema }))
+
+    const res = invoke('entities:promote', { kind: 'subscription-candidate', key: 'netflix' }) as {
+      success: boolean
+      promotedId: number
+    }
+    expect(res.success).toBe(true)
+    const n = sqlite.prepare('SELECT COUNT(*) c FROM subscriptions').get() as { c: number }
+    expect(n.c).toBe(1) // linked to the existing row, no duplicate
+    const existing = sqlite
+      .prepare("SELECT id FROM subscriptions WHERE external_id='detected:netflix::Chase'")
+      .get() as { id: number }
+    expect(res.promotedId).toBe(existing.id)
+  })
+
   it('throws when the entity is not in the projection', () => {
     expect(() => invoke('entities:promote', { kind: 'person', key: 'ghost' })).toThrow()
   })
