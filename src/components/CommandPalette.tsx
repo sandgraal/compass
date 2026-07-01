@@ -24,6 +24,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Store,
   TrendingUp,
   Users,
   Wallet
@@ -218,6 +219,14 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       icon: <Network size={15} />,
       action: () => nav('/people'),
       keywords: ['connections', 'friends', 'linkedin', 'facebook', 'who', 'relationships']
+    },
+    {
+      id: 'places',
+      label: 'Merchants & Places',
+      description: 'Businesses you buy from & places you go',
+      icon: <Store size={15} />,
+      action: () => nav('/places'),
+      keywords: ['merchants', 'stores', 'shops', 'places', 'spending', 'amazon', 'paypal']
     },
     {
       id: 'subscriptions',

@@ -596,6 +596,27 @@ export const derivedEntities = sqliteTable(
   })
 )
 
+// ---- Places & merchants (cross-reference engine — promote target) ----
+// The OWNED home for a merchant/place the user promotes out of `derived_entities`:
+// the businesses they transact with and the places they go. Mirrors the `assets`
+// shape (flat, `kind` discriminator). `external_id` UNIQUE (`derived:<kind>:<key>`
+// for a promoted entity / `manual:<uuid>`) dedupes a re-promote. `reference`-free —
+// nothing sensitive; `total_spend` is the rolled-up spend at promote time.
+export const places = sqliteTable('places', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  externalId: text('external_id').notNull().unique(),
+  kind: text('kind').notNull().default('merchant'), // 'merchant' | 'place'
+  name: text('name').notNull(),
+  category: text('category'),
+  address: text('address'),
+  url: text('url'),
+  totalSpend: real('total_spend'),
+  notes: text('notes'),
+  source: text('source').notNull().default('manual'), // 'manual' | 'derived'
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
 // ---- Travel segments (Phase 11.5 — days-in-country & residency) ----
 // One row per trip the user logs OUTSIDE their home country: a country + an
 // inclusive [startDate, endDate] window. Per-country day counts (the rest of the

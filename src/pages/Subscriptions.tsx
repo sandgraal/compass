@@ -3,6 +3,7 @@ import {
   CreditCard,
   Download,
   ExternalLink,
+  History,
   Pencil,
   Plus,
   Sparkles,
@@ -36,6 +37,7 @@ const money = (n: number): string =>
 export default function Subscriptions(): JSX.Element {
   const [subs, setSubs] = useState<SubscriptionRecord[]>([])
   const [detected, setDetected] = useState<DetectedSubscriptions | null>(null)
+  const [candidates, setCandidates] = useState<DerivedEntity[]>([])
   const [editing, setEditing] = useState<number | 'new' | null>(null)
   const [draft, setDraft] = useState<SubscriptionInput>(EMPTY)
   const [busy, setBusy] = useState(false)
@@ -48,12 +50,14 @@ export default function Subscriptions(): JSX.Element {
 
   async function load(): Promise<void> {
     if (!isElectron()) return
-    const [list, det] = await Promise.all([
+    const [list, det, cand] = await Promise.all([
       window.api.subscriptions.list(),
-      window.api.subscriptions.getDetected().catch(() => null)
+      window.api.subscriptions.getDetected().catch(() => null),
+      window.api.entities.list({ kind: 'subscription-candidate' }).catch(() => [])
     ])
     setSubs(list)
     setDetected(det)
+    setCandidates(cand)
   }
 
   const activeAnnual = subs
@@ -61,6 +65,14 @@ export default function Subscriptions(): JSX.Element {
     .reduce((sum, s) => sum + s.annualCost, 0)
 
   const untrackedDetected = (detected?.active ?? []).filter((d) => !d.tracked)
+  // Records-derived subscription candidates the user hasn't tracked yet. Exclude
+  // any already promoted (engine flags `promotedKind==='subscription'`) and any the
+  // finance audit already surfaces above (same normalized merchant key) so a
+  // service isn't listed twice.
+  const detectedMerchants = new Set((detected?.active ?? []).map((d) => d.merchant))
+  const untrackedCandidates = candidates.filter(
+    (c) => c.promotedKind !== 'subscription' && !detectedMerchants.has(c.key)
+  )
 
   function startAdd(): void {
     setDraft({ ...EMPTY })
@@ -127,6 +139,19 @@ export default function Subscriptions(): JSX.Element {
         medianAmount: d.medianAmount
       })
       toast(`Now tracking ${d.merchant}.`, 'success')
+      await load()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function trackCandidate(c: DerivedEntity): Promise<void> {
+    if (!isElectron()) return
+    setBusy(true)
+    try {
+      const res = await window.api.entities.promote({ kind: 'subscription-candidate', key: c.key })
+      if (res.success) toast(`Now tracking ${c.name}.`, 'success')
+      else toast(res.error ?? 'Could not track this subscription.', 'error')
       await load()
     } finally {
       setBusy(false)
@@ -235,6 +260,44 @@ export default function Subscriptions(): JSX.Element {
                 <button
                   type="button"
                   onClick={() => track(d)}
+                  disabled={busy}
+                  className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-primary/15 hover:bg-primary/25 text-primary rounded-lg transition-colors disabled:opacity-50"
+                >
+                  <Plus size={11} /> Track
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {untrackedCandidates.length > 0 && (
+        <div className="mt-8">
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <History size={12} /> From your timeline ({untrackedCandidates.length})
+          </h2>
+          <p className="text-xs text-muted-foreground/70 mb-3">
+            Recurring services Compass found across your imported data (PayPal, Amazon, Netflix…) —
+            not just your bank transactions.
+          </p>
+          <div className="space-y-2">
+            {untrackedCandidates.map((c) => (
+              <div
+                key={c.key}
+                className="flex items-center gap-3 rounded-xl border border-border bg-card/60 px-4 py-3"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground capitalize">{c.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {c.attrs.cadence ?? 'recurring'}
+                    {c.attrs.medianAmount != null && ` · ${money(c.attrs.medianAmount)}`}
+                    {c.attrs.annualCost != null && ` · ${money(c.attrs.annualCost)}/yr`}
+                    {c.sources.length > 0 && ` · ${c.sources.join(', ')}`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => trackCandidate(c)}
                   disabled={busy}
                   className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-primary/15 hover:bg-primary/25 text-primary rounded-lg transition-colors disabled:opacity-50"
                 >

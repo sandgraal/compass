@@ -89,6 +89,13 @@ export interface OwnedRefs {
   contacts: Array<{ id: number; displayName: string }>
   /** Every `subscriptions.externalId` (the `detected:<merchant>::<account>` set). */
   subscriptionExternalIds: string[]
+  /** Owned places/merchants (`places` table) — for the promoted-place match. */
+  places?: Array<{ id: number; externalId: string }>
+}
+
+/** The `derived:` external id a promoted merchant/place lives under in `places`. */
+export function placeExternalId(kind: 'merchant' | 'place', key: string): string {
+  return `derived:${kind}:${key}`
 }
 
 // ── Money parsing ─────────────────────────────────────────────────────────────
@@ -409,6 +416,8 @@ export function deriveEntities(records: EntityRecordRow[], owned: OwnedRefs): De
     const m = detectedMerchant(ext)
     if (m) trackedMerchantKeys.add(m)
   }
+  const placeIdByExternal = new Map<string, number>()
+  for (const p of owned.places ?? []) placeIdByExternal.set(p.externalId, p.id)
 
   const out: DerivedEntity[] = []
   for (const [mapKey, e] of acc) {
@@ -423,7 +432,25 @@ export function deriveEntities(records: EntityRecordRow[], owned: OwnedRefs): De
       attrs.currency = currency
     }
 
-    const base: DerivedEntity = {
+    // Match to an owned row: a person → a contact; a merchant/place → a promoted
+    // `places` row (a subscription-candidate's tracked-ness is handled below).
+    let promotedId: number | null = null
+    let promotedKind: DerivedEntity['promotedKind'] = null
+    if (kind === 'person') {
+      const cid = contactByKey.get(key)
+      if (cid != null) {
+        promotedId = cid
+        promotedKind = 'contact'
+      }
+    } else if (kind === 'merchant' || kind === 'place') {
+      const pid = placeIdByExternal.get(placeExternalId(kind, key))
+      if (pid != null) {
+        promotedId = pid
+        promotedKind = 'place'
+      }
+    }
+
+    out.push({
       kind,
       name,
       key,
@@ -432,11 +459,9 @@ export function deriveEntities(records: EntityRecordRow[], owned: OwnedRefs): De
       firstSeen: e.first,
       lastSeen: e.last,
       attrs,
-      promotedId: kind === 'person' ? (contactByKey.get(key) ?? null) : null,
-      promotedKind: null
-    }
-    if (base.promotedId != null) base.promotedKind = 'contact'
-    out.push(base)
+      promotedId,
+      promotedKind
+    })
 
     // Subscription-candidate: a merchant with ≥3 dated touchpoints on a regular
     // cadence. Emitted as a SEPARATE entity (the merchant row stays for the

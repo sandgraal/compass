@@ -234,6 +234,14 @@ function ensureNewTables(sqlite: Database.Database): void {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS derived_entities_kind_key ON derived_entities (kind, match_key);
     CREATE INDEX IF NOT EXISTS derived_entities_kind_count ON derived_entities (kind, count);
+    -- Owned merchants/places promoted out of derived_entities (migration 0024).
+    CREATE TABLE IF NOT EXISTS places (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      external_id TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'merchant', name TEXT NOT NULL,
+      category TEXT, address TEXT, url TEXT, total_spend REAL, notes TEXT,
+      source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS places_external_id_unique ON places (external_id);
     -- Full-text index over the timeline (Phase 10.7 "Converse"). External-content
     -- FTS5 mirroring records by rowid; the triggers keep it in sync for EVERY writer
     -- (import + the future per-source delete). Lives here (the always-run fallback) as

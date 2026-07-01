@@ -20,6 +20,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Store,
   Target,
   TrendingUp,
   Users
@@ -93,6 +94,7 @@ export function Sidebar(): JSX.Element {
     { label: 'Vault', to: '/vault', icon: <ShieldCheck size={18} /> },
     { label: 'Contacts', to: '/contacts', icon: <Users size={18} /> },
     { label: 'People', to: '/people', icon: <Network size={18} /> },
+    { label: 'Merchants & Places', to: '/places', icon: <Store size={18} /> },
     { label: 'Subscriptions', to: '/subscriptions', icon: <CreditCard size={18} /> },
     { label: 'Household & Assets', to: '/assets', icon: <Home size={18} /> },
     { label: 'Timeline', to: '/timeline', icon: <Clock size={18} /> },

@@ -169,6 +169,13 @@
       "when": 1782970000000,
       "tag": "0023_brave_mac_gargan",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1782980000000,
+      "tag": "0024_bouncy_meltdown",
+      "breakpoints": true
     }
   ]
 }

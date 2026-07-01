@@ -30,6 +30,11 @@ function makeDb(): { db: ReturnType<typeof drizzle<typeof schema>>; sqlite: Data
       attrs TEXT, promoted_kind TEXT, promoted_id INTEGER, refreshed_at INTEGER
     );
     CREATE UNIQUE INDEX derived_entities_kind_key ON derived_entities (kind, match_key);
+    CREATE TABLE places (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, kind TEXT NOT NULL DEFAULT 'merchant',
+      name TEXT NOT NULL, category TEXT, address TEXT, url TEXT, total_spend REAL, notes TEXT,
+      source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER
+    );
   `)
   return { db: drizzle(sqlite, { schema }), sqlite }
 }

@@ -14,7 +14,7 @@
 import { inArray } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type * as schema from '../db/schema'
-import { contacts, derivedEntities, records, subscriptions } from '../db/schema'
+import { contacts, derivedEntities, places, records, subscriptions } from '../db/schema'
 import { ENTITY_EXTRACTORS, type EntityRecordRow, type OwnedRefs, deriveEntities } from './entities'
 
 /** Distinct sources that have at least one extractor — the DB read is scoped here. */
@@ -62,7 +62,8 @@ export function refreshDerivedEntities(db: BetterSQLite3Database<typeof schema>)
       .select({ externalId: subscriptions.externalId })
       .from(subscriptions)
       .all()
-      .map((s) => s.externalId)
+      .map((s) => s.externalId),
+    places: db.select({ id: places.id, externalId: places.externalId }).from(places).all()
   }
 
   const entities = deriveEntities(rows, owned)
