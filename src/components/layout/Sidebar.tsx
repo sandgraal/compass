@@ -14,6 +14,7 @@ import {
   Inbox,
   Layers,
   LayoutDashboard,
+  LayoutGrid,
   Network,
   Plug2,
   ScrollText,
@@ -89,6 +90,7 @@ export function Sidebar(): JSX.Element {
     {
       title: 'Home',
       items: [
+        { label: 'Overview', to: '/overview', icon: <LayoutGrid size={18} /> },
         { label: 'Dashboard', to: '/dashboard', icon: <LayoutDashboard size={18} /> },
         { label: 'Timeline', to: '/timeline', icon: <Clock size={18} /> }
       ]

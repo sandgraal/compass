@@ -15,6 +15,7 @@ import {
   Inbox,
   Layers,
   LayoutDashboard,
+  LayoutGrid,
   LineChart,
   Network,
   Plug,
@@ -102,11 +103,19 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       keywords: ['add', 'task', 'todo', 'checklist', 'new', 'create']
     },
     {
+      id: 'overview',
+      label: 'Overview',
+      description: 'Everything in one place',
+      icon: <LayoutGrid size={15} />,
+      action: () => nav('/overview'),
+      keywords: ['home', 'everything', 'summary', 'search', 'start']
+    },
+    {
       id: 'dashboard',
       label: 'Dashboard',
       description: 'Today at a glance',
       icon: <LayoutDashboard size={15} />,
-      action: () => nav('/'),
+      action: () => nav('/dashboard'),
       keywords: ['home', 'today']
     },
     {

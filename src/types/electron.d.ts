@@ -518,6 +518,27 @@ declare global {
     source: string
   }
 
+  interface OverviewSuggestionItem {
+    name: string
+    key: string
+    count: number
+    cadence?: string | null
+    annualCost?: number | null
+  }
+
+  interface OverviewSummary {
+    storehouse: StorehouseSummary
+    timeline: { records: number; sources: number; earliest: number | null; latest: number | null }
+    suggestions: {
+      peopleUnpromoted: number
+      subscriptionsUntracked: number
+      merchants: number
+      places: number
+      topPeople: OverviewSuggestionItem[]
+      topSubscriptions: OverviewSuggestionItem[]
+    }
+  }
+
   interface TimelineSearchHit {
     id: number
     source: string
@@ -994,6 +1015,9 @@ declare global {
       places: {
         list(): Promise<PlaceRecord[]>
         delete(id: number): Promise<{ success: boolean }>
+      }
+      overview: {
+        summary(): Promise<OverviewSummary>
       }
       snapshot: {
         list(opts?: { source?: string; category?: string }): Promise<SnapshotFactRecord[]>
