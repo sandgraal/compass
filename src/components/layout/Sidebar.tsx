@@ -168,7 +168,7 @@ export function Sidebar(): JSX.Element {
       <nav className="flex-1 px-3 py-2 overflow-y-auto">
         {SECTIONS.map((section) => (
           <div key={section.title} className="mb-3 last:mb-0">
-            <p className="px-3 pt-1 pb-1 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">
+            <p className="px-3 pt-1 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
               {section.title}
             </p>
             <div className="space-y-0.5">
