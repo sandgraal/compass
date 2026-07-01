@@ -82,36 +82,74 @@ export function Sidebar(): JSX.Element {
     return unsub
   }, [])
 
-  const NAV: NavItem[] = [
-    { label: 'Dashboard', to: '/dashboard', icon: <LayoutDashboard size={18} /> },
-    { label: 'Storehouse', to: '/storehouse', icon: <Layers size={18} /> },
-    { label: 'Daily', to: '/daily', icon: <CalendarDays size={18} /> },
-    { label: 'Weekly', to: '/weekly', icon: <CalendarRange size={18} /> },
-    { label: 'Monthly', to: '/monthly', icon: <CalendarCheck size={18} /> },
-    { label: 'Knowledge Base', to: '/knowledge', icon: <BookOpen size={18} /> },
-    { label: 'Ask Compass', to: '/ask', icon: <Sparkles size={18} /> },
-    { label: 'Claude Inbox', to: '/claude-inbox', icon: <Inbox size={18} /> },
-    { label: 'Vault', to: '/vault', icon: <ShieldCheck size={18} /> },
-    { label: 'Contacts', to: '/contacts', icon: <Users size={18} /> },
-    { label: 'People', to: '/people', icon: <Network size={18} /> },
-    { label: 'Merchants & Places', to: '/places', icon: <Store size={18} /> },
-    { label: 'Subscriptions', to: '/subscriptions', icon: <CreditCard size={18} /> },
-    { label: 'Household & Assets', to: '/assets', icon: <Home size={18} /> },
-    { label: 'Timeline', to: '/timeline', icon: <Clock size={18} /> },
-    { label: 'Ad Profile', to: '/ad-profile', icon: <Target size={18} /> },
-    { label: 'Profile', to: '/profile', icon: <IdCard size={18} /> },
-    { label: 'Apps & Websites', to: '/apps', icon: <Blocks size={18} /> },
-    { label: 'Saved', to: '/google-saved', icon: <Bookmark size={18} /> },
-    { label: 'Get Your Data', to: '/data-rights', icon: <ScrollText size={18} /> },
-    { label: 'Finance', to: '/finance', icon: <TrendingUp size={18} /> },
+  // Grouped into domains so the sidebar reads as ~7 scannable sections instead of
+  // a flat wall of ~24 links. Routes are unchanged — this is organization, not a
+  // re-route — so deep links, the command palette, and `compass://` all still work.
+  const SECTIONS: { title: string; items: NavItem[] }[] = [
     {
-      label: 'Integrations',
-      to: '/integrations',
-      icon: <Plug2 size={18} />,
-      badge: inboxCount > 0 ? inboxCount : undefined
+      title: 'Home',
+      items: [
+        { label: 'Dashboard', to: '/dashboard', icon: <LayoutDashboard size={18} /> },
+        { label: 'Timeline', to: '/timeline', icon: <Clock size={18} /> }
+      ]
     },
-    { label: 'Export', to: '/export', icon: <Download size={18} /> },
-    { label: 'Settings', to: '/settings', icon: <Settings size={18} /> }
+    {
+      title: 'People & Places',
+      items: [
+        { label: 'People', to: '/people', icon: <Network size={18} /> },
+        { label: 'Contacts', to: '/contacts', icon: <Users size={18} /> },
+        { label: 'Merchants & Places', to: '/places', icon: <Store size={18} /> }
+      ]
+    },
+    {
+      title: 'Money',
+      items: [
+        { label: 'Finance', to: '/finance', icon: <TrendingUp size={18} /> },
+        { label: 'Subscriptions', to: '/subscriptions', icon: <CreditCard size={18} /> },
+        { label: 'Household & Assets', to: '/assets', icon: <Home size={18} /> }
+      ]
+    },
+    {
+      title: 'Planner',
+      items: [
+        { label: 'Daily', to: '/daily', icon: <CalendarDays size={18} /> },
+        { label: 'Weekly', to: '/weekly', icon: <CalendarRange size={18} /> },
+        { label: 'Monthly', to: '/monthly', icon: <CalendarCheck size={18} /> }
+      ]
+    },
+    {
+      title: 'Knowledge',
+      items: [
+        { label: 'Knowledge Base', to: '/knowledge', icon: <BookOpen size={18} /> },
+        { label: 'Ask Compass', to: '/ask', icon: <Sparkles size={18} /> },
+        { label: 'Claude Inbox', to: '/claude-inbox', icon: <Inbox size={18} /> },
+        { label: 'Vault', to: '/vault', icon: <ShieldCheck size={18} /> }
+      ]
+    },
+    {
+      title: 'Your Data',
+      items: [
+        { label: 'Storehouse', to: '/storehouse', icon: <Layers size={18} /> },
+        { label: 'Ad Profile', to: '/ad-profile', icon: <Target size={18} /> },
+        { label: 'Profile', to: '/profile', icon: <IdCard size={18} /> },
+        { label: 'Apps & Websites', to: '/apps', icon: <Blocks size={18} /> },
+        { label: 'Saved', to: '/google-saved', icon: <Bookmark size={18} /> },
+        { label: 'Get Your Data', to: '/data-rights', icon: <ScrollText size={18} /> },
+        { label: 'Export', to: '/export', icon: <Download size={18} /> }
+      ]
+    },
+    {
+      title: 'System',
+      items: [
+        {
+          label: 'Integrations',
+          to: '/integrations',
+          icon: <Plug2 size={18} />,
+          badge: inboxCount > 0 ? inboxCount : undefined
+        },
+        { label: 'Settings', to: '/settings', icon: <Settings size={18} /> }
+      ]
+    }
   ]
 
   return (
@@ -126,29 +164,38 @@ export function Sidebar(): JSX.Element {
         </div>
       </div>
 
-      {/* Nav links */}
-      <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
-        {NAV.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
-                isActive
-                  ? 'bg-sidebar-accent text-primary font-medium'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/60'
-              )
-            }
-          >
-            {item.icon}
-            <span className="flex-1">{item.label}</span>
-            {item.badge !== undefined && item.badge > 0 && (
-              <span className="text-[10px] font-semibold bg-primary text-primary-foreground rounded-full min-w-[16px] h-4 flex items-center justify-center px-1">
-                {item.badge > 99 ? '99+' : item.badge}
-              </span>
-            )}
-          </NavLink>
+      {/* Nav links — grouped into domain sections */}
+      <nav className="flex-1 px-3 py-2 overflow-y-auto">
+        {SECTIONS.map((section) => (
+          <div key={section.title} className="mb-3 last:mb-0">
+            <p className="px-3 pt-1 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              {section.title}
+            </p>
+            <div className="space-y-0.5">
+              {section.items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) =>
+                    cn(
+                      'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+                      isActive
+                        ? 'bg-sidebar-accent text-primary font-medium'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/60'
+                    )
+                  }
+                >
+                  {item.icon}
+                  <span className="flex-1">{item.label}</span>
+                  {item.badge !== undefined && item.badge > 0 && (
+                    <span className="text-[10px] font-semibold bg-primary text-primary-foreground rounded-full min-w-[16px] h-4 flex items-center justify-center px-1">
+                      {item.badge > 99 ? '99+' : item.badge}
+                    </span>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+          </div>
         ))}
       </nav>
 
