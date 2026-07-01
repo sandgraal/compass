@@ -64,13 +64,17 @@ export default function Places(): JSX.Element {
     }
   }
 
+  // Match on both the displayed name AND the normalized key, so typing what the
+  // user sees (with original casing/punctuation) finds the row.
   const shownMerchants = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return q ? merchants.filter((e) => e.key.includes(q)) : merchants
+    return q
+      ? merchants.filter((e) => e.key.includes(q) || e.name.toLowerCase().includes(q))
+      : merchants
   }, [merchants, query])
   const shownPlaces = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return q ? places.filter((e) => e.key.includes(q)) : places
+    return q ? places.filter((e) => e.key.includes(q) || e.name.toLowerCase().includes(q)) : places
   }, [places, query])
   const total = merchants.length + places.length
 

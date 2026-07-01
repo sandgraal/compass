@@ -66,12 +66,18 @@ export default function Subscriptions(): JSX.Element {
 
   const untrackedDetected = (detected?.active ?? []).filter((d) => !d.tracked)
   // Records-derived subscription candidates the user hasn't tracked yet. Exclude
-  // any already promoted (engine flags `promotedKind==='subscription'`) and any the
-  // finance audit already surfaces above (same normalized merchant key) so a
-  // service isn't listed twice.
+  // any already promoted (engine flags `promotedKind==='subscription'`), any the
+  // finance audit already surfaces above (same normalized merchant key), and any
+  // the user already curates in the owned list (manual subs the engine can't flag,
+  // matched by name) — so a service is never listed twice.
   const detectedMerchants = new Set((detected?.active ?? []).map((d) => d.merchant))
+  const ownedSubNames = new Set(subs.map((s) => s.name.trim().toLowerCase()))
   const untrackedCandidates = candidates.filter(
-    (c) => c.promotedKind !== 'subscription' && !detectedMerchants.has(c.key)
+    (c) =>
+      c.promotedKind !== 'subscription' &&
+      !detectedMerchants.has(c.key) &&
+      !ownedSubNames.has(c.key) &&
+      !ownedSubNames.has(c.name.trim().toLowerCase())
   )
 
   function startAdd(): void {
