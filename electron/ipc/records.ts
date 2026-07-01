@@ -31,6 +31,7 @@ import {
 } from '../knowledge/records-embeddings'
 import { updateRecordsKnowledge } from '../knowledge/records-extractor'
 import { serializeCsv } from '../lib/csv'
+import { refreshDerivedEntities } from '../lib/entities-projection'
 import { extractPdfText } from '../lib/pdf'
 import {
   type RecordInput,
@@ -360,6 +361,14 @@ export async function ingestFiles(paths: string[]): Promise<RecordsImportResult>
       updateRecordsKnowledge()
     } catch {
       /* knowledge refresh is best-effort */
+    }
+    // Cross-reference the new records into the derived-entity cache (People /
+    // Merchants / Places / subscription candidates). Synchronous but scoped to the
+    // sources with extractors; best-effort so a failure never fails the import.
+    try {
+      refreshDerivedEntities(getDb())
+    } catch {
+      /* derived-entity projection is best-effort */
     }
     // Extend the opt-in semantic index with the new records (fire-and-forget; only
     // does anything if the user has already built one, and never blocks the import).

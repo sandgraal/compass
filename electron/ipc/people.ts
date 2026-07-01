@@ -1,51 +1,48 @@
 /**
- * People IPC — the "Connect" track (Phase 10.7).
+ * People IPC — the "Connect" track (Phase 10.7), now fed by the cross-reference
+ * engine (Phase-2 of the cross-reference work).
  *
- * `people:list` derives the cross-source people directory: it reads only the
- * people-bearing records (the (source, type) combos whose titles name a person)
- * plus the contacts list, then hands them to the pure `buildPeople` aggregator.
- * Read-only, local, no vault. Recomputed on demand like `records:facets`.
+ * `people:list` reads the `kind='person'` slice of the `derived_entities`
+ * projection — which the engine (`electron/lib/entities.ts`) builds from ALL
+ * people-bearing sources, not just the four the original hardcoded filter knew.
+ * Same `Person` shape as before, so the People page is unchanged; it's just no
+ * longer blind to email/messages/payments people once those extractors land.
+ *
+ * Read-only, local, no vault. The projection is rebuilt after each import and
+ * self-heals on demand via `entities:refresh`.
  */
 
-import { and, eq, inArray } from 'drizzle-orm'
+import { asc, desc, eq } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
-import { contacts, records } from '../db/schema'
-import {
-  PEOPLE_RECORD_FILTERS,
-  type Person,
-  type PersonSourceRow,
-  buildPeople
-} from '../lib/people'
+import { derivedEntities } from '../db/schema'
+import type { Person } from '../lib/people'
 
 export function registerPeopleHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('people:list', (): Person[] => {
     const db = getDb()
-    const rows: PersonSourceRow[] = []
-    for (const f of PEOPLE_RECORD_FILTERS) {
-      const found = db
-        .select({
-          source: records.source,
-          type: records.type,
-          title: records.title,
-          occurredAt: records.occurredAt
-        })
-        .from(records)
-        .where(and(eq(records.source, f.source), inArray(records.type, f.types)))
-        .all()
-      for (const x of found) {
-        rows.push({
-          source: x.source,
-          type: x.type,
-          title: x.title,
-          occurredAt: x.occurredAt ? x.occurredAt.getTime() : null
-        })
-      }
-    }
-    const cs = db
-      .select({ id: contacts.id, displayName: contacts.displayName })
-      .from(contacts)
+    const rows = db
+      .select()
+      .from(derivedEntities)
+      .where(eq(derivedEntities.kind, 'person'))
+      .orderBy(desc(derivedEntities.count), asc(derivedEntities.id))
       .all()
-    return buildPeople(rows, cs)
+    return rows.map((r) => {
+      let sources: string[] = []
+      try {
+        sources = JSON.parse(r.sources) as string[]
+      } catch {
+        sources = []
+      }
+      return {
+        name: r.name,
+        key: r.matchKey,
+        count: r.count,
+        sources,
+        firstSeen: r.firstSeen ? r.firstSeen.getTime() : null,
+        lastSeen: r.lastSeen ? r.lastSeen.getTime() : null,
+        contactId: r.promotedKind === 'contact' ? (r.promotedId ?? null) : null
+      }
+    })
   })
 }

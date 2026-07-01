@@ -10,6 +10,9 @@
 
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
+import { type Cadence, PER_YEAR, detectCadence, median, normalizeMerchant } from '../lib/normalize'
+
+export type { Cadence }
 
 const SUB_CATEGORIES = new Set([
   'Subscriptions',
@@ -23,7 +26,6 @@ const SUB_CATEGORIES = new Set([
 ])
 
 export type SubscriptionStatus = 'active' | 'zombie' | 'expired'
-export type Cadence = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'semi-annual' | 'yearly'
 
 export type Subscription = {
   merchant: string
@@ -61,51 +63,6 @@ export type SubscriptionAudit = {
   zombies: Subscription[]
   expired: Subscription[]
   duplicates: { merchant: string; accounts: string[]; combinedAnnual: number }[]
-}
-
-const PER_YEAR: Record<Cadence, number> = {
-  weekly: 52,
-  biweekly: 26,
-  monthly: 12,
-  quarterly: 4,
-  'semi-annual': 2,
-  yearly: 1
-}
-
-function normalizeMerchant(desc: string): string {
-  let d = desc.toLowerCase().trim()
-  d = d.replace(/^payment to /, '')
-  d = d.replace(/^aplpay\s+/, '')
-  d = d.replace(/\b\d{4,}\b/g, '') // strip transaction IDs
-  d = d.replace(/\b(inc|llc|ltd|corp|co)\.?\b/g, '')
-  d = d.replace(/[*#]/g, ' ')
-  d = d.replace(/\b(com|net|io|co|ai)\b/g, '')
-  d = d.replace(/\s+/g, ' ').trim()
-  d = d.replace(/^[,.\-/]+|[,.\-/]+$/g, '').trim()
-  return d.split(' ').slice(0, 4).join(' ')
-}
-
-function median(nums: number[]): number {
-  const sorted = [...nums].sort((a, b) => a - b)
-  const mid = Math.floor(sorted.length / 2)
-  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
-}
-
-function detectCadence(dates: Date[]): Cadence | null {
-  if (dates.length < 2) return null
-  const gaps: number[] = []
-  for (let i = 0; i < dates.length - 1; i++) {
-    const ms = dates[i + 1].getTime() - dates[i].getTime()
-    gaps.push(Math.round(ms / 86400000))
-  }
-  const med = median(gaps)
-  if (med >= 25 && med <= 35) return 'monthly'
-  if (med >= 6 && med <= 9) return 'weekly'
-  if (med >= 12 && med <= 16) return 'biweekly'
-  if (med >= 80 && med <= 100) return 'quarterly'
-  if (med >= 175 && med <= 200) return 'semi-annual'
-  if (med >= 350 && med <= 380) return 'yearly'
-  return null
 }
 
 export function auditSubscriptions(

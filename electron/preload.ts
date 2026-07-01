@@ -327,6 +327,12 @@ const api = {
   people: {
     list: () => ipcRenderer.invoke('people:list')
   },
+  entities: {
+    list: (opts: { kind: string; q?: string; limit?: number; offset?: number }) =>
+      ipcRenderer.invoke('entities:list', opts),
+    promote: (req: { kind: string; key: string }) => ipcRenderer.invoke('entities:promote', req),
+    refresh: () => ipcRenderer.invoke('entities:refresh')
+  },
   snapshot: {
     list: (opts?: { source?: string; category?: string }) =>
       ipcRenderer.invoke('snapshot:list', opts)

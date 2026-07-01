@@ -23,27 +23,59 @@ import { getDb } from '../db/client'
 import { subscriptions } from '../db/schema'
 import { auditSubscriptions } from '../integrations/finance-subscriptions'
 import { serializeCsv } from '../lib/csv'
+import { annualizeCost } from '../lib/normalize'
+
+// Re-exported for the Storehouse summary (electron/ipc/storehouse.ts), which
+// annualizes the same subscription costs.
+export { annualizeCost }
 
 const MAX_TEXT = 4000
 const MAX_NOTES = 20_000
 
-const PER_YEAR: Record<string, number> = {
-  weekly: 52,
-  biweekly: 26,
-  monthly: 12,
-  quarterly: 4,
-  'semi-annual': 2,
-  yearly: 1
-}
-
-/** Annualize a per-cadence cost. Unknown cadence falls back to monthly (×12). */
-export function annualizeCost(cost: number, cadence: string): number {
-  return Math.round(cost * (PER_YEAR[cadence] ?? 12) * 100) / 100
-}
-
 /** The natural key a detected charge materializes under, so re-tracking dedupes. */
 function detectedKey(merchant: string, account: string): string {
   return `detected:${merchant}::${account}`
+}
+
+/**
+ * Materialize a detected recurring charge into the owned table, idempotent by the
+ * `detected:<merchant>::<account>` external id. Shared by the finance-audit
+ * "track" handler AND the cross-reference engine's `entities:promote`, so a
+ * records-derived subscription candidate and a finance-detected one collapse to
+ * the same row when their (merchant, account) match. Returns the row id.
+ */
+export function trackDetectedSubscription(detected: {
+  merchant: string
+  account?: string | null
+  category?: string | null
+  cadence?: string
+  medianAmount?: number
+}): { id: number; alreadyTracked: boolean } {
+  const db = getDb()
+  const externalId = detectedKey(detected.merchant, detected.account ?? '—')
+  const existing = db
+    .select({ id: subscriptions.id })
+    .from(subscriptions)
+    .where(eq(subscriptions.externalId, externalId))
+    .all()[0]
+  if (existing) return { id: existing.id, alreadyTracked: true }
+  const result = db
+    .insert(subscriptions)
+    .values({
+      ...toStorage({
+        name: detected.merchant,
+        cost: detected.medianAmount,
+        cadence: detected.cadence,
+        category: detected.category ?? null,
+        paymentAccount: detected.account ?? null
+      }),
+      externalId,
+      source: 'detected',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    })
+    .run()
+  return { id: Number(result.lastInsertRowid), alreadyTracked: false }
 }
 
 const CSV_HEADERS = [
@@ -233,31 +265,8 @@ export function registerSubscriptionsHandlers(ipcMain: IpcMain): void {
       }
     ) => {
       if (!detected?.merchant?.trim()) throw new Error('track-detected requires a merchant')
-      const db = getDb()
-      const externalId = detectedKey(detected.merchant, detected.account ?? '—')
-      const existing = db
-        .select({ id: subscriptions.id })
-        .from(subscriptions)
-        .where(eq(subscriptions.externalId, externalId))
-        .all()[0]
-      if (existing) return { success: true, id: existing.id, alreadyTracked: true }
-      const result = db
-        .insert(subscriptions)
-        .values({
-          ...toStorage({
-            name: detected.merchant,
-            cost: detected.medianAmount,
-            cadence: detected.cadence,
-            category: detected.category ?? null,
-            paymentAccount: detected.account ?? null
-          }),
-          externalId,
-          source: 'detected',
-          createdAt: new Date(),
-          updatedAt: new Date()
-        })
-        .run()
-      return { success: true, id: Number(result.lastInsertRowid) }
+      const { id, alreadyTracked } = trackDetectedSubscription(detected)
+      return alreadyTracked ? { success: true, id, alreadyTracked: true } : { success: true, id }
     }
   )
 
