@@ -18,6 +18,7 @@ import GoogleSaved from './pages/GoogleSaved'
 import Integrations from './pages/Integrations'
 import KnowledgeBase from './pages/KnowledgeBase'
 import Monthly from './pages/Monthly'
+import Overview from './pages/Overview'
 import People from './pages/People'
 import Places from './pages/Places'
 import Profile from './pages/Profile'
@@ -77,7 +78,8 @@ export default function App(): JSX.Element {
       />
       <Routes>
         <Route path="/" element={<AppLayout />}>
-          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route index element={<Navigate to="/overview" replace />} />
+          <Route path="overview" element={<Overview />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="daily" element={<Daily />} />
           <Route path="weekly" element={<Weekly />} />

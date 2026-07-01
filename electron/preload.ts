@@ -339,6 +339,9 @@ const api = {
     list: () => ipcRenderer.invoke('places:list'),
     delete: (id: number) => ipcRenderer.invoke('places:delete', id)
   },
+  overview: {
+    summary: () => ipcRenderer.invoke('overview:summary')
+  },
   snapshot: {
     list: (opts?: { source?: string; category?: string }) =>
       ipcRenderer.invoke('snapshot:list', opts)
