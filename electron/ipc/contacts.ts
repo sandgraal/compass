@@ -234,8 +234,12 @@ function parsedToInput(p: ParsedContact, source: string): ContactInput {
 /**
  * Upsert a batch of contacts keyed by `externalId`. Returns how many rows were
  * freshly inserted vs. updated in place — the importer reports both to the user.
+ *
+ * Exported so the Google Contacts live sync reuses the exact same owned-writer path
+ * as file imports (dedupe by external id, search-blob recompute) instead of a
+ * parallel one.
  */
-function upsertContacts(inputs: ContactInput[]): { imported: number; updated: number } {
+export function upsertContacts(inputs: ContactInput[]): { imported: number; updated: number } {
   const db = getDb()
   let imported = 0
   let updated = 0

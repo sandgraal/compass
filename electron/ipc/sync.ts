@@ -13,6 +13,7 @@ import {
   syncEvents
 } from '../db/schema'
 import { readAppleCalendars } from '../integrations/apple-calendar'
+import { ContactsScopeError, buildGoogleContactInputs } from '../integrations/google-contacts'
 import { syncLinear } from '../integrations/linear'
 import { syncNotion } from '../integrations/notion'
 import { readVaultPathSetting, syncObsidian } from '../integrations/obsidian'
@@ -41,6 +42,8 @@ import {
 import { readKnowledgeFile } from '../knowledge/writer'
 import { KNOWLEDGE_DIR } from '../paths'
 import { getValidGoogleToken, loadToken } from './auth'
+import { upsertContacts } from './contacts'
+import { afterFinanceSync } from './storehouse-sync'
 
 type SyncResult = {
   service: string
@@ -601,6 +604,22 @@ export async function syncGoogle(
       await updateDriveKnowledge(files)
     }
 
+    // ---- Contacts (People API) ----
+    // Best-effort: an already-connected user who hasn't re-granted the
+    // contacts.readonly scope gets a soft-skip (ContactsScopeError) rather than a
+    // failed Google sync. Reuses the owned vCard upsert writer.
+    try {
+      const inputs = await buildGoogleContactInputs(accessToken)
+      const { imported, updated } = upsertContacts(inputs)
+      recordsUpdated += imported + updated
+    } catch (err) {
+      if (err instanceof ContactsScopeError) {
+        console.warn('[sync] google contacts skipped — reconnect Google to grant the scope')
+      } else {
+        console.warn('[sync] google contacts sync failed (non-fatal):', (err as Error).message)
+      }
+    }
+
     db.update(integrations)
       .set({ lastSyncedAt: new Date(), status: 'connected', errorMessage: null })
       .where(eq(integrations.service, 'google'))
@@ -820,6 +839,9 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
       // doesn't) so the renderer clears the card spinner and refreshes the
       // connection list — see the onSyncUpdate handler in Integrations.tsx.
       const results = await syncAllSimplefin()
+      // Fold freshly synced balances + transactions into net worth and the
+      // cross-reference engine before the renderer refreshes off `sync:update`.
+      afterFinanceSync()
       const totalRecords = results.reduce((n, r) => n + r.added, 0)
       const errors = results
         .filter((r) => r.errorMessage)

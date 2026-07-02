@@ -261,7 +261,7 @@ export function getNetWorthSnapshot(
 ): NetWorthSnapshot {
   const accounts = sqlite
     .prepare(
-      `SELECT a.id, a.name, a.asset_class, a.is_debt, a.currency
+      `SELECT a.id, a.name, a.asset_class, a.is_debt, a.currency, a.balance
          FROM finance_accounts a`
     )
     .all() as Array<{
@@ -270,6 +270,7 @@ export function getNetWorthSnapshot(
     asset_class: string
     is_debt: number
     currency: string | null
+    balance: number | null
   }>
 
   const { base, toBase } = makeBaseConverter(sqlite)
@@ -285,7 +286,10 @@ export function getNetWorthSnapshot(
       )
       .get(a.id, now) as { balance: number; captured_at: number } | undefined
 
-    const balance = last?.balance ?? 0
+    // Prefer a captured historical snapshot; fall back to the account's LIVE balance
+    // (refreshed every sync by SimpleFIN/Plaid) so net worth is real on a fresh
+    // install before the 00:05 snapshot cron has ever run, instead of showing $0.
+    const balance = last?.balance ?? a.balance ?? 0
     const capturedAt = last?.captured_at ?? null
     const currency = (a.currency || base).toUpperCase()
     const baseBalance = toBase(balance, currency)

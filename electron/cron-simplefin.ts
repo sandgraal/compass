@@ -20,6 +20,7 @@
 
 import cron from 'node-cron'
 import { syncAllSimplefin } from './integrations/simplefin/sync'
+import { afterFinanceSync } from './ipc/storehouse-sync'
 import { maybeSendNotification } from './ipc/sync'
 
 /** Cron expression for the daily SimpleFIN sync. Local time, not UTC. */
@@ -35,11 +36,17 @@ export async function runDailySimplefinSync(
   syncAll: () => Promise<
     Array<{ connectionId: string; added: number; duplicates: number; errorMessage?: string }>
   > = syncAllSimplefin,
-  notify: typeof maybeSendNotification = maybeSendNotification
+  notify: typeof maybeSendNotification = maybeSendNotification,
+  // Post-sync bridge: capture balance snapshots + project transactions into the
+  // Storehouse spine. Injected (and defended internally) so unit tests stay hermetic.
+  afterSync: () => void = afterFinanceSync
 ): Promise<void> {
   try {
     const results = await syncAll()
     if (results.length === 0) return // nothing connected — quiet
+    // Freshly synced balances + transactions are on disk now — fold them into net
+    // worth and the cross-reference engine before we notify.
+    afterSync()
     const totalRecords = results.reduce((n, r) => n + r.added, 0)
     const errored = results.filter((r) => r.errorMessage)
     if (errored.length > 0) {

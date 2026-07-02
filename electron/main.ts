@@ -32,6 +32,7 @@ import { registerSettingsHandlers } from './ipc/settings'
 import { registerSimplefinHandlers } from './ipc/simplefin'
 import { registerSpotlightHandlers, startKnowledgeMirrorWatcher } from './ipc/spotlight'
 import { registerStorehouseHandlers } from './ipc/storehouse'
+import { registerStorehouseSyncHandlers } from './ipc/storehouse-sync'
 import { registerSubscriptionsHandlers } from './ipc/subscriptions'
 import { registerSyncHandlers } from './ipc/sync'
 import { initAutoUpdater, registerUpdaterHandlers, scheduleUpdateChecks } from './ipc/updater'
@@ -167,6 +168,7 @@ app.whenReady().then(async () => {
   registerSubscriptionsHandlers(ipcMain)
   registerAssetsHandlers(ipcMain)
   registerStorehouseHandlers(ipcMain)
+  registerStorehouseSyncHandlers(ipcMain)
   registerRecordsHandlers(ipcMain)
   registerPeopleHandlers(ipcMain)
   registerEntitiesHandlers(ipcMain)

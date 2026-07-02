@@ -22,6 +22,11 @@ const result = (over: Partial<SimplefinResult>): SimplefinResult => ({
   ...over
 })
 
+// The post-sync bridge (snapshots + records projection) is exercised in
+// storehouse-sync.test.ts; inject a no-op here so these notification tests stay
+// hermetic and don't touch the DB singleton.
+const noAfter = (): void => {}
+
 describe('SIMPLEFIN_DAILY_CRON', () => {
   it('is the 06:00-local daily expression', () => {
     expect(SIMPLEFIN_DAILY_CRON).toBe('0 6 * * *')
@@ -37,7 +42,7 @@ describe('runDailySimplefinSync', () => {
 
   it('delegates the zero-record case to maybeSendNotification', async () => {
     const notify = vi.fn()
-    await runDailySimplefinSync(async () => [result({ connectionId: 'conn-a' })], notify)
+    await runDailySimplefinSync(async () => [result({ connectionId: 'conn-a' })], notify, noAfter)
     expect(notify).toHaveBeenCalledWith('simplefin', 0)
   })
 
@@ -45,14 +50,19 @@ describe('runDailySimplefinSync', () => {
     const notify = vi.fn()
     await runDailySimplefinSync(
       async () => [result({ added: 3 }), result({ connectionId: 'conn-b', added: 2 })],
-      notify
+      notify,
+      noAfter
     )
     expect(notify).toHaveBeenCalledWith('simplefin', 5)
   })
 
   it('fires an error notification when a single connection fails', async () => {
     const notify = vi.fn()
-    await runDailySimplefinSync(async () => [result({ errorMessage: 'Amex: HTTP 403' })], notify)
+    await runDailySimplefinSync(
+      async () => [result({ errorMessage: 'Amex: HTTP 403' })],
+      notify,
+      noAfter
+    )
     expect(notify).toHaveBeenCalledWith('simplefin', 0, 'Amex: HTTP 403')
   })
 
@@ -63,7 +73,8 @@ describe('runDailySimplefinSync', () => {
         result({ connectionId: 'a', errorMessage: 'A bad' }),
         result({ connectionId: 'b', errorMessage: 'B bad' })
       ],
-      notify
+      notify,
+      noAfter
     )
     expect(notify).toHaveBeenCalledOnce()
     const [, , msg] = notify.mock.calls[0]
