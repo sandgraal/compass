@@ -159,15 +159,16 @@ export default function Retirement(): JSX.Element {
         engine[fd.key] = fd.pct ? v / 100 : v
       }
 
-      const [r1, r2] = await Promise.all([
-        window.api.finance.setRetirementConfig(basic),
-        window.api.finance.setRetirementEngineConfig(engine)
-      ])
+      // Sequential (not Promise.all): the two setters touch different config
+      // stores, so a partial save is possible. Refresh after ANY outcome so the
+      // form always reflects what actually persisted, never a stale in-between.
+      const r1 = await window.api.finance.setRetirementConfig(basic)
+      const r2 = await window.api.finance.setRetirementEngineConfig(engine)
+      await refresh()
       if (!r1.success || !r2.success) {
         showToast(r1.error ?? r2.error ?? 'Failed to save.', 'error')
         return
       }
-      await refresh()
       showToast('Saved.', 'success')
     } catch (err) {
       console.error('[retirement] save failed', err)

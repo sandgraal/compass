@@ -39,6 +39,7 @@ export default function RentalStudio(): JSX.Element {
   const [data, setData] = useState<StudioData | null>(null)
   const [loading, setLoading] = useState(true)
   const [units, setUnits] = useState<StudioUnit[]>([])
+  const [rentalYears, setRentalYears] = useState('')
   const [newComp, setNewComp] = useState({
     name: '',
     zone: 'Cartago',
@@ -50,6 +51,7 @@ export default function RentalStudio(): JSX.Element {
   const applyData = useCallback((r: StudioData) => {
     setData(r)
     setUnits((r.units as StudioUnit[]) ?? [])
+    setRentalYears(String(r.settings.rentalYears))
   }, [])
 
   const refresh = useCallback(async () => {
@@ -247,7 +249,14 @@ export default function RentalStudio(): JSX.Element {
                 value={u.bedrooms ?? ''}
                 onChange={(e) =>
                   setUnits((p) =>
-                    p.map((x, i) => (i === idx ? { ...x, bedrooms: Number(e.target.value) } : x))
+                    p.map((x, i) =>
+                      i === idx
+                        ? {
+                            ...x,
+                            bedrooms: e.target.value === '' ? undefined : Number(e.target.value)
+                          }
+                        : x
+                    )
                   )
                 }
                 className="w-full bg-background border border-border rounded px-2 py-1 text-sm text-foreground"
@@ -261,7 +270,14 @@ export default function RentalStudio(): JSX.Element {
                 value={u.occupancy ?? ''}
                 onChange={(e) =>
                   setUnits((p) =>
-                    p.map((x, i) => (i === idx ? { ...x, occupancy: Number(e.target.value) } : x))
+                    p.map((x, i) =>
+                      i === idx
+                        ? {
+                            ...x,
+                            occupancy: e.target.value === '' ? undefined : Number(e.target.value)
+                          }
+                        : x
+                    )
                   )
                 }
                 className="w-full bg-background border border-border rounded px-2 py-1 text-sm text-foreground"
@@ -275,7 +291,13 @@ export default function RentalStudio(): JSX.Element {
                 onChange={(e) =>
                   setUnits((p) =>
                     p.map((x, i) =>
-                      i === idx ? { ...x, nightlyOverride: Number(e.target.value) } : x
+                      i === idx
+                        ? {
+                            ...x,
+                            nightlyOverride:
+                              e.target.value === '' ? undefined : Number(e.target.value)
+                          }
+                        : x
                     )
                   )
                 }
@@ -418,8 +440,14 @@ export default function RentalStudio(): JSX.Element {
           Rental years
           <input
             type="number"
-            defaultValue={settings.rentalYears}
-            onBlur={(e) => void mutate({ settings: { rentalYears: Number(e.target.value) } })}
+            value={rentalYears}
+            onChange={(e) => setRentalYears(e.target.value)}
+            onBlur={() => {
+              // Skip a blank/NaN blur so clearing the field doesn't silently save 0.
+              if (rentalYears.trim() !== '' && Number.isFinite(Number(rentalYears))) {
+                void mutate({ settings: { rentalYears: Number(rentalYears) } })
+              }
+            }}
             className="w-20 bg-background border border-border rounded px-2 py-1 text-sm text-foreground"
           />
         </label>
