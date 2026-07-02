@@ -1578,6 +1578,188 @@ declare global {
           input: Record<string, number | null>
         ): Promise<{ success: boolean; error?: string }>
 
+        // Rich Monte-Carlo / tax-aware retirement plan (Phase 11.4 supersession)
+        getRetirementPlan(): Promise<{
+          baseCurrency: string
+          startingAssets: number
+          hasSsaStatement: boolean
+          config: {
+            currentAge: number
+            retirementAge: number
+            horizonAge: number
+            startingAssets: number | null
+            annualContribution: number
+            realReturnPct: number
+            annualSpending: number
+            ssMonthlyAtFra: number
+            ssClaimAge: number
+            fra: number
+            airbnbAnnualNet: number
+            otherAnnualIncome: number
+            stressReturnPct: number
+            stressYears: number
+          }
+          engineConfig: {
+            meanReturn: number
+            postRetireReturn: number
+            stdDev: number
+            inflationRate: number
+            crInflationRate: number
+            fxDriftPct: number
+            salary: number
+            k401ContribPct: number
+            employerMatchPct: number
+            condoValue: number
+            condoPurchasePrice: number
+            primaryResidenceSince: number
+            condoSaleYear: number
+            filingStatus: 'single' | 'mfj'
+            ssColaRate: number
+            cajaMonthly: number
+            privateMonthly: number
+            medicalInflationRate: number
+            ltcEnabled: boolean
+            ltcMonthly: number
+            ltcStartAge: number
+            ltcYears: number
+            lifeExpectancy: number
+          }
+          // Fully-resolved engine inputs (kept loose; the form reads config/engineConfig).
+          inputs: Record<string, number | string | boolean>
+          plan: {
+            startBalance: number
+            buckets: { taxDeferred: number; taxable: number; taxableBasis: number; roth: number }
+            swr: {
+              swr: string
+              safeThreshold: number
+              status: 'safe' | 'caution' | 'risky'
+              maxSafeWithdrawal: number
+            }
+            bridge: {
+              accessAge: number
+              fundedFromTaxable: boolean
+              firstTapAge: number | null
+              spendingToAccess: number
+              taxableAtRetirement: number
+              taxableAtAccess: number | null
+              yearsToAccess: number
+            }
+            taxDrag: number[]
+            projection: Array<{
+              year: number
+              age: number
+              balance: number
+              realBalance: number
+              withdrawal: number
+              expenses: number
+              realExpenses: number
+              ssIncome: number
+              freelanceIncome: number
+              rentalIncome: number
+              healthCost: number
+              ltcCost: number
+              deferredWithdrawal: number
+              taxableWithdrawal: number
+              rmd: number
+              capitalGains: number
+              ordinaryTaxable: number
+              ltcg0Headroom: number
+              usTax: number
+              crTax: number
+              netIncome: number
+              effectiveRate: number
+              taxableBalance: number
+              taxDeferredBalance: number
+              depleted: boolean
+            }>
+          }
+          monteCarlo: {
+            successRate: string
+            percentiles: { p10: number; p25: number; p50: number; p75: number; p90: number }
+            downside: {
+              failRate: number
+              medianFailAge: number | null
+              earliestFailAge: number | null
+            }
+            paths?: {
+              p10: Array<{ year: number; age: number; value: number }>
+              p25: Array<{ year: number; age: number; value: number }>
+              p50: Array<{ year: number; age: number; value: number }>
+              p75: Array<{ year: number; age: number; value: number }>
+              p90: Array<{ year: number; age: number; value: number }>
+            }
+          }
+        }>
+        setRetirementEngineConfig(
+          input: Record<string, number | string | boolean>
+        ): Promise<{ success: boolean; error?: string }>
+
+        // CR Rental Studio (Phase 10.2)
+        getRentalStudio(): Promise<{
+          baseCurrency: string
+          comps: Array<{
+            id: number
+            name: string
+            url: string
+            zone: string
+            bedrooms: number
+            nightlyUsd: number | null
+            occupancyPct: number | null
+            rating: number | null
+            reviewCount: number | null
+            notes: string | null
+            savedAt: string | null
+          }>
+          units: Array<Record<string, unknown>>
+          settings: { includeInPlan: boolean; rentalYears: number }
+          totals: {
+            monthlyNet: number
+            annualNet: number
+            annualGross: number
+            per: Array<{
+              id: number | string | undefined
+              name: string | undefined
+              nightly: number
+              monthlyNet: number
+              annualNet: number
+              annualGross: number
+            }>
+          }
+          reconciliation: {
+            studioAnnualNet: number
+            actualsNetOperating: number
+            actualsYear: number | null
+            deltaPct: number | null
+            note: string
+          }
+        }>
+        setRentalStudio(input: {
+          addComp?: Record<string, unknown>
+          updateComp?: { id: number; patch: Record<string, unknown> }
+          deleteComp?: number
+          units?: Array<Record<string, unknown>>
+          settings?: { includeInPlan?: boolean; rentalYears?: number }
+        }): Promise<{ success: boolean; error?: string; studio?: unknown }>
+        suggestNightly(input: {
+          comps?: Array<Record<string, unknown>>
+          listing?: Record<string, unknown>
+        }): Promise<{
+          suggested: number | null
+          low: number | null
+          high: number | null
+          basis: 'no-comps' | 'median' | 'per-bedroom+median'
+          stats: {
+            count: number
+            min: number | null
+            p25: number | null
+            p50: number | null
+            p75: number | null
+            max: number | null
+            mean: number | null
+            perBedroomP50: number | null
+          }
+        }>
+
         // Days-in-country & residency (Phase 11.5)
         getResidencySummary(): Promise<{
           config: {

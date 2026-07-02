@@ -26,6 +26,14 @@
  */
 
 import type { SqliteForFx } from './finance-fx'
+import type { FilingStatus } from './finance-retire-constants'
+import {
+  DEFAULT_INPUTS,
+  type RetireInputs,
+  type RetirementPlan,
+  computePlan
+} from './finance-retire-engine'
+import { type MonteCarloResult, makeRng, runMonteCarlo } from './finance-retire-math'
 import {
   type NetWorthSnapshot,
   type SqliteForSnapshot,
@@ -354,5 +362,330 @@ export function buildRetirementProjection(
     hasSsaStatement: hasSsaStatement(sqlite),
     baseline,
     stress
+  }
+}
+
+// ─── Rich engine (Phase 11.4 supersession) ───────────────────────────────────
+//
+// The deterministic `buildRetirementProjection` above still backs the legacy
+// Finance→Retirement sub-tab. `buildRetirementPlan` below is the richer engine
+// (Monte-Carlo + tax-aware bucket drawdown, ported from retire-early-hub) that
+// the new Retirement surface consumes and that will supersede the legacy tab.
+// It reuses the SAME connectors — starting balances come from the net-worth
+// snapshot, base currency from the same snapshot — so no displayed figure moves.
+
+// Fixed seed so the plan's Monte Carlo / success rate is reproducible (matches
+// the optimizer's seed). Determinism keeps the UI stable and tests exact.
+const RETIRE_MC_SEED = 20290101
+
+/** Split the net-worth snapshot into engine seed buckets (base currency). */
+function bucketsFromSnapshot(snap: NetWorthSnapshot): { taxDeferred: number; taxable: number } {
+  let taxDeferred = 0
+  let taxable = 0
+  for (const a of snap.byAccount) {
+    if (a.isDebt) continue
+    const bal = a.baseBalance ?? 0
+    if (a.assetClass === 'retirement') taxDeferred += bal
+    else if (a.assetClass === 'savings') taxable += bal
+    // real_estate / manual_asset / spending are excluded from investable buckets.
+  }
+  return { taxDeferred: round2(taxDeferred), taxable: round2(taxable) }
+}
+
+// ─── Rich engine config (the fields the legacy 14 don't own) ─────────────────
+//
+// Everything the tax-aware engine needs BEYOND the legacy config: nominal
+// returns, accumulation (salary/401k), §121 home sale, healthcare/LTC, and the
+// life-expectancy horizon. Persisted under `retEng*` app_settings keys so the
+// new Retirement page drives the rich model WITHOUT touching the legacy config
+// (which still backs the old tab). Legacy config keeps ownership of demographics,
+// spending, SS, Airbnb net, other income, and the pre-retirement contribution.
+
+export type RetireEngineConfig = {
+  meanReturn: number // accumulation nominal
+  postRetireReturn: number // post-retirement nominal
+  stdDev: number
+  inflationRate: number
+  crInflationRate: number
+  fxDriftPct: number
+  salary: number
+  k401ContribPct: number
+  employerMatchPct: number
+  condoValue: number
+  condoPurchasePrice: number
+  primaryResidenceSince: number
+  condoSaleYear: number
+  filingStatus: FilingStatus
+  ssColaRate: number
+  cajaMonthly: number
+  privateMonthly: number
+  medicalInflationRate: number
+  ltcEnabled: boolean
+  ltcMonthly: number
+  ltcStartAge: number
+  ltcYears: number
+  lifeExpectancy: number
+}
+
+export const DEFAULT_RETIRE_ENGINE_CONFIG: RetireEngineConfig = {
+  meanReturn: DEFAULT_INPUTS.meanReturn,
+  postRetireReturn: DEFAULT_INPUTS.postRetireReturn,
+  stdDev: DEFAULT_INPUTS.stdDev,
+  inflationRate: DEFAULT_INPUTS.inflationRate,
+  crInflationRate: DEFAULT_INPUTS.crInflationRate,
+  fxDriftPct: DEFAULT_INPUTS.fxDriftPct,
+  salary: DEFAULT_INPUTS.salary,
+  k401ContribPct: DEFAULT_INPUTS.k401ContribPct,
+  employerMatchPct: DEFAULT_INPUTS.employerMatchPct,
+  condoValue: DEFAULT_INPUTS.condoValue,
+  condoPurchasePrice: DEFAULT_INPUTS.condoPurchasePrice,
+  primaryResidenceSince: DEFAULT_INPUTS.primaryResidenceSince,
+  condoSaleYear: DEFAULT_INPUTS.condoSaleYear,
+  filingStatus: DEFAULT_INPUTS.filingStatus,
+  ssColaRate: DEFAULT_INPUTS.ssColaRate,
+  cajaMonthly: DEFAULT_INPUTS.cajaMonthly,
+  privateMonthly: DEFAULT_INPUTS.privateMonthly,
+  medicalInflationRate: DEFAULT_INPUTS.medicalInflationRate,
+  ltcEnabled: DEFAULT_INPUTS.ltcEnabled,
+  ltcMonthly: DEFAULT_INPUTS.ltcMonthly,
+  ltcStartAge: DEFAULT_INPUTS.ltcStartAge,
+  ltcYears: DEFAULT_INPUTS.ltcYears,
+  lifeExpectancy: DEFAULT_INPUTS.lifeExpectancy
+}
+
+export const RETIRE_ENGINE_CONFIG_KEYS: Record<keyof RetireEngineConfig, string> = {
+  meanReturn: 'retEngMeanReturn',
+  postRetireReturn: 'retEngPostRetireReturn',
+  stdDev: 'retEngStdDev',
+  inflationRate: 'retEngInflationRate',
+  crInflationRate: 'retEngCrInflationRate',
+  fxDriftPct: 'retEngFxDriftPct',
+  salary: 'retEngSalary',
+  k401ContribPct: 'retEngK401ContribPct',
+  employerMatchPct: 'retEngEmployerMatchPct',
+  condoValue: 'retEngCondoValue',
+  condoPurchasePrice: 'retEngCondoPurchasePrice',
+  primaryResidenceSince: 'retEngPrimaryResidenceSince',
+  condoSaleYear: 'retEngCondoSaleYear',
+  filingStatus: 'retEngFilingStatus',
+  ssColaRate: 'retEngSsColaRate',
+  cajaMonthly: 'retEngCajaMonthly',
+  privateMonthly: 'retEngPrivateMonthly',
+  medicalInflationRate: 'retEngMedicalInflationRate',
+  ltcEnabled: 'retEngLtcEnabled',
+  ltcMonthly: 'retEngLtcMonthly',
+  ltcStartAge: 'retEngLtcStartAge',
+  ltcYears: 'retEngLtcYears',
+  lifeExpectancy: 'retEngLifeExpectancy'
+}
+
+export function getRetireEngineConfig(sqlite: SqliteForFx): RetireEngineConfig {
+  const read = (key: string): string | null => {
+    try {
+      const row = sqlite.prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as
+        | { value?: string }
+        | undefined
+      return row?.value ?? null
+    } catch {
+      return null
+    }
+  }
+  const num = (key: keyof RetireEngineConfig, fallback: number): number => {
+    // Guard before Number(): Number(null)/Number('') are 0, which would mask a
+    // missing setting as a real 0 instead of the default.
+    const raw = read(RETIRE_ENGINE_CONFIG_KEYS[key])
+    if (raw == null || raw === '') return fallback
+    const v = Number(raw)
+    return Number.isFinite(v) ? v : fallback
+  }
+  const bool = (key: keyof RetireEngineConfig, fallback: boolean): boolean => {
+    const raw = read(RETIRE_ENGINE_CONFIG_KEYS[key])
+    if (raw == null || raw === '') return fallback
+    return raw === '1' || raw === 'true'
+  }
+  const d = DEFAULT_RETIRE_ENGINE_CONFIG
+  const filingRaw = read(RETIRE_ENGINE_CONFIG_KEYS.filingStatus)
+  return {
+    meanReturn: num('meanReturn', d.meanReturn),
+    postRetireReturn: num('postRetireReturn', d.postRetireReturn),
+    stdDev: num('stdDev', d.stdDev),
+    inflationRate: num('inflationRate', d.inflationRate),
+    crInflationRate: num('crInflationRate', d.crInflationRate),
+    fxDriftPct: num('fxDriftPct', d.fxDriftPct),
+    salary: num('salary', d.salary),
+    k401ContribPct: num('k401ContribPct', d.k401ContribPct),
+    employerMatchPct: num('employerMatchPct', d.employerMatchPct),
+    condoValue: num('condoValue', d.condoValue),
+    condoPurchasePrice: num('condoPurchasePrice', d.condoPurchasePrice),
+    primaryResidenceSince: num('primaryResidenceSince', d.primaryResidenceSince),
+    condoSaleYear: num('condoSaleYear', d.condoSaleYear),
+    filingStatus: filingRaw === 'mfj' ? 'mfj' : 'single',
+    ssColaRate: num('ssColaRate', d.ssColaRate),
+    cajaMonthly: num('cajaMonthly', d.cajaMonthly),
+    privateMonthly: num('privateMonthly', d.privateMonthly),
+    medicalInflationRate: num('medicalInflationRate', d.medicalInflationRate),
+    ltcEnabled: bool('ltcEnabled', d.ltcEnabled),
+    ltcMonthly: num('ltcMonthly', d.ltcMonthly),
+    ltcStartAge: num('ltcStartAge', d.ltcStartAge),
+    ltcYears: num('ltcYears', d.ltcYears),
+    lifeExpectancy: num('lifeExpectancy', d.lifeExpectancy)
+  }
+}
+
+export function setRetireEngineConfig(
+  sqlite: SqliteForFx,
+  patch: Partial<RetireEngineConfig>,
+  now: number = Date.now()
+): void {
+  const write = (key: string, value: string): void => {
+    sqlite
+      .prepare(
+        `INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+      )
+      .run(key, value, now)
+  }
+  for (const [k, v] of Object.entries(patch) as Array<[keyof RetireEngineConfig, unknown]>) {
+    const key = RETIRE_ENGINE_CONFIG_KEYS[k]
+    if (!key) continue
+    if (k === 'filingStatus') {
+      if (v === 'single' || v === 'mfj') write(key, v)
+    } else if (k === 'ltcEnabled') {
+      if (typeof v === 'boolean') write(key, v ? '1' : '0')
+    } else if (typeof v === 'number' && Number.isFinite(v)) {
+      write(key, String(v))
+    }
+  }
+}
+
+/**
+ * Map the legacy config + engine config + snapshot-derived buckets into the rich
+ * engine's inputs. Legacy config owns demographics/spending/SS/airbnb/other-income/
+ * contribution; the snapshot seeds current balances (retirement→tax-deferred,
+ * savings→taxable); the engine config owns everything else. NOTE: the legacy
+ * `realReturnPct` (a REAL return) is deliberately NOT mapped onto the engine's
+ * NOMINAL returns — that would double-count inflation.
+ */
+function engineInputs(
+  config: RetirementConfig,
+  eng: RetireEngineConfig,
+  buckets: { taxDeferred: number; taxable: number }
+): RetireInputs {
+  const override = config.startingAssets
+  // A single-number override is treated as liquid taxable; else use the buckets.
+  const k401CurrentBalance = override != null ? 0 : buckets.taxDeferred
+  const currentSavings = override != null ? override : buckets.taxable
+  const horizonYears = Math.max(0, config.horizonAge - config.retirementAge)
+  return {
+    ...DEFAULT_INPUTS,
+    // Legacy-owned continuity.
+    currentAge: config.currentAge,
+    retirementAge: config.retirementAge,
+    planToAge: config.horizonAge,
+    annualExpenses: config.annualSpending,
+    ssMonthly: config.ssMonthlyAtFra,
+    ssStartAge: config.ssClaimAge,
+    annualSavingsExtra: config.annualContribution,
+    rentalNetMonthly: config.airbnbAnnualNet / 12,
+    rentalYears: config.airbnbAnnualNet > 0 ? horizonYears : 0,
+    includeRental: config.airbnbAnnualNet > 0,
+    freelanceMonthly: config.otherAnnualIncome / 12,
+    freelanceYears: config.otherAnnualIncome > 0 ? horizonYears : 0,
+    // Snapshot-seeded balances.
+    k401CurrentBalance,
+    currentSavings,
+    // Engine-owned overrides.
+    meanReturn: eng.meanReturn,
+    postRetireReturn: eng.postRetireReturn,
+    stdDev: eng.stdDev,
+    inflationRate: eng.inflationRate,
+    crInflationRate: eng.crInflationRate,
+    fxDriftPct: eng.fxDriftPct,
+    salary: eng.salary,
+    k401ContribPct: eng.k401ContribPct,
+    employerMatchPct: eng.employerMatchPct,
+    condoValue: eng.condoValue,
+    condoPurchasePrice: eng.condoPurchasePrice,
+    primaryResidenceSince: eng.primaryResidenceSince,
+    condoSaleYear: eng.condoSaleYear,
+    filingStatus: eng.filingStatus,
+    ssColaRate: eng.ssColaRate,
+    cajaMonthly: eng.cajaMonthly,
+    privateMonthly: eng.privateMonthly,
+    medicalInflationRate: eng.medicalInflationRate,
+    ltcEnabled: eng.ltcEnabled,
+    ltcMonthly: eng.ltcMonthly,
+    ltcStartAge: eng.ltcStartAge,
+    ltcYears: eng.ltcYears,
+    lifeExpectancy: eng.lifeExpectancy
+  }
+}
+
+export type RetirementPlanResult = {
+  baseCurrency: string
+  startingAssets: number // today's-dollars investable total (snapshot sum or override)
+  hasSsaStatement: boolean
+  config: RetirementConfig // legacy-owned fields (age/spending/SS/airbnb/…)
+  engineConfig: RetireEngineConfig // engine-owned fields (returns/healthcare/…)
+  inputs: RetireInputs // fully-resolved engine inputs
+  plan: RetirementPlan
+  monteCarlo: MonteCarloResult
+}
+
+/**
+ * Assemble the rich retirement plan: seed the tax-aware engine from the
+ * net-worth snapshot + legacy config, run `computePlan` + a seeded fat-tailed
+ * Monte Carlo. Pure over the DB; the seed is pinned so the result is
+ * deterministic (stable UI, exact tests).
+ */
+export function buildRetirementPlan(sqlite: SqliteForFx & SqliteForSnapshot): RetirementPlanResult {
+  const config = getRetirementConfig(sqlite)
+  const engineConfig = getRetireEngineConfig(sqlite)
+  const snap = getNetWorthSnapshot(sqlite)
+  const buckets = bucketsFromSnapshot(snap)
+  const inputs = engineInputs(config, engineConfig, buckets)
+  const plan = computePlan(inputs)
+  const i = plan.inputs
+  const inflationMean = (1 + i.crInflationRate) * (1 + i.fxDriftPct) - 1
+  const years = Math.max(1, i.planToAge - i.retirementAge)
+  const monteCarlo = runMonteCarlo({
+    startBalance: plan.startBalance,
+    annualExpenses: i.annualExpenses,
+    meanReturn: i.postRetireReturn,
+    stdDev: i.stdDev,
+    inflationMean,
+    inflationStd: 0.02,
+    years,
+    simulations: 1000,
+    ssStartAge: i.ssStartAge,
+    ssMonthly: i.ssMonthly,
+    ssColaRate: i.ssColaRate,
+    currentAge: i.retirementAge,
+    additionalIncome: i.freelanceMonthly,
+    freelanceYears: i.freelanceYears,
+    rentalNetMonthly: i.includeRental ? i.rentalNetMonthly : 0,
+    rentalYears: i.includeRental ? i.rentalYears : 0,
+    healthMonthly: i.cajaMonthly + i.privateMonthly,
+    medicalInflationRate: i.medicalInflationRate,
+    ltcEnabled: i.ltcEnabled,
+    ltcMonthly: i.ltcMonthly,
+    ltcStartAge: i.ltcStartAge,
+    ltcYears: i.ltcYears,
+    taxDrag: plan.taxDrag,
+    rng: makeRng(RETIRE_MC_SEED)
+  })
+  const startingAssets =
+    config.startingAssets != null
+      ? config.startingAssets
+      : round2(buckets.taxDeferred + buckets.taxable)
+  return {
+    baseCurrency: snap.baseCurrency,
+    startingAssets,
+    hasSsaStatement: hasSsaStatement(sqlite),
+    config,
+    engineConfig,
+    inputs: i,
+    plan,
+    monteCarlo
   }
 }

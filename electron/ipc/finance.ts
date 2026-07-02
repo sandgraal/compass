@@ -58,8 +58,28 @@ import {
   setPropertyConfig
 } from '../integrations/finance-property'
 import {
+  type Comp,
+  type Listing,
+  type Unit,
+  suggestNightly
+} from '../integrations/finance-rental-pricing'
+import {
+  type CompInput,
+  type StudioSettings,
+  addComp,
+  buildRentalStudio,
+  deleteComp,
+  setSettings,
+  setUnits,
+  studioPlanAnnualNet,
+  updateComp
+} from '../integrations/finance-rental-studio'
+import {
+  type RetireEngineConfig,
   type RetirementConfig,
+  buildRetirementPlan,
   buildRetirementProjection,
+  setRetireEngineConfig,
   setRetirementConfig
 } from '../integrations/finance-retirement'
 import {
@@ -1036,6 +1056,173 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       return { success: true }
     }
   )
+
+  // ── Rich retirement plan (Phase 11.4 supersession) ───────────────────────
+  // Monte-Carlo + tax-aware engine seeded from the net-worth snapshot; consumed
+  // by the new Retirement page. Additive — the legacy get-retirement-projection
+  // above is untouched so the current Finance→Retirement tab keeps working.
+  ipcMain.handle('finance:get-retirement-plan', () => {
+    return buildRetirementPlan(getRawSqlite())
+  })
+
+  ipcMain.handle(
+    'finance:set-retirement-engine-config',
+    (_event, raw?: Partial<RetireEngineConfig> | null) => {
+      const input: Partial<RetireEngineConfig> = raw && typeof raw === 'object' ? raw : {}
+      const patch: Partial<RetireEngineConfig> = {}
+
+      // (key, min, max) bounds — mirror the engine's own sanitize clamps.
+      const NUMERIC: Array<[keyof RetireEngineConfig, number, number]> = [
+        ['meanReturn', 0, 0.5],
+        ['postRetireReturn', 0, 0.5],
+        ['stdDev', 0, 1],
+        ['inflationRate', 0, 0.5],
+        ['crInflationRate', 0, 0.5],
+        ['fxDriftPct', -0.1, 0.1],
+        ['salary', 0, 100_000_000],
+        ['k401ContribPct', 0, 1],
+        ['employerMatchPct', 0, 0.5],
+        ['condoValue', 0, 1_000_000_000],
+        ['condoPurchasePrice', 0, 1_000_000_000],
+        ['primaryResidenceSince', 1900, 2200],
+        ['condoSaleYear', 1900, 2200],
+        ['ssColaRate', 0, 0.5],
+        ['cajaMonthly', 0, 1_000_000],
+        ['privateMonthly', 0, 1_000_000],
+        ['medicalInflationRate', 0, 0.5],
+        ['ltcMonthly', 0, 1_000_000],
+        ['ltcStartAge', 50, 110],
+        ['ltcYears', 0, 30],
+        ['lifeExpectancy', 70, 110]
+      ]
+      for (const [key, min, max] of NUMERIC) {
+        if (!(key in input)) continue
+        const rawVal = input[key]
+        if (
+          rawVal == null ||
+          typeof rawVal === 'boolean' ||
+          (typeof rawVal === 'string' && rawVal.trim() === '')
+        ) {
+          return { success: false, error: `Invalid ${key}: ${String(rawVal)}` }
+        }
+        const v = Number(rawVal)
+        if (!Number.isFinite(v) || v < min || v > max) {
+          return { success: false, error: `Invalid ${key}: ${String(rawVal)}` }
+        }
+        patch[key] = v as never
+      }
+      if ('filingStatus' in input) {
+        const fs = input.filingStatus
+        if (fs !== 'single' && fs !== 'mfj') {
+          return { success: false, error: `Invalid filingStatus: ${String(fs)}` }
+        }
+        patch.filingStatus = fs
+      }
+      if ('ltcEnabled' in input) {
+        const le = input.ltcEnabled
+        if (typeof le !== 'boolean') {
+          return { success: false, error: `Invalid ltcEnabled: ${String(le)}` }
+        }
+        patch.ltcEnabled = le
+      }
+
+      setRetireEngineConfig(getRawSqlite(), patch)
+      return { success: true }
+    }
+  )
+
+  // ── CR Rental Studio (Phase 10.2) ────────────────────────────────────────
+  // Forward-looking rental pricing/revenue from comps + listing units. Its
+  // projected net feeds the retirement engine's Airbnb income, and reconciles
+  // against the backward-looking property P&L (buildPropertyPnl).
+  ipcMain.handle('finance:get-rental-studio', () => {
+    return buildRentalStudio(getRawSqlite())
+  })
+
+  ipcMain.handle('finance:suggest-nightly', (_event, raw?: unknown) => {
+    const input =
+      raw && typeof raw === 'object' ? (raw as { comps?: Comp[]; listing?: Listing }) : {}
+    const comps = Array.isArray(input.comps) ? input.comps.slice(0, 500) : []
+    const listing = input.listing && typeof input.listing === 'object' ? input.listing : {}
+    return suggestNightly(comps, listing)
+  })
+
+  ipcMain.handle('finance:set-rental-studio', (_event, raw?: unknown) => {
+    const input =
+      raw && typeof raw === 'object'
+        ? (raw as {
+            addComp?: CompInput
+            updateComp?: { id?: number; patch?: CompInput }
+            deleteComp?: number
+            units?: Unit[]
+            settings?: Partial<StudioSettings>
+          })
+        : {}
+    const sqlite = getRawSqlite()
+
+    // Light validation of a comp payload (the module coerces the rest).
+    const validComp = (c: CompInput | undefined): string | null => {
+      if (!c || typeof c !== 'object') return 'comp must be an object'
+      if (
+        c.bedrooms != null &&
+        (!Number.isFinite(Number(c.bedrooms)) || Number(c.bedrooms) < 1 || Number(c.bedrooms) > 20)
+      ) {
+        return `Invalid bedrooms: ${c.bedrooms}`
+      }
+      if (
+        c.nightlyUsd != null &&
+        (!Number.isFinite(Number(c.nightlyUsd)) || Number(c.nightlyUsd) < 0)
+      ) {
+        return `Invalid nightlyUsd: ${c.nightlyUsd}`
+      }
+      return null
+    }
+
+    if (input.addComp !== undefined) {
+      const err = validComp(input.addComp)
+      if (err) return { success: false, error: err }
+      addComp(sqlite, input.addComp)
+    }
+    if (input.updateComp !== undefined) {
+      const { id, patch } = input.updateComp ?? {}
+      if (!Number.isFinite(Number(id))) return { success: false, error: `Invalid comp id: ${id}` }
+      const err = validComp(patch)
+      if (err) return { success: false, error: err }
+      updateComp(sqlite, Number(id), patch ?? {})
+    }
+    if (input.deleteComp !== undefined) {
+      if (!Number.isFinite(Number(input.deleteComp))) {
+        return { success: false, error: `Invalid comp id: ${input.deleteComp}` }
+      }
+      deleteComp(sqlite, Number(input.deleteComp))
+    }
+    if (input.units !== undefined) {
+      if (!Array.isArray(input.units) || input.units.length > 50) {
+        return { success: false, error: 'units must be an array of ≤50 entries' }
+      }
+      setUnits(sqlite, input.units)
+    }
+    if (input.settings !== undefined) {
+      const s = input.settings
+      if (s.includeInPlan != null && typeof s.includeInPlan !== 'boolean') {
+        return { success: false, error: `Invalid includeInPlan: ${s.includeInPlan}` }
+      }
+      if (
+        s.rentalYears != null &&
+        (!Number.isFinite(Number(s.rentalYears)) ||
+          Number(s.rentalYears) < 0 ||
+          Number(s.rentalYears) > 40)
+      ) {
+        return { success: false, error: `Invalid rentalYears: ${s.rentalYears}` }
+      }
+      setSettings(sqlite, s)
+    }
+
+    // Sync the studio's projected net into the retirement engine's Airbnb income.
+    setRetirementConfig(sqlite, { airbnbAnnualNet: Math.round(studioPlanAnnualNet(sqlite)) })
+
+    return { success: true, studio: buildRentalStudio(sqlite) }
+  })
 
   // ── Financial goals & milestones (Phase 11.6) ────────────────────────────
   // Target-date goals that auto-link to net worth / retirement / property, or

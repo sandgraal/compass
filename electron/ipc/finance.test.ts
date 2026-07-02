@@ -154,6 +154,12 @@ function createSchema(): void {
       manual_current REAL NOT NULL DEFAULT 0, monthly_contribution REAL NOT NULL DEFAULT 0,
       notes TEXT, created_at INTEGER, updated_at INTEGER
     );
+    CREATE TABLE rental_comps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '',
+      zone TEXT NOT NULL DEFAULT 'Cartago', bedrooms INTEGER NOT NULL DEFAULT 2,
+      nightly_usd REAL, occupancy_pct REAL, rating REAL, review_count INTEGER,
+      notes TEXT, saved_at TEXT, created_at INTEGER, updated_at INTEGER
+    );
     CREATE TABLE assets (
       id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE,
       type TEXT NOT NULL DEFAULT 'other', name TEXT NOT NULL, value REAL, provider TEXT,
@@ -691,6 +697,131 @@ describe('finance:retirement (Phase 11.4)', () => {
     })
     // A non-object payload is a safe no-op, not a crash.
     expect((await invoke(h, null)) as { success: boolean }).toMatchObject({ success: true })
+  })
+})
+
+describe('finance:retirement-plan (Phase 11.4 rich engine)', () => {
+  function seedRetirement(balance: number): void {
+    const id = seedAccount('401k')
+    sqlite.prepare("UPDATE finance_accounts SET asset_class = 'retirement' WHERE id = ?").run(id)
+    sqlite
+      .prepare(
+        'INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (?, ?, ?, ?)'
+      )
+      .run(id, Date.now(), balance, 'manual')
+  }
+
+  it('get-retirement-plan seeds from net worth + returns Monte Carlo + both configs', async () => {
+    seedRetirement(800_000)
+    const getPlan = await registerAndGet('finance:get-retirement-plan')
+    const res = (await invoke(getPlan)) as {
+      startingAssets: number
+      engineConfig: { ltcEnabled: boolean }
+      monteCarlo: { successRate: string }
+      plan: { projection: unknown[]; startBalance: number }
+    }
+    expect(res.startingAssets).toBe(800_000) // sourced from net worth
+    expect(res.engineConfig.ltcEnabled).toBe(false) // engine-config default
+    expect(res.plan.projection.length).toBeGreaterThan(0)
+    expect(res.plan.startBalance).toBeGreaterThan(0)
+    expect(Number.parseFloat(res.monteCarlo.successRate)).toBeGreaterThanOrEqual(0)
+  })
+
+  it('set-retirement-engine-config persists + validates numbers / enum / boolean', async () => {
+    const setEng = await registerAndGet('finance:set-retirement-engine-config')
+    expect(
+      (await invoke(setEng, {
+        postRetireReturn: 0.045,
+        ltcEnabled: true,
+        filingStatus: 'mfj'
+      })) as {
+        success: boolean
+      }
+    ).toMatchObject({ success: true })
+    // Out-of-range number rejected.
+    expect((await invoke(setEng, { postRetireReturn: 5 })) as { success: boolean }).toMatchObject({
+      success: false
+    })
+    // Bad filing-status enum rejected.
+    expect((await invoke(setEng, { filingStatus: 'joint' })) as { success: boolean }).toMatchObject(
+      {
+        success: false
+      }
+    )
+    // Non-boolean ltcEnabled rejected.
+    expect((await invoke(setEng, { ltcEnabled: 'yes' })) as { success: boolean }).toMatchObject({
+      success: false
+    })
+    // A non-object payload is a safe no-op.
+    expect((await invoke(setEng, null)) as { success: boolean }).toMatchObject({ success: true })
+  })
+
+  it('engine config flows through to the plan', async () => {
+    seedRetirement(800_000)
+    const setEng = await registerAndGet('finance:set-retirement-engine-config')
+    await invoke(setEng, { ltcEnabled: true, ltcMonthly: 4000, ltcStartAge: 82, ltcYears: 5 })
+    const getPlan = await registerAndGet('finance:get-retirement-plan')
+    const res = (await invoke(getPlan)) as {
+      engineConfig: { ltcEnabled: boolean }
+      inputs: { ltcEnabled: boolean }
+    }
+    expect(res.engineConfig.ltcEnabled).toBe(true)
+    expect(res.inputs.ltcEnabled).toBe(true)
+  })
+})
+
+describe('finance:rental-studio (Phase 10.2)', () => {
+  it('get-rental-studio returns defaults on an empty studio', async () => {
+    const h = await registerAndGet('finance:get-rental-studio')
+    const r = (await invoke(h)) as {
+      comps: unknown[]
+      units: unknown[]
+      settings: { includeInPlan: boolean; rentalYears: number }
+      reconciliation: { actualsNetOperating: number; deltaPct: number | null }
+    }
+    expect(r.comps).toEqual([])
+    expect(r.settings).toEqual({ includeInPlan: true, rentalYears: 20 })
+    expect(r.reconciliation.actualsNetOperating).toBe(0)
+    expect(r.reconciliation.deltaPct).toBeNull()
+  })
+
+  it('set-rental-studio adds a comp/unit, validates, and syncs airbnb net into retirement', async () => {
+    const set = await registerAndGet('finance:set-rental-studio')
+    const ok = (await invoke(set, {
+      addComp: { name: 'A', bedrooms: 2, nightlyUsd: 120 },
+      units: [{ id: 'u1', name: 'Cabin', bedrooms: 2, occupancy: 0.6 }]
+    })) as { success: boolean; studio: { comps: unknown[]; totals: { annualNet: number } } }
+    expect(ok.success).toBe(true)
+    expect(ok.studio.comps.length).toBe(1)
+    expect(ok.studio.totals.annualNet).toBeGreaterThan(0)
+
+    // The projected net was pushed into the retirement config's Airbnb income.
+    const getProj = await registerAndGet('finance:get-retirement-projection')
+    const proj = (await invoke(getProj)) as { config: { airbnbAnnualNet: number } }
+    expect(proj.config.airbnbAnnualNet).toBeGreaterThan(0)
+
+    // Validation: an out-of-range bedroom count is rejected.
+    expect(
+      (await invoke(set, { addComp: { bedrooms: 99 } })) as { success: boolean }
+    ).toMatchObject({
+      success: false
+    })
+    // A non-object payload is a safe no-op that still succeeds.
+    expect((await invoke(set, null)) as { success: boolean }).toMatchObject({ success: true })
+  })
+
+  it('suggest-nightly returns a price band from comps', async () => {
+    const h = await registerAndGet('finance:suggest-nightly')
+    const r = (await invoke(h, {
+      comps: [
+        { nightlyUSD: 90, bedrooms: 2 },
+        { nightlyUSD: 110, bedrooms: 2 },
+        { nightlyUSD: 50, bedrooms: 1 }
+      ],
+      listing: { bedrooms: 2 }
+    })) as { suggested: number | null; basis: string }
+    expect(typeof r.suggested).toBe('number')
+    expect(r.basis).toBe('per-bedroom+median')
   })
 })
 

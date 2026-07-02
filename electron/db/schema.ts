@@ -656,3 +656,24 @@ export const financialGoals = sqliteTable('financial_goals', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
+
+// CR Rental Studio comps (Phase 10.2) — Airbnb-style listings the user collects to
+// price their own unit. A growing, row-edited list → its own table (modeled on
+// financial_goals). Units + studio settings are small/fixed and live as JSON in
+// app_settings instead. Only nightly_usd + bedrooms feed the pricing engine; the
+// rest is metadata for the comps-table UI.
+export const rentalComps = sqliteTable('rental_comps', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull().default(''),
+  url: text('url').notNull().default(''),
+  zone: text('zone').notNull().default('Cartago'),
+  bedrooms: integer('bedrooms').notNull().default(2),
+  nightlyUsd: real('nightly_usd'),
+  occupancyPct: real('occupancy_pct'),
+  rating: real('rating'),
+  reviewCount: integer('review_count'),
+  notes: text('notes'),
+  savedAt: text('saved_at'), // ISO 'YYYY-MM-DD' the comp was captured
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
