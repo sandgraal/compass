@@ -267,10 +267,12 @@ export function computePlan(inputs: Record<string, unknown> = {}): RetirementPla
     years: yearsToRetire
   })
 
+  const sec121Eligible = i.condoSaleYear - i.primaryResidenceSince >= 2
   const condo = calcCondoProceeds({
     estimatedValue: i.condoValue,
     purchasePrice: i.condoPurchasePrice,
-    filingStatus: i.filingStatus
+    filingStatus: i.filingStatus,
+    sec121Eligible
   })
 
   const extraSavings = fvAnnuity(i.annualSavingsExtra / 12, i.meanReturn, yearsToRetire)

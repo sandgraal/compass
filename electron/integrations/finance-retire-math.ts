@@ -75,28 +75,31 @@ export function calcCondoProceeds({
   estimatedValue,
   purchasePrice,
   closingCostsPct = 0.06,
-  filingStatus = 'single'
+  filingStatus = 'single',
+  sec121Eligible = true
 }: {
   estimatedValue: number
   purchasePrice: number
   closingCostsPct?: number
   filingStatus?: FilingStatus
+  sec121Eligible?: boolean
 }): CondoProceedsResult {
-  const exclusion = filingStatus === 'mfj' ? 500_000 : 250_000
   const gain = estimatedValue - purchasePrice
-  const taxableGain = Math.max(0, gain - exclusion)
+  const exclusionLimit = filingStatus === 'mfj' ? 500_000 : 250_000
+  const exclusionApplied = sec121Eligible ? Math.min(gain, exclusionLimit) : 0
+  const taxableGain = Math.max(0, gain - exclusionApplied)
   const closingCosts = estimatedValue * closingCostsPct
   const netProceeds = estimatedValue - closingCosts - taxableGain * 0.15 // assume 15% LTCG if any
   return {
     estimatedValue,
     purchasePrice,
     grossGain: gain,
-    exclusionApplied: Math.min(gain, exclusion),
+    exclusionApplied,
     taxableGain,
     estimatedTaxOnGain: taxableGain * 0.15,
     closingCosts,
     netProceeds,
-    sec121Eligible: true
+    sec121Eligible
   }
 }
 

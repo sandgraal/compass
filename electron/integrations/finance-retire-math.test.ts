@@ -78,6 +78,18 @@ describe('calcCondoProceeds — §121', () => {
     })
     expect(r.taxableGain).toBe(0) // 420k < 500k
   })
+  it('taxes the full gain when §121 eligibility is not met', () => {
+    const r = calcCondoProceeds({
+      estimatedValue: 400_000,
+      purchasePrice: 180_000,
+      filingStatus: 'single',
+      sec121Eligible: false
+    })
+    expect(r.sec121Eligible).toBe(false)
+    expect(r.exclusionApplied).toBe(0)
+    expect(r.taxableGain).toBe(220_000) // full gain taxable
+    expect(r.estimatedTaxOnGain).toBeCloseTo(33_000, 6) // 220k * 15%
+  })
 })
 
 describe('projectRetirementDrawdown — legacy (tax-free) mode', () => {
