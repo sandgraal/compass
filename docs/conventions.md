@@ -27,7 +27,9 @@ A new IPC handler always touches **three files**:
    ipcMain.handle('<domain>:<verb>', (_event, ...args) => { /* ... */ })
    ```
    - Validate inputs (path traversal, type checks)
-   - Wrap I/O errors and return `{ success: boolean, error?: string }`
+   - Two return shapes, by handler kind:
+     - **GET/query handlers** (the majority — `finance:get-accounts`, `finance:get-net-worth-snapshot`, `finance:get-retirement-plan`, `finance:get-holdings`, etc.) return the raw data directly, no wrapper. Let the renderer's try/catch handle IPC-level failures.
+     - **Mutation/set-style handlers** (`finance:set-retirement-engine-config`, `finance:set-rental-studio`, etc.) wrap I/O and validation errors and return `{ success: boolean, error?: string }` so the renderer can toast a specific message.
 
 2. **Expose in `electron/preload.ts`** under the appropriate namespace:
    ```ts
@@ -53,12 +55,13 @@ if (!fullPath.startsWith(KNOWLEDGE_DIR)) throw new Error('Path traversal blocked
 ```
 Or use the existing `relativePath.includes('..')` guard. **Never trust input paths.**
 
-## Toast / Confirm pattern (in progress — see Phase 1.4)
+## Toast / Confirm pattern
 
-Today's mix of `alert()` / `confirm()` / inline toast is being unified.
-- Future: `import { useToast } from '@/components/ui/toast'`
-- Future: `import { ConfirmDialog } from '@/components/ui/confirm-dialog'`
-- Old `alert()`/`confirm()` calls being migrated PR by PR.
+The unified pattern (Phase 1.4) is complete and is the only pattern used anywhere in the codebase — raw `alert()`/`window.confirm()` are gone from `src/`. Every page, including the newest ones (`Retirement.tsx`, `RentalStudio.tsx`), uses these two primitives:
+- `import { useToast } from '../components/ui/Toast'` → `const { toast } = useToast()` for fire-and-forget notifications
+- `import { useConfirm } from '../components/ui/ConfirmDialog'` → `const confirm = useConfirm()` for destructive-action confirmations, used as `await confirm({...})`
+
+Note the actual file casing (`Toast.tsx`, `ConfirmDialog.tsx` — PascalCase, under `src/components/ui/`) and that imports are relative paths, not the `@/` alias — no file in `src/` currently imports via `@/`, even though `tsconfig.web.json` does configure `@/*` → `src/*`.
 
 ## Styling
 
@@ -82,8 +85,8 @@ Today's mix of `alert()` / `confirm()` / inline toast is being unified.
 
 ## Error handling
 
-- IPC handlers catch all errors and return `{ success: false, error: String(err) }`.
-- Renderer code handles `{ success: false }` with a toast (not `console.error`).
+- Mutation-style IPC handlers catch errors and return `{ success: false, error: String(err) }`; GET/query handlers let thrown errors propagate as a rejected IPC promise instead (see the IPC handler pattern above).
+- Renderer code handles `{ success: false }` — or a caught rejection from a GET call — with a toast (not `console.error`).
 - Never silently swallow errors that have user impact.
 
 ## Security invariants (DO NOT BREAK)
@@ -112,7 +115,7 @@ Conventional commits enforced by Lefthook hint (not strict):
 
 Co-author Claude on every Claude-touched commit:
 ```
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 ```
 
 ## PR checklist

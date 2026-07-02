@@ -1,7 +1,9 @@
 # Compass
 
 Local-first personal life OS. Electron 41 + React 18 + TypeScript + Drizzle/SQLite + TipTap.
-All user data stays on disk; only OAuth tokens leave the machine (and only to Google/GitHub).
+All user data stays on disk. The only outbound calls are ones you explicitly opt into: OAuth
+tokens (Google/GitHub), SimpleFIN/Plaid API credentials for bank sync, optional BYO LLM calls
+(Anthropic/OpenAI) if you configure a key, and an unauthenticated FX-rate fetch (open.er-api.com).
 
 ## Run
 - `npm run dev` — start Electron + Vite HMR
@@ -19,6 +21,8 @@ All user data stays on disk; only OAuth tokens leave the machine (and only to Go
 - Adding a new integration → [`docs/integrations.md`](docs/integrations.md)
 - Knowledge auto-update pipeline → [`docs/knowledge-extractor.md`](docs/knowledge-extractor.md)
 - Agent orchestration / worktrees → [`docs/agent-orchestration.md`](docs/agent-orchestration.md)
+- Claude/MCP integration + security model → [`docs/claude-integration.md`](docs/claude-integration.md)
+- Finance module overview (ingest, net worth, forecast, tax tagging) → [`docs/finance.md`](docs/finance.md)
 
 ## Hard constraints (Lefthook + hooks enforce these — failure ≠ "try harder")
 - Never write to `knowledge-base/`, `.vault/`, `.data/`, `.env*`, `*.db*` from this repo's working tree

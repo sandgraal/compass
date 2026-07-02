@@ -7,8 +7,10 @@ Compass is keyboard-first. Three mechanisms let you move and capture without hun
 Press **⌘K** anywhere to open the global palette. It does two jobs at once:
 
 **Navigation & actions:**
-- Jump to any page: Dashboard, Daily, Weekly, Monthly, Knowledge Base, Ask Compass, Claude Inbox,
-  Vault, Finance, Integrations, Settings.
+- Jump to any page: **Overview**, **Dashboard**, **Storehouse**, **Timeline**, Daily, Weekly,
+  Monthly, Knowledge Base, Ask Compass, Claude Inbox, Vault, **Contacts**, **People**,
+  **Merchants & Places**, **Subscriptions**, **Household & Assets**, **Export & Portability**,
+  Finance, **Retirement**, **CR Rental Studio**, Integrations, Settings.
 - Deep links: **Net Worth**, **Cash-flow forecast** (open the right Finance tab directly).
 - Quick actions: **New task for today**, **Search knowledge base**, **Sync all services**,
   **Open data folder**.

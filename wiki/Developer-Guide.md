@@ -32,14 +32,20 @@ e2e/                 # Playwright specs
 ```bash
 npm run dev          # Electron + Vite HMR
 npm run build        # production build
+npm run preview      # electron-vite preview of a production build
 npm run typecheck    # tsc for renderer + main
 npm run check        # Biome lint + format check
 npm run format       # Biome write
+npm run lint:fast    # oxlint — fast supplemental linter
+npm run lint:react   # eslint over src/ (React-specific rules)
 npm run test:run     # Vitest one-shot  ← use this, NOT `npm test` (watch mode)
+npm run test:coverage # Vitest one-shot with coverage
 npm run test:e2e     # Playwright
 npm run db:generate  # drizzle-kit migration from schema
 npm run db:migrate   # run migrations
 npm run screenshots  # seed synthetic demo data + capture docs/images
+npm run build:mcpb   # build the MCP bundle (scripts/build-mcpb.ts)
+npm run knip         # find unused files/exports/dependencies
 npm run status       # refresh the project-status snapshot
 ```
 

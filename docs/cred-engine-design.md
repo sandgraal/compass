@@ -91,7 +91,7 @@ changes its DOM and breaks an adapter (handled as a clean, surfaced failure, not
  │  ┌──────────────────┐            ┌─────────────────────────────────────┐  │
  │  │ cred:list        │            │ runtime.ts   — opens + drives the    │  │
  │  │ cred:run(portal) │──drives──▶ │   sandboxed BrowserWindow            │  │
- │  │ cred:cancel      │            │ adapters/<portal>.ts — per-portal    │  │
+ │  │ cred:cancel      │            │ adapters.ts  — per-portal            │  │
  │  │ cred:save-cred   │ (v2 only)  │   steps: navigate → locate → export  │  │
  │  │ cred:status      │            │ vault.ts     — portal-credentials    │  │
  │  └──────────────────┘            │   (v2, reuses crypto-vault)          │  │
@@ -175,31 +175,45 @@ Extends the Plaid child-window pattern, hardened:
 - `webContents.setWindowOpenHandler(() => ({ action: 'deny' }))` — no popups/new windows.
 - `will-navigate` / `will-redirect` allow-list pinned to the portal's origin(s); anything else is blocked
   and surfaced as an error (defends against an open-redirect walking the session off-origin).
-- Per-portal CSP applied via `session.webRequest.onHeadersReceived` (header-based, since these are real
-  HTTP responses — unlike Plaid's `data:` URL meta-tag case).
+- **No portal-CSP rewriting.** Unlike Plaid's `data:` URL meta-tag case, CRED does **not** intercept or
+  rewrite the portal's own CSP headers via `session.webRequest.onHeadersReceived` — overriding a live
+  third-party site's headers would risk breaking it. Isolation instead comes from the combination already
+  listed above: the cold, non-persistent session partition, `sandbox: true`, no Compass preload, no popups,
+  and the `will-navigate`/`will-redirect` allow-list pinned to the adapter's origins (see the header comment
+  in `electron/integrations/cred/window.ts`).
 - `session.on('will-download')` → forces `item.setSavePath(<temp>/<sanitized>)`, enforces `MAX_IMPORT_BYTES`,
   resolves a promise with the final path.
 - A hard **timeout** and a user-visible **Cancel** that destroys the window and clears the session.
 
-### 6.3 The portal adapter — `electron/integrations/cred/adapters/<portalId>.ts`
-A small, declarative description of one portal. The adapter never reads credential fields and never types a
-password (the user does, in Mode A). It declares:
+### 6.3 The portal adapter — `electron/integrations/cred/adapters.ts`
+A small, declarative description of one portal. **Shipped as a single flat file**, not a per-portal
+directory: `electron/integrations/cred/adapters.ts` defines each adapter (e.g. `SSA_ADAPTER`) plus the
+`CRED_ADAPTERS` registry array together, alongside `adapters.test.ts`. Split into per-portal files only if
+the registry grows unwieldy. The adapter never reads credential fields and never types a password (the user
+does, in Mode A). It declares (see `electron/integrations/cred/types.ts` for the authoritative shape):
 ```ts
 interface PortalAdapter {
   id: string                       // 'ssa' | 'usps' | …
   name: string
   loginUrl: string                 // pinned origin — the only place we navigate to
   origins: string[]               // allow-list for will-navigate
+  /** 'beta' until its selectors have been validated against the real portal with a live account
+   *  (surfaced in `cred:list` and a UI "beta" badge so the user knows it may need a tweak). */
+  status: 'beta' | 'stable'
   /** Signal that the user has reached the authenticated area (URL test or selector). */
-  isLoggedIn(webContents): Promise<boolean>
-  /** From logged-in state, drive to the export and trigger it. Returns when a download starts
-   *  (download mode) or returns extracted text (scrape mode — flagged brittle/ToS-gray). */
-  fetch(webContents): Promise<{ kind: 'download' } | { kind: 'scrape'; text: string }>
+  isLoggedIn(page: AutomationPage): Promise<boolean>
+  /** From logged-in state, drive to the export and return the artifact. */
+  fetch(page: AutomationPage): Promise<CredArtifact>
 }
 ```
 Adapters are pure navigation logic (`executeJavaScript` to click an "Export" button, wait for a selector).
 **Scrape mode** (reading the rendered DOM when no download exists) is supported but explicitly marked the
 brittle, ToS-grayest path and is preferred only when no file download is available.
+
+The `status` field is load-bearing, not decorative: it's surfaced in `cred:list` output and rendered as a
+visible **"beta"** badge next to the Automate button in `src/pages/DataRights.tsx`, and it's part of why
+`COMPASS_ENABLE_CRED` stays off by default — the shipped SSA adapter is itself still `'beta'` pending
+validation against a live account.
 
 ### 6.4 The artifact handoff
 A `download`-mode result is a file path → passed straight into the **existing** `ingestPath` used by

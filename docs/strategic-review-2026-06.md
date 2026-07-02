@@ -1,5 +1,8 @@
 # Strategic review — June 2026
 
+> **⚠️ Superseded — kept as a historical record; the Phase 11 it proposed shipped in full on 2026-06-30.**
+> See [`implementation_plan.md`](implementation_plan.md) § Phase 11 for current status.
+>
 > Audit snapshot taken **2026-06-26** (at v0.14.0). The living tracker is
 > [`implementation_plan.md`](implementation_plan.md); this file is the *why* behind the next shape of that
 > tracker. **Supersedes** [`strategic-review-2026-05.md`](strategic-review-2026-05.md) (which drove Phases

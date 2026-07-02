@@ -47,6 +47,16 @@ One async function per integration:
 
 Extractors are pure functions of their input — calling them with the same data twice produces the same file. Don't append; always rewrite.
 
+## Sibling extractor modules
+
+The pipeline isn't limited to `extractor.ts` — several domains that don't map cleanly to a single external integration have their own extractor module alongside it, all calling the same `updateKnowledgeFile` writer and following the same conventions above:
+
+- **`electron/knowledge/finance-extractor.ts`** — `writeFinancesOverview`, `writeFinancesDebt`, `writeFinancesMonthly`, and `writeAllFinanceKnowledge` (a convenience wrapper that calls all three) — writes the finance summary pages
+- **`electron/knowledge/contacts-extractor.ts`** — `writeRelationships` — writes `relationships.md` from the contacts table
+- **`electron/knowledge/records-extractor.ts`** — `updateRecordsKnowledge` — writes an overview page summarizing the Storehouse `records` timeline (counts, sources, span)
+
+Follow the same pattern when extending any of these (or adding a new sibling module): pure functions of their input, idempotent rewrite (not append), and delegate the actual file write to `updateKnowledgeFile`.
+
 ## Diff view (KnowledgeBase.tsx)
 
 The diff view (GitCompare button in the editor toolbar) compares the current file to `<path>.prev`. The `.prev` file is automatically created by `updateKnowledgeFile` before each overwrite. If no `.prev` exists, the button doesn't appear (no diff to show).

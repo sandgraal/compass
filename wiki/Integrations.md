@@ -28,6 +28,12 @@ The page renders one card per service with a **Connect** button and connection s
 | **Notion** | Shared pages → `knowledge-base/notion/*.md` | Internal-integration token |
 | **Obsidian** | Two-way markdown bridge (vault ↔ knowledge base) | Local vault path — no account |
 
+## Coming soon
+
+The Integrations page also shows an upcoming/not-yet-connected card for **Slack** ("Action items
+from DMs and channels", scoped to `messages:read`). It's a placeholder for a future integration —
+there's no Connect flow behind it yet.
+
 ## Connecting Google (OAuth)
 
 Google requires you to use **your own** OAuth app (so your data flows through *your* Google Cloud

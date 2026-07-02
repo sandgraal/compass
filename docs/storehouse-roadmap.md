@@ -1,6 +1,6 @@
 # Storehouse Roadmap — The Acquisition Engine (Phase 10)
 
-> **Status (v0.14.0):** the spine + first waves **shipped.** The Drop Zone, the `records`/Timeline store
+> **Status (v0.16.0):** the spine + first waves **shipped.** The Drop Zone, the `records`/Timeline store
 > (migration `0016`), **~44 recognizers** (`electron/lib/recognizers.ts`), the Data-Rights Concierge
 > (`src/lib/data-rights.ts`, 16 sources), and the CRED sandbox (`electron/integrations/cred/`, SSA adapter,
 > gated off by default) are live — see [`implementation_plan.md`](implementation_plan.md) § Phase 10 for
@@ -204,8 +204,8 @@ Builds on Phase 9's shipped spine; **does not renumber 9.x**. Each wave is its o
   registry) + the unified **`records`/timeline store** (migration `0016`) + a basic **Timeline** view.
   Seed recognizers: a Google Takeout subset, Apple Health `export.xml`, and one credit-report PDF.
   *Everything else hangs off this — build first.*
-- [~] **10.2 Financial & credit completeness** 🟡 *credit-report + tax-doc PDF recognizers shipped; holdings/IRS/crypto open (feeds Phase 11)* — credit reports (RIGHTS), brokerage/retirement
-  (SnapTrade or Plaid Investments), IRS/tax transcripts, crypto. Extends Phase 4 net worth + forecast.
+- [~] **10.2 Financial & credit completeness** 🟡 *credit-report + tax-doc PDF recognizers shipped; a generic brokerage-holdings CSV importer (FILE path) shipped (PR #271 — `electron/integrations/finance-holdings.ts`, dated `records` snapshots, Net Worth holdings card); LIVE holdings feed, IRS transcripts, crypto still open (feeds Phase 11)* — credit reports (RIGHTS), brokerage/retirement holdings
+  LIVE auto-feed (SnapTrade or Plaid Investments), IRS/tax transcripts, crypto. Extends Phase 4 net worth + forecast.
 - [~] **10.3 Health & medical** 🟡 *Apple Health `export.xml` recognizer shipped; FHIR/genetics/wearables open* — Apple Health (FILE) → FHIR/Blue Button (evaluate Fasten Health) →
   genetics → wearables. Feeds the Phase 9.4 `medical_*` tables.
 - [~] **10.4 Digital footprint & comms** 🟡 *Google/Meta/LinkedIn/Amazon/Spotify/Netflix/YouTube + browser + iMessage + email shipped; Apple/WhatsApp/Signal/Telegram open* — the big takeouts (Google/Meta/X/LinkedIn/Amazon/Spotify) +

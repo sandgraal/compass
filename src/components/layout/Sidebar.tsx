@@ -47,6 +47,7 @@ interface SyncIndicator {
 export function Sidebar(): JSX.Element {
   const [integrations, setIntegrations] = useState<SyncIndicator[]>([])
   const [inboxCount, setInboxCount] = useState(0)
+  const [appVersion, setAppVersion] = useState('')
 
   useEffect(() => {
     const isElectron = typeof window !== 'undefined' && !!window.api
@@ -56,6 +57,11 @@ export function Sidebar(): JSX.Element {
     window.api.sync.getSyncStatus().then((rows) => {
       setIntegrations(rows.map((r) => ({ service: r.service, status: r.status })))
     })
+
+    window.api.updater
+      .getVersion()
+      .then(setAppVersion)
+      .catch(() => {})
 
     // Load inbox count
     window.api.gmail
@@ -251,7 +257,9 @@ export function Sidebar(): JSX.Element {
             <span>K</span>
           </kbd>
         </button>
-        <p className="text-xs text-muted-foreground/50">Compass v0.1.0 · Local only</p>
+        <p className="text-xs text-muted-foreground/50">
+          Compass{appVersion ? ` v${appVersion}` : ''} · Local only
+        </p>
       </div>
     </aside>
   )
