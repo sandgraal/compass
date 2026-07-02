@@ -1,4 +1,5 @@
 import {
+  BedDouble,
   Blocks,
   BookOpen,
   Bookmark,
@@ -109,6 +110,7 @@ export function Sidebar(): JSX.Element {
       items: [
         { label: 'Finance', to: '/finance', icon: <TrendingUp size={18} /> },
         { label: 'Retirement', to: '/retirement', icon: <PiggyBank size={18} /> },
+        { label: 'Rental Studio', to: '/rental-studio', icon: <BedDouble size={18} /> },
         { label: 'Subscriptions', to: '/subscriptions', icon: <CreditCard size={18} /> },
         { label: 'Household & Assets', to: '/assets', icon: <Home size={18} /> }
       ]

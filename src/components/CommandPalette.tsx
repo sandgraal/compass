@@ -1,5 +1,6 @@
 import {
   ArrowRight,
+  BedDouble,
   BookOpen,
   Calendar,
   CalendarDays,
@@ -295,6 +296,14 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
         'ss',
         'social security'
       ]
+    },
+    {
+      id: 'rental-studio',
+      label: 'CR Rental Studio',
+      description: 'Price your Airbnb from comps & project net revenue',
+      icon: <BedDouble size={15} />,
+      action: () => nav('/rental-studio'),
+      keywords: ['rental', 'airbnb', 'studio', 'comps', 'nightly', 'occupancy', 'cr', 'costa rica']
     },
     {
       id: 'finance-networth',
