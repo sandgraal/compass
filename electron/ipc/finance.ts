@@ -1097,9 +1097,17 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       ]
       for (const [key, min, max] of NUMERIC) {
         if (!(key in input)) continue
-        const v = Number(input[key])
+        const rawVal = input[key]
+        if (
+          rawVal == null ||
+          typeof rawVal === 'boolean' ||
+          (typeof rawVal === 'string' && rawVal.trim() === '')
+        ) {
+          return { success: false, error: `Invalid ${key}: ${String(rawVal)}` }
+        }
+        const v = Number(rawVal)
         if (!Number.isFinite(v) || v < min || v > max) {
-          return { success: false, error: `Invalid ${key}: ${String(input[key])}` }
+          return { success: false, error: `Invalid ${key}: ${String(rawVal)}` }
         }
         patch[key] = v as never
       }
