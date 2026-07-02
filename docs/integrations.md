@@ -7,13 +7,13 @@ Use the `add-integration` skill (`.claude/skills/add-integration/SKILL.md`) to d
 ### 1. Pick the data shape
 What data are you syncing? Pick or create a table in `electron/db/schema.ts`. Examples:
 - Notion → `notion_pages` table (id, title, url, lastEdited, syncedAt)
-- Linear → reuse `github_items` with `repo` repurposed as `team`, or new `linear_issues`
+- Linear → its own `linear_issues` table (`electron/db/schema.ts`) — already shipped this way (PAT-based, see `electron/integrations/linear.ts`); use it as the reference example for a PAT integration with a dedicated table
 - Slack → `slack_action_items` (similar to `gmail_actions`)
 
 If new table → run the `migration-author` subagent to generate the Drizzle migration.
 
 ### 2. Add the integration row
-On first connect, ensure a row exists in `integrations` with `service='<name>'`. Pattern is in `electron/ipc/auth.ts` (`registerService` helper).
+On first connect, ensure a row exists in `integrations` with `service='<name>'`. There's no shared helper for this — each OAuth/PAT handler does a raw `db.insert(integrations).values({ service: '<name>', ... })` inline. Copy the pattern from an existing handler in `electron/ipc/auth.ts` (google, github) or a PAT module like `electron/integrations/linear.ts` / `electron/integrations/notion.ts`.
 
 ### 3. OAuth flow (or PAT input)
 - OAuth: copy the pattern from `auth:connect-google` or `auth:connect-github` in `electron/ipc/auth.ts`. Use a child `BrowserWindow` for the redirect.
@@ -21,7 +21,11 @@ On first connect, ensure a row exists in `integrations` with `service='<name>'`.
 - **Always store tokens encrypted.** Never plaintext on disk, never sent to renderer.
 
 ### 4. Sync function
-Add `sync<Service>()` to `electron/ipc/sync.ts`:
+Add `sync<Service>()` in its own module, `electron/integrations/<service>.ts` (this is the actual current pattern — e.g. `syncNotion` in `electron/integrations/notion.ts`, `syncLinear` in `electron/integrations/linear.ts`, `syncTodoist` in `electron/integrations/todoist.ts`). `electron/ipc/sync.ts` only holds the handful of original inline sync functions (`syncAppleCalendar`, `syncGoogle`, `syncGitHub`) plus imports every other service's function purely for dispatch:
+```ts
+import { syncLinear } from '../integrations/linear'
+```
+Your module should:
 - Take an optional `mainWindow` for progress events
 - Look up the integration row, get `integrationId` for `sync_events` logging
 - Auth headers from decrypted token
@@ -36,7 +40,9 @@ Add `update<Service>Knowledge(items)` to `electron/knowledge/extractor.ts`:
 - Call `updateKnowledgeFile(KNOWLEDGE_DIR, '<category>/<file>.md', content)` — this auto-writes a `.prev` snapshot for the diff view
 
 ### 6. Schedule
-- For now, the `cron.ts` schedules a single combined task. Once Phase 2.5 lands, you'll register your service with `restartCronJobsFor('<service>')`.
+- `electron/cron.ts` already schedules one cron task **per integration row**: `startCronJobs()` reads every row in `integrations`, resolves its `syncIntervalMinutes` (falling back to the legacy global `appSettings.syncInterval`), and calls `scheduleForService(service, interval)` for each — so your new row gets its own independently-configurable schedule automatically, no extra registration needed.
+- Add your service to the dispatch table in `runSyncForService(service)` in `cron.ts` so the scheduled tick actually calls your sync function.
+- After changing the `integrations` table (new row, interval edit), call `restartCronJobs()` (no args — it re-derives every schedule from the table) rather than trying to target one service.
 - `sync:trigger` IPC handler dispatches to your sync function based on `service` arg.
 
 ### 7. Frontend
@@ -44,17 +50,21 @@ Add `update<Service>Knowledge(items)` to `electron/knowledge/extractor.ts`:
 - Setup guide entry: append to the OAuth setup guide section if the user needs to create their own OAuth app
 - The card UI auto-renders from the array
 
-### 8. Optional: dedicated page
+### 8. CSP allowlist
+Every real integration needs its outbound host reachable under the production CSP. In `electron/main.ts`, add the API hostname to the `connect-src` allowlist. Don't forget the OAuth host too, if it's a separate domain from the API host. Skipping this step means the integration works in dev (no CSP) but silently fails to fetch in a packaged build.
+
+### 9. Optional: dedicated page
 If the data warrants its own view (like Finance), use the `add-page` skill.
 
 ## Checklist
 
 - [ ] Schema added (and migration generated if new table)
-- [ ] OAuth or PAT IPC handler in `electron/ipc/auth.ts`
-- [ ] Sync function in `electron/ipc/sync.ts`
-- [ ] Knowledge extractor in `electron/knowledge/extractor.ts`
+- [ ] OAuth or PAT IPC handler in `electron/ipc/auth.ts` (or a PAT module under `electron/integrations/`)
+- [ ] Sync function in its own `electron/integrations/<service>.ts` module, imported into `electron/ipc/sync.ts` for dispatch
+- [ ] Knowledge extractor in `electron/knowledge/extractor.ts` (or its own sibling module — see `docs/knowledge-extractor.md`)
 - [ ] Frontend card in `src/pages/Integrations.tsx`
 - [ ] Setup guide in the same file (if OAuth)
 - [ ] Type for the new `window.api.<service>.*` namespace in `src/types/electron.d.ts`
+- [ ] CSP `connect-src` entry in `electron/main.ts` for the API host (and OAuth host if separate)
 - [ ] Test: connect → trigger sync → verify rows in table + markdown file updates
 - [ ] Add a Vitest unit test for the sync transformer (mock the API response)

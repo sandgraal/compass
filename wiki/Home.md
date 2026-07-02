@@ -26,11 +26,16 @@ GitHub / bank data) and BYO-key AI requests you trigger.
 
 ## Features
 
+- **Overview** — the app's home landing page (the default `/overview` route you land on at
+  launch): a unified snapshot pulled from across everything Compass knows about your life
+  (money, tasks, calendar, timeline highlights) in one place.
 - **[Dashboard](Dashboard)** — your morning brief: today's tasks, money, and calendar at a glance.
 - **[Planner: Daily / Weekly / Monthly](Planner-Daily-Weekly-Monthly)** — checklists, templates, reviews, and habit streaks.
 - **[Knowledge Base](Knowledge-Base)** — markdown notes with `[[wikilinks]]`, backlinks, full-text + semantic search.
 - **[Finance](Finance)** — net worth, 90-day cash-flow forecast, subscription audit, budgets, tax tagging, SimpleFIN/Plaid bank sync.
-- **[Storehouse & Timeline](Storehouse-and-Timeline)** — Contacts, Subscriptions, Assets, and the Drop Zone that turns any data export into one searchable life Timeline.
+- **[Retirement](Cross-Border-and-Retirement)** — a long-horizon, tax-aware retirement projection: accumulation → decumulation, Social Security claiming-age modeling, sequence-of-returns stress testing.
+- **CR Rental Studio** — short-term-rental pricing and P&L tooling for a Costa Rica Airbnb-style property, deep-integrated with net worth and multi-currency.
+- **[Storehouse & Timeline](Storehouse-and-Timeline)** — Contacts, Subscriptions, Merchants & Places, Assets, and the Drop Zone that turns any data export into one searchable life Timeline, cross-referenced into every tab.
 - **[People](People)** — a unified directory of everyone across your imported data.
 - **[Data Rights & Acquisition](Data-Rights-and-Acquisition)** — go *get* the data you have a right to: the Drop Zone, the Data-Rights Concierge, and assisted-login portal pulls.
 - **[Vault](Vault)** — AES-256-GCM encrypted secrets; master key in the OS Keychain.

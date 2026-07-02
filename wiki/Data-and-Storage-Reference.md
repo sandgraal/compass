@@ -35,7 +35,7 @@ target) that's:
 
 ## Database schema (SQLite via Drizzle)
 
-The DB lives at `.data/compass.db`. Key tables (28 total; latest migration `0018`):
+The DB lives at `.data/compass.db`. Key tables (34 total; latest migration `0025`):
 
 | Table | Purpose |
 |---|---|
@@ -55,6 +55,7 @@ The DB lives at `.data/compass.db`. Key tables (28 total; latest migration `0018
 | `plaid_items` | One row per connected Plaid Item; sync cursor + last sync + error surface. **Tokens are NOT here** (they're in `.vault/plaid.enc`). |
 | `finance_transactions` | Transactions, hashed for dedup; indexed `geo`, `purpose`, `(taxYear, taxTag)`. |
 | `finance_balance_snapshots` | Per-(account, day) balance for net-worth trajectory. Source = manual / inferred / plaid. |
+| `fx_rates` | Daily FX-rate snapshots (base/quote/rate), fetched or manual, powering base-currency net worth and FX gain/loss. UNIQUE on `(date, base, quote)`. |
 | `forecast_overrides` | User skip / shift / override edits to the projected cash-flow stream. UNIQUE on `(account_id, date, label)`. |
 | `budget_rules` | Per-category monthly budget targets. |
 | `categorization_rules` | Pattern → category rules for auto-categorization. |
@@ -66,6 +67,11 @@ The DB lives at `.data/compass.db`. Key tables (28 total; latest migration `0018
 | `subscriptions` | First-class subscriptions (cost, cadence, status, next renewal) — distinct from detected recurring charges. |
 | `assets` | Household inventory by `type` (insurance/vehicle/property/membership/warranty/pet/other) + renewal date. |
 | `records` | The unified **Timeline** log: `source`, `type`, `occurredAt`, `payload`, content-addressed `hash` dedup (+ a `records_fts` FTS5 index). The Drop Zone's destination. |
+| `derived_entities` | The cross-reference engine's cache: records projected into typed candidates (`kind` = person/merchant/place/subscription-candidate), with counts, sources, and a `promoted_id` once you promote one. Powers People and Merchants & Places. |
+| `places` | The OWNED home for a promoted merchant or place (`kind` = merchant/place): name, category, address, url, rolled-up spend. The promote target for `derived_entities`. |
+| `travel_segments` | Trips logged OUTSIDE the home country (country + inclusive date range), feeding the Residency tab's day-count/substantial-presence-test math. |
+| `financial_goals` | Target-date savings goals (target amount, date, monthly contribution); current value is manual or auto-linked to net worth / retirement / property basis. Backs the Goals tab. |
+| `rental_comps` | Comparable short-term-rental listings (zone, bedrooms, nightly rate, occupancy, rating) collected in the CR Rental Studio to price your own unit. |
 | `snapshot_facts` | Static "who you are / what's set" facts from exports (ad-profile, profile, security config) behind themed pages. |
 
 Full column-level detail and migration history:

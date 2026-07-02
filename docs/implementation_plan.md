@@ -360,9 +360,9 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 
 ---
 
-## Phase 8 — Claude Integration (bidirectional, Proposed)
+## Phase 8 — Claude Integration (bidirectional)
 
-> **Status: proposed, not scheduled.** Make Compass a first-class **bidirectional Claude citizen** — Claude (Desktop, Cowork, Code) can read *and* (with approval) act on Compass data, and Compass embeds Claude's agentic capabilities. Full design + the "Claude Inbox" confirmed-writes architecture + the five-lens expert evaluation live in [`claude-integration.md`](claude-integration.md). **Today's reality:** a read-only MCP for Claude Code + a BYO-key Ask Compass assistant — everything below is 🔜.
+> **Status: ✅ 100% — all shipped.** Compass is a first-class **bidirectional Claude citizen** — Claude (Desktop, Cowork, Code) can read *and* (with approval) act on Compass data, and Compass embeds Claude's agentic capabilities. Full design + the "Claude Inbox" confirmed-writes architecture + the five-lens expert evaluation live in [`claude-integration.md`](claude-integration.md). All 6 items (8.1–8.6) below are shipped: MCP read+propose tools, in-app Claude Inbox, one-click `.mcpb` Desktop bundle, end-user Cowork plugin, 5 Claude Skills, and the agentic Ask Compass assistant.
 
 **Hard invariants (carry into every item):** Claude never writes directly — it enqueues *proposals* to a `claude_proposals` queue; Compass is the sole writer via existing validated IPC; every mutation is human-approved + audit-logged; the **vault is never exposed**; finance is exposed as **summaries, not raw rows**; cloud LLM stays BYO-key + opt-in.
 
@@ -420,6 +420,11 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
   `/storehouse`, sidebar + ⌘K): tiles for contacts / subscriptions (annual) / assets (value), assets-by-type,
   and upcoming renewals (subscriptions + assets, next 60 days), with deep links to each domain + Export + Vault.
   Read-only aggregator. *Grows as more domains land* (documents, medical, finance net worth — follow-ups).
+  **Related but distinct (2026-07-02, PR #277 — see the P4–P7 addendum after § Phase 11):** a separate
+  `src/pages/Overview.tsx` (route `/overview`) is now the app's actual **default landing route** (`/` redirects
+  there) and is built on top of the newer cross-reference/derived-entities engine (§ addendum, P4) rather than
+  this page's direct per-domain aggregation. `Storehouse.tsx` at `/storehouse` still exists unchanged as
+  described above; the two pages currently coexist as different "one place for everything" views.
 - [ ] **9.7 Reverse connectors** — where standards exist, write back (e.g. push contacts to a CardDAV
   server), completing two-way portability.
 
@@ -511,17 +516,18 @@ deeper financial/health/comms sources (10.2–10.4) + full CRED (10.6).
 
 ---
 
-## Phase 11 — Life Planning & Cross-Border (proposed)
+## Phase 11 — Life Planning & Cross-Border
 
-> **Status: proposed, not scheduled (2026-06-26).** Output of the June expert panel — full evaluation in
+> **Status: ✅ Complete (2026-06-30).** Output of the June expert panel — full evaluation in
 > [`strategic-review-2026-06.md`](strategic-review-2026-06.md). Compass tracks the past and the next 90
-> days well, but does little with the **multi-year future** or the user's **cross-border** shape (a
+> days well, but did little with the **multi-year future** or the user's **cross-border** shape (a
 > US-based owner of Costa Rica property run as an Airbnb; activity across US/CR/Spain/Colombia/Panama). The
-> app already *encodes* that shape — CR `geo` tags, a `capex-airbnb` tax tag, Schedule C/E, an ingested SSA
-> statement, a `retirement` `assetClass` no calculation reads — so most of this phase is **leverage over
-> data already in the DB**, not new ingestion. Every item reuses shipped machinery; 11.1 + 11.2 are
+> app already *encoded* that shape — CR `geo` tags, a `capex-airbnb` tax tag, Schedule C/E, an ingested SSA
+> statement, a `retirement` `assetClass` no calculation reads — so most of this phase was **leverage over
+> data already in the DB**, not new ingestion. All 7 items (11.1–11.7) shipped; 11.1 + 11.2 passed
 > `security-auditor` merge gates (FX network calls + foreign-account identifiers). Thresholds/forms are
-> jurisdiction-specific — *(verify at build time)*.
+> jurisdiction-specific — *(verify at build time)*. **11.4 was later superseded** by the retire-early-hub
+> port — see the note at the end of § 11.4 and the new dated addendum after § Phase 11.
 
 - [x] **11.1 Multi-currency foundation** (L) — *the keystone.* ✅ *foundation + live FX fetch + all
   three follow-ups implemented.* **Done:** `currency` column on `finance_accounts` + `finance_transactions`
@@ -564,17 +570,27 @@ deeper financial/health/comms sources (10.2–10.4) + full CRED (10.6).
   `finance:get-property-pnl` + `finance:set-property-config` (config in `app_settings`); a new **Property**
   tab renders the P&L, basis, depreciation schedule, and net-yield, prompting to tag Schedule E income
   when revenue is empty. No new ingestion.
-- [x] **11.4 Long-horizon retirement projection** (L) — **shipped.** A pure annual accumulation→decumulation
-  engine `electron/integrations/finance-retirement.ts` (separate from the daily 90-day `buildForecast` — the
-  granularity differs): grows the portfolio to `retirementAge`, then draws spending net of **Social Security**
-  (with **claiming-age** math — 62/FRA/70 reduction + delayed-credit factors), **Airbnb** net income, and
-  other income, flagging the depletion age. Runs a **sequence-of-returns stress** path (a poor early market)
-  alongside the baseline. Works in real (today's) dollars. Starting balance auto-sources from the
-  `retirement`+`savings` net-worth assets (override-able); config in `app_settings`. The SSA PIA is a manual
-  input — the statement recognizer is **content-light by design** (no benefit/earnings stored), so
-  `hasSsaStatement()` only detects ingestion to prompt the user. IPC `finance:get-retirement-projection` +
-  `finance:set-retirement-config`; a new **Retirement** tab charts the baseline + stress balance trajectory
-  with a config form. (Brokerage-holdings auto-import — Phase 10.2 — remains a future feed.)
+- [x] **11.4 Long-horizon retirement projection** (L) — **shipped 2026-06-30, then SUPERSEDED 2026-07-02.**
+  Originally: a pure annual accumulation→decumulation engine `electron/integrations/finance-retirement.ts`
+  (separate from the daily 90-day `buildForecast` — the granularity differs): grows the portfolio to
+  `retirementAge`, then draws spending net of **Social Security** (with **claiming-age** math — 62/FRA/70
+  reduction + delayed-credit factors), **Airbnb** net income, and other income, flagging the depletion age.
+  Ran a **sequence-of-returns stress** path (a poor early market) alongside the baseline. Worked in real
+  (today's) dollars. Starting balance auto-sourced from the `retirement`+`savings` net-worth assets
+  (override-able); config in `app_settings`. The SSA PIA was a manual input — the statement recognizer is
+  **content-light by design** (no benefit/earnings stored), so `hasSsaStatement()` only detects ingestion to
+  prompt the user. IPC `finance:get-retirement-projection` + `finance:set-retirement-config`. The original UI
+  was a **Retirement tab inside `Finance.tsx`** charting the baseline + stress balance trajectory with a
+  config form.
+  >
+  > **Superseded 2026-07-02 (PRs #278/#279, v0.16.0) — see the "P4–P7 Storehouse redesign + retire-early-hub
+  > integration" addendum right after § Phase 11.** The deterministic engine above was replaced by a ported
+  > Monte-Carlo/tax-aware engine (`finance-retire-{constants,math,tax,strategy,engine,optimizer}.ts`) driving
+  > a new top-level **`/retirement`** page; the legacy Finance→Retirement sub-tab was deleted. The legacy
+  > `finance:get-retirement-projection` / `finance:set-retirement-config` IPC handlers are **kept for
+  > back-compat** (unused by any current UI) alongside the new `finance:get-retirement-plan` /
+  > `finance:set-retirement-engine-config` handlers. Brokerage-holdings auto-import (Phase 10.2) shipped its
+  > FILE path via PR #271 (see § 10.2) and now feeds the new engine's net-worth seed.
 - [x] **11.5 Days-in-country & residency readiness** (M) — **shipped.** A new `travel_segments` table
   (migration `0021`, BOTH paths) holds trips OUTSIDE the home country; pure `electron/integrations/residency.ts`
   computes per-country day counts (home = the year remainder) and feeds the **US substantial-presence test**
@@ -601,11 +617,57 @@ deeper financial/health/comms sources (10.2–10.4) + full CRED (10.6).
   secrets) — it directs the user to store documents in Vault → Legal. Cross-border heirship/estate-tax
   caveats surfaced *(verify with counsel)*.
 
-> **Build order:** 11.1 (keystone) → 11.2 / 11.3 (independent; both ride the existing tag system) → 11.4
-> (needs 11.1 + holdings 10.2) → 11.5 → 11.6 → 11.7. **Re-prioritization of the existing backlog:** promote
-> **10.2** (brokerage/retirement holdings → feeds 11.4; IRS/tax transcripts → feeds 11.2); the shipped SSA
-> RIGHTS already feeds 11.4; keep 10.3 Apple Health lower for a US-based user; **10.6 full CRED stays gated
-> and last.**
+> **Build order (historical — as executed 2026-06-30):** 11.1 (keystone) → 11.2 / 11.3 (independent; both
+> ride the existing tag system) → 11.4 → 11.5 → 11.6 → 11.7, with 10.2's brokerage/retirement-holdings FILE
+> path (PR #271, § 10.2) shipping alongside as a feed for 11.4's starting balance. All of Phase 11 is now
+> complete. **Note:** 11.4's original deterministic engine has since been superseded (2026-07-02) — see the
+> supersession note at the end of § 11.4 and the addendum below. 10.3 Apple Health / full 10.6 CRED remain
+> open per § Phase 10 and are unrelated to Phase 11's completion.
+
+---
+
+## Addendum (2026-07-02) — P4–P7 Storehouse redesign + retire-early-hub integration (v0.16.0)
+
+> Two back-to-back merge waves shipped after Phase 11 closed. Neither was a numbered phase in the original
+> plan; both are recorded here so the document stays truthful. Released together as **v0.16.0** (tag =
+> `origin/main` `a6f73e1`, PR #280).
+
+**P4–P7 "Storehouse redesign"** (PRs #274–277) — makes a new cross-reference / derived-entities engine the
+backbone of the whole app instead of a single People page:
+
+- **P4 — Cross-reference engine** (#274) — `electron/lib/entities.ts` + a `derived_entities` cache table
+  (migration `0023`) projects the `records` timeline into typed entities (person / merchant / place / sub)
+  with a one-click promote into the owned `contacts` / `assets` / `subscriptions` tables. Every domain page
+  now reads through this projection instead of maintaining its own ad-hoc extraction. The People page (§
+  10.7 "Connect") is rebuilt on top of it.
+- **P5 — Subscriptions & Merchants/Places from the timeline** (#275) — Subscriptions' "Detected" section and
+  a new **Merchants & Places** page (`src/pages/Places.tsx`, route `/places`, `kind: 'merchant'` /
+  `kind: 'place'` entities from `entities.list`) are now surfaced from the cross-reference engine rather than
+  bespoke per-page detection.
+- **P6 — Grouped sidebar navigation** (#276) — `src/components/layout/Sidebar.tsx` reorganized from one flat
+  list into **7 domain sections** (Home · People & Places · Money · Planner · Knowledge · Your Data ·
+  System) so it reads as scannable groups instead of a 20+ item flat list.
+- **P7 — Unified Overview home page** (#277) — new `src/pages/Overview.tsx` (route `/overview`) — see the
+  note added to § 9.6 below for how it relates to the existing `Storehouse.tsx` page.
+
+**retire-early-hub integration** (PRs #278–279) — ports the standalone `retire-early-hub` FIRE-planner repo
+(`/Users/christopherennis/Websites/retire-early-hub`) into Compass as a deep-integrated Monte-Carlo/tax-aware
+retirement engine, **superseding the Phase 11.4 deterministic engine** (see the supersession note at the end
+of § 11.4):
+
+- **Backend** (#278) — `electron/integrations/finance-retire-{constants,math,tax,strategy,engine,optimizer}.ts`
+  (ported from the standalone app's `src/utils/planEngine.js`, personal seed values dropped in favor of
+  Compass-DB-sourced defaults) drive `finance:get-retirement-plan` + `finance:set-retirement-engine-config`
+  (additive — the legacy 11.4 IPC handlers are untouched, just unused by any current UI). A new **CR Rental
+  Studio** backend ships alongside it: `finance-rental-studio.ts` (listing-unit config + reconciliation of
+  projected income vs. tagged Schedule-E actuals), `finance-rental-pricing.ts`, and
+  `finance-cr-rental-market.ts` (comparable-listing pricing suggestions) backed by a new `rental_comps` table
+  (migration `0025`).
+- **Frontend** (#279) — two new top-level pages, both in the sidebar's Money section (§ P6 above): **`/retirement`**
+  (`src/pages/Retirement.tsx` — KPI tiles for success rate / starting assets / SWR / depletion age, a
+  Monte-Carlo p10/p50/p90 fan chart over the deterministic baseline) and **`/rental-studio`**
+  (`src/pages/RentalStudio.tsx` — reconciliation banner, listing-unit editor with per-unit price suggestions,
+  market-comps table). The same PR **removed the legacy Finance→Retirement sub-tab** from `Finance.tsx`.
 
 ---
 

@@ -1,11 +1,22 @@
 # Storehouse & Timeline
 
-**Routes:** `/storehouse` · `/timeline` · **Sidebar:** Storehouse · Timeline
+**Routes:** `/storehouse` · `/timeline` · **Sidebar:** Your Data → Storehouse · Home → Timeline
 
 The Storehouse is Compass's founding promise: *one local place that holds all of your data — owned by you,
 never lost if a service shuts down, and exportable at will.* It pairs a set of owned domains (Contacts,
 Subscriptions, Assets) with a universal **Drop Zone → Timeline** that turns any data export into one
 searchable, append-only life log. Design: [`docs/storehouse-roadmap.md`](https://github.com/sandgraal/compass/blob/main/docs/storehouse-roadmap.md).
+
+> **Related but distinct: the `/overview` home page.** Compass also has a newer **Overview** page
+> (`/overview`, Home section, and the app's actual default landing route — `/` redirects there) that
+> bills itself with a near-identical pitch: *"Everything you've brought into Compass, in one place."*
+> It's a global search-everything box over the Timeline plus quick links into People, Contacts,
+> Merchants & Places, Subscriptions, and Household & Assets, built on top of the newer
+> cross-reference/derived-entities engine (see below) rather than this page's direct per-domain
+> aggregation. `Storehouse.tsx` at `/storehouse` is unchanged and still the place for the
+> read-only domain tiles described below — the two pages currently coexist as different "one place
+> for everything" views, Overview being the more general entry point and Storehouse the
+> domain-focused summary.
 
 ## Storehouse overview (`/storehouse`)
 
@@ -56,8 +67,30 @@ the same export is idempotent (no double-counting).
 > char-budgeted, payload never returned). The vault and raw finance stay aggregates-only. See
 > [Security & Privacy](Security-and-Privacy).
 
+## The cross-reference engine: from records to People & Places
+
+Dropping files into the Timeline is only half of Compass's founding promise — the other half is
+turning that raw, siloed pile of records into entities you actually recognize: the *people* you
+talk to, the *merchants* you pay, the *places* you go. `electron/lib/entities.ts` projects the
+`records` store into typed candidates (`kind`: person / merchant / place / subscription-candidate),
+cached in a `derived_entities` table so the projection doesn't have to be recomputed from scratch on
+every page load. Every domain page now reads through this shared projection instead of doing its
+own ad-hoc extraction:
+
+- **[People](People)** (`/people`) — the directory of people the projection finds across messages,
+  contacts-like records, and more.
+- **Merchants & Places** (`/places`, sidebar: People & Places) — `src/pages/Places.tsx` surfaces the
+  `merchant` and `place` kinds the same engine derives from your spending and location-bearing
+  records.
+
+Both pages share the same **one-click promote** flow: `entities:promote` takes a derived candidate
+and materializes it into an owned row — a `contacts` entry, a `subscriptions` entry, or a `places`
+entry (the `places` table, distinct from the `derived_entities` cache, is the permanent home for a
+promoted merchant/place). Nothing is promoted automatically; derived entities are suggestions until
+you act on them, exactly like the Timeline's "nothing is deleted, only tagged" philosophy above.
+
 ## Related
 
-- [People](People) — the cross-source directory derived from these records.
+- [People](People) — the cross-source people directory built on the cross-reference engine above.
 - [Data Rights & Acquisition](Data-Rights-and-Acquisition) — how to *get* the exports you drop here.
 - [Backup & Restore](Backup-and-Restore) — the Universal Export Center.

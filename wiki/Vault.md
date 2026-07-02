@@ -7,13 +7,16 @@ in plaintext on disk. It is **separate from the SQLite database and the knowledg
 
 ## What goes in the Vault
 
-Five built-in categories, each with field templates:
+Six built-in categories, each with field templates:
 
 - **Financial** — account numbers, routing details, card data
 - **Identity** — IDs, passport/SSN-type data
 - **Credentials** — logins, passwords, keys
 - **Medical** — health records, prescriptions
 - **Legal** — documents, references
+- **Foreign Accounts** — FBAR/FATCA: foreign bank/securities account numbers and institutions
+  (identifiers stay vault-only; the FBAR/FATCA summary computes max-aggregate values without ever
+  reading them)
 
 Each entry has an `id`, `createdAt`, `updatedAt`, plus category-specific fields. You can add new
 categories with field templates — see the [Developer Guide](Developer-Guide#adding-a-vault-category).

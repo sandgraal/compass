@@ -1,11 +1,17 @@
 # Finance
 
-**Route:** `/finance` · **Sidebar:** Finance · **⌘K:** "Finance" / "Net Worth" / "Cash-flow forecast"
+**Route:** `/finance` · **Sidebar:** Money → Finance · **⌘K:** "Finance" / "Net Worth" / "Cash-flow forecast"
 
 A complete local-first personal-finance command center: statement ingest, auto-categorization,
-net-worth tracking, a 90-day cash-flow forecast, subscription auditing, budgets, and tax tagging.
-Everything runs on your machine; raw transactions never leave it. Full design:
-[`docs/finance.md`](https://github.com/sandgraal/compass/blob/main/docs/finance.md).
+net-worth tracking, a 90-day cash-flow forecast, subscription auditing, budgets, tax tagging, and —
+as of Phase 11 — multi-currency, expat tax (FBAR/FATCA), Costa Rica property P&L, residency
+tracking, goals, and estate readiness. Everything runs on your machine; raw transactions never leave
+it. Full design: [`docs/finance.md`](https://github.com/sandgraal/compass/blob/main/docs/finance.md).
+
+> **Not on this page:** long-horizon **Retirement** planning and the **CR Rental Studio** used to
+> live inside Finance but have since moved out to their own top-level pages — **`/retirement`** and
+> **`/rental-studio`** — as siblings of Finance in the sidebar's **Money** section. See
+> [Cross-Border & Retirement](Cross-Border-and-Retirement) for both.
 
 ## The daily-driver loop (no manual entry)
 
@@ -23,12 +29,16 @@ ritual entirely.
 
 ## The tabs
 
-The page has seven tabs along the top:
+The page has twelve tabs along the top: Overview, Net Worth, Forecast, Transactions, Accounts,
+Rules, CR & Subs, Property, Expat Tax, Residency, Goals, and Estate.
 
-### Overview
-Your financial snapshot: total debt and weighted APR, this month's income vs. expense and savings
-rate, budget target vs. actual, Costa Rica capex, annualized active-subscription cost, and a tax
-summary. A toggle lets you **exclude property** from the figures.
+### Finance Overview tab
+*(Not to be confused with the app-wide `/overview` landing page — see
+[Storehouse & Timeline](Storehouse-and-Timeline) — this is the Overview **tab inside Finance**,
+scoped to money.)* Your financial snapshot: total debt and
+weighted APR, this month's income vs. expense and savings rate, budget target vs. actual, Costa Rica
+capex, annualized active-subscription cost, and a tax summary. A toggle lets you **exclude property**
+from the figures.
 
 ### Net Worth
 Assets, liabilities, and net worth, plus **30 / 90 / 365-day deltas** and a trajectory chart. Net
@@ -74,6 +84,41 @@ Two reports in one tab:
 - **Subscriptions** — detected recurring charges (merchant, account, cadence, per-charge, annualized,
   last seen) and **possible duplicates**, so you can find zombie subscriptions and price hikes.
 
+### Property
+The Costa Rica property / Airbnb P&L and Schedule E depreciation schedule, assembled from rows
+already tagged `geo`/`purpose`/tax tag — no separate ledger to maintain. Revenue only shows up once
+you manually tag Airbnb payouts `tax:schedule-e-income` (the auto-classifier deliberately never
+assigns that tag); operating and capex come from either the tax tag or CR geo/purpose. Capex
+accumulates into a cost basis instead of expensing immediately, and depreciates straight-line over a
+configurable term (defaults to **30-year foreign ADS**, not the 27.5-year domestic schedule).
+
+### Expat Tax
+The foreign side of a US person's return, built from data Compass already holds: **FBAR** (FinCEN
+114) — the maximum aggregate USD value of your foreign accounts at any point in the year, flagged
+once it crosses the reporting threshold — **FATCA** (Form 8938) against a higher, configurable
+threshold, and a **foreign-tax-credit** ledger sourced from `tax:foreign-tax`-tagged rows. Only
+non-debt foreign accounts count toward FBAR/FATCA. Account identifiers themselves never appear here —
+they live only in the encrypted `foreign-accounts` vault category.
+
+### Residency
+Per-country day counts from a travel log (you log trips *outside* your home country; unlogged days
+default to home), feeding the **US substantial-presence test**, a **Costa Rica 183-day** check, a
+residency-pathway checklist (pensionado / rentista / inversionista), and a **CAJA** (CR public
+health) cost estimate.
+
+### Goals
+Target-date savings goals — a tax reserve, the next CR capex draw, a retirement number, an emergency
+fund — each showing remaining amount, percent complete, required monthly contribution, and on-track
+status. A goal's current value is either entered manually or **auto-linked** to a live aggregate (net
+worth, retirement assets, or property cost basis) so it tracks itself.
+
+### Estate
+A readiness dashboard: a manual estate-document checklist (will, healthcare directive, POA, trust,
+beneficiary designations, a cross-border CR/US plan, digital estate), insurance-adequacy surfacing
+from your Household & Assets `insurance` entries (coverage, expiring-soon renewals, gaps vs. a
+recommended set), and property holdings as a title/beneficiary reminder. This tab deliberately reads
+**no vault data** — it directs you to store the actual documents in Vault → Legal.
+
 ## Categorization, geography & tax tagging
 
 - **Geo / purpose** (`geo`, `purpose`) are indexed columns set at ingest, defaulting to `US`;
@@ -114,5 +159,8 @@ Both dedupe through the same `finance_transactions.hash` constraint as a manual 
 
 ## Related
 
+- [Cross-Border & Retirement](Cross-Border-and-Retirement) — the **Retirement** and **CR Rental
+  Studio** pages that used to be part of Finance; also covers the Expat Tax / Property / Residency /
+  Goals / Estate tabs above in more depth.
 - [Settings](Settings) — set the watched folder and sync behavior.
 - [Integrations](Integrations) — Plaid connection lives alongside Google/GitHub.

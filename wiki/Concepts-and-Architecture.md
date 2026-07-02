@@ -12,6 +12,14 @@ is no Compass server. The only network traffic is:
 - OAuth tokens you grant, used to **pull your own data back** (Google, GitHub, Plaid).
 - AI requests you explicitly trigger, and only if you've added a key — local **Ollama** is preferred.
 
+The app opens on **Overview** (`/overview`), a unified home page assembled from everything Compass
+already knows — money, tasks, calendar, and Timeline highlights — rather than any single domain
+page. Money-related pages now include **Retirement** (a long-horizon, tax-aware projection) and
+**CR Rental Studio** (short-term-rental pricing/P&L) alongside Finance. The sidebar groups all
+pages into domain sections (Home, People & Places, Money, Planner, Knowledge, Your Data, System)
+so navigation scales as more pages ship. None of this changes the security model below — it's the
+same IPC boundary, just more surface area on top of it.
+
 ## The two-process security boundary
 
 Compass is an Electron app split into a hardened renderer and a privileged main process.

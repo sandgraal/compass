@@ -11,15 +11,18 @@ of truth (see [`finance/legacy-cutover.md`](finance/legacy-cutover.md)).
 > bring-your-own-keys option. CSV/PDF drop + watched-folder ingest remain the
 > fallback for institutions neither reaches (e.g. CR Banco Popular). See § Bank sync.
 
-> **Forward roadmap:** the next finance work is the cross-border / retirement layer —
-> see [`strategic-review-2026-06.md`](strategic-review-2026-06.md) +
+> **Phase 11 "Life Planning & Cross-Border" — shipped.** Multi-currency, FBAR/FATCA
+> expat tax, CR property/Airbnb P&L + depreciation, and long-horizon retirement
+> projection all landed; the retirement engine was then deep-ported from the
+> standalone retire-early-hub app (Monte Carlo, tax-aware drawdown, optimizer) with
+> a companion **CR Rental Studio**. See § Forward roadmap below and
 > [`implementation_plan.md`](implementation_plan.md) § Phase 11.
 
 ## Surfaces
 
 | Layer | File | Purpose |
 |---|---|---|
-| Schema | `electron/db/schema.ts` (finance section) | `financeAccounts` (debts via `isDebt=true`, net-worth bucket via `assetClass`, debt pay day via `paymentDayOfMonth`, optional Plaid/SimpleFIN linkage via `plaidItemId`+`plaidAccountId`+`mask`), `financeTransactions` (with indexed `geo`, `purpose`, `taxTag`, `taxYear`), `categorizationRules`, `budgetRules`, `financeBalanceSnapshots`, `forecastOverrides`, `plaidItems`, `simplefinConnections` |
+| Schema | `electron/db/schema.ts` (finance section) | `financeAccounts` (debts via `isDebt=true`, net-worth bucket via `assetClass`, debt pay day via `paymentDayOfMonth`, optional Plaid/SimpleFIN linkage via `plaidItemId`+`plaidAccountId`+`mask`), `financeTransactions` (with indexed `geo`, `purpose`, `taxTag`, `taxYear`), `categorizationRules`, `budgetRules`, `financeBalanceSnapshots`, `forecastOverrides`, `plaidItems`, `simplefinConnections`, `rentalComps` (migration `0025` — CR Rental Studio comps) |
 | Ingest | `electron/integrations/finance.ts` | CSV parsers (Chase, Amex, Cap One, Discover, BoA, USAA, Rocket Money, generic), categorizer, dedupe |
 | PDF | `electron/integrations/finance-pdf.ts` | Statement extractors (USAA, AMEX, generic) |
 | Watcher | `electron/integrations/finance-watcher.ts` | Chokidar watch on `~/Documents/Money/` (configurable), 3-level subfolder depth, `.csv` + `.xlsx` + `.pdf` allowlist |
@@ -30,9 +33,11 @@ of truth (see [`finance/legacy-cutover.md`](finance/legacy-cutover.md)).
 | Cash-flow forecast | `electron/integrations/finance-forecast.ts` | 90-day projection: subscriptions + recurring income + debt minimums + calendar bills + user overrides. Day-aggregated to avoid within-day order artifacts; debt minimums route to a cash account. |
 | ATM split | `electron/integrations/finance-atm-split.ts` | 70/30 CR ATM auto-split (Property/Construction vs personal cash) |
 | Subscriptions | `electron/integrations/finance-subscriptions.ts` | Recurring detection, zombies, duplicates |
+| Retirement engine | `electron/integrations/finance-retire-{constants,tax,strategy,math,engine,optimizer}.ts` | Rich Monte-Carlo, tax-aware retirement planner ported from the standalone retire-early-hub app. `computePlan()` (`finance-retire-engine.ts`) is the pure single source of truth shared by the projection view, Monte Carlo, scenarios, and the optimizer; `finance-retire-strategy.ts` adds RMDs/SEPP/SS break-even/Roth-ladder calculators; `finance-retire-optimizer.ts` does a seeded what-if search over CR expenses / freelance years / retirement age. Seeded from the DB (net-worth snapshot, retirement-asset buckets) rather than the standalone app's gitignored personal config. Superseded the older deterministic `finance-retirement.ts` (Phase 11.4) as the engine behind the UI; that module and its `finance:get-retirement-projection` IPC handler still exist for back-compat but the **Retirement** page now runs on `finance:get-retirement-plan` / `buildRetirementPlan`. |
+| CR Rental Studio | `electron/integrations/finance-cr-rental-market.ts`, `finance-rental-pricing.ts`, `finance-rental-studio.ts` | Pure short-term-rental pricing/revenue engine ported from retire-early-hub, plus the studio backend that persists user-collected comps (`rentalComps` table) and listing config and reconciles the studio's *forward-looking* projected revenue against `finance-property.ts`'s *backward-looking* actual P&L from tagged transactions. The projected annual net feeds the retirement engine's Airbnb income at the IPC boundary. |
 | Knowledge | `electron/knowledge/finance-extractor.ts` | Writes `profile/finances.md`, `profile/finances-debt.md`, `profile/finances-monthly.md` |
-| IPC | `electron/ipc/finance.ts` | 35+ handlers — see `electron/preload.ts` for the full surface |
-| UI | `src/pages/Finance.tsx` | Overview / Net Worth / Forecast / Transactions / Accounts / Rules / CR & Subs tabs — all shipped (incl. the YTD Tax summary card + tax-pack export button) |
+| IPC | `electron/ipc/finance.ts` | 65+ handlers (incl. retirement + rental studio) — see `electron/preload.ts` for the full surface |
+| UI | `src/pages/Finance.tsx` | 12 tabs — Overview / Net Worth / Forecast / Transactions / Accounts / Rules / CR & Subs / Property / Expat Tax / Residency / Goals / Estate — all shipped (incl. the YTD Tax summary card + tax-pack export button). Retirement and CR Rental Studio are no longer tabs here — they moved out to their own top-level pages (`src/pages/Retirement.tsx` at `/retirement`, `src/pages/RentalStudio.tsx` at `/rental-studio`; sidebar + command-palette entries). |
 
 ## Sign convention
 
@@ -205,11 +210,23 @@ the latest merge:
 - ✅ [`plaid-integration.md`](finance/plaid-integration.md) — Plaid bank-linking (6 PRs, shipped; advanced / BYO-keys)
 - ✅ **SimpleFIN Bridge** — recommended user-as-aggregator bank/card sync (shipped 2026-06-14; `electron/integrations/simplefin/*`)
 - ✅ [`legacy-cutover.md`](finance/legacy-cutover.md) — Excel pipeline retired early (2026-05-21)
+- ✅ **Phase 11 "Life Planning & Cross-Border"** — multi-currency (USD/CRC + FX, PR #259), foreign-account
+  & expat-tax FBAR/FATCA (PR #261), CR property/Airbnb P&L + depreciation (PR #260), and long-horizon
+  retirement projection (PR #262) — all shipped 2026-06-27 through 2026-06-30. New Property / Expat Tax /
+  Residency / Goals / Estate tabs on the Finance page. See
+  [`strategic-review-2026-06.md`](strategic-review-2026-06.md) + [`implementation_plan.md`](implementation_plan.md)
+  § Phase 11.
+- ✅ **Retirement engine port + CR Rental Studio** — the standalone retire-early-hub FIRE planner
+  (Monte Carlo, tax-aware drawdown, RMDs/SEPP/Roth-ladder strategies, an optimizer) ported in as
+  `finance-retire-{constants,tax,strategy,math,engine,optimizer}.ts`, deep-integrated with net worth/FX,
+  superseding the earlier deterministic Phase 11.4 projection as the primary engine. Shipped alongside a
+  companion CR Rental Studio (`finance-cr-rental-market.ts`, `finance-rental-pricing.ts`,
+  `finance-rental-studio.ts`, `rentalComps` table). Both moved out of the Finance tab set into their own
+  top-level pages, `/retirement` and `/rental-studio`.
 
-**Next (proposed — Phase 11 "Life Planning & Cross-Border"):** multi-currency (USD/CRC + FX),
-foreign-account & expat-tax (FBAR/FATCA), CR property/Airbnb P&L + depreciation, and a long-horizon
-retirement projection. See [`strategic-review-2026-06.md`](strategic-review-2026-06.md) +
-[`implementation_plan.md`](implementation_plan.md) § Phase 11.
+**Next (open):** see [`implementation_plan.md`](implementation_plan.md) for whatever's currently claimed /
+in-flight beyond Phase 11 — nothing finance-specific is queued as of this writing beyond sharpening the
+brokerage-CSV column matching against a real export (§10.2) and a live holdings/investments feed.
 
 The implementation plan's
 [Phase 4 — Finance forward](./implementation_plan.md#phase-4--finance-forward-roadmap)

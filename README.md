@@ -12,7 +12,7 @@ A **local-first personal life OS** that unifies your finances, knowledge, calend
 ![Platform](https://img.shields.io/badge/macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-Electron%2041-6272F1)
 ![Stack](https://img.shields.io/badge/React%2018%20%C2%B7%20TypeScript%20%C2%B7%20SQLite-informational)
 ![Privacy](https://img.shields.io/badge/encrypted%20vault-AES--256--GCM-22c55e)
-![Status](https://img.shields.io/badge/version-0.14.0-blue)
+![Status](https://img.shields.io/badge/version-0.16.0-blue)
 
 </div>
 
@@ -36,9 +36,13 @@ It's a *daily driver*: open it in the morning for your brief (calendar + tasks +
 
 | | |
 |---|---|
+| **Overview** — the default landing page and flagship "one place for all your data" home: a unified summary across finances, timeline, tasks, and calendar the moment you open the app. | ![Compass dashboard](docs/images/dashboard.png) |
 | **Finance command center** — net worth, 90-day cash-flow forecast, subscription audit, budgets, tax tagging. | ![Net worth](docs/images/finance-networth.png) |
 | **90-day forecast** — projects subscriptions, income, debt minimums + calendar bills into a daily balance, with low-cash warnings. | ![Forecast](docs/images/finance-forecast.png) |
+| **Retirement** — a Monte-Carlo, tax-aware retirement planner: accumulation → decumulation projection, Social Security claiming-age math, sequence-of-returns stress testing, and scenario/optimizer tooling. | ![Net worth](docs/images/finance-networth.png) |
+| **Rental Studio** — a Costa Rica short-term-rental pricing tool: nightly-rate comps by zone/bedroom count and occupancy-based revenue projections for a property you operate. | ![Forecast](docs/images/finance-forecast.png) |
 | **Storehouse & Timeline** — the Acquisition Engine: drop any data export (CSV / JSON / PDF / mbox / zip / SQLite) into the Drop Zone and Compass normalizes it into one append-only, searchable life timeline — PayPal, Venmo, Amazon, LinkedIn, Goodreads, streaming history, browser history, iMessage, Apple Health, and PDF letters (credit report, tax, Social Security). | ![Knowledge base](docs/images/knowledge.png) |
+| **People & Merchants and Places** — the timeline cross-referenced into a searchable People directory and a Merchants & Places view, with one-click promote from raw records. | ![Knowledge base](docs/images/knowledge.png) |
 | **Knowledge base** — plain-markdown notes with `[[wikilinks]]`, backlinks, full-text + semantic search. | ![Knowledge base](docs/images/knowledge.png) |
 | **Ask Compass** — a RAG assistant grounded in *your* knowledge base. Bring your own key; runs against local Ollama first. | ![Ask Compass](docs/images/ask.png) |
 | **Weekly review** — a Sunday ritual: progress, open issues, what-went-well / blockers / next-week. | ![Weekly review](docs/images/weekly.png) |
@@ -52,8 +56,8 @@ It's a *daily driver*: open it in the morning for your brief (calendar + tasks +
 
 | Area | Capabilities |
 |---|---|
-| **💰 Finance** | ✅ CSV / PDF / Excel statement ingest · ✅ auto-categorization · ✅ net-worth tracking + trajectory · ✅ 90-day cash-flow forecast · ✅ subscription & price-hike audit · ✅ budgets · ✅ Schedule C/E + capex tax tagging + tax-pack export · ✅ SimpleFIN bank + card sync (recommended; incl. Amex) · ✅ Plaid bank-linking (advanced) · 🔜 receipts via email · 🔜 investment holdings |
-| **🗂️ Storehouse** | ✅ Drop Zone for any data export (CSV / JSON / XML / mbox / zip / SQLite / PDF) · ✅ append-only searchable **Timeline** · ✅ "on this day" recap · ✅ recognizers: PayPal · Venmo · Amazon · LinkedIn · Goodreads · Netflix / Spotify / YouTube history · Chrome / Firefox / Safari history · iMessage · Apple Health · email (mbox) · ✅ PDF recognizers: credit report · tax docs · Social Security statement · ✅ Contacts · ✅ Data-Rights Concierge · ✅ assisted-login portal pull (SSA, *beta*) |
+| **💰 Finance** | ✅ CSV / PDF / Excel statement ingest · ✅ auto-categorization · ✅ net-worth tracking + trajectory · ✅ 90-day cash-flow forecast · ✅ subscription & price-hike audit · ✅ budgets · ✅ Schedule C/E + capex tax tagging + tax-pack export · ✅ SimpleFIN bank + card sync (recommended; incl. Amex) · ✅ Plaid bank-linking (advanced) · ✅ investment holdings (generic brokerage-CSV import — manual, not a live feed) · ✅ Retirement planner (Monte-Carlo, tax-aware, SS claiming-age math) · ✅ Rental Studio (CR short-term-rental pricing) · 🔜 receipts via email · 🔜 live brokerage feed |
+| **🗂️ Storehouse** | ✅ Drop Zone for any data export (CSV / JSON / XML / mbox / zip / SQLite / PDF) · ✅ append-only searchable **Timeline** · ✅ "on this day" recap · ✅ recognizers: PayPal · Venmo · Amazon · LinkedIn · Goodreads · Netflix / Spotify / YouTube history · Chrome / Firefox / Safari history · iMessage · Apple Health · email (mbox) · ✅ PDF recognizers: credit report · tax docs · Social Security statement · ✅ Contacts · ✅ **People** directory · ✅ **Merchants & Places** · ✅ Data-Rights Concierge · ✅ assisted-login portal pull (SSA, *beta*) |
 | **📚 Knowledge** | ✅ markdown notes · ✅ `[[wikilinks]]` + backlinks · ✅ TipTap rich editor · ✅ full-text + semantic (local-embedding) search · ✅ Spotlight mirror · ✅ Obsidian vault bridge (import + export) · ✅ Notion import · 🔜 Notion export · 🔜 web clipper |
 | **🔐 Vault** | ✅ AES-256-GCM encrypted categories · ✅ OS-Keychain master key · ✅ auto-lock · ✅ 1Password CSV import · 🔜 encrypted sharing with a trusted partner |
 | **📅 Calendar** | ✅ Google Calendar · ✅ Apple Calendar (local `.ics`, RRULE expansion) · 🔜 Outlook / Office 365 · 🔜 CalDAV |

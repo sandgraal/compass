@@ -15,7 +15,7 @@ The hard constraint: *let an assistant help with your life OS without letting it
 
 | Direction | What exists | Where |
 |---|---|---|
-| Claude → Compass | stdio MCP with **read tools** (tasks, knowledge search/read, calendar, sync status, finance summaries, habit streaks, upcoming, repo commits/test-status/integration-health) **and `compass_propose_*` write-proposal tools** (task/note/txn-tag/habit-check) that enqueue to the Claude Inbox. **Vault excluded; finance raw rows excluded.** | `mcp/compass-mcp/index.ts`, `proposals.ts`, `.mcp.json` |
+| Claude → Compass | stdio MCP with **15 read tools** — `compass_today_tasks`, `compass_tasks`, `compass_search_knowledge`, `compass_read_knowledge_file`, `compass_recent_calendar`, `compass_recent_notes`, `compass_sync_status`, `compass_recent_commits`, `compass_test_status`, `compass_integration_health`, `compass_finance_summary`, `compass_habit_streaks`, `compass_upcoming`, `compass_timeline`, `compass_search_timeline` — **and `compass_propose_*` write-proposal tools** (task/note/txn-tag/habit-check) that enqueue to the Claude Inbox. **Vault excluded; finance raw rows excluded** — with one deliberate, documented exception: `compass_timeline` / `compass_search_timeline` read actual life-data records, not just aggregates (see § records exception below). | `mcp/compass-mcp/index.ts`, `proposals.ts`, `.mcp.json` |
 | Claude → Compass (act) | **Claude Inbox** — proposals land in `claude_proposals`; the user approves/rejects in-app and approval applies the change via validated write logic (re-validated as a trust boundary). | `electron/ipc/claude.ts`, `src/pages/ClaudeInbox.tsx` |
 | Compass → Claude | "Ask Compass" — BYO Anthropic/OpenAI key, RAG over local notes, plus the **agentic tool-use loop with prompt caching** (8.5). | `electron/ipc/assistant.ts`, `electron/integrations/llm-client.ts` |
 | Packaging | **`compass`** end-user plugin (MCP + skills) for Cowork/Code from a repo checkout, **plus the self-contained one-click `.mcpb` Desktop bundle** (8.3 — `npm run build:mcpb`, attached to tagged releases). Separate from the **developer** `compass-stack` plugin (subagents/skills/hooks for *building* Compass). | `claude-plugin/`, `scripts/build-mcpb.ts`, `.claude/plugin.json` |
@@ -47,14 +47,14 @@ flowchart LR
 2. Compass remains the **sole writer**, executing approved proposals through its **existing, input-validating** IPC handlers.
 3. **Every** mutation is **human-approved** in the Claude Inbox and **audit-logged**.
 4. The **vault is never exposed** to any Claude surface (read or write).
-5. Finance is exposed as **summaries/aggregates only** — never raw transaction rows.
+5. Finance is exposed as **summaries/aggregates only** — never raw transaction rows. **This does not apply uniformly to every domain:** Phase 10.7 "Converse" made one deliberate, documented exception — the `records` Timeline (purchases, media, messages, browsing, documents, health, credit/tax, connections, and more, imported from the user's own data exports) is searchable **in detail**, not just in aggregate, via `search_records` (embedded agent) / `compass_search_timeline` (MCP). This was a conscious relaxation for the user's *own acquired data*, scoped narrowly to the records store — vault and raw finance/transaction rows remain aggregates-only with no equivalent exception. `compass_timeline` / `get_timeline` stay aggregate-only (counts by source/kind/year); the detail read is a separate, explicitly-named tool.
 6. Cloud LLM access stays **BYO-key, opt-in, local-first** (Ollama preferred).
 
 ## Phase 8 tracks (proposed)
 
 ### 8.1 MCP capability expansion ✅ *(shipped)*
 Extends `mcp/compass-mcp/index.ts`:
-- **New privacy-respecting reads:** `compass_finance_summary` (aggregates only), `compass_habit_streaks`, `compass_upcoming` (unified daily brief).
+- **New privacy-respecting reads:** `compass_finance_summary` (aggregates only), `compass_habit_streaks`, `compass_upcoming` (unified daily brief), `compass_tasks` (date-range checklist read, PR #167), `compass_recent_notes` (PR #167), `compass_timeline` (Phase 10.7 — aggregate counts over the unified life Timeline by source/kind/year), `compass_search_timeline` (Phase 10.7 — the detail-record read; see Invariant #5's records exception above).
 - **Propose-write tools** (enqueue only): `compass_propose_task`, `compass_propose_note`, `compass_propose_txn_tag`, `compass_propose_habit_check` — in `proposals.ts`; each validates input, opens no DB / touches no vault, and appends a `status:'pending'` proposal to the append-only inbox (`<app-data>/.data/claude-inbox.jsonl`). Note paths are relative `.md` only (traversal blocked).
 - Per-tool unit tests in `proposals.test.ts` (validation + enqueue round-trip). The JSONL line schema (`{ id, createdAt, status, source, type, payload }`) is the contract 8.2 consumes — keep it stable.
 
@@ -75,9 +75,19 @@ Extends `mcp/compass-mcp/index.ts`:
 
 ### 8.5 Embedded Claude agent in Ask Compass — ✅ *(shipped)*
 - ✅ `assistant:agent` runs a **bounded Anthropic tool-use loop** (`electron/ipc/assistant.ts`). The client (`llm-client.ts`) gained tool-use + **`cache_control` prompt caching** — kept **HTTP-only, no SDK** to match the codebase's deliberate "don't pull in LLM SDKs" convention.
-- ✅ Tools (`electron/integrations/assistant-tools.ts`): read `get_upcoming` + `get_finance_summary` (aggregates only), and `propose_task` — which **enqueues a `pending` `claude_proposals` row** (→ the Claude Inbox) rather than writing directly. The same propose→approve funnel as the MCP. Vault excluded; OpenAI keeps the single-shot RAG `ask`.
+- ✅ Tools (`electron/integrations/assistant-tools.ts`, `ASSISTANT_TOOLS`) — 9 today, all read-only except the last:
+  - `get_upcoming` — today's tasks, near-term calendar, accounts with a payment due
+  - `get_finance_summary` — **aggregates only** (net worth, monthly income/expense/net, current-month spend by category) — never individual transactions
+  - `get_week_tasks` — daily-checklist tasks across a date range
+  - `get_weekly_goals` — the week's goals
+  - `get_habit_streaks` — current/longest streak per active habit
+  - `get_insights` — the same proactive-insights data as the Dashboard "Worth a look" card
+  - `get_timeline` — **aggregate** counts over the unified life Timeline (totals by source/kind/year) — see Invariant #5's records exception above
+  - `search_records` — the **actual matching Timeline records** (not just aggregates) — the same documented "records" exception as the MCP's `compass_search_timeline` (Invariant #5 above)
+  - `propose_task` — **enqueues a `pending` `claude_proposals` row** (→ the Claude Inbox) rather than writing directly. The same propose→approve funnel as the MCP.
+  - Vault is excluded from every tool above; OpenAI keeps the single-shot RAG `ask` instead of the tool-use loop.
 - ✅ Renderer **Agent toggle** in Ask Compass (`src/pages/Ask.tsx`) — routes through `assistant:agent`, shows the tool trace, and surfaces proposed changes as a banner linking to the Claude Inbox. Anthropic-only (auto-disabled for other providers).
-- 🔜 More tools (notes, habits, txn-tag) and proactive-insights surfacing (spend anomalies, habit slippage).
+- 🔜 More propose-write tools (notes, habits, txn-tag — mirroring the MCP's `compass_propose_*` set) and proactive-insights surfacing beyond the read-only `get_insights`.
 
 ### 8.6 Claude Skills for Compass — ✅ *(shipped)*
 - `claude-plugin/skills/`: `morning-brief`, `weekly-review`, `budget-check`, `plan-my-week`, `capture-from-web`. Each is **read-first** (via the MCP read tools) and routes any change through `compass_propose_*` → the Claude Inbox approval flow — never a direct write. The vault is never exposed; finance stays at the summary level.
