@@ -18,6 +18,7 @@ import {
   LayoutGrid,
   LineChart,
   Network,
+  PiggyBank,
   Plug,
   Plus,
   RefreshCw,
@@ -278,6 +279,22 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       icon: <TrendingUp size={15} />,
       action: () => nav('/finance'),
       keywords: ['budget', 'money', 'debt', 'spending']
+    },
+    {
+      id: 'retirement',
+      label: 'Retirement',
+      description: 'Monte-Carlo retirement plan & assumptions',
+      icon: <PiggyBank size={15} />,
+      action: () => nav('/retirement'),
+      keywords: [
+        'retirement',
+        'fire',
+        'monte carlo',
+        'drawdown',
+        'projection',
+        'ss',
+        'social security'
+      ]
     },
     {
       id: 'finance-networth',

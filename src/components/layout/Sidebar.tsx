@@ -16,6 +16,7 @@ import {
   LayoutDashboard,
   LayoutGrid,
   Network,
+  PiggyBank,
   Plug2,
   ScrollText,
   Settings,
@@ -107,6 +108,7 @@ export function Sidebar(): JSX.Element {
       title: 'Money',
       items: [
         { label: 'Finance', to: '/finance', icon: <TrendingUp size={18} /> },
+        { label: 'Retirement', to: '/retirement', icon: <PiggyBank size={18} /> },
         { label: 'Subscriptions', to: '/subscriptions', icon: <CreditCard size={18} /> },
         { label: 'Household & Assets', to: '/assets', icon: <Home size={18} /> }
       ]

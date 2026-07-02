@@ -22,6 +22,7 @@ import Overview from './pages/Overview'
 import People from './pages/People'
 import Places from './pages/Places'
 import Profile from './pages/Profile'
+import Retirement from './pages/Retirement'
 import Settings from './pages/Settings'
 import Storehouse from './pages/Storehouse'
 import Subscriptions from './pages/Subscriptions'
@@ -90,6 +91,7 @@ export default function App(): JSX.Element {
           <Route path="people" element={<People />} />
           <Route path="places" element={<Places />} />
           <Route path="finance" element={<Finance />} />
+          <Route path="retirement" element={<Retirement />} />
           <Route path="subscriptions" element={<Subscriptions />} />
           <Route path="assets" element={<Assets />} />
           <Route path="storehouse" element={<Storehouse />} />
