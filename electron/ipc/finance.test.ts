@@ -154,6 +154,12 @@ function createSchema(): void {
       manual_current REAL NOT NULL DEFAULT 0, monthly_contribution REAL NOT NULL DEFAULT 0,
       notes TEXT, created_at INTEGER, updated_at INTEGER
     );
+    CREATE TABLE rental_comps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '',
+      zone TEXT NOT NULL DEFAULT 'Cartago', bedrooms INTEGER NOT NULL DEFAULT 2,
+      nightly_usd REAL, occupancy_pct REAL, rating REAL, review_count INTEGER,
+      notes TEXT, saved_at TEXT, created_at INTEGER, updated_at INTEGER
+    );
     CREATE TABLE assets (
       id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE,
       type TEXT NOT NULL DEFAULT 'other', name TEXT NOT NULL, value REAL, provider TEXT,
@@ -761,6 +767,61 @@ describe('finance:retirement-plan (Phase 11.4 rich engine)', () => {
     }
     expect(res.engineConfig.ltcEnabled).toBe(true)
     expect(res.inputs.ltcEnabled).toBe(true)
+  })
+})
+
+describe('finance:rental-studio (Phase 10.2)', () => {
+  it('get-rental-studio returns defaults on an empty studio', async () => {
+    const h = await registerAndGet('finance:get-rental-studio')
+    const r = (await invoke(h)) as {
+      comps: unknown[]
+      units: unknown[]
+      settings: { includeInPlan: boolean; rentalYears: number }
+      reconciliation: { actualsNetOperating: number; deltaPct: number | null }
+    }
+    expect(r.comps).toEqual([])
+    expect(r.settings).toEqual({ includeInPlan: true, rentalYears: 20 })
+    expect(r.reconciliation.actualsNetOperating).toBe(0)
+    expect(r.reconciliation.deltaPct).toBeNull()
+  })
+
+  it('set-rental-studio adds a comp/unit, validates, and syncs airbnb net into retirement', async () => {
+    const set = await registerAndGet('finance:set-rental-studio')
+    const ok = (await invoke(set, {
+      addComp: { name: 'A', bedrooms: 2, nightlyUsd: 120 },
+      units: [{ id: 'u1', name: 'Cabin', bedrooms: 2, occupancy: 0.6 }]
+    })) as { success: boolean; studio: { comps: unknown[]; totals: { annualNet: number } } }
+    expect(ok.success).toBe(true)
+    expect(ok.studio.comps.length).toBe(1)
+    expect(ok.studio.totals.annualNet).toBeGreaterThan(0)
+
+    // The projected net was pushed into the retirement config's Airbnb income.
+    const getProj = await registerAndGet('finance:get-retirement-projection')
+    const proj = (await invoke(getProj)) as { config: { airbnbAnnualNet: number } }
+    expect(proj.config.airbnbAnnualNet).toBeGreaterThan(0)
+
+    // Validation: an out-of-range bedroom count is rejected.
+    expect(
+      (await invoke(set, { addComp: { bedrooms: 99 } })) as { success: boolean }
+    ).toMatchObject({
+      success: false
+    })
+    // A non-object payload is a safe no-op that still succeeds.
+    expect((await invoke(set, null)) as { success: boolean }).toMatchObject({ success: true })
+  })
+
+  it('suggest-nightly returns a price band from comps', async () => {
+    const h = await registerAndGet('finance:suggest-nightly')
+    const r = (await invoke(h, {
+      comps: [
+        { nightlyUSD: 90, bedrooms: 2 },
+        { nightlyUSD: 110, bedrooms: 2 },
+        { nightlyUSD: 50, bedrooms: 1 }
+      ],
+      listing: { bedrooms: 2 }
+    })) as { suggested: number | null; basis: string }
+    expect(typeof r.suggested).toBe('number')
+    expect(r.basis).toBe('per-bedroom+median')
   })
 })
 

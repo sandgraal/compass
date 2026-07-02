@@ -1694,6 +1694,72 @@ declare global {
           input: Record<string, number | string | boolean>
         ): Promise<{ success: boolean; error?: string }>
 
+        // CR Rental Studio (Phase 10.2)
+        getRentalStudio(): Promise<{
+          baseCurrency: string
+          comps: Array<{
+            id: number
+            name: string
+            url: string
+            zone: string
+            bedrooms: number
+            nightlyUsd: number | null
+            occupancyPct: number | null
+            rating: number | null
+            reviewCount: number | null
+            notes: string | null
+            savedAt: string | null
+          }>
+          units: Array<Record<string, unknown>>
+          settings: { includeInPlan: boolean; rentalYears: number }
+          totals: {
+            monthlyNet: number
+            annualNet: number
+            annualGross: number
+            per: Array<{
+              id: number | string | undefined
+              name: string | undefined
+              nightly: number
+              monthlyNet: number
+              annualNet: number
+              annualGross: number
+            }>
+          }
+          reconciliation: {
+            studioAnnualNet: number
+            actualsNetOperating: number
+            actualsYear: number | null
+            deltaPct: number | null
+            note: string
+          }
+        }>
+        setRentalStudio(input: {
+          addComp?: Record<string, unknown>
+          updateComp?: { id: number; patch: Record<string, unknown> }
+          deleteComp?: number
+          units?: Array<Record<string, unknown>>
+          settings?: { includeInPlan?: boolean; rentalYears?: number }
+        }): Promise<{ success: boolean; error?: string; studio?: unknown }>
+        suggestNightly(input: {
+          comps?: Array<Record<string, unknown>>
+          listing?: Record<string, unknown>
+        }): Promise<{
+          suggested: number | null
+          low: number | null
+          high: number | null
+          basis: 'no-comps' | 'median' | 'per-bedroom+median'
+          stats: {
+            count: number
+            min: number | null
+            p25: number | null
+            p50: number | null
+            p75: number | null
+            max: number | null
+            mean: number | null
+            perBedroomP50: number | null
+          }
+        }>
+
         // Days-in-country & residency (Phase 11.5)
         getResidencySummary(): Promise<{
           config: {

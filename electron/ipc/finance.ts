@@ -58,6 +58,23 @@ import {
   setPropertyConfig
 } from '../integrations/finance-property'
 import {
+  type Comp,
+  type Listing,
+  type Unit,
+  suggestNightly
+} from '../integrations/finance-rental-pricing'
+import {
+  type CompInput,
+  type StudioSettings,
+  addComp,
+  buildRentalStudio,
+  deleteComp,
+  setSettings,
+  setUnits,
+  studioPlanAnnualNet,
+  updateComp
+} from '../integrations/finance-rental-studio'
+import {
   type RetireEngineConfig,
   type RetirementConfig,
   buildRetirementPlan,
@@ -1105,6 +1122,99 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       return { success: true }
     }
   )
+
+  // ── CR Rental Studio (Phase 10.2) ────────────────────────────────────────
+  // Forward-looking rental pricing/revenue from comps + listing units. Its
+  // projected net feeds the retirement engine's Airbnb income, and reconciles
+  // against the backward-looking property P&L (buildPropertyPnl).
+  ipcMain.handle('finance:get-rental-studio', () => {
+    return buildRentalStudio(getRawSqlite())
+  })
+
+  ipcMain.handle('finance:suggest-nightly', (_event, raw?: unknown) => {
+    const input =
+      raw && typeof raw === 'object' ? (raw as { comps?: Comp[]; listing?: Listing }) : {}
+    const comps = Array.isArray(input.comps) ? input.comps.slice(0, 500) : []
+    const listing = input.listing && typeof input.listing === 'object' ? input.listing : {}
+    return suggestNightly(comps, listing)
+  })
+
+  ipcMain.handle('finance:set-rental-studio', (_event, raw?: unknown) => {
+    const input =
+      raw && typeof raw === 'object'
+        ? (raw as {
+            addComp?: CompInput
+            updateComp?: { id?: number; patch?: CompInput }
+            deleteComp?: number
+            units?: Unit[]
+            settings?: Partial<StudioSettings>
+          })
+        : {}
+    const sqlite = getRawSqlite()
+
+    // Light validation of a comp payload (the module coerces the rest).
+    const validComp = (c: CompInput | undefined): string | null => {
+      if (!c || typeof c !== 'object') return 'comp must be an object'
+      if (
+        c.bedrooms != null &&
+        (!Number.isFinite(Number(c.bedrooms)) || Number(c.bedrooms) < 1 || Number(c.bedrooms) > 20)
+      ) {
+        return `Invalid bedrooms: ${c.bedrooms}`
+      }
+      if (
+        c.nightlyUsd != null &&
+        (!Number.isFinite(Number(c.nightlyUsd)) || Number(c.nightlyUsd) < 0)
+      ) {
+        return `Invalid nightlyUsd: ${c.nightlyUsd}`
+      }
+      return null
+    }
+
+    if (input.addComp !== undefined) {
+      const err = validComp(input.addComp)
+      if (err) return { success: false, error: err }
+      addComp(sqlite, input.addComp)
+    }
+    if (input.updateComp !== undefined) {
+      const { id, patch } = input.updateComp ?? {}
+      if (!Number.isFinite(Number(id))) return { success: false, error: `Invalid comp id: ${id}` }
+      const err = validComp(patch)
+      if (err) return { success: false, error: err }
+      updateComp(sqlite, Number(id), patch ?? {})
+    }
+    if (input.deleteComp !== undefined) {
+      if (!Number.isFinite(Number(input.deleteComp))) {
+        return { success: false, error: `Invalid comp id: ${input.deleteComp}` }
+      }
+      deleteComp(sqlite, Number(input.deleteComp))
+    }
+    if (input.units !== undefined) {
+      if (!Array.isArray(input.units) || input.units.length > 50) {
+        return { success: false, error: 'units must be an array of ≤50 entries' }
+      }
+      setUnits(sqlite, input.units)
+    }
+    if (input.settings !== undefined) {
+      const s = input.settings
+      if (s.includeInPlan != null && typeof s.includeInPlan !== 'boolean') {
+        return { success: false, error: `Invalid includeInPlan: ${s.includeInPlan}` }
+      }
+      if (
+        s.rentalYears != null &&
+        (!Number.isFinite(Number(s.rentalYears)) ||
+          Number(s.rentalYears) < 0 ||
+          Number(s.rentalYears) > 40)
+      ) {
+        return { success: false, error: `Invalid rentalYears: ${s.rentalYears}` }
+      }
+      setSettings(sqlite, s)
+    }
+
+    // Sync the studio's projected net into the retirement engine's Airbnb income.
+    setRetirementConfig(sqlite, { airbnbAnnualNet: Math.round(studioPlanAnnualNet(sqlite)) })
+
+    return { success: true, studio: buildRentalStudio(sqlite) }
+  })
 
   // ── Financial goals & milestones (Phase 11.6) ────────────────────────────
   // Target-date goals that auto-link to net worth / retirement / property, or

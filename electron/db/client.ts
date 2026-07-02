@@ -158,6 +158,23 @@ function ensureNewTables(sqlite: Database.Database): void {
       created_at INTEGER,
       updated_at INTEGER
     );
+    -- CR Rental Studio comps (Phase 10.2). Migration 0025 + this always-run
+    -- fallback (packaged builds don't reliably run migrations).
+    CREATE TABLE IF NOT EXISTS rental_comps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL DEFAULT '',
+      url TEXT NOT NULL DEFAULT '',
+      zone TEXT NOT NULL DEFAULT 'Cartago',
+      bedrooms INTEGER NOT NULL DEFAULT 2,
+      nightly_usd REAL,
+      occupancy_pct REAL,
+      rating REAL,
+      review_count INTEGER,
+      notes TEXT,
+      saved_at TEXT,
+      created_at INTEGER,
+      updated_at INTEGER
+    );
     -- FX-rate snapshots (Phase 11.1). Lives here (the always-run fallback) as
     -- well as migration 0019 because the packaged app doesn't bundle migrations.
     CREATE TABLE IF NOT EXISTS fx_rates (
@@ -716,6 +733,23 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       manual_current REAL NOT NULL DEFAULT 0,
       monthly_contribution REAL NOT NULL DEFAULT 0,
       notes TEXT,
+      created_at INTEGER,
+      updated_at INTEGER
+    );
+    -- CR Rental Studio comps (Phase 10.2). Migration 0025 + this always-run
+    -- fallback (packaged builds don't reliably run migrations).
+    CREATE TABLE IF NOT EXISTS rental_comps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL DEFAULT '',
+      url TEXT NOT NULL DEFAULT '',
+      zone TEXT NOT NULL DEFAULT 'Cartago',
+      bedrooms INTEGER NOT NULL DEFAULT 2,
+      nightly_usd REAL,
+      occupancy_pct REAL,
+      rating REAL,
+      review_count INTEGER,
+      notes TEXT,
+      saved_at TEXT,
       created_at INTEGER,
       updated_at INTEGER
     );

@@ -496,6 +496,12 @@ const api = {
     getRetirementPlan: () => ipcRenderer.invoke('finance:get-retirement-plan'),
     setRetirementEngineConfig: (input: Record<string, number | string | boolean>) =>
       ipcRenderer.invoke('finance:set-retirement-engine-config', input),
+    // CR Rental Studio (Phase 10.2)
+    getRentalStudio: () => ipcRenderer.invoke('finance:get-rental-studio'),
+    setRentalStudio: (input: Record<string, unknown>) =>
+      ipcRenderer.invoke('finance:set-rental-studio', input),
+    suggestNightly: (input: { comps?: unknown[]; listing?: Record<string, unknown> }) =>
+      ipcRenderer.invoke('finance:suggest-nightly', input),
 
     // Days-in-country & residency (Phase 11.5)
     getResidencySummary: () => ipcRenderer.invoke('finance:get-residency-summary'),
