@@ -115,13 +115,14 @@ export function calcUSAnnualTax({
   const agi = ordinaryIncome + ssTaxable + capitalGains
   const taxableIncome = Math.max(0, agi - stdDed)
   const taxableOrdinary = Math.max(0, taxableIncome - capitalGains)
+  const taxableLtcg = Math.max(0, taxableIncome - taxableOrdinary)
 
   const { tax: ordinaryTax, breakdown } = calcFederalTax(taxableOrdinary, filingStatus)
 
   // LTCG stacked on top of ordinary income for bracket placement.
   const ltcgBrackets = LTCG_BRACKETS_2025[filingStatus]
   let ltcgTax = 0
-  let ltcgRemaining = capitalGains
+  let ltcgRemaining = taxableLtcg
   const stackedOrdinary = taxableOrdinary
   for (const b of ltcgBrackets) {
     if (ltcgRemaining <= 0) break
