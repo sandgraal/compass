@@ -23,6 +23,7 @@
 import { type Cadence, PER_YEAR, detectCadence, median, normalizeMerchant } from './normalize'
 import {
   extractPersonName,
+  humanizeHandle,
   isAutomatedSender,
   isLikelyPerson,
   normalizeName,
@@ -354,6 +355,22 @@ export const ENTITY_EXTRACTORS: EntityExtractor[] = [
       // like "GitHub"/"Uber" are dropped) on top of the person/merchant classifier.
       if (!name || !name.includes(' ') || !isLikelyPerson(name)) return []
       return [{ kind: 'person', name }]
+    }
+  },
+  // ── People from GitHub issue/PR authors ──
+  // The opener login rides in the body as "· @login" (with a "[bot]" suffix for
+  // bots). We drop bots and single-token logins (a login is only treated as a person
+  // when it humanizes to a multi-part name like "john-smith" → "John Smith"), so the
+  // common cases — your own login and automation bots — never pollute People. The
+  // issue/PR itself is still a searchable record regardless.
+  {
+    id: 'github-person',
+    match: { source: 'github', types: ['issue', 'pr'] },
+    extract: (r) => {
+      const m = (r.body ?? '').match(/@([\w-]+)(\[bot\])?/)
+      if (!m || m[2]) return [] // no author, or a "[bot]" account
+      const name = humanizeHandle(m[1])
+      return name && isLikelyPerson(name) ? [{ kind: 'person', name }] : []
     }
   },
   // ── Places from calendar event locations ──

@@ -10,11 +10,25 @@ import {
   type PersonSourceRow,
   buildPeople,
   extractPersonName,
+  humanizeHandle,
   isAutomatedSender,
   isLikelyPerson,
   normalizeName,
   parseEmailSender
 } from './people'
+
+describe('humanizeHandle', () => {
+  it('title-cases a delimited multi-part handle', () => {
+    expect(humanizeHandle('jane-doe')).toBe('Jane Doe')
+    expect(humanizeHandle('bob.smith')).toBe('Bob Smith')
+    expect(humanizeHandle('ana_maria')).toBe('Ana Maria')
+  })
+
+  it('returns null for a single token or a handle with digits', () => {
+    expect(humanizeHandle('sandgraal')).toBeNull()
+    expect(humanizeHandle('user123-x')).toBeNull()
+  })
+})
 
 describe('isAutomatedSender', () => {
   it('flags the real-world automated senders (no-reply, role alias, bulk subdomain, "via")', () => {

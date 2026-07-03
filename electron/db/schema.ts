@@ -84,6 +84,11 @@ export const githubItems = sqliteTable('github_items', {
   body: text('body'),
   labels: text('labels'), // JSON array of strings
   dueDate: text('due_date'),
+  // Storehouse projection inputs (Phase 10 live-sync). `author` = the opener login
+  // (issue.user.login) → People; `updatedAt` = the item's own last-updated ISO time,
+  // used as the timeline date (no created/updated column existed before).
+  author: text('author'),
+  updatedAt: text('updated_at'),
   syncedAt: integer('synced_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
@@ -102,6 +107,8 @@ export const linearIssues = sqliteTable('linear_issues', {
   priority: integer('priority').notNull().default(0), // 0 none … 1 urgent … 4 low (Linear's scale)
   team: text('team'), // team key, e.g. 'ENG'
   dueDate: text('due_date'),
+  // The issue's own last-updated ISO time — the Storehouse timeline date (Phase 10).
+  updatedAt: text('updated_at'),
   syncedAt: integer('synced_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
