@@ -49,6 +49,9 @@ export function registerHabitsHandlers(ipcMain: IpcMain): void {
         icon?: string
         color?: string
         active?: boolean
+        // Cross-domain leverage: null clears the link (back to a manual habit).
+        autoLinkSource?: string | null
+        autoLinkThreshold?: number | null
       }
     ) => {
       const db = getDb()
@@ -105,6 +108,9 @@ export function registerHabitsHandlers(ipcMain: IpcMain): void {
   })
 
   // ── Toggle (upsert) a habit entry ─────────────────────────────────────────
+  // A manual toggle always clears `source` back to null — even on an entry a
+  // sync auto-filled — so the user's own edit sticks and a later sync never
+  // re-overwrites it (same trust model as the Todoist/Things checklist imports).
   ipcMain.handle('habits:toggle', async (_event, habitId: number, date: string) => {
     const db = getDb()
 
@@ -117,7 +123,7 @@ export function registerHabitsHandlers(ipcMain: IpcMain): void {
 
     if (existing) {
       db.update(habitEntries)
-        .set({ completed: !existing.completed })
+        .set({ completed: !existing.completed, source: null })
         .where(eq(habitEntries.id, existing.id))
         .run()
       return { success: true, completed: !existing.completed }

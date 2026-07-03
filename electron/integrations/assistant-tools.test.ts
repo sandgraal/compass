@@ -47,11 +47,12 @@ beforeEach(() => {
     CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER);
     CREATE TABLE habits (
       id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, icon TEXT, color TEXT,
-      active INTEGER DEFAULT 1, created_at INTEGER
+      active INTEGER DEFAULT 1, created_at INTEGER,
+      auto_link_source TEXT, auto_link_threshold REAL
     );
     CREATE TABLE habit_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT, habit_id INTEGER, date TEXT NOT NULL,
-      completed INTEGER DEFAULT 0
+      completed INTEGER DEFAULT 0, source TEXT
     );
     CREATE TABLE knowledge_files (
       id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL,

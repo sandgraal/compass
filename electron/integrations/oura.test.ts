@@ -83,6 +83,15 @@ beforeEach(() => {
       sleep_score INTEGER, readiness_score INTEGER, activity_score INTEGER,
       steps INTEGER, total_sleep_minutes INTEGER, synced_at INTEGER
     );
+    CREATE TABLE habits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, icon TEXT,
+      color TEXT DEFAULT '#6272f1', active INTEGER DEFAULT 1, created_at INTEGER,
+      auto_link_source TEXT, auto_link_threshold REAL
+    );
+    CREATE TABLE habit_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, habit_id INTEGER REFERENCES habits(id),
+      date TEXT NOT NULL, completed INTEGER DEFAULT 0, source TEXT
+    );
   `)
 })
 
@@ -252,5 +261,111 @@ describe('syncOura', () => {
     const r = await syncOura(null)
     expect(r.success).toBe(false)
     expect(r.error).toContain('500')
+  })
+})
+
+// ── syncOura — habit auto-link (cross-domain leverage) ──────────────────────
+// `today` is pinned to 2026-06-13 (see the localYmd mock above), but the shared
+// `collectionFor` fixture only returns data for 2026-06-12 — so these tests
+// override fetchMock with their OWN today-dated rows rather than touching the
+// shared fixture (avoids perturbing the row-count assertions above).
+
+function seedHabit(
+  db: Database.Database,
+  name: string,
+  autoLinkSource: string | null,
+  autoLinkThreshold: number | null
+): number {
+  const info = db
+    .prepare(
+      'INSERT INTO habits (name, active, auto_link_source, auto_link_threshold) VALUES (?, 1, ?, ?)'
+    )
+    .run(name, autoLinkSource, autoLinkThreshold)
+  return Number(info.lastInsertRowid)
+}
+
+function todayResponse(sleepScore: number): typeof fetchMock {
+  fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input.toString()
+    if (url.includes('daily_sleep')) {
+      return jsonResponse({ data: [{ day: '2026-06-13', score: sleepScore }] })
+    }
+    return jsonResponse({ data: [] })
+  })
+  return fetchMock
+}
+
+describe('syncOura — habit auto-link', () => {
+  it('auto-fills a habit whose linked metric meets the threshold', async () => {
+    const habitId = seedHabit(sqlite, 'sleep well', 'oura-sleep-score', 80)
+    todayResponse(85)
+    const { syncOura } = await import('./oura')
+    await syncOura(null)
+
+    const entry = sqlite
+      .prepare('SELECT completed, source FROM habit_entries WHERE habit_id = ? AND date = ?')
+      .get(habitId, '2026-06-13') as { completed: number; source: string }
+    expect(entry.completed).toBe(1)
+    expect(entry.source).toBe('oura')
+  })
+
+  it('does not create an entry when the metric is below the threshold', async () => {
+    const habitId = seedHabit(sqlite, 'sleep well', 'oura-sleep-score', 80)
+    todayResponse(60)
+    const { syncOura } = await import('./oura')
+    await syncOura(null)
+
+    const entry = sqlite
+      .prepare('SELECT * FROM habit_entries WHERE habit_id = ? AND date = ?')
+      .get(habitId, '2026-06-13')
+    expect(entry).toBeUndefined()
+  })
+
+  it('never overwrites an entry the user already toggled manually', async () => {
+    const habitId = seedHabit(sqlite, 'sleep well', 'oura-sleep-score', 80)
+    // User explicitly marked today NOT done (source=null, like habits:toggle leaves it).
+    sqlite
+      .prepare(
+        'INSERT INTO habit_entries (habit_id, date, completed, source) VALUES (?, ?, 0, NULL)'
+      )
+      .run(habitId, '2026-06-13')
+    todayResponse(95) // well above threshold — would normally auto-fill
+    const { syncOura } = await import('./oura')
+    await syncOura(null)
+
+    const entry = sqlite
+      .prepare('SELECT completed, source FROM habit_entries WHERE habit_id = ? AND date = ?')
+      .get(habitId, '2026-06-13') as { completed: number; source: string | null }
+    expect(entry.completed).toBe(0) // untouched
+    expect(entry.source).toBeNull()
+  })
+
+  it('refreshes (does not duplicate) an entry it previously auto-filled itself', async () => {
+    const habitId = seedHabit(sqlite, 'sleep well', 'oura-sleep-score', 80)
+    sqlite
+      .prepare(
+        "INSERT INTO habit_entries (habit_id, date, completed, source) VALUES (?, ?, 1, 'oura')"
+      )
+      .run(habitId, '2026-06-13')
+    todayResponse(90)
+    const { syncOura } = await import('./oura')
+    await syncOura(null)
+
+    const count = sqlite
+      .prepare('SELECT COUNT(*) c FROM habit_entries WHERE habit_id = ? AND date = ?')
+      .get(habitId, '2026-06-13') as { c: number }
+    expect(count.c).toBe(1)
+  })
+
+  it('leaves a manual (non-auto-linked) habit untouched even if it has no entry today', async () => {
+    const habitId = seedHabit(sqlite, 'read a book', null, null)
+    todayResponse(95)
+    const { syncOura } = await import('./oura')
+    await syncOura(null)
+
+    const entry = sqlite
+      .prepare('SELECT * FROM habit_entries WHERE habit_id = ? AND date = ?')
+      .get(habitId, '2026-06-13')
+    expect(entry).toBeUndefined()
   })
 })

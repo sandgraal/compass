@@ -267,7 +267,14 @@ const api = {
       ipcRenderer.invoke('habits:create', habit),
     update: (
       id: number,
-      updates: { name?: string; icon?: string; color?: string; active?: boolean }
+      updates: {
+        name?: string
+        icon?: string
+        color?: string
+        active?: boolean
+        autoLinkSource?: string | null
+        autoLinkThreshold?: number | null
+      }
     ) => ipcRenderer.invoke('habits:update', id, updates),
     delete: (id: number) => ipcRenderer.invoke('habits:delete', id),
     getEntries: (month: string) => ipcRenderer.invoke('habits:get-entries', month),

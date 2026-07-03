@@ -75,13 +75,16 @@ beforeEach(() => {
       icon TEXT,
       color TEXT DEFAULT '#6272f1',
       active INTEGER DEFAULT 1,
-      created_at INTEGER
+      created_at INTEGER,
+      auto_link_source TEXT,
+      auto_link_threshold REAL
     );
     CREATE TABLE habit_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       habit_id INTEGER,
       date TEXT NOT NULL,
-      completed INTEGER DEFAULT 0
+      completed INTEGER DEFAULT 0,
+      source TEXT
     );
     CREATE TABLE knowledge_files (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

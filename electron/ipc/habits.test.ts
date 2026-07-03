@@ -65,13 +65,16 @@ beforeEach(() => {
       icon TEXT,
       color TEXT DEFAULT '#6272f1',
       active INTEGER DEFAULT 1,
-      created_at INTEGER
+      created_at INTEGER,
+      auto_link_source TEXT,
+      auto_link_threshold REAL
     );
     CREATE TABLE habit_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       habit_id INTEGER REFERENCES habits(id),
       date TEXT NOT NULL,
-      completed INTEGER DEFAULT 0
+      completed INTEGER DEFAULT 0,
+      source TEXT
     );
   `)
   for (const k of Object.keys(handlers)) delete handlers[k]
@@ -187,6 +190,29 @@ describe('habits:update', () => {
       active: number
     }
     expect(row.active).toBe(1)
+  })
+
+  it('sets an auto-link source + threshold', async () => {
+    const id = seedHabit('sleep well')
+    const h = await registerAndGet('habits:update')
+    await invoke(h, id, { autoLinkSource: 'oura-sleep-score', autoLinkThreshold: 80 })
+    const row = sqlite
+      .prepare('SELECT auto_link_source, auto_link_threshold FROM habits WHERE id = ?')
+      .get(id) as { auto_link_source: string; auto_link_threshold: number }
+    expect(row.auto_link_source).toBe('oura-sleep-score')
+    expect(row.auto_link_threshold).toBe(80)
+  })
+
+  it('clears an auto-link back to a manual habit', async () => {
+    const id = seedHabit('sleep well')
+    const h = await registerAndGet('habits:update')
+    await invoke(h, id, { autoLinkSource: 'oura-sleep-score', autoLinkThreshold: 80 })
+    await invoke(h, id, { autoLinkSource: null, autoLinkThreshold: null })
+    const row = sqlite
+      .prepare('SELECT auto_link_source, auto_link_threshold FROM habits WHERE id = ?')
+      .get(id) as { auto_link_source: string | null; auto_link_threshold: number | null }
+    expect(row.auto_link_source).toBeNull()
+    expect(row.auto_link_threshold).toBeNull()
   })
 })
 
@@ -337,5 +363,22 @@ describe('habits:toggle', () => {
     expect(first.completed).toBe(true)
     const second = (await invoke(h, id, '2026-05-20')) as { completed: boolean }
     expect(second.completed).toBe(false)
+  })
+
+  it('clears source back to manual when a user toggles an auto-filled entry', async () => {
+    // Cross-domain leverage: a habit entry a sync auto-filled (source='oura')
+    // must become user-owned the moment the user touches it, so a later sync
+    // never re-overwrites their explicit choice.
+    const id = seedHabit('sleep well')
+    sqlite
+      .prepare('INSERT INTO habit_entries (habit_id, date, completed, source) VALUES (?, ?, 1, ?)')
+      .run(id, '2026-05-20', 'oura')
+    const h = await registerAndGet('habits:toggle')
+    await invoke(h, id, '2026-05-20')
+    const row = sqlite
+      .prepare('SELECT completed, source FROM habit_entries WHERE habit_id = ? AND date = ?')
+      .get(id, '2026-05-20') as { completed: number; source: string | null }
+    expect(row.completed).toBe(0)
+    expect(row.source).toBeNull()
   })
 })

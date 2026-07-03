@@ -514,6 +514,11 @@ function ensureNewTables(sqlite: Database.Database): void {
   } catch {
     /* finance_transactions might not exist on a pristine DB — ignore */
   }
+  // Cross-domain leverage (2026-07-03, migration 0028) — habit auto-link from a
+  // life-logging source (Oura first). Both `habits` columns null = manual habit.
+  ensureColumn(sqlite, 'habits', 'auto_link_source', 'TEXT')
+  ensureColumn(sqlite, 'habits', 'auto_link_threshold', 'REAL')
+  ensureColumn(sqlite, 'habit_entries', 'source', 'TEXT')
 }
 
 function ensureColumn(
@@ -838,14 +843,17 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       icon TEXT,
       color TEXT DEFAULT '#6272f1',
       active INTEGER DEFAULT 1,
-      created_at INTEGER
+      created_at INTEGER,
+      auto_link_source TEXT,
+      auto_link_threshold REAL
     );
 
     CREATE TABLE IF NOT EXISTS habit_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       habit_id INTEGER REFERENCES habits(id),
       date TEXT NOT NULL,
-      completed INTEGER DEFAULT 0
+      completed INTEGER DEFAULT 0,
+      source TEXT
     );
 
     CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
