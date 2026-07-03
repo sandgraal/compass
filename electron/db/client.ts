@@ -175,6 +175,20 @@ function ensureNewTables(sqlite: Database.Database): void {
       created_at INTEGER,
       updated_at INTEGER
     );
+    -- Oura daily metrics (health-fitness category, first LIVE source). Mirrors
+    -- migration 0027 here (the always-run fallback) since packaged builds skip
+    -- migrations.
+    CREATE TABLE IF NOT EXISTS oura_daily_metrics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      sleep_score INTEGER,
+      readiness_score INTEGER,
+      activity_score INTEGER,
+      steps INTEGER,
+      total_sleep_minutes INTEGER,
+      synced_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS oura_daily_metrics_date_unique ON oura_daily_metrics (date);
     -- FX-rate snapshots (Phase 11.1). Lives here (the always-run fallback) as
     -- well as migration 0019 because the packaged app doesn't bundle migrations.
     CREATE TABLE IF NOT EXISTS fx_rates (
@@ -761,6 +775,19 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       saved_at TEXT,
       created_at INTEGER,
       updated_at INTEGER
+    );
+
+    -- Oura daily metrics (health-fitness category, first LIVE source). Migration
+    -- 0027 + this always-run fallback (packaged builds don't reliably run migrations).
+    CREATE TABLE IF NOT EXISTS oura_daily_metrics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      sleep_score INTEGER,
+      readiness_score INTEGER,
+      activity_score INTEGER,
+      steps INTEGER,
+      total_sleep_minutes INTEGER,
+      synced_at INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS forecast_overrides (

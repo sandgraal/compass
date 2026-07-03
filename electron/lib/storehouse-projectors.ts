@@ -189,6 +189,46 @@ export function projectGithub(rows: GithubRow[]): RecordInput[] {
   return out
 }
 
+/** An Oura daily-metrics row reduced to the projector's fields (`oura_daily_metrics`). */
+export interface OuraRow {
+  date: string // 'YYYY-MM-DD'
+  sleepScore: number | null
+  readinessScore: number | null
+  activityScore: number | null
+  steps: number | null
+}
+
+/**
+ * Project `oura_daily_metrics` → records (`source:'oura'`, `type:'wellness'`).
+ *
+ * One row per day, occurredAt = that day at local midnight (matches the finance
+ * date idiom via `localDayMs`). naturalKey = the date string, so a re-sync
+ * upserts the SAME timeline row in place (mutable-occurredAt upsert semantics,
+ * like Gmail/Calendar/GitHub/Linear) rather than spamming a new one — scores can
+ * be revised after Oura finishes processing a day.
+ */
+export function projectOuraMetrics(rows: OuraRow[]): RecordInput[] {
+  const out: RecordInput[] = []
+  for (const r of rows) {
+    if (!r.date) continue
+    const parts: string[] = []
+    if (r.sleepScore != null) parts.push(`Sleep ${r.sleepScore}`)
+    if (r.readinessScore != null) parts.push(`Readiness ${r.readinessScore}`)
+    if (r.activityScore != null) parts.push(`Activity ${r.activityScore}`)
+    const title = parts.length > 0 ? `Oura: ${parts.join(' · ')}` : 'Oura: no scores yet'
+    out.push({
+      source: 'oura',
+      type: 'wellness',
+      occurredAt: localDayMs(r.date),
+      title,
+      body: r.steps != null ? `${r.steps.toLocaleString('en-US')} steps` : undefined,
+      payload: r,
+      naturalKey: r.date
+    })
+  }
+  return out
+}
+
 /** A Linear issue reduced to the projector's fields (`linear_issues`). */
 export interface LinearRow {
   externalId: string

@@ -12,6 +12,9 @@ const TOKEN_KEY_PREFIX = 'compass_token_'
 const OAUTH_PORT = 4242
 const GOOGLE_CALLBACK_PATH = '/oauth/google/callback'
 const GITHUB_CALLBACK_PATH = '/oauth/github/callback'
+// Duplicated from `electron/integrations/oura.ts` (not imported) to avoid a
+// circular import — that module imports `loadToken` from this file.
+const OURA_API = 'https://api.ouraring.com'
 
 export function saveToken(service: string, tokenData: object): void {
   const json = JSON.stringify(tokenData)
@@ -776,6 +779,66 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
             connectedAt: new Date(),
             status: 'connected',
             scopes: JSON.stringify(['tasks:read'])
+          }
+        })
+        .run()
+
+      return { success: true }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Oura Personal Access Token (health-fitness — first LIVE source in that
+  // category). Same paste-once PAT pattern as Todoist: validate the format,
+  // prove it works against the lightweight `/v2/usercollection/personal_info`
+  // identity check, encrypt to disk, flip the integrations row. Oura PATs are
+  // Bearer tokens minted from the user's Oura account (Account → Personal
+  // Access Tokens) — no OAuth app registration needed.
+  ipcMain.handle('auth:connect-oura', async (_event, token: string) => {
+    if (typeof token !== 'string') {
+      return { error: 'Token must be a string.' }
+    }
+    // Bound length BEFORE trim/regex — the renderer is an untrusted boundary.
+    if (token.length > 256) {
+      return { error: 'Token is too long.' }
+    }
+    const trimmed = token.trim()
+    // Oura Personal Access Tokens are opaque alphanumeric strings (no fixed
+    // prefix documented); keep the check lenient but reject obvious garbage.
+    if (!/^[A-Za-z0-9]{20,256}$/.test(trimmed)) {
+      return {
+        error:
+          "That doesn't look like an Oura Personal Access Token. Create one from your Oura account → Personal Access Tokens."
+      }
+    }
+    try {
+      const resp = await fetch(`${OURA_API}/v2/usercollection/personal_info`, {
+        headers: { Authorization: `Bearer ${trimmed}` }
+      })
+      if (resp.status === 401 || resp.status === 403) {
+        return { error: 'Oura rejected the token (auth failed). It may be revoked or mistyped.' }
+      }
+      if (!resp.ok) {
+        return { error: `Oura responded with HTTP ${resp.status}.` }
+      }
+
+      saveToken('oura', { access_token: trimmed, auth_method: 'personal-access-token' })
+
+      const db = getDb()
+      db.insert(integrations)
+        .values({
+          service: 'oura',
+          connectedAt: new Date(),
+          status: 'connected',
+          scopes: JSON.stringify(['personal', 'daily'])
+        })
+        .onConflictDoUpdate({
+          target: integrations.service,
+          set: {
+            connectedAt: new Date(),
+            status: 'connected',
+            scopes: JSON.stringify(['personal', 'daily'])
           }
         })
         .run()

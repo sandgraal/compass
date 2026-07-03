@@ -83,6 +83,11 @@ beforeEach(() => {
       title TEXT NOT NULL, url TEXT NOT NULL, state TEXT NOT NULL, state_type TEXT NOT NULL,
       priority INTEGER NOT NULL DEFAULT 0, team TEXT, due_date TEXT, updated_at TEXT, synced_at INTEGER
     );
+    CREATE TABLE oura_daily_metrics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL UNIQUE,
+      sleep_score INTEGER, readiness_score INTEGER, activity_score INTEGER,
+      steps INTEGER, total_sleep_minutes INTEGER, synced_at INTEGER
+    );
     CREATE TABLE contacts (
       id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL
     );
@@ -129,6 +134,14 @@ function addGithub(
       "INSERT INTO github_items (type,repo,external_id,title,url,state,author,updated_at) VALUES (?,?,?,?,'http://x','open',?,'2026-06-01T00:00:00Z')"
     )
     .run(type, repo, externalId, title, author)
+}
+
+function addOura(date: string, sleepScore: number | null, steps: number | null) {
+  sqlite
+    .prepare(
+      'INSERT INTO oura_daily_metrics (date, sleep_score, readiness_score, activity_score, steps) VALUES (?,?,?,?,?)'
+    )
+    .run(date, sleepScore, 70, 80, steps)
 }
 
 describe('projectAllToRecords', () => {
@@ -229,6 +242,35 @@ describe('projectAllToRecords', () => {
     expect(row.title).toBe('Edited title')
     expect(row.occurred_at).toBe(Date.parse('2026-08-01T00:00:00Z'))
     expect(res.imported).toBe(0) // an update, not a new insert
+  })
+
+  it('projects Oura daily metrics → wellness records, upserting on re-projection', () => {
+    addOura('2026-06-12', 82, 8412)
+
+    const res = projectAllToRecords()
+    expect(res.imported).toBe(1)
+
+    const row = sqlite
+      .prepare("SELECT source, type, title, body FROM records WHERE source='oura'")
+      .get()
+    expect(row).toEqual({
+      source: 'oura',
+      type: 'wellness',
+      title: 'Oura: Sleep 82 · Readiness 70 · Activity 80',
+      body: '8,412 steps'
+    })
+
+    // A rescored day (Oura revises after processing) re-projects the SAME row.
+    sqlite.prepare("UPDATE oura_daily_metrics SET sleep_score = 90 WHERE date = '2026-06-12'").run()
+    const res2 = projectAllToRecords()
+    expect(res2.imported).toBe(0) // update, not a new insert
+    expect(sqlite.prepare("SELECT COUNT(*) AS n FROM records WHERE source='oura'").get()).toEqual({
+      n: 1
+    })
+    const updated = sqlite.prepare("SELECT title FROM records WHERE source='oura'").get() as {
+      title: string
+    }
+    expect(updated.title).toBe('Oura: Sleep 90 · Readiness 70 · Activity 80')
   })
 })
 

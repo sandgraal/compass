@@ -22,7 +22,8 @@ import {
   financeTransactions,
   githubItems,
   gmailActions,
-  linearIssues
+  linearIssues,
+  ouraDailyMetrics
 } from '../db/schema'
 import { captureSnapshots } from '../integrations/finance-snapshot'
 import { refreshDerivedEntities } from '../lib/entities-projection'
@@ -32,11 +33,13 @@ import {
   type GithubRow,
   type GmailRow,
   type LinearRow,
+  type OuraRow,
   projectCalendar,
   projectFinanceTransactions,
   projectGithub,
   projectGmail,
-  projectLinear
+  projectLinear,
+  projectOuraMetrics
 } from '../lib/storehouse-projectors'
 import { insertRecords, upsertLiveRecords } from './records'
 
@@ -115,6 +118,20 @@ function readLinear(): LinearRow[] {
     .all()
 }
 
+/** Read Oura daily metrics as projector inputs. */
+function readOura(): OuraRow[] {
+  return getDb()
+    .select({
+      date: ouraDailyMetrics.date,
+      sleepScore: ouraDailyMetrics.sleepScore,
+      readinessScore: ouraDailyMetrics.readinessScore,
+      activityScore: ouraDailyMetrics.activityScore,
+      steps: ouraDailyMetrics.steps
+    })
+    .from(ouraDailyMetrics)
+    .all()
+}
+
 export interface BackfillResult {
   /** Records newly inserted this run (already-present rows dedupe to 0). */
   imported: number
@@ -125,8 +142,8 @@ export interface BackfillResult {
 /**
  * Project all live-integration domain tables into `records`, then rebuild the
  * derived-entity cache ONCE. Idempotent — safe to run on every sync and on demand.
- * Covers finance + Gmail + Calendar; GitHub/Linear projectors slot in here next.
- * Per-source provenance tags keep the batch labels meaningful.
+ * Covers finance + Gmail + Calendar + GitHub + Linear + Oura. Per-source
+ * provenance tags keep the batch labels meaningful.
  */
 export function projectAllToRecords(): BackfillResult {
   const now = Date.now()
@@ -139,13 +156,15 @@ export function projectAllToRecords(): BackfillResult {
     projectFinanceTransactions(readFinanceTxns()),
     `live:finance:${now}`
   ).imported
-  // Gmail/Calendar/GitHub/Linear carry a MUTABLE occurredAt (received_at / start /
-  // updated_at), so they UPSERT on a stable per-domain-row key (occurredAt excluded):
-  // a changed timestamp re-projects in place instead of spamming a new timeline row.
+  // Gmail/Calendar/GitHub/Linear/Oura carry a MUTABLE occurredAt (received_at /
+  // start / updated_at / the day's scores being revised), so they UPSERT on a
+  // stable per-domain-row key (occurredAt excluded): a changed timestamp or a
+  // rescored day re-projects in place instead of spamming a new timeline row.
   imported += upsertLiveRecords(projectGmail(readGmail()), `live:gmail:${now}`).imported
   imported += upsertLiveRecords(projectCalendar(readCalendar()), `live:gcal:${now}`).imported
   imported += upsertLiveRecords(projectGithub(readGithub()), `live:github:${now}`).imported
   imported += upsertLiveRecords(projectLinear(readLinear()), `live:linear:${now}`).imported
+  imported += upsertLiveRecords(projectOuraMetrics(readOura()), `live:oura:${now}`).imported
   const { count } = refreshDerivedEntities(getDb())
   return { imported, entities: count }
 }

@@ -38,6 +38,15 @@ interface GitHubIssue {
   pull_request?: object
 }
 
+interface OuraDailyMetric {
+  date: string // 'YYYY-MM-DD'
+  sleepScore: number | null
+  readinessScore: number | null
+  activityScore: number | null
+  steps: number | null
+  totalSleepMinutes: number | null
+}
+
 export async function updateCalendarKnowledge(events: CalendarEvent[]): Promise<void> {
   if (!events.length) return
 
@@ -154,4 +163,33 @@ export async function updateGitHubKnowledge(issues: GitHubIssue[]): Promise<void
   }
 
   updateKnowledgeFile(KNOWLEDGE_DIR, 'work/github-summary.md', `${lines.join('\n')}\n`)
+}
+
+/**
+ * Renders the last 30 days of Oura scores (most recent first) as a markdown
+ * table. Health-fitness's first knowledge file — mirrors the GitHub summary's
+ * shape (a header + auto-updated stamp + one markdown table).
+ */
+export async function updateOuraKnowledge(items: OuraDailyMetric[]): Promise<void> {
+  if (!items.length) return
+
+  const lines = [
+    '# Oura Summary',
+    '',
+    '> Auto-updated by Compass on each sync.',
+    '',
+    '| Date | Sleep | Readiness | Activity | Steps |',
+    '|---|---|---|---|---|'
+  ]
+
+  const sorted = [...items].sort((a, b) => b.date.localeCompare(a.date))
+  const fmt = (n: number | null): string => (n == null ? '—' : String(n))
+  for (const m of sorted.slice(0, 30)) {
+    const steps = m.steps == null ? '—' : m.steps.toLocaleString('en-US')
+    lines.push(
+      `| ${m.date} | ${fmt(m.sleepScore)} | ${fmt(m.readinessScore)} | ${fmt(m.activityScore)} | ${steps} |`
+    )
+  }
+
+  updateKnowledgeFile(KNOWLEDGE_DIR, 'health/oura-summary.md', `${lines.join('\n')}\n`)
 }
