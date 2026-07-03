@@ -563,7 +563,16 @@ export async function syncGoogle(
           })
           .onConflictDoUpdate({
             target: gmailActions.threadId,
-            set: { subject, syncedAt: new Date() }
+            // Refresh the projection inputs too (sender/snippet/time), not just the
+            // subject — otherwise afterGoogleSync would re-project stale People data
+            // for a thread that already existed.
+            set: {
+              subject,
+              fromAddress: from,
+              snippet: msgData.snippet,
+              receivedAt: date ? new Date(date) : new Date(),
+              syncedAt: new Date()
+            }
           })
           .run()
         recordsUpdated++

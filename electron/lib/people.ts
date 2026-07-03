@@ -88,7 +88,6 @@ function humanizeLocalPart(email: string): string | null {
 // and "newsletters-noreply" are caught, while a real "jane.alerts" is not.
 const AUTOMATION_TOKENS = new Set([
   'noreply',
-  'no-reply',
   'donotreply',
   'newsletter',
   'newsletters',
@@ -134,7 +133,11 @@ export function isAutomatedSender(from: string): boolean {
   const email = (angle ? angle[1] : bare ? bare[1] : '').toLowerCase().trim()
   if (!email.includes('@')) return false
   const [local, domain] = email.split('@')
-  if (/no-?reply|do-?not-?reply/.test(local)) return true
+  // no-reply / do-not-reply, whether delimited ("no-reply", "no.reply") or not
+  // ("donotreply") — matched on the delimiter-COLLAPSED local anchored at the start,
+  // so "honoreply" (no leading boundary) is NOT flagged.
+  if (/^(?:no|donot)reply/.test(local.replace(/[._-]+/g, ''))) return true
+  // Role aliases / bulk tokens as whole `.-_`-delimited local segments.
   if (local.split(/[._-]+/).some((seg) => AUTOMATION_TOKENS.has(seg))) return true
   if (AUTOMATION_SUBDOMAIN.test(`@${domain}.`)) return true
   return false

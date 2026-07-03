@@ -35,6 +35,12 @@ describe('isAutomatedSender', () => {
     expect(isAutomatedSender('Jane Doe <jane@example.com>')).toBe(false)
     expect(isAutomatedSender('jane.doe@gmail.com')).toBe(false)
   })
+
+  it('matches automation tokens on segment/prefix boundaries, not substrings', () => {
+    expect(isAutomatedSender('no-reply@x.com')).toBe(true) // delimited no-reply
+    expect(isAutomatedSender('honoreply@x.com')).toBe(false) // "noreply" mid-token, not a prefix
+    expect(isAutomatedSender('mailinfo@x.com')).toBe(false) // "info"/"mail" as a substring, not a segment
+  })
 })
 
 describe('parseEmailSender', () => {
