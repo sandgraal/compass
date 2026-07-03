@@ -30,16 +30,18 @@ let sqlite: Database.Database
 const TMP_DIR = mkdtempSync(join(tmpdir(), 'compass-records-embed-'))
 const INDEX_PATH = join(TMP_DIR, 'records-embeddings.json')
 
-/** Thin wrappers pinning the index to the throwaway path above (never the real DATA_DIR). */
+// Thin wrappers pinning the index to the throwaway path above (never the real
+// DATA_DIR). `indexPath` comes AFTER `...opts` so it always wins — a caller can
+// never override the pin and accidentally read the real on-disk index.
 function buildIndex(db: Database.Database, opts: BuildRecordsIndexOptions = {}) {
-  return buildRecordsEmbeddingsIndex(db, { indexPath: INDEX_PATH, ...opts })
+  return buildRecordsEmbeddingsIndex(db, { ...opts, indexPath: INDEX_PATH })
 }
 function searchSemantic(
   db: Database.Database,
   query: string,
   opts: SearchRecordsSemanticOptions = {}
 ) {
-  return searchRecordsSemantic(db, query, { indexPath: INDEX_PATH, ...opts })
+  return searchRecordsSemantic(db, query, { ...opts, indexPath: INDEX_PATH })
 }
 
 // Deterministic offline embedding: a fixed-dim vector counting a few keywords, so
