@@ -74,12 +74,20 @@ export function parseEmailSender(from: string): string | null {
   return full // already a bare name
 }
 
-/** Turn a `first.last` / `first_last` email local part into "First Last", else null. */
-function humanizeLocalPart(email: string): string | null {
-  const local = email.split('@')[0]
-  const parts = local.split(/[._]/).filter(Boolean)
+/**
+ * Turn a `first.last` / `first_last` / `first-last` handle (email local part or a
+ * GitHub login) into "First Last", or null when it isn't a delimited multi-part
+ * alphabetic handle (so single-token handles like "sandgraal" / "noreply" → null).
+ */
+export function humanizeHandle(handle: string): string | null {
+  const parts = handle.split(/[._-]/).filter(Boolean)
   if (parts.length < 2 || !parts.every((p) => /^[a-z]+$/i.test(p))) return null
   return parts.map((p) => p[0].toUpperCase() + p.slice(1).toLowerCase()).join(' ')
+}
+
+/** Humanize an email local part (drops the domain first). */
+function humanizeLocalPart(email: string): string | null {
+  return humanizeHandle(email.split('@')[0])
 }
 
 // Machine senders: no-reply mailers, role aliases, bulk-mail subdomains, and

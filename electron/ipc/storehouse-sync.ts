@@ -17,16 +17,26 @@
  */
 import type { IpcMain } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
-import { calendarEvents, financeTransactions, gmailActions } from '../db/schema'
+import {
+  calendarEvents,
+  financeTransactions,
+  githubItems,
+  gmailActions,
+  linearIssues
+} from '../db/schema'
 import { captureSnapshots } from '../integrations/finance-snapshot'
 import { refreshDerivedEntities } from '../lib/entities-projection'
 import {
   type CalendarRow,
   type FinanceTxnRow,
+  type GithubRow,
   type GmailRow,
+  type LinearRow,
   projectCalendar,
   projectFinanceTransactions,
-  projectGmail
+  projectGithub,
+  projectGmail,
+  projectLinear
 } from '../lib/storehouse-projectors'
 import { insertRecords } from './records'
 
@@ -74,6 +84,37 @@ function readCalendar(): CalendarRow[] {
     .map((r) => ({ ...r, startAt: r.startAt ? r.startAt.getTime() : null }))
 }
 
+/** Read GitHub issues/PRs as projector inputs. */
+function readGithub(): GithubRow[] {
+  return getDb()
+    .select({
+      externalId: githubItems.externalId,
+      type: githubItems.type,
+      repo: githubItems.repo,
+      title: githubItems.title,
+      state: githubItems.state,
+      author: githubItems.author,
+      updatedAt: githubItems.updatedAt
+    })
+    .from(githubItems)
+    .all()
+}
+
+/** Read Linear issues as projector inputs. */
+function readLinear(): LinearRow[] {
+  return getDb()
+    .select({
+      externalId: linearIssues.externalId,
+      identifier: linearIssues.identifier,
+      title: linearIssues.title,
+      state: linearIssues.state,
+      team: linearIssues.team,
+      updatedAt: linearIssues.updatedAt
+    })
+    .from(linearIssues)
+    .all()
+}
+
 export interface BackfillResult {
   /** Records newly inserted this run (already-present rows dedupe to 0). */
   imported: number
@@ -96,6 +137,8 @@ export function projectAllToRecords(): BackfillResult {
   ).imported
   imported += insertRecords(projectGmail(readGmail()), `live:gmail:${now}`).imported
   imported += insertRecords(projectCalendar(readCalendar()), `live:gcal:${now}`).imported
+  imported += insertRecords(projectGithub(readGithub()), `live:github:${now}`).imported
+  imported += insertRecords(projectLinear(readLinear()), `live:linear:${now}`).imported
   const { count } = refreshDerivedEntities(getDb())
   return { imported, entities: count }
 }
@@ -123,14 +166,15 @@ export function afterFinanceSync(): void {
 }
 
 /**
- * Post-sync hook for the Google sync path (Gmail/Calendar → People/Places). Same
- * defensive contract as `afterFinanceSync` but without the finance snapshot step.
+ * Post-sync hook for the non-finance connectors (Google Gmail/Calendar, GitHub,
+ * Linear) — projects the latest synced data into the spine. Same defensive contract
+ * as `afterFinanceSync` (never throws) but without the finance snapshot step.
  */
-export function afterGoogleSync(): void {
+export function afterConnectorSync(): void {
   try {
     projectAllToRecords()
   } catch (err) {
-    console.warn('[storehouse-sync] google projection failed (non-fatal):', err)
+    console.warn('[storehouse-sync] connector projection failed (non-fatal):', err)
   }
 }
 

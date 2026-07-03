@@ -19,6 +19,7 @@ import type { BrowserWindow } from 'electron'
 import { getDb } from '../db/client'
 import { integrations, linearIssues, syncEvents } from '../db/schema'
 import { loadToken } from '../ipc/auth'
+import { afterConnectorSync } from '../ipc/storehouse-sync'
 
 export const LINEAR_API = 'https://api.linear.app/graphql'
 /** Max issues pulled per sync — a generous ceiling for an assigned-issue list. */
@@ -39,6 +40,7 @@ export const ASSIGNED_ISSUES_QUERY = `query CompassAssignedIssues($first: Int!) 
         url
         priority
         dueDate
+        updatedAt
         state { name type }
         team { key }
       }
@@ -53,6 +55,7 @@ export interface LinearIssueNode {
   url: string
   priority?: number | null
   dueDate?: string | null
+  updatedAt?: string | null
   state?: { name?: string | null; type?: string | null } | null
   team?: { key?: string | null } | null
 }
@@ -72,6 +75,7 @@ export interface LinearIssueRow {
   priority: number
   team: string | null
   dueDate: string | null
+  updatedAt: string | null
 }
 
 /**
@@ -95,7 +99,8 @@ export function normalizeLinearIssues(resp: LinearGraphQLResponse): LinearIssueR
       stateType,
       priority: Number.isFinite(n.priority) ? Number(n.priority) : 0,
       team: n.team?.key ?? null,
-      dueDate: n.dueDate ?? null
+      dueDate: n.dueDate ?? null,
+      updatedAt: n.updatedAt ?? null
     })
   }
   return rows
@@ -150,6 +155,7 @@ export async function syncLinear(mainWindow?: BrowserWindow | null): Promise<Syn
             priority: row.priority,
             team: row.team,
             dueDate: row.dueDate,
+            updatedAt: row.updatedAt,
             syncedAt: new Date()
           }
         })
@@ -195,6 +201,9 @@ export async function syncLinear(mainWindow?: BrowserWindow | null): Promise<Syn
       status: 'done',
       recordsUpdated
     })
+    // Project the freshly synced issues into the Storehouse spine (Timeline/Search).
+    // Defensive — never fails the sync.
+    afterConnectorSync()
     return { service: 'linear', success: true, recordsUpdated }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

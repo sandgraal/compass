@@ -73,6 +73,16 @@ beforeEach(() => {
       title TEXT NOT NULL, start_at INTEGER, end_at INTEGER, all_day INTEGER DEFAULT 0,
       location TEXT, description TEXT, html_link TEXT, synced_at INTEGER
     );
+    CREATE TABLE github_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, repo TEXT NOT NULL,
+      external_id TEXT NOT NULL UNIQUE, title TEXT NOT NULL, url TEXT NOT NULL, state TEXT NOT NULL,
+      body TEXT, labels TEXT, due_date TEXT, author TEXT, updated_at TEXT, synced_at INTEGER
+    );
+    CREATE TABLE linear_issues (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, identifier TEXT NOT NULL,
+      title TEXT NOT NULL, url TEXT NOT NULL, state TEXT NOT NULL, state_type TEXT NOT NULL,
+      priority INTEGER NOT NULL DEFAULT 0, team TEXT, due_date TEXT, updated_at TEXT, synced_at INTEGER
+    );
     CREATE TABLE contacts (
       id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL
     );
@@ -105,6 +115,20 @@ function addEvent(externalId: string, title: string, location: string | null) {
       "INSERT INTO calendar_events (source,external_id,title,location,start_at) VALUES ('google',?,?,?,?)"
     )
     .run(externalId, title, location, 1700000000000)
+}
+
+function addGithub(
+  externalId: string,
+  type: string,
+  repo: string,
+  title: string,
+  author: string | null
+) {
+  sqlite
+    .prepare(
+      "INSERT INTO github_items (type,repo,external_id,title,url,state,author,updated_at) VALUES (?,?,?,?,'http://x','open',?,'2026-06-01T00:00:00Z')"
+    )
+    .run(type, repo, externalId, title, author)
 }
 
 describe('projectAllToRecords', () => {
@@ -156,6 +180,24 @@ describe('projectAllToRecords', () => {
     expect(person).toEqual({ name: 'Jane Doe' })
     const place = sqlite.prepare("SELECT name FROM derived_entities WHERE kind='place'").get()
     expect(place).toEqual({ name: 'Cartago, CR' })
+  })
+
+  it('projects GitHub issues/PRs → records; derives a person only for a real collaborator', () => {
+    addGithub('g1', 'pr', 'sandgraal/worldspine', 'Fix scene timing', 'sandgraal') // self, single-token
+    addGithub('g2', 'issue', 'acme/app', 'Bug: crash on load', 'jane-doe') // collaborator
+    addGithub('g3', 'pr', 'acme/app', 'Automated bump', 'dependabot[bot]') // bot
+
+    const res = projectAllToRecords()
+    expect(res.imported).toBe(3) // all three become searchable records
+
+    const github = sqlite.prepare("SELECT COUNT(*) AS n FROM records WHERE source='github'").get()
+    expect(github).toEqual({ n: 3 })
+
+    // Only the humanizable collaborator login becomes a person; self + bot are dropped.
+    const people = sqlite
+      .prepare("SELECT name FROM derived_entities WHERE kind='person' ORDER BY name")
+      .all()
+    expect(people).toEqual([{ name: 'Jane Doe' }])
   })
 })
 

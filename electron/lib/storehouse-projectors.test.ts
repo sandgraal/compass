@@ -3,10 +3,14 @@ import { parseMoney } from './entities'
 import {
   type CalendarRow,
   type FinanceTxnRow,
+  type GithubRow,
   type GmailRow,
+  type LinearRow,
   projectCalendar,
   projectFinanceTransactions,
-  projectGmail
+  projectGithub,
+  projectGmail,
+  projectLinear
 } from './storehouse-projectors'
 
 const txn = (partial: Partial<FinanceTxnRow> & Pick<FinanceTxnRow, 'hash'>): FinanceTxnRow => ({
@@ -123,5 +127,62 @@ describe('projectCalendar', () => {
 
   it('skips rows without an external id', () => {
     expect(projectCalendar([ev({ externalId: '' })])).toHaveLength(0)
+  })
+})
+
+describe('projectGithub', () => {
+  const gh = (p: Partial<GithubRow> & Pick<GithubRow, 'externalId'>): GithubRow => ({
+    type: 'issue',
+    repo: 'acme/app',
+    title: 'Fix the bug',
+    state: 'open',
+    author: 'jane-doe',
+    updatedAt: '2026-06-01T12:00:00Z',
+    ...p
+  })
+
+  it('maps an issue/PR with the author appended to the body for extraction', () => {
+    const [r] = projectGithub([gh({ externalId: 'g1', type: 'pr' })])
+    expect(r.source).toBe('github')
+    expect(r.type).toBe('pr')
+    expect(r.title).toBe('Fix the bug')
+    expect(r.body).toBe('acme/app · open · @jane-doe')
+    expect(r.naturalKey).toBe('g1')
+    expect(r.occurredAt).toBe(Date.parse('2026-06-01T12:00:00Z'))
+  })
+
+  it('omits the author segment when there is no author', () => {
+    const [r] = projectGithub([gh({ externalId: 'g1', author: null })])
+    expect(r.body).toBe('acme/app · open')
+  })
+
+  it('skips rows without an external id', () => {
+    expect(projectGithub([gh({ externalId: '' })])).toHaveLength(0)
+  })
+})
+
+describe('projectLinear', () => {
+  const li = (p: Partial<LinearRow> & Pick<LinearRow, 'externalId'>): LinearRow => ({
+    identifier: 'ENG-12',
+    title: 'Ship the thing',
+    state: 'In Progress',
+    team: 'ENG',
+    updatedAt: '2026-06-01T12:00:00Z',
+    ...p
+  })
+
+  it('maps an issue as "IDENT Title" with a team · state body', () => {
+    const [r] = projectLinear([li({ externalId: 'l1' })])
+    expect(r.source).toBe('linear')
+    expect(r.type).toBe('issue')
+    expect(r.title).toBe('ENG-12 Ship the thing')
+    expect(r.body).toBe('ENG · In Progress')
+    expect(r.naturalKey).toBe('l1')
+    expect(r.occurredAt).toBe(Date.parse('2026-06-01T12:00:00Z'))
+  })
+
+  it('drops the team prefix when there is no team', () => {
+    const [r] = projectLinear([li({ externalId: 'l1', team: null })])
+    expect(r.body).toBe('In Progress')
   })
 })

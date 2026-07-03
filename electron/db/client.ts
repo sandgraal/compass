@@ -217,6 +217,7 @@ function ensureNewTables(sqlite: Database.Database): void {
       priority INTEGER NOT NULL DEFAULT 0,
       team TEXT,
       due_date TEXT,
+      updated_at TEXT,
       synced_at INTEGER
     );
     -- Storehouse "Acquisition Engine" Drop Zone (migrations 0016/0017). These live
@@ -455,6 +456,11 @@ function ensureNewTables(sqlite: Database.Database): void {
   // `fx_rates` table itself is created in the CREATE TABLE block above.
   ensureColumn(sqlite, 'finance_accounts', 'currency', "TEXT NOT NULL DEFAULT 'USD'")
   ensureColumn(sqlite, 'finance_transactions', 'currency', "TEXT NOT NULL DEFAULT 'USD'")
+  // Phase 10 live-sync projectors — author + timeline date for GitHub/Linear
+  // (migration 0026; kept here too since packaged builds may skip migrations).
+  ensureColumn(sqlite, 'github_items', 'author', 'TEXT')
+  ensureColumn(sqlite, 'github_items', 'updated_at', 'TEXT')
+  ensureColumn(sqlite, 'linear_issues', 'updated_at', 'TEXT')
   // Phase 11.2 — foreign-account flag for FBAR/FATCA. Backfill non-USD accounts
   // to foreign as a starting guess (the user can correct in the Accounts UI).
   const addedIsForeign = ensureColumn(
@@ -591,6 +597,8 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       body TEXT,
       labels TEXT,
       due_date TEXT,
+      author TEXT,
+      updated_at TEXT,
       synced_at INTEGER
     );
 
@@ -605,6 +613,7 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       priority INTEGER NOT NULL DEFAULT 0,
       team TEXT,
       due_date TEXT,
+      updated_at TEXT,
       synced_at INTEGER
     );
 
