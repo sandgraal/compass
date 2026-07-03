@@ -10,9 +10,56 @@ import {
   type PersonSourceRow,
   buildPeople,
   extractPersonName,
+  isAutomatedSender,
   isLikelyPerson,
-  normalizeName
+  normalizeName,
+  parseEmailSender
 } from './people'
+
+describe('isAutomatedSender', () => {
+  it('flags the real-world automated senders (no-reply, role alias, bulk subdomain, "via")', () => {
+    for (const from of [
+      'Google <no-reply@accounts.google.com>',
+      'Google Alerts <googlealerts-noreply@google.com>', // mid-local "noreply"
+      'Snowflake via LinkedIn <newsletters-noreply@linkedin.com>', // "via" + noreply
+      'ResortPass <hello@hello.resortpass.com>',
+      'American Express <americanexpress@member.americanexpress.com>', // member. subdomain
+      'Linear <security@updates.linear.app>',
+      'FLUENT <Info@getfluent.com>'
+    ]) {
+      expect(isAutomatedSender(from), from).toBe(true)
+    }
+  })
+
+  it('does NOT flag a real person sending from a personal address', () => {
+    expect(isAutomatedSender('Jane Doe <jane@example.com>')).toBe(false)
+    expect(isAutomatedSender('jane.doe@gmail.com')).toBe(false)
+  })
+
+  it('matches automation tokens on segment/prefix boundaries, not substrings', () => {
+    expect(isAutomatedSender('no-reply@x.com')).toBe(true) // delimited no-reply
+    expect(isAutomatedSender('honoreply@x.com')).toBe(false) // "noreply" mid-token, not a prefix
+    expect(isAutomatedSender('mailinfo@x.com')).toBe(false) // "info"/"mail" as a substring, not a segment
+  })
+})
+
+describe('parseEmailSender', () => {
+  it('returns the display name from a "Name <addr>" header', () => {
+    expect(parseEmailSender('Jane Doe <jane@example.com>')).toBe('Jane Doe')
+    expect(parseEmailSender('"Doe, Jane" <jane@x.com>')).toBe('Doe, Jane')
+  })
+
+  it('humanizes a first.last / first_last bare address', () => {
+    expect(parseEmailSender('jane.doe@example.com')).toBe('Jane Doe')
+    expect(parseEmailSender('bob_smith@x.com')).toBe('Bob Smith')
+  })
+
+  it('returns null for a single-token local part (noreply/billing)', () => {
+    expect(parseEmailSender('noreply@github.com')).toBeNull()
+    expect(parseEmailSender('billing@stripe.com')).toBeNull()
+    expect(parseEmailSender('')).toBeNull()
+  })
+})
 
 describe('extractPersonName', () => {
   it('pulls the person from each people-bearing title', () => {

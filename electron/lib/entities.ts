@@ -21,7 +21,13 @@
  */
 
 import { type Cadence, PER_YEAR, detectCadence, median, normalizeMerchant } from './normalize'
-import { extractPersonName, isLikelyPerson, normalizeName } from './people'
+import {
+  extractPersonName,
+  isAutomatedSender,
+  isLikelyPerson,
+  normalizeName,
+  parseEmailSender
+} from './people'
 
 export type EntityKind = 'person' | 'merchant' | 'place' | 'subscription-candidate'
 
@@ -330,6 +336,24 @@ export const ENTITY_EXTRACTORS: EntityExtractor[] = [
       return [
         { kind: 'merchant', name: t, amount: money?.amount, currency: money?.currency ?? null }
       ]
+    }
+  },
+  // ── People from email senders (Gmail) ──
+  // The sender rides in the FIRST body segment ("From · snippet"). We require a
+  // MULTI-WORD name (real senders are first+last; single-token brands like
+  // "GitHub"/"Uber" are dropped) on top of the isLikelyPerson gate. The email is
+  // still a searchable record regardless — only the person derivation is gated.
+  {
+    id: 'gmail-person',
+    match: { source: 'gmail', types: ['email'] },
+    extract: (r) => {
+      const from = (r.body ?? '').split(' · ')[0].trim()
+      if (isAutomatedSender(from)) return [] // no-reply / role alias / bulk mailer
+      const name = parseEmailSender(from)
+      // Require a multi-word name (real senders are first+last; single-token brands
+      // like "GitHub"/"Uber" are dropped) on top of the person/merchant classifier.
+      if (!name || !name.includes(' ') || !isLikelyPerson(name)) return []
+      return [{ kind: 'person', name }]
     }
   },
   // ── Places from calendar event locations ──

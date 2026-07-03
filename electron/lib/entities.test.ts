@@ -222,6 +222,36 @@ describe('deriveEntities — live finance transactions', () => {
   })
 })
 
+describe('deriveEntities — Gmail senders & calendar places', () => {
+  const email = (from: string, subject = 'hi'): EntityRecordRow =>
+    rec({ source: 'gmail', type: 'email', title: subject, body: `${from} · preview text` })
+
+  it('derives a person from a multi-word email sender', () => {
+    const [p] = deriveEntities([email('Jane Doe <jane@example.com>')], NO_OWNED)
+    expect(p.kind).toBe('person')
+    expect(p.name).toBe('Jane Doe')
+  })
+
+  it('does NOT derive people from brand / automated senders', () => {
+    const rows = [
+      email('GitHub <noreply@github.com>'), // single-word display + no-reply
+      email('notifications@github.com'), // role alias, no display name
+      email('Google Alerts <googlealerts-noreply@google.com>'), // multi-word but automated
+      email('Snowflake via LinkedIn <newsletters-noreply@linkedin.com>') // "via" forward
+    ]
+    expect(deriveEntities(rows, NO_OWNED).some((e) => e.kind === 'person')).toBe(false)
+  })
+
+  it('derives a place from a calendar event location', () => {
+    const [place] = deriveEntities(
+      [rec({ source: 'gcal', type: 'event', title: 'Offsite', body: 'Cartago, CR' })],
+      NO_OWNED
+    )
+    expect(place.kind).toBe('place')
+    expect(place.name).toBe('Cartago, CR')
+  })
+})
+
 describe('isBankNoise', () => {
   it('flags transfers, card/ACH payments, interest and reference codes', () => {
     for (const noise of [

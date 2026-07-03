@@ -63,6 +63,16 @@ beforeEach(() => {
       amount REAL NOT NULL, currency TEXT NOT NULL DEFAULT 'USD', description TEXT NOT NULL,
       category TEXT DEFAULT 'Uncategorized'
     );
+    CREATE TABLE gmail_actions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL UNIQUE, subject TEXT NOT NULL,
+      from_address TEXT NOT NULL, action_summary TEXT, snippet TEXT, received_at INTEGER,
+      snoozed_until TEXT, done INTEGER DEFAULT 0, synced_at INTEGER
+    );
+    CREATE TABLE calendar_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, external_id TEXT NOT NULL UNIQUE,
+      title TEXT NOT NULL, start_at INTEGER, end_at INTEGER, all_day INTEGER DEFAULT 0,
+      location TEXT, description TEXT, html_link TEXT, synced_at INTEGER
+    );
     CREATE TABLE contacts (
       id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL
     );
@@ -80,6 +90,22 @@ beforeEach(() => {
     CREATE UNIQUE INDEX derived_entities_kind_key ON derived_entities (kind, match_key);
   `)
 })
+
+function addGmail(threadId: string, from: string, subject = 'hi', receivedAt = 1700000000000) {
+  sqlite
+    .prepare(
+      'INSERT INTO gmail_actions (thread_id,subject,from_address,snippet,received_at) VALUES (?,?,?,?,?)'
+    )
+    .run(threadId, subject, from, 'preview', receivedAt)
+}
+
+function addEvent(externalId: string, title: string, location: string | null) {
+  sqlite
+    .prepare(
+      "INSERT INTO calendar_events (source,external_id,title,location,start_at) VALUES ('google',?,?,?,?)"
+    )
+    .run(externalId, title, location, 1700000000000)
+}
 
 describe('projectAllToRecords', () => {
   it('projects finance transactions into records and rebuilds derived entities', () => {
@@ -109,6 +135,27 @@ describe('projectAllToRecords', () => {
     expect(projectAllToRecords().imported).toBe(1)
     expect(projectAllToRecords().imported).toBe(0)
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM records').get()).toEqual({ n: 1 })
+  })
+
+  it('projects Gmail senders → people and calendar locations → places', () => {
+    addGmail('t1', 'Jane Doe <jane@example.com>')
+    addEvent('e1', 'Offsite', 'Cartago, CR')
+
+    const res = projectAllToRecords()
+    expect(res.imported).toBe(2) // one email + one event
+
+    const bySource = sqlite
+      .prepare('SELECT source, COUNT(*) AS n FROM records GROUP BY source ORDER BY source')
+      .all()
+    expect(bySource).toEqual([
+      { source: 'gcal', n: 1 },
+      { source: 'gmail', n: 1 }
+    ])
+
+    const person = sqlite.prepare("SELECT name FROM derived_entities WHERE kind='person'").get()
+    expect(person).toEqual({ name: 'Jane Doe' })
+    const place = sqlite.prepare("SELECT name FROM derived_entities WHERE kind='place'").get()
+    expect(place).toEqual({ name: 'Cartago, CR' })
   })
 })
 

@@ -78,3 +78,70 @@ export function projectFinanceTransactions(rows: FinanceTxnRow[]): RecordInput[]
   }
   return out
 }
+
+/** A Gmail inbox row reduced to the fields the projector needs (`gmail_actions`). */
+export interface GmailRow {
+  threadId: string
+  subject: string
+  fromAddress: string
+  snippet: string | null
+  receivedAt: number | null // epoch ms
+}
+
+/**
+ * Project `gmail_actions` → records (`source:'gmail'`, `type:'email'`).
+ *
+ * The sender rides in the FIRST body segment so the `gmail-person` extractor can
+ * parse a display name from it (`body.split(' · ')[0]`); the snippet follows as a
+ * preview line. title = the subject. naturalKey = the thread id.
+ */
+export function projectGmail(rows: GmailRow[]): RecordInput[] {
+  const out: RecordInput[] = []
+  for (const r of rows) {
+    if (!r.threadId) continue
+    const from = r.fromAddress?.trim() || '(unknown sender)'
+    const snippet = r.snippet?.trim()
+    out.push({
+      source: 'gmail',
+      type: 'email',
+      occurredAt: r.receivedAt ?? null,
+      title: r.subject?.trim() || '(no subject)',
+      body: snippet ? `${from} · ${snippet}` : from,
+      payload: r,
+      naturalKey: r.threadId
+    })
+  }
+  return out
+}
+
+/** A calendar event reduced to the fields the projector needs (`calendar_events`). */
+export interface CalendarRow {
+  externalId: string
+  title: string
+  location: string | null
+  startAt: number | null // epoch ms
+}
+
+/**
+ * Project `calendar_events` → records (`source:'gcal'`, `type:'event'`).
+ *
+ * body = the location so the EXISTING `gcal-place` extractor (which reads `body` as
+ * the place name) derives Places from event locations — the same shape the Google
+ * Takeout `.ics` recognizer already emits, so live + imported calendar unify.
+ */
+export function projectCalendar(rows: CalendarRow[]): RecordInput[] {
+  const out: RecordInput[] = []
+  for (const r of rows) {
+    if (!r.externalId) continue
+    out.push({
+      source: 'gcal',
+      type: 'event',
+      occurredAt: r.startAt ?? null,
+      title: r.title?.trim() || '(untitled event)',
+      body: r.location?.trim() || undefined,
+      payload: r,
+      naturalKey: r.externalId
+    })
+  }
+  return out
+}

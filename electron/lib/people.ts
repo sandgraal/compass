@@ -50,6 +50,99 @@ function capture(title: string, re: RegExp): string | null {
   return m ? m[1].trim() : null
 }
 
+/**
+ * Best-effort person name from an email "From" value — a `"Display Name <addr>"`
+ * header or a bare address. Returns the display name when present, else a
+ * humanized `first.last`/`first_last` local part, else null. The CALLER still gates
+ * the result through `isLikelyPerson` (this only extracts a candidate) — so brands
+ * with a display name ("GitHub") are filtered downstream, and single-token local
+ * parts ("noreply", "billing") never produce a name here.
+ */
+export function parseEmailSender(from: string): string | null {
+  const full = (from ?? '').trim()
+  if (!full) return null
+  const angle = full.match(/^(.+?)\s*<([^>]+)>$/)
+  if (angle) {
+    const display = angle[1]
+      .trim()
+      .replace(/^["']|["']$/g, '')
+      .trim()
+    if (display && !display.includes('@')) return display
+    return humanizeLocalPart(angle[2])
+  }
+  if (full.includes('@')) return humanizeLocalPart(full)
+  return full // already a bare name
+}
+
+/** Turn a `first.last` / `first_last` email local part into "First Last", else null. */
+function humanizeLocalPart(email: string): string | null {
+  const local = email.split('@')[0]
+  const parts = local.split(/[._]/).filter(Boolean)
+  if (parts.length < 2 || !parts.every((p) => /^[a-z]+$/i.test(p))) return null
+  return parts.map((p) => p[0].toUpperCase() + p.slice(1).toLowerCase()).join(' ')
+}
+
+// Machine senders: no-reply mailers, role aliases, bulk-mail subdomains, and
+// "Brand via LinkedIn"-style forwards. Real people almost never send from these.
+// Matched as a whole `.-_`-delimited local-part segment so "googlealerts-noreply"
+// and "newsletters-noreply" are caught, while a real "jane.alerts" is not.
+const AUTOMATION_TOKENS = new Set([
+  'noreply',
+  'donotreply',
+  'newsletter',
+  'newsletters',
+  'notification',
+  'notifications',
+  'alert',
+  'alerts',
+  'mailer',
+  'mailings',
+  'bounce',
+  'bounces',
+  'updates',
+  'update',
+  'security',
+  'support',
+  'info',
+  'hello',
+  'team',
+  'billing',
+  'member',
+  'members',
+  'account',
+  'marketing',
+  'sales',
+  'contact',
+  'admin',
+  'mail',
+  'email'
+])
+const AUTOMATION_SUBDOMAIN =
+  /@(?:mail|email|mailer|mc|em|member|members|updates|notification|notifications|news|newsletter|marketing|reply|bounce|alert|alerts)\./i
+
+/**
+ * Does this "From" value look like an automated / bulk sender rather than a human?
+ * Catches no-reply + role-alias local parts (anywhere in the local, segment-wise),
+ * bulk-mail subdomains (`member.`, `mail.`, `mc.`…), and "X via LinkedIn" newsletter
+ * forwards. Used to keep the People directory clean when projecting Gmail senders.
+ */
+export function isAutomatedSender(from: string): boolean {
+  if (/\bvia\s+\w/i.test(from)) return true // "Snowflake via LinkedIn"
+  const angle = from.match(/<([^>]+)>/)
+  const bare = from.match(/([^\s<]+@[^\s>]+)/)
+  const email = (angle ? angle[1] : bare ? bare[1] : '').toLowerCase().trim()
+  if (!email.includes('@')) return false
+  const [local, domain] = email.split('@')
+  // no-reply / do-not-reply, whether delimited ("no-reply", "no.reply") or not
+  // ("donotreply") — matched on the delimiter-COLLAPSED local anchored at the start,
+  // so "honoreply" (no leading boundary) is NOT flagged.
+  if (/^(?:no|donot)reply/.test(local.replace(/[._-]+/g, ''))) return true
+  // Role aliases / bulk tokens as whole `.-_`-delimited local segments.
+  if (local.split(/[._-]+/).some((seg) => AUTOMATION_TOKENS.has(seg))) return true
+  if (AUTOMATION_SUBDOMAIN.test(`@${domain}.`)) return true
+  return false
+}
+
 // ── Person vs. merchant classifier ───────────────────────────────────────────
 // The financial / messaging counterparties (PayPal payees, conversation labels)
 // are a MIX of real people and merchants / newsletters / phone numbers / groups.
