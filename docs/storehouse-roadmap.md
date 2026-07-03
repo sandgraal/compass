@@ -102,6 +102,12 @@ Linear/Todoist sync without widening the renderer CSP.
   over **derived knowledge markdown + summaries**, never raw vault rows (§5).
 - **Insights engine** — extends the Morning Brief: "on this day," anomaly/correlation surfacing
   (sleep vs. spending), combined net-worth + health + productivity dashboards.
+- **Habit auto-link** *(✅ shipped 2026-07-03)* — life-logging streams (wearables first, eventually
+  Strava/Spotify per §4b) can opt a Habit into auto-fill via an explicit per-habit threshold
+  (`habits.autoLinkSource` / `autoLinkThreshold`) — the same "pre-populated but user-editable" trust
+  model as the Todoist/Things daily-checklist imports. This is the first concrete fix for the
+  "Habits/Goals/Travel/Rental Comps are isolated from the `records`/`derived_entities` spine" gap;
+  Goals/Travel/Rental Comps are candidates for the same pattern once a source warrants it.
 - **Universal Export** (Phase 9.0) — the durable backstop; every new source registers with it.
 
 ---
@@ -132,7 +138,7 @@ FILE. *(All third-party specifics — free cadences, API availability — verify
 | Insurance claims / EOBs | claims, costs | CRED (payer portal), RIGHTS/LIVE (Medicare Blue Button 2.0) | |
 | Prescriptions | fill history | LIVE (FHIR meds), CRED (pharmacy) | |
 | **Genetics** | raw genotype | EXPORT/FILE (23andMe / AncestryDNA download) | sensitive → encrypt at rest |
-| Wearables | recovery, strain, sleep | LIVE (Oura, Whoop, Garmin, Fitbit/Google), EXPORT (Strava) | |
+| Wearables | recovery, strain, sleep | LIVE (Oura, Whoop, Garmin, Fitbit/Google), EXPORT (Strava) | **Oura first** — supports a Personal Access Token (no OAuth app registration), matching the low-friction Todoist/Linear/Notion pattern; Whoop/Garmin/Fitbit follow once that pattern proves out |
 
 ### 4c. Digital footprint & communications
 | Source | What you get | Method(s) | Notes / guardrails |
@@ -161,6 +167,18 @@ FILE. *(All third-party specifics — free cadences, API availability — verify
 | USPS Informed Delivery | scanned mail-piece images | LIVE/CRED | |
 | **Data brokers** | your full file — "what's on record about you" | RIGHTS (LexisNexis full-file FCRA disclosure incl. LexID, Acxiom, Spokeo, Oracle) + opt-out | the eye-opener layer |
 | Vital / immigration | birth/marriage, USCIS, passport | FILE/RIGHTS | mostly manual |
+
+### 4e. Attention & lifestyle *(new — identified in the 2026-07-03 integrations deep dive, not yet built)*
+| Source | What you get | Method(s) | Notes / guardrails |
+|---|---|---|---|
+| Time & attention | screen time, app/site usage | LIVE (RescueTime API, Toggl), EXPORT (native OS Screen Time) | digital wellbeing — ties naturally into Habits once 4b wearables prove the pattern (§6, Cross-Domain Leverage) |
+| Lifestyle spend & delivery | ride history, food-delivery order history | EXPORT (Uber/Lyft/DoorDash/Grubhub/Instacart "download my data"), LIVE where an API exists | ties spending to daily-life patterns for the insights/nudge layer — not just another balance line |
+
+**Prioritization (next up, in order, per the 2026-07-03 session):**
+1. **Wearables — Oura first** — ✅ **shipped 2026-07-03**, the first LIVE health-fitness source, PAT-based. Whoop/Garmin/Fitbit follow once that pattern proves out.
+2. **Crypto exchange** (Coinbase/Kraken, feeds 4a) — completes net worth alongside Plaid/SimpleFIN/holdings.
+3. **Chat archive recognizers** (WhatsApp/Signal/Telegram, feeds 4c) — cheap EXPORT wins reusing `archive-importers.ts`.
+4. **Lifestyle-spend recognizers** (Uber/DoorDash/Instacart, this section) — newly catalogued, not yet scheduled.
 
 ---
 
@@ -206,7 +224,7 @@ Builds on Phase 9's shipped spine; **does not renumber 9.x**. Each wave is its o
   *Everything else hangs off this — build first.*
 - [~] **10.2 Financial & credit completeness** 🟡 *credit-report + tax-doc PDF recognizers shipped; a generic brokerage-holdings CSV importer (FILE path) shipped (PR #271 — `electron/integrations/finance-holdings.ts`, dated `records` snapshots, Net Worth holdings card); LIVE holdings feed, IRS transcripts, crypto still open (feeds Phase 11)* — credit reports (RIGHTS), brokerage/retirement holdings
   LIVE auto-feed (SnapTrade or Plaid Investments), IRS/tax transcripts, crypto. Extends Phase 4 net worth + forecast.
-- [~] **10.3 Health & medical** 🟡 *Apple Health `export.xml` recognizer shipped; FHIR/genetics/wearables open* — Apple Health (FILE) → FHIR/Blue Button (evaluate Fasten Health) →
+- [~] **10.3 Health & medical** 🟡 *Apple Health `export.xml` recognizer shipped; **Oura (LIVE, PAT-based) shipped 2026-07-03**; FHIR/genetics/remaining wearables (Whoop/Garmin/Fitbit) open* — Apple Health (FILE) → FHIR/Blue Button (evaluate Fasten Health) →
   genetics → wearables. Feeds the Phase 9.4 `medical_*` tables.
 - [~] **10.4 Digital footprint & comms** 🟡 *Google/Meta/LinkedIn/Amazon/Spotify/Netflix/YouTube + browser + iMessage + email shipped; Apple/WhatsApp/Signal/Telegram open* — the big takeouts (Google/Meta/X/LinkedIn/Amazon/Spotify) +
   browser history + iMessage + email archive. Heavy reuse of `archive-importers.ts`.
