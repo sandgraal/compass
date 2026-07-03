@@ -37,6 +37,7 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  readFileSync,
   readdirSync,
   rmSync,
   statSync,
@@ -163,11 +164,15 @@ deleted).
  * the equivalent path under `mirrorRoot`, creates parent dirs as it
  * goes, and prunes any mirrored `.md` whose source file is gone.
  *
- * `mtime`-skip avoids unnecessary copies: if the mirrored file has the
- * same mtime as the source (modulo 1s precision), we leave it alone.
- * After every copy we propagate the source's mtime onto the
- * destination via `utimesSync`, so the second reconcile sees a match
- * and skips. Without that, every reconcile would recopy every file.
+ * Skip-unchanged avoids unnecessary copies: if the mirrored file is
+ * byte-for-byte identical to the source (same size + same content), we
+ * leave it alone. We deliberately do NOT key the skip on mtime — the
+ * mirror's mtime is stamped from the source via `utimesSync` after each
+ * copy, but that value round-trips through the host filesystem's
+ * timestamp granularity. On some CI filesystems the stored mtime rounds
+ * across a whole-second boundary, so a floor-to-seconds mtime compare
+ * would spuriously see a "change" and re-copy an identical file. A
+ * content compare is deterministic regardless of timestamp precision.
  *
  * Returns counts so the UI can show the user what happened.
  */
@@ -212,24 +217,26 @@ export function reconcileMirror(kbRoot: string, mirrorRootInput: string): Backfi
       const srcStat = statSync(src)
       if (existsSync(dst)) {
         const dstStat = statSync(dst)
-        // mtime compared to whole seconds — the chokidar
-        // `awaitWriteFinish` upstream gives us sub-second jitter that
-        // would force a copy on every reconcile otherwise.
-        if (Math.floor(srcStat.mtimeMs / 1000) === Math.floor(dstStat.mtimeMs / 1000)) {
+        // Skip when the mirror already matches the source byte-for-byte.
+        // Size is the cheap gate; only when sizes tie do we read both
+        // files and compare content. This is deterministic — unlike an
+        // mtime compare, which is at the mercy of `utimesSync`
+        // round-tripping through the host filesystem's timestamp
+        // granularity (see the function doc comment).
+        if (srcStat.size === dstStat.size && readFileSync(src).equals(readFileSync(dst))) {
           result.skipped++
           continue
         }
       }
       copyFileSync(src, dst)
-      // Stamp the destination with the source's mtime so the next
-      // reconcile sees a match and skips. Without this, the first
-      // backfill leaves every mirrored file with mtime=now, then the
-      // second reconcile recopies every file — `result.skipped`
-      // counts would be permanently misleading.
+      // Stamp the destination with the source's mtime so the mirrored
+      // file reflects when the note was actually last modified (nicer
+      // for Spotlight / Finder). The skip check above is content-based,
+      // so this is cosmetic — not load-bearing for correctness.
       try {
         utimesSync(dst, srcStat.atime, srcStat.mtime)
       } catch {
-        /* best-effort; the next reconcile will just recopy */
+        /* best-effort */
       }
       result.copied++
     } catch (err) {
@@ -328,8 +335,10 @@ export function applyMirrorChange(
   const dstDir = dirname(dst)
   if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true })
   copyFileSync(src, dst)
-  // Mirror the source mtime so the next reconcile's mtime-skip path
-  // works. See the long-form rationale in `reconcileMirror`.
+  // Mirror the source mtime so the copy reflects the note's real
+  // last-modified time in Spotlight / Finder. `reconcileMirror`'s
+  // skip check is content-based, so this is cosmetic, not
+  // load-bearing.
   try {
     const srcStat = statSync(src)
     utimesSync(dst, srcStat.atime, srcStat.mtime)
