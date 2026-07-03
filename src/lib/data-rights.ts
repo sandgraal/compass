@@ -125,6 +125,48 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     payoff: 'Same as PayPal — P2P contacts flow straight into your People directory.',
     payoffLink: '/people'
   },
+  {
+    id: 'coinbase',
+    name: 'Coinbase',
+    domain: 'Financial',
+    method: 'export',
+    what: 'Your full crypto transaction history',
+    how: 'Coinbase → Profile → Statements → Generate report → Transaction history (CSV)',
+    format: 'CSV',
+    intoCompass: 'Drop the transaction-history CSV',
+    url: 'https://accounts.coinbase.com/statements',
+    recordsSourceId: 'coinbase',
+    payoff:
+      'Every buy, sell, and convert joins the searchable Timeline — your crypto activity, owned.',
+    payoffLink: '/timeline'
+  },
+  {
+    id: 'kraken',
+    name: 'Kraken',
+    domain: 'Financial',
+    method: 'export',
+    what: 'Your ledger of trades, deposits & withdrawals',
+    how: 'Kraken → History → Export → Ledgers (CSV)',
+    format: 'CSV',
+    intoCompass: 'Drop the ledgers CSV',
+    url: 'https://www.kraken.com/u/history/export',
+    recordsSourceId: 'kraken',
+    payoff: 'Your Kraken ledger joins the Timeline alongside every other account.',
+    payoffLink: '/timeline'
+  },
+  {
+    id: 'plaid-investments',
+    name: 'Investment holdings (Plaid)',
+    domain: 'Financial',
+    method: 'live',
+    integrationId: 'plaid',
+    what: 'Live positions from your brokerage & retirement accounts',
+    how: 'Connect Plaid on the Integrations page — holdings sync alongside transactions',
+    format: 'Live sync',
+    intoCompass: 'Auto-synced — no file to drop',
+    payoff: 'Replaces manual CSV uploads with an auto-updating Net Worth holdings card.',
+    payoffLink: '/finance'
+  },
 
   // ── Government ───────────────────────────────────────────────────────────────
   {

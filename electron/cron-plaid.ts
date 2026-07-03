@@ -27,6 +27,7 @@
  */
 
 import cron from 'node-cron'
+import { syncAllPlaidInvestments } from './integrations/plaid/investments'
 import { syncAllPlaid } from './integrations/plaid/sync'
 import { maybeSendNotification } from './ipc/sync'
 
@@ -54,12 +55,21 @@ export async function runDailyPlaidSync(
       errorMessage?: string
     }>
   > = syncAllPlaid,
-  notify: typeof maybeSendNotification = maybeSendNotification
+  notify: typeof maybeSendNotification = maybeSendNotification,
+  syncInvestments: () => Promise<Array<{ imported: number }>> = syncAllPlaidInvestments
 ): Promise<void> {
   try {
     const results = await syncAll()
     if (results.length === 0) return // nothing connected — quiet
-    const totalRecords = results.reduce((n, r) => n + r.added + r.modified + r.removed, 0)
+    let totalRecords = results.reduce((n, r) => n + r.added + r.modified + r.removed, 0)
+    // Holdings ride along, best-effort — a wholesale failure (or no investment
+    // accounts) never affects the transactions notification below.
+    try {
+      const inv = await syncInvestments()
+      totalRecords += inv.reduce((n, r) => n + r.imported, 0)
+    } catch {
+      // ignore — transactions already synced; holdings retry next run
+    }
     const errored = results.filter((r) => r.errorMessage)
     if (errored.length > 0) {
       // Prefer ITEM_LOGIN_REQUIRED in the body when present — it's the one

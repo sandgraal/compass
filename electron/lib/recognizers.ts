@@ -17,6 +17,7 @@ import type Database from 'better-sqlite3'
 import { AMAZON_RECOGNIZER } from './amazon'
 import { parseAppleHealth } from './apple-health'
 import { BROWSER_RECOGNIZERS } from './browser-history'
+import { COINBASE_RECOGNIZER, KRAKEN_RECOGNIZER } from './crypto-exchange'
 import { parseCSV } from './csv'
 import { parseWhen } from './dates'
 import {
@@ -294,6 +295,8 @@ export const RECOGNIZERS: Recognizer[] = [
   PAYPAL_RECOGNIZER,
   GOODREADS_RECOGNIZER,
   VENMO_RECOGNIZER,
+  COINBASE_RECOGNIZER,
+  KRAKEN_RECOGNIZER,
   LINKEDIN_RECOGNIZER,
   LINKEDIN_MESSAGES_RECOGNIZER,
   LINKEDIN_POSITIONS_RECOGNIZER,

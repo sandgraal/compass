@@ -29,13 +29,18 @@ import { getPlaidClient } from './client'
 import { setAccessToken } from './vault'
 
 /**
- * Pinned product list. Compass needs transactions; we don't ask for
- * auth/identity/etc. so the consent screen stays as narrow as
- * possible. Add to this list deliberately and document why — every
- * product widens the consent prompt and the data the user is
- * authorizing Plaid to share.
+ * Pinned product list. Compass needs transactions; `investments` adds the
+ * holdings feed that powers Net Worth's positions card (Phase 10.2). We still
+ * don't ask for auth/identity/etc. so the consent screen stays as narrow as
+ * possible. Add to this list deliberately and document why — every product
+ * widens the consent prompt and the data the user authorizes Plaid to share.
+ *
+ * NOTE: this is a SHARED array — adding `investments` means even a
+ * checking-only re-link requests the investments scope on the consent screen.
+ * That's an accepted trade for one Link flow that covers both; the holdings
+ * fetch simply no-ops (returns 0) for Items with no investment accounts.
  */
-const PRODUCTS: Products[] = [Products.Transactions]
+const PRODUCTS: Products[] = [Products.Transactions, Products.Investments]
 
 /**
  * Pinned to the US/territories for now. Plaid's coverage matrix

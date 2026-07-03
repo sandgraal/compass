@@ -18,6 +18,7 @@ import { syncLinear } from '../integrations/linear'
 import { syncNotion } from '../integrations/notion'
 import { readVaultPathSetting, syncObsidian } from '../integrations/obsidian'
 import { syncOura } from '../integrations/oura'
+import { syncAllPlaidInvestments } from '../integrations/plaid/investments'
 import { syncAllPlaid } from '../integrations/plaid/sync'
 import { syncAllSimplefin } from '../integrations/simplefin/sync'
 import { syncThings } from '../integrations/things'
@@ -854,10 +855,16 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
       const errors = results
         .filter((r) => r.errorMessage)
         .map((r) => `${r.itemId}: ${r.errorMessage}`)
+      // Investments holdings ride along on the same sync but are BEST-EFFORT:
+      // most Items have no investment accounts, so their fetch "errors" are
+      // expected and must NOT flip the transactions-sync success. Fold the
+      // imported holdings count into the total; ignore per-Item holdings errors.
+      const investments = await syncAllPlaidInvestments()
+      const holdingsImported = investments.reduce((n, r) => n + r.imported, 0)
       return {
         service: 'plaid',
         success: errors.length === 0,
-        recordsUpdated: totalRecords,
+        recordsUpdated: totalRecords + holdingsImported,
         error: errors.length > 0 ? errors.join('; ') : undefined
       }
     }

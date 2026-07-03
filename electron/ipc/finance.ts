@@ -46,6 +46,7 @@ import {
   updateGoal
 } from '../integrations/finance-goals'
 import {
+  NET_WORTH_HOLDINGS_SOURCES,
   getLatestHoldings,
   importHoldings,
   parseHoldingsCsv,
@@ -704,7 +705,9 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     }
   })
 
-  ipcMain.handle('finance:get-holdings', () => getLatestHoldings(getRawSqlite()))
+  ipcMain.handle('finance:get-holdings', () =>
+    getLatestHoldings(getRawSqlite(), NET_WORTH_HOLDINGS_SOURCES)
+  )
 
   // ── Net-worth trajectory ─────────────────────────────────────────────────
   // Returns every snapshot in the requested window. Caller (UI) groups by
