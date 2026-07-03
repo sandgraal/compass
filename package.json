@@ -86,7 +86,7 @@
     "electron": "^41.5.0",
     "electron-builder": "^26.9.0",
     "electron-vite": "^5.0.0",
-    "esbuild": "^0.28.1",
+    "esbuild": "0.27.2",
     "eslint": "^9.16.0",
     "eslint-plugin-react-hooks": "^5.1.0",
     "eslint-plugin-react-refresh": "^0.4.16",
