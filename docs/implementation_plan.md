@@ -451,7 +451,8 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 
 **Status (v0.14.0):** the spine (10.1) and the leverage layer (10.7) shipped; **~44 recognizers** across
 CSV/JSON, archive, streaming (Apple Health, mbox), SQLite (browser/iMessage), and PDF dispatch
-(`electron/lib/recognizers.ts`); the Data-Rights Concierge (`src/lib/data-rights.ts`, 16 sources) and the
+(`electron/lib/recognizers.ts`); the Data-Rights Concierge (`src/lib/data-rights.ts`, 16 sources across
+**6 domains** — Financial/Government/Health/Travel/Social & Communications/Lifestyle & Shopping) and the
 CRED sandbox (`electron/integrations/cred/`, SSA adapter, **gated off by default**) shipped. Remaining:
 deeper financial/health/comms sources (10.2–10.4) + full CRED (10.6).
 
@@ -464,9 +465,25 @@ deeper financial/health/comms sources (10.2–10.4) + full CRED (10.6).
   self-hosted Fasten Health) → genetics → wearables. Feeds the Phase 9.4 `medical_*` tables.
 - [~] **10.4 Digital footprint & comms** 🟡 *mostly shipped — Google/Meta/LinkedIn/Amazon/Spotify/Netflix/YouTube + browser history + iMessage + email (mbox) recognizers shipped; Apple Data&Privacy, WhatsApp/Signal/Telegram open* — the big takeouts (Google/Meta/X/LinkedIn/Amazon/Spotify), browser
   history, iMessage (`chat.db`), email archive. Heavy reuse of `archive-importers.ts`.
-- [~] **10.5 Government & official + Data-Rights Concierge** 🟡 *partial — the Data-Rights Concierge (`src/lib/data-rights.ts`, 16 sources, request→track→ingest) + tax/SSA PDF recognizers shipped; IRS/bureau portal automation, property/court/travel open* — SSA, IRS, property/court/travel records,
+- [~] **10.5 Government & official + Data-Rights Concierge** 🟡 *partial — the Data-Rights Concierge (`src/lib/data-rights.ts`, 16 sources across 6 domains, request→track→ingest) + tax/SSA PDF recognizers shipped; IRS/bureau portal automation, property/court/travel open* — SSA, IRS, property/court/travel records,
   data-broker file disclosures + opt-outs, and the **request → track → ingest** workflow (reuses the Morning
   Brief scheduler).
+  - [x] **Get Your Data page redesign (PR1 of a multi-PR expansion, 2026-07).** `DataRightsDomain` grew
+    4 → 6 (added **Travel** — currently empty, a placeholder for a later CBP I-94 / Airbnb wave — and split
+    the old catch-all `Digital` into **Social & Communications** / **Lifestyle & Shopping**). `DataRightsSource`
+    gained `method: 'live' | 'export' | 'rights'`, `integrationId` (LIVE sources key into
+    `INTEGRATION_REGISTRY`), `recordsSourceId` (EXPORT/RIGHTS — the `records.source` value(s) that count as
+    imported), and a `payoff`/`payoffLink` pair tying each source to a real downstream Compass feature (e.g.
+    Venmo → "Feeds People"). New three-state status model — `not-started` / `requested` / `imported` — with
+    `imported` derived for free (records facets for EXPORT/RIGHTS, connected-integration state for LIVE) and
+    `requested` a NEW lightweight "I'm waiting on this" mark, persisted as a JSON blob in the existing
+    `app_settings` table (key `dataRightsRequested`) via 3 new IPC handlers (`registerDataRightsHandlers`,
+    `electron/ipc/data-rights.ts`) — **no new table, no migration**. Pure status derivation
+    (`getDataRightsStatus`, `summarizeDataRightsProgress`) lives in `src/lib/data-rights-status.ts`. Page
+    rewrite adds a per-domain progress header (`DataRightsProgress.tsx`), search + status/method filter chips,
+    and per-card `DataRightsCard.tsx`. Source count unchanged at 16 — this PR is shape-only; new sources land
+    in follow-up PRs (crypto/Plaid Investments, Fitbit/Garmin, CBP I-94/property, WhatsApp/X/rideshare) per the
+    "Get Your Data" expansion plan.
 - [~] **10.6 Credential-Based Aggregation Engine** 🟡 *early — the Portal Automation Sandbox + SSA assisted-login adapter shipped (`electron/integrations/cred/`, Mode A / no-stored-credentials, **gated off by `COMPASS_ENABLE_CRED`**); stored-credential mode + more portals open* — the **Portal Automation Sandbox** (extends the Plaid
   Link child-window bridge): opt-in, vault-backed (`portal-credentials`), isolated, assisted-login for MFA.
   Cross-cutting + riskiest → **last**. **Design gate:** [`cred-engine-design.md`](cred-engine-design.md)

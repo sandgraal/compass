@@ -12,6 +12,7 @@ import { registerBackupHandlers } from './ipc/backup'
 import { registerClaudeHandlers } from './ipc/claude'
 import { registerContactsHandlers } from './ipc/contacts'
 import { registerCredHandlers } from './ipc/cred'
+import { registerDataRightsHandlers } from './ipc/data-rights'
 import { registerEntitiesHandlers } from './ipc/entities'
 import { registerExportHandlers } from './ipc/export'
 import { registerFinanceHandlers } from './ipc/finance'
@@ -170,6 +171,7 @@ app.whenReady().then(async () => {
   registerStorehouseHandlers(ipcMain)
   registerStorehouseSyncHandlers(ipcMain)
   registerRecordsHandlers(ipcMain)
+  registerDataRightsHandlers(ipcMain)
   registerPeopleHandlers(ipcMain)
   registerEntitiesHandlers(ipcMain)
   registerPlacesHandlers(ipcMain)

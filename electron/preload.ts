@@ -336,6 +336,12 @@ const api = {
     importPaths: (paths: string[]) => ipcRenderer.invoke('records:import-paths', paths),
     pathsForFiles: (files: File[]) => files.map((f) => webUtils.getPathForFile(f))
   },
+  dataRights: {
+    getRequested: () => ipcRenderer.invoke('data-rights:get-requested'),
+    markRequested: (sourceId: string) => ipcRenderer.invoke('data-rights:mark-requested', sourceId),
+    clearRequested: (sourceId: string) =>
+      ipcRenderer.invoke('data-rights:clear-requested', sourceId)
+  },
   people: {
     list: () => ipcRenderer.invoke('people:list')
   },
@@ -480,6 +486,9 @@ const api = {
     getFxGainLoss: (year?: number) => ipcRenderer.invoke('finance:get-fx-gain-loss', year),
     importHoldings: () => ipcRenderer.invoke('finance:import-holdings'),
     getHoldings: () => ipcRenderer.invoke('finance:get-holdings'),
+    getCreditSummary: () => ipcRenderer.invoke('finance:get-credit-summary'),
+    addCreditScore: (input: { score: number; bureau?: string; date?: string }) =>
+      ipcRenderer.invoke('finance:add-credit-score', input),
     setFxRate: (input: { date: string; base: string; quote: string; rate: number }) =>
       ipcRenderer.invoke('finance:set-fx-rate', input),
     refreshFxRates: () => ipcRenderer.invoke('finance:refresh-fx-rates'),
