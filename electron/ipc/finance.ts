@@ -1243,7 +1243,8 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       if (comps.length === 0) {
         return {
           success: false,
-          error: 'No comps found — is this a rental comps CSV (it needs a name/nightly/URL column)?'
+          error:
+            'No comps found — is this a rental comps CSV? It needs at least a "name" column (zone, bedrooms, and nightly are optional).'
         }
       }
       const { imported, skipped } = importComps(sqlite, comps)

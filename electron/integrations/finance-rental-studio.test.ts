@@ -219,6 +219,12 @@ describe('parseRentalCompsCsv (retire-early-hub cabin-tracker export)', () => {
     expect(comps[0].notes).toBeNull()
   })
 
+  it('rejects a CSV with no name column (returns no comps → caller errors)', () => {
+    // An unrelated CSV that happens to have a nightly-like column must not seed
+    // empty-name junk rows into the comps table.
+    expect(parseRentalCompsCsv(['nightly', 'zone'], [['80', 'Cartago']])).toEqual([])
+  })
+
   it('tolerates reordered / partial headers', () => {
     const comps = parseRentalCompsCsv(
       ['url', 'nightly', 'name'],
