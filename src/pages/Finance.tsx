@@ -2,6 +2,7 @@ import { format } from 'date-fns'
 import {
   AlertCircle,
   AlertTriangle,
+  CreditCard,
   Download,
   Eye,
   FolderOpen,
@@ -103,6 +104,7 @@ export type Tab =
   | 'residency'
   | 'goals'
   | 'estate'
+  | 'credit'
 
 /**
  * Whitelist of tab values the command palette can deep-link to. Exported
@@ -122,7 +124,8 @@ export const VALID_FINANCE_TABS: ReadonlySet<Tab> = new Set<Tab>([
   'expat',
   'residency',
   'goals',
-  'estate'
+  'estate',
+  'credit'
 ])
 
 /**
@@ -650,7 +653,8 @@ export default function Finance(): JSX.Element {
             ['expat', 'Expat Tax'],
             ['residency', 'Residency'],
             ['goals', 'Goals'],
-            ['estate', 'Estate']
+            ['estate', 'Estate'],
+            ['credit', 'Credit']
           ] as const
         ).map(([key, label]) => (
           <button
@@ -699,6 +703,8 @@ export default function Finance(): JSX.Element {
       {tab === 'goals' && <GoalsTab />}
 
       {tab === 'estate' && <EstateTab />}
+
+      {tab === 'credit' && <CreditTab />}
 
       {tab === 'forecast' && <ForecastTab accounts={accounts} />}
 
@@ -2718,6 +2724,344 @@ const EMPTY_GOAL_FORM = {
   targetDate: '',
   manualCurrent: '',
   monthlyContribution: ''
+}
+
+// ─── Credit ──────────────────────────────────────────────────────────────────
+
+type CreditSummary = Awaited<ReturnType<Window['api']['finance']['getCreditSummary']>>
+
+const fmtUsd = (n: number): string => formatMoney(n, 'USD', { decimals: 0 })
+
+function pctStr(u: number | null): string {
+  if (u == null) return '—'
+  const p = u * 100
+  return `${p < 10 ? p.toFixed(1) : Math.round(p)}%`
+}
+
+function utilColor(u: number | null): string {
+  if (u == null) return 'bg-muted'
+  if (u > 0.3) return 'bg-red-500'
+  if (u > 0.1) return 'bg-amber-500'
+  return 'bg-emerald-500'
+}
+
+function UtilBar({ util }: { util: number | null }): JSX.Element {
+  const w = util == null ? 0 : Math.min(100, Math.round(util * 100))
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-1.5 w-24 rounded-full bg-muted overflow-hidden">
+        <div className={cn('h-full rounded-full', utilColor(util))} style={{ width: `${w}%` }} />
+      </div>
+      <span className="tabular-nums text-xs text-muted-foreground w-10 text-right">
+        {pctStr(util)}
+      </span>
+    </div>
+  )
+}
+
+const SEVERITY_CLASS: Record<'high' | 'medium' | 'low', string> = {
+  high: 'bg-red-500/15 text-red-600 dark:text-red-400',
+  medium: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+  low: 'bg-muted text-muted-foreground'
+}
+
+function ageStr(months: number | null): string {
+  if (months == null) return '—'
+  const y = Math.floor(months / 12)
+  const m = months % 12
+  return y > 0 ? `${y}y ${m}m` : `${m}m`
+}
+
+function CreditTab(): JSX.Element {
+  const [summary, setSummary] = useState<CreditSummary | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [scoreInput, setScoreInput] = useState('')
+  const [bureauInput, setBureauInput] = useState('')
+  const [savingScore, setSavingScore] = useState(false)
+  const { toast: showToast } = useToast()
+
+  const refresh = useCallback(async () => {
+    if (!window.api?.finance) {
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    try {
+      setSummary(await window.api.finance.getCreditSummary())
+    } catch (err) {
+      console.error('[credit] refresh failed', err)
+      showToast('Failed to load credit summary.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }, [showToast])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const addScore = async () => {
+    if (!window.api?.finance) return
+    const score = Number(scoreInput)
+    if (!Number.isFinite(score) || score < 300 || score > 850) {
+      showToast('Enter a score between 300 and 850.', 'error')
+      return
+    }
+    setSavingScore(true)
+    try {
+      const res = await window.api.finance.addCreditScore({
+        score,
+        bureau: bureauInput.trim() || undefined
+      })
+      if (!res.success) {
+        showToast(res.error ?? 'Failed to add score.', 'error')
+        return
+      }
+      setScoreInput('')
+      setBureauInput('')
+      await refresh()
+    } catch (err) {
+      console.error('[credit] add score failed', err)
+      showToast('Failed to add score.', 'error')
+    } finally {
+      setSavingScore(false)
+    }
+  }
+
+  if (loading) return <p className="text-sm text-muted-foreground p-4">Loading credit…</p>
+  if (!summary) return <p className="text-sm text-muted-foreground p-4">Credit unavailable.</p>
+
+  if (!summary.hasData) {
+    return (
+      <div className="bg-card border border-border rounded-xl p-8 text-center">
+        <CreditCard className="mx-auto mb-3 text-muted-foreground" size={28} />
+        <p className="text-sm font-medium mb-1">No credit report yet</p>
+        <p className="text-sm text-muted-foreground max-w-md mx-auto">
+          Get your free report from <span className="text-foreground">annualcreditreport.com</span>{' '}
+          and drop the PDF on the Timeline. Compass extracts your tradelines, balances, utilization,
+          and inquiries — your SSN and date of birth are never stored.
+        </p>
+      </div>
+    )
+  }
+
+  const s = summary
+  return (
+    <div className="space-y-6">
+      <div className="text-sm text-muted-foreground">
+        {s.bureau ?? 'Credit report'}
+        {s.reportDate ? ` · as of ${s.reportDate}` : ''}
+        {s.bureausAvailable.length > 1 && (
+          <span className="ml-1 text-xs">
+            (also on file: {s.bureausAvailable.filter((b) => b !== s.bureau).join(', ')})
+          </span>
+        )}
+      </div>
+
+      {/* Top tiles */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-card border border-border rounded-xl p-4">
+          <div className="text-xs text-muted-foreground mb-1">Score</div>
+          {s.score != null ? (
+            <div className="text-2xl font-semibold tabular-nums">{s.score}</div>
+          ) : (
+            <div className="text-sm text-muted-foreground pt-1">Not in the free report</div>
+          )}
+        </div>
+        <div className="bg-card border border-border rounded-xl p-4">
+          <div className="text-xs text-muted-foreground mb-1">Overall utilization</div>
+          <div className="text-2xl font-semibold tabular-nums">{pctStr(s.overallUtilization)}</div>
+          <div className="text-xs text-muted-foreground">
+            {fmtUsd(s.totalRevolvingBalance)} / {fmtUsd(s.totalRevolvingLimit)}
+          </div>
+        </div>
+        <div className="bg-card border border-border rounded-xl p-4">
+          <div className="text-xs text-muted-foreground mb-1">Accounts</div>
+          <div className="text-2xl font-semibold tabular-nums">
+            {s.openCount}
+            <span className="text-sm text-muted-foreground"> open</span>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {s.closedCount} closed · avg age {ageStr(s.averageAccountAgeMonths)}
+          </div>
+        </div>
+        <div className="bg-card border border-border rounded-xl p-4">
+          <div className="text-xs text-muted-foreground mb-1">Payment history</div>
+          <div className="text-2xl font-semibold tabular-nums">
+            {s.onTimeCount}
+            <span className="text-sm text-muted-foreground"> on-time</span>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {s.lateCount} with past lates · {s.hardInquiries12mo} hard inq (12mo)
+          </div>
+        </div>
+      </div>
+
+      {/* Manual score entry */}
+      <div className="bg-card border border-border rounded-xl p-4 flex flex-wrap items-end gap-3">
+        <div>
+          <label htmlFor="credit-score-input" className="block text-xs text-muted-foreground mb-1">
+            Log a score
+          </label>
+          <input
+            id="credit-score-input"
+            type="number"
+            min={300}
+            max={850}
+            value={scoreInput}
+            onChange={(e) => setScoreInput(e.target.value)}
+            placeholder="720"
+            className="w-24 bg-background border border-border rounded px-2 py-1 text-sm"
+          />
+        </div>
+        <div>
+          <label htmlFor="credit-bureau-input" className="block text-xs text-muted-foreground mb-1">
+            Source (optional)
+          </label>
+          <input
+            id="credit-bureau-input"
+            value={bureauInput}
+            onChange={(e) => setBureauInput(e.target.value)}
+            placeholder="Credit Karma"
+            className="w-40 bg-background border border-border rounded px-2 py-1 text-sm"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => void addScore()}
+          disabled={savingScore}
+          className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded hover:opacity-90 disabled:opacity-50"
+        >
+          {savingScore ? 'Saving…' : 'Add score'}
+        </button>
+        <p className="text-xs text-muted-foreground flex-1 min-w-[12rem]">
+          The free report has no score — log one from Credit Karma, your bank, or a paid pull to
+          track it over time.
+        </p>
+      </div>
+
+      {/* Score trend */}
+      {s.scoreTrend.length >= 2 && (
+        <div className="bg-card border border-border rounded-xl p-4">
+          <div className="text-xs text-muted-foreground mb-2">Score trend</div>
+          <ResponsiveContainer width="100%" height={140}>
+            <LineChart data={s.scoreTrend}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+              <YAxis domain={['dataMin - 20', 'dataMax + 20']} tick={{ fontSize: 11 }} width={36} />
+              <Tooltip />
+              <Line type="monotone" dataKey="score" stroke="hsl(var(--primary))" strokeWidth={2} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Recommendations */}
+      {s.recommendations.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-sm font-medium">Ways to improve</div>
+          {s.recommendations.map((r) => (
+            <div
+              key={r.id}
+              className="bg-card border border-border rounded-xl p-3 flex items-start gap-3"
+            >
+              <span
+                className={cn(
+                  'mt-0.5 px-1.5 py-0.5 rounded text-xs font-medium shrink-0',
+                  SEVERITY_CLASS[r.severity]
+                )}
+              >
+                {r.severity}
+              </span>
+              <div>
+                <div className="text-sm font-medium">{r.title}</div>
+                <div className="text-xs text-muted-foreground">{r.detail}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Revolving accounts / utilization */}
+      {s.perCard.length > 0 && (
+        <div>
+          <div className="text-sm font-medium mb-2">Revolving accounts</div>
+          <div className="bg-card border border-border rounded-xl p-4 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs text-muted-foreground">
+                <tr className="text-left">
+                  <th className="pb-2">Card</th>
+                  <th className="pb-2 text-right">Balance</th>
+                  <th className="pb-2 text-right">Limit</th>
+                  <th className="pb-2">Utilization</th>
+                </tr>
+              </thead>
+              <tbody>
+                {s.perCard.map((c) => (
+                  <tr
+                    key={`${c.creditor}-${c.accountLast4 ?? ''}`}
+                    className="border-t border-border"
+                  >
+                    <td className="py-1.5">
+                      {c.creditor}
+                      {c.accountLast4 ? (
+                        <span className="text-muted-foreground"> ••{c.accountLast4}</span>
+                      ) : null}
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums">
+                      {c.balance != null ? fmtUsd(c.balance) : '—'}
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums">
+                      {c.limit != null ? fmtUsd(c.limit) : '—'}
+                    </td>
+                    <td className="py-1.5">
+                      <UtilBar util={c.utilization} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Account mix + inquiries */}
+      <div className="grid md:grid-cols-2 gap-4">
+        <div className="bg-card border border-border rounded-xl p-4">
+          <div className="text-sm font-medium mb-2">Account mix</div>
+          <div className="space-y-1">
+            {s.accountTypeMix.map((t) => (
+              <div key={t.type} className="flex justify-between text-sm">
+                <span className="text-muted-foreground">{t.type}</span>
+                <span className="tabular-nums">{t.count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="bg-card border border-border rounded-xl p-4">
+          <div className="text-sm font-medium mb-2">Recent inquiries</div>
+          {s.hardInquiries24mo + s.softInquiries24mo === 0 ? (
+            <div className="text-sm text-muted-foreground">No inquiries in the last 2 years.</div>
+          ) : (
+            <div className="space-y-1 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Hard (12mo / 24mo)</span>
+                <span className="tabular-nums">
+                  {s.hardInquiries12mo} / {s.hardInquiries24mo}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Soft (12mo / 24mo)</span>
+                <span className="tabular-nums">
+                  {s.softInquiries12mo} / {s.softInquiries24mo}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function GoalsTab(): JSX.Element {

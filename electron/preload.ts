@@ -480,6 +480,9 @@ const api = {
     getFxGainLoss: (year?: number) => ipcRenderer.invoke('finance:get-fx-gain-loss', year),
     importHoldings: () => ipcRenderer.invoke('finance:import-holdings'),
     getHoldings: () => ipcRenderer.invoke('finance:get-holdings'),
+    getCreditSummary: () => ipcRenderer.invoke('finance:get-credit-summary'),
+    addCreditScore: (input: { score: number; bureau?: string; date?: string }) =>
+      ipcRenderer.invoke('finance:add-credit-score', input),
     setFxRate: (input: { date: string; base: string; quote: string; rate: number }) =>
       ipcRenderer.invoke('finance:set-fx-rate', input),
     refreshFxRates: () => ipcRenderer.invoke('finance:refresh-fx-rates'),
