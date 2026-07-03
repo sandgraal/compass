@@ -1469,6 +1469,47 @@ declare global {
             totalGainPct: number | null
           }
         }>
+        getCreditSummary(): Promise<{
+          hasData: boolean
+          bureau: string | null
+          bureausAvailable: string[]
+          reportDate: string | null
+          score: number | null
+          scoreTrend: Array<{ date: string; score: number }>
+          totalRevolvingBalance: number
+          totalRevolvingLimit: number
+          overallUtilization: number | null
+          perCard: Array<{
+            creditor: string
+            accountLast4: string | null
+            balance: number | null
+            limit: number | null
+            utilization: number | null
+          }>
+          openCount: number
+          closedCount: number
+          tradelineCount: number
+          accountTypeMix: Array<{ type: string; count: number }>
+          oldestAccountMonths: number | null
+          averageAccountAgeMonths: number | null
+          onTimeCount: number
+          lateCount: number
+          hardInquiries12mo: number
+          softInquiries12mo: number
+          hardInquiries24mo: number
+          softInquiries24mo: number
+          recommendations: Array<{
+            id: string
+            severity: 'high' | 'medium' | 'low'
+            title: string
+            detail: string
+          }>
+        }>
+        addCreditScore(input: {
+          score: number
+          bureau?: string
+          date?: string
+        }): Promise<{ success: boolean; error?: string; imported?: number }>
         setFxRate(input: {
           date: string
           base: string

@@ -19,6 +19,7 @@ import {
   dedupeTransactions,
   mergeAccounts
 } from '../integrations/finance-cleanup'
+import { getCreditSummary } from '../integrations/finance-credit'
 import {
   ESTATE_ITEMS,
   buildEstateReadinessFromDb,
@@ -107,6 +108,7 @@ import {
 import { writeAllFinanceKnowledge } from '../knowledge/finance-extractor'
 import { localYm, localYmd } from '../lib/dates'
 import { DATA_DIR } from '../paths'
+import { insertRecords } from './records'
 
 const DEFAULT_MONEY_FOLDER = join(homedir(), 'Documents', 'Money')
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -705,6 +707,47 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   })
 
   ipcMain.handle('finance:get-holdings', () => getLatestHoldings(getRawSqlite()))
+
+  // ── Credit report hub (Phase 10.5 — RIGHTS mode) ─────────────────────────
+  // A dropped credit-report PDF is parsed into `records` (summary + tradelines +
+  // inquiries) by the Drop Zone; this reads them back into the Credit tab view.
+  // Read-only — the data arrives via the timeline import, not through here.
+  ipcMain.handle('finance:get-credit-summary', () => getCreditSummary(getRawSqlite(), localYmd()))
+
+  // Manual score entry — the free annualcreditreport.com report carries no score,
+  // so let the user log one (Credit Karma / bank / paid pull). Stored as a
+  // `credit-score` record (no table) and merged into the score trend.
+  ipcMain.handle(
+    'finance:add-credit-score',
+    (_event, input: { score?: number; bureau?: string; date?: string }) => {
+      const score = Number(input?.score)
+      if (!Number.isFinite(score) || score < 300 || score > 850) {
+        return { success: false, error: 'Score must be between 300 and 850.' }
+      }
+      const bureau =
+        typeof input?.bureau === 'string' && input.bureau.trim()
+          ? input.bureau.trim().slice(0, 40)
+          : 'Manual'
+      const date =
+        typeof input?.date === 'string' && ISO_DATE_RE.test(input.date) ? input.date : localYmd()
+      const occurredAt = Date.parse(`${date}T00:00:00`)
+      const { imported } = insertRecords(
+        [
+          {
+            source: 'credit-report',
+            type: 'credit-score',
+            occurredAt: Number.isFinite(occurredAt) ? occurredAt : null,
+            title: `Credit score ${score} — ${bureau}`,
+            body: `score ${score}`,
+            payload: { bureau, score, reportDate: date, manual: true },
+            naturalKey: `${bureau}|manual|${date}`
+          }
+        ],
+        'manual-credit-score'
+      )
+      return { success: true, imported }
+    }
+  )
 
   // ── Net-worth trajectory ─────────────────────────────────────────────────
   // Returns every snapshot in the requested window. Caller (UI) groups by
