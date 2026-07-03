@@ -266,7 +266,11 @@ export function importComps(
     }
     sqlite.prepare('COMMIT').run()
   } catch (err) {
-    sqlite.prepare('ROLLBACK').run()
+    // Swallow a rollback failure (e.g. the txn was already closed) so the
+    // original insert error — the real root cause — is what the caller sees.
+    try {
+      sqlite.prepare('ROLLBACK').run()
+    } catch {}
     throw err
   }
   return { imported, skipped }
