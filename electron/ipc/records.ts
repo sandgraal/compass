@@ -91,8 +91,13 @@ function rowToRecord(row: RecordRow) {
   }
 }
 
-/** Insert a batch of parsed records, deduping by content hash. Returns counts. */
-function insertRecords(inputs: RecordInput[], provenance: string): { imported: number } {
+/**
+ * Insert a batch of parsed records, deduping by content hash. Returns counts.
+ *
+ * Exported so the live-integration projectors (`electron/ipc/storehouse-sync.ts`)
+ * reuse the exact same dedup + FTS-trigger + truncation path as file imports.
+ */
+export function insertRecords(inputs: RecordInput[], provenance: string): { imported: number } {
   const db = getDb()
   let imported = 0
   for (const inp of inputs) {

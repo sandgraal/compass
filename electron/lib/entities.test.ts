@@ -3,6 +3,7 @@ import {
   type EntityRecordRow,
   type OwnedRefs,
   deriveEntities,
+  isBankNoise,
   parseMoney,
   subscriptionKey
 } from './entities'
@@ -173,5 +174,82 @@ describe('deriveEntities — merchants & subscriptions', () => {
     const out = deriveEntities(rows, NO_OWNED)
     expect(out.find((e) => e.kind === 'merchant')?.name).toBe('Amazon')
     expect(out.some((e) => e.kind === 'subscription-candidate')).toBe(false)
+  })
+})
+
+describe('deriveEntities — live finance transactions', () => {
+  // Bodies here match projectFinanceTransactions' output ("<amt> <CUR> · <category>").
+  const fin = (title: string, body: string, iso: string): EntityRecordRow =>
+    rec({ source: 'finance', type: 'txn', title, body, occurredAt: day(iso) })
+
+  it('derives a merchant with spend from a synced transaction', () => {
+    const [m] = deriveEntities([fin('Starbucks', '-6.50 USD · Dining', '2026-06-01')], NO_OWNED)
+    expect(m.kind).toBe('merchant')
+    expect(m.name).toBe('Starbucks')
+    expect(m.attrs.totalSpend).toBe(6.5)
+    expect(m.attrs.currency).toBe('USD')
+  })
+
+  it('promotes a recurring monthly charge to a subscription candidate', () => {
+    const rows = [
+      fin('Netflix', '-15.99 USD · Entertainment', '2026-01-15'),
+      fin('Netflix', '-15.99 USD · Entertainment', '2026-02-15'),
+      fin('Netflix', '-15.99 USD · Entertainment', '2026-03-15')
+    ]
+    const sub = deriveEntities(rows, NO_OWNED).find((e) => e.kind === 'subscription-candidate')
+    expect(sub?.name).toBe('Netflix')
+    expect(sub?.attrs.cadence).toBe('monthly')
+  })
+
+  it('ignores the generic-title fallback so blank descriptions do not pollute Merchants', () => {
+    const out = deriveEntities(
+      [fin('Transaction', '-1.00 USD · Uncategorized', '2026-06-01')],
+      NO_OWNED
+    )
+    expect(out.some((e) => e.kind === 'merchant')).toBe(false)
+  })
+
+  it('does not derive merchants from internal bank plumbing', () => {
+    // Real SimpleFIN memos that are transfers/payments/interest — searchable as
+    // records, but never a merchant or a bogus subscription.
+    const rows = [
+      fin('USAA FUNDS TRANSFER DB', '-800.00 USD · Transfer', '2026-01-01'),
+      fin('AMEX EPAYMENT    ACH PMT    ***4592', '-500.00 USD · Payment', '2026-02-01'),
+      fin('ONLINE PAYMENT - THANK YOU', '-1000.00 USD · Payment', '2026-03-01'),
+      fin('INTEREST PAID', '0.39 USD · Interest', '2026-03-02')
+    ]
+    expect(deriveEntities(rows, NO_OWNED).some((e) => e.kind === 'merchant')).toBe(false)
+  })
+})
+
+describe('isBankNoise', () => {
+  it('flags transfers, card/ACH payments, interest and reference codes', () => {
+    for (const noise of [
+      'USAA FUNDS TRANSFER CR',
+      'AMEX EPAYMENT    ACH PMT    ***4592',
+      'ONLINE PAYMENT - THANK YOU',
+      'USAA CREDIT CARD PAYMENT',
+      'INTEREST PAID',
+      'INTEREST',
+      'PRINCIPAL',
+      'ICPAYMENT',
+      'AMZ_STORECRD_PMT PAYMENT    ***0615',
+      '020001643                CARTAGO' // leading ATM/branch reference code
+    ]) {
+      expect(isBankNoise(noise), noise).toBe(true)
+    }
+  })
+
+  it('does NOT flag real merchants or utility payees', () => {
+    for (const real of [
+      'Uber Trip help.uber.com CA',
+      'AMAZON MARKETPLACE',
+      'WALGREENS WEST PALM BEACH FL',
+      'FPL DIRECT DEBIT ELEC PYMT', // Florida Power & Light — a real utility
+      'MICROSOFT*XBOX GAME PA REDMOND WA',
+      'SUPERMERCADO LA LEYENDA CARTAGO'
+    ]) {
+      expect(isBankNoise(real), real).toBe(false)
+    }
   })
 })

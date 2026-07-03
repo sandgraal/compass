@@ -27,6 +27,7 @@ import { financeAccounts, integrations, simplefinConnections } from '../db/schem
 import { claimSetupToken, fetchAccounts } from '../integrations/simplefin/client'
 import { syncSimplefin } from '../integrations/simplefin/sync'
 import { listConnectionIds, removeAccessUrl, setAccessUrl } from '../integrations/simplefin/vault'
+import { afterFinanceSync } from './storehouse-sync'
 
 export type SimplefinStatus = {
   /** Connection ids that have an Access URL stored in the vault. */
@@ -117,6 +118,10 @@ export function registerSimplefinHandlers(ipcMain: IpcMain): void {
         added = result.added
         accountsUpserted = result.accountsUpserted
         accountsLinked = result.accountsLinked
+        // Project the just-synced accounts/transactions into the Storehouse spine
+        // and capture balances so People/Places/net-worth light up immediately on
+        // first connect — the moment a new user most expects to see their data.
+        afterFinanceSync()
       } catch {
         // non-fatal
       }

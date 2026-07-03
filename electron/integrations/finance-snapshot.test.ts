@@ -347,6 +347,20 @@ describe('getNetWorthSnapshot', () => {
     expect(snap.byAccount[0].capturedAt).toBeNull()
   })
 
+  it('falls back to the live account balance when no snapshot exists yet', () => {
+    // Fresh install: SimpleFIN synced a balance onto the account but the 00:05
+    // snapshot cron has never run. Net worth must reflect the live balance, not $0.
+    sqlite
+      .prepare(
+        "INSERT INTO finance_accounts (id, name, is_debt, asset_class, balance) VALUES (1, 'Chase', 0, 'spending', 8200)"
+      )
+      .run()
+    const snap = getNetWorthSnapshot(sqlite)
+    expect(snap.byAccount[0].balance).toBe(8200)
+    expect(snap.byAccount[0].capturedAt).toBeNull() // still no captured snapshot
+    expect(snap.net).toBe(8200)
+  })
+
   it('returns null deltas when there are no historical snapshots in the window', () => {
     sqlite.prepare("INSERT INTO finance_accounts (id, name, is_debt) VALUES (1, 'Chase', 0)").run()
     setAccountBalance(sqlite, 1, 5000)

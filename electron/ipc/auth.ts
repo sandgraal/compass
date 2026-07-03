@@ -402,6 +402,8 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
       'https://www.googleapis.com/auth/calendar.readonly',
       'https://www.googleapis.com/auth/gmail.readonly',
       'https://www.googleapis.com/auth/drive.readonly',
+      // Read-only address book → the owned `contacts` table (People API).
+      'https://www.googleapis.com/auth/contacts.readonly',
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/userinfo.profile'
     ]

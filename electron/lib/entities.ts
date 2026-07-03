@@ -155,6 +155,32 @@ function venmoCounterparties(body: string | null): string[] {
 
 const VOICE_VERB = /^(Text with|Voicemail from|Missed call from|Call to|Call from)\s+/
 
+/**
+ * Internal bank plumbing that is NOT a merchant: transfers, card/ACH payments,
+ * interest, principal, fee reversals. Kept deliberately conservative — the tokens
+ * here are unambiguous banking memos, not consumer merchants (a utility on
+ * "DIRECT DEBIT" or a store with "PAYMENT" in its name is intentionally NOT caught).
+ * These rows still land in the searchable timeline; they just don't derive an entity.
+ */
+const BANK_NOISE =
+  /\b(funds?\s+transfer|balance\s+transfer|wire\s+transfer|transfer\s+(to|from)|e-?payment|ach\s+(pmt|payment|debit|credit)|online\s+payment|(credit\s+)?card\s+payment|bill\s*pay(ment)?|auto\s*pay|thank\s+you|interest\s+(paid|charge)|finance\s+charge|overdraft|atm\s+rebate|icpayment)\b/i
+/** Embedded tokens where a `\b` boundary fails (e.g. "AMZ_STORECRD_PMT"). */
+const BANK_NOISE_EMBED = /store_?crd|_pmt\b/i
+/** Single-word statement memos that are never merchants. */
+const BANK_NOISE_EXACT = /^(interest|principal|payment|deposit|withdrawal|transfer)$/i
+/** A leading run of digits is an ATM/branch/reference code, not a merchant name. */
+const BANK_REF_CODE = /^\d{5,}\b/
+
+export function isBankNoise(description: string): boolean {
+  const d = description.trim()
+  return (
+    BANK_NOISE_EXACT.test(d) ||
+    BANK_REF_CODE.test(d) ||
+    BANK_NOISE.test(d) ||
+    BANK_NOISE_EMBED.test(d)
+  )
+}
+
 export const ENTITY_EXTRACTORS: EntityExtractor[] = [
   // ── People from the social graph + conversations (reuse extractPersonName) ──
   {
@@ -278,6 +304,28 @@ export const ENTITY_EXTRACTORS: EntityExtractor[] = [
     extract: (r) => {
       const t = r.title.trim()
       if (!t || t === '(transaction)') return []
+      const money = parseMoney(r.body)
+      return [
+        { kind: 'merchant', name: t, amount: money?.amount, currency: money?.currency ?? null }
+      ]
+    }
+  },
+  // ── Live finance transactions (SimpleFIN/Plaid) → merchants + subscriptions ──
+  // The description IS the payee/merchant; spend rides in the body's first segment
+  // ("-25.00 USD · Category"). Recurring charges become subscription candidates via
+  // the cadence path. People are deliberately NOT derived here — bank memos are too
+  // noisy for isLikelyPerson; People come from Contacts + Gmail instead.
+  //
+  // A transaction that IS internal bank plumbing (a transfer, a card/ACH payment,
+  // interest, principal) still becomes a searchable timeline record — we just don't
+  // derive a bogus "merchant"/"subscription" from it (e.g. an "ONLINE PAYMENT -
+  // THANK YOU" charge is not a $52k/yr subscription).
+  {
+    id: 'finance-merchant',
+    match: { source: 'finance', types: ['txn'] },
+    extract: (r) => {
+      const t = r.title.trim()
+      if (!t || t === 'Transaction' || isBankNoise(t)) return []
       const money = parseMoney(r.body)
       return [
         { kind: 'merchant', name: t, amount: money?.amount, currency: money?.currency ?? null }

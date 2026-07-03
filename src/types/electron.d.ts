@@ -946,6 +946,7 @@ declare global {
       }
       storehouse: {
         summary(): Promise<StorehouseSummary>
+        backfill(): Promise<{ imported: number; entities: number }>
       }
       records: {
         list(opts?: {

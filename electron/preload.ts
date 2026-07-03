@@ -293,7 +293,10 @@ const api = {
 
   // --- Storehouse overview (Phase 9.6 — "see ALL my info in one place") ---
   storehouse: {
-    summary: () => ipcRenderer.invoke('storehouse:summary')
+    summary: () => ipcRenderer.invoke('storehouse:summary'),
+    // Project already-synced live-integration data (finance, …) into the records
+    // spine on demand, then rebuild the derived-entity cache.
+    backfill: () => ipcRenderer.invoke('storehouse:backfill')
   },
 
   // --- Records / Timeline (Phase 10.1 — the Drop Zone) ---
