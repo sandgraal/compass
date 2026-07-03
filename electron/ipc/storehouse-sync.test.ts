@@ -199,6 +199,37 @@ describe('projectAllToRecords', () => {
       .all()
     expect(people).toEqual([{ name: 'Jane Doe' }])
   })
+
+  it('UPSERTS a live row on a changed timestamp — no duplicate timeline spam', () => {
+    addGithub('g1', 'issue', 'acme/app', 'Original title', 'jane-doe')
+    projectAllToRecords()
+    expect(sqlite.prepare("SELECT COUNT(*) AS n FROM records WHERE source='github'").get()).toEqual(
+      {
+        n: 1
+      }
+    )
+
+    // Simulate the issue being updated on GitHub: new updated_at + edited title.
+    sqlite
+      .prepare(
+        "UPDATE github_items SET updated_at='2026-08-01T00:00:00Z', title='Edited title' WHERE external_id='g1'"
+      )
+      .run()
+    const res = projectAllToRecords()
+
+    // Still ONE github record (updated in place, not a second row), reflecting the edit.
+    expect(sqlite.prepare("SELECT COUNT(*) AS n FROM records WHERE source='github'").get()).toEqual(
+      {
+        n: 1
+      }
+    )
+    const row = sqlite
+      .prepare("SELECT title, occurred_at FROM records WHERE source='github'")
+      .get() as { title: string; occurred_at: number }
+    expect(row.title).toBe('Edited title')
+    expect(row.occurred_at).toBe(Date.parse('2026-08-01T00:00:00Z'))
+    expect(res.imported).toBe(0) // an update, not a new insert
+  })
 })
 
 describe('afterFinanceSync', () => {

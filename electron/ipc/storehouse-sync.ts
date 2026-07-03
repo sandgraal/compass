@@ -38,7 +38,7 @@ import {
   projectGmail,
   projectLinear
 } from '../lib/storehouse-projectors'
-import { insertRecords } from './records'
+import { insertRecords, upsertLiveRecords } from './records'
 
 /** Read every finance transaction as a projector input row. */
 function readFinanceTxns(): FinanceTxnRow[] {
@@ -131,14 +131,21 @@ export interface BackfillResult {
 export function projectAllToRecords(): BackfillResult {
   const now = Date.now()
   let imported = 0
+  // Finance uses the plain (occurredAt-inclusive) insert: a transaction's date is
+  // IMMUTABLE, so its hash is stable and re-projection is already a no-op — and this
+  // keeps the dedup hash identical to what v0.17.0 shipped, so an upgrade doesn't
+  // duplicate the 394 finance records already on disk.
   imported += insertRecords(
     projectFinanceTransactions(readFinanceTxns()),
     `live:finance:${now}`
   ).imported
-  imported += insertRecords(projectGmail(readGmail()), `live:gmail:${now}`).imported
-  imported += insertRecords(projectCalendar(readCalendar()), `live:gcal:${now}`).imported
-  imported += insertRecords(projectGithub(readGithub()), `live:github:${now}`).imported
-  imported += insertRecords(projectLinear(readLinear()), `live:linear:${now}`).imported
+  // Gmail/Calendar/GitHub/Linear carry a MUTABLE occurredAt (received_at / start /
+  // updated_at), so they UPSERT on a stable per-domain-row key (occurredAt excluded):
+  // a changed timestamp re-projects in place instead of spamming a new timeline row.
+  imported += upsertLiveRecords(projectGmail(readGmail()), `live:gmail:${now}`).imported
+  imported += upsertLiveRecords(projectCalendar(readCalendar()), `live:gcal:${now}`).imported
+  imported += upsertLiveRecords(projectGithub(readGithub()), `live:github:${now}`).imported
+  imported += upsertLiveRecords(projectLinear(readLinear()), `live:linear:${now}`).imported
   const { count } = refreshDerivedEntities(getDb())
   return { imported, entities: count }
 }
