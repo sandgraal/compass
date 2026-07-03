@@ -252,6 +252,21 @@ describe('deriveEntities — Gmail senders & calendar places', () => {
   })
 })
 
+describe('deriveEntities — GitHub authors', () => {
+  const gh = (repo: string, author: string): EntityRecordRow =>
+    rec({ source: 'github', type: 'pr', title: 'A change', body: `${repo} · open · @${author}` })
+
+  it('derives a person only from a humanizable, non-bot collaborator login', () => {
+    const rows = [
+      gh('sandgraal/x', 'sandgraal'), // single-token → dropped (typically self)
+      gh('acme/app', 'dependabot[bot]'), // bot → dropped
+      gh('acme/app', 'jane-doe') // real collaborator → "Jane Doe"
+    ]
+    const people = deriveEntities(rows, NO_OWNED).filter((e) => e.kind === 'person')
+    expect(people.map((p) => p.name)).toEqual(['Jane Doe'])
+  })
+})
+
 describe('isBankNoise', () => {
   it('flags transfers, card/ACH payments, interest and reference codes', () => {
     for (const noise of [

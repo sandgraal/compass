@@ -17,18 +17,28 @@
  */
 import type { IpcMain } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
-import { calendarEvents, financeTransactions, gmailActions } from '../db/schema'
+import {
+  calendarEvents,
+  financeTransactions,
+  githubItems,
+  gmailActions,
+  linearIssues
+} from '../db/schema'
 import { captureSnapshots } from '../integrations/finance-snapshot'
 import { refreshDerivedEntities } from '../lib/entities-projection'
 import {
   type CalendarRow,
   type FinanceTxnRow,
+  type GithubRow,
   type GmailRow,
+  type LinearRow,
   projectCalendar,
   projectFinanceTransactions,
-  projectGmail
+  projectGithub,
+  projectGmail,
+  projectLinear
 } from '../lib/storehouse-projectors'
-import { insertRecords } from './records'
+import { insertRecords, upsertLiveRecords } from './records'
 
 /** Read every finance transaction as a projector input row. */
 function readFinanceTxns(): FinanceTxnRow[] {
@@ -74,6 +84,37 @@ function readCalendar(): CalendarRow[] {
     .map((r) => ({ ...r, startAt: r.startAt ? r.startAt.getTime() : null }))
 }
 
+/** Read GitHub issues/PRs as projector inputs. */
+function readGithub(): GithubRow[] {
+  return getDb()
+    .select({
+      externalId: githubItems.externalId,
+      type: githubItems.type,
+      repo: githubItems.repo,
+      title: githubItems.title,
+      state: githubItems.state,
+      author: githubItems.author,
+      updatedAt: githubItems.updatedAt
+    })
+    .from(githubItems)
+    .all()
+}
+
+/** Read Linear issues as projector inputs. */
+function readLinear(): LinearRow[] {
+  return getDb()
+    .select({
+      externalId: linearIssues.externalId,
+      identifier: linearIssues.identifier,
+      title: linearIssues.title,
+      state: linearIssues.state,
+      team: linearIssues.team,
+      updatedAt: linearIssues.updatedAt
+    })
+    .from(linearIssues)
+    .all()
+}
+
 export interface BackfillResult {
   /** Records newly inserted this run (already-present rows dedupe to 0). */
   imported: number
@@ -90,12 +131,21 @@ export interface BackfillResult {
 export function projectAllToRecords(): BackfillResult {
   const now = Date.now()
   let imported = 0
+  // Finance uses the plain (occurredAt-inclusive) insert: a transaction's date is
+  // IMMUTABLE, so its hash is stable and re-projection is already a no-op — and this
+  // keeps the dedup hash identical to what v0.17.0 shipped, so an upgrade doesn't
+  // duplicate the 394 finance records already on disk.
   imported += insertRecords(
     projectFinanceTransactions(readFinanceTxns()),
     `live:finance:${now}`
   ).imported
-  imported += insertRecords(projectGmail(readGmail()), `live:gmail:${now}`).imported
-  imported += insertRecords(projectCalendar(readCalendar()), `live:gcal:${now}`).imported
+  // Gmail/Calendar/GitHub/Linear carry a MUTABLE occurredAt (received_at / start /
+  // updated_at), so they UPSERT on a stable per-domain-row key (occurredAt excluded):
+  // a changed timestamp re-projects in place instead of spamming a new timeline row.
+  imported += upsertLiveRecords(projectGmail(readGmail()), `live:gmail:${now}`).imported
+  imported += upsertLiveRecords(projectCalendar(readCalendar()), `live:gcal:${now}`).imported
+  imported += upsertLiveRecords(projectGithub(readGithub()), `live:github:${now}`).imported
+  imported += upsertLiveRecords(projectLinear(readLinear()), `live:linear:${now}`).imported
   const { count } = refreshDerivedEntities(getDb())
   return { imported, entities: count }
 }
@@ -123,14 +173,15 @@ export function afterFinanceSync(): void {
 }
 
 /**
- * Post-sync hook for the Google sync path (Gmail/Calendar → People/Places). Same
- * defensive contract as `afterFinanceSync` but without the finance snapshot step.
+ * Post-sync hook for the non-finance connectors (Google Gmail/Calendar, GitHub,
+ * Linear) — projects the latest synced data into the spine. Same defensive contract
+ * as `afterFinanceSync` (never throws) but without the finance snapshot step.
  */
-export function afterGoogleSync(): void {
+export function afterConnectorSync(): void {
   try {
     projectAllToRecords()
   } catch (err) {
-    console.warn('[storehouse-sync] google projection failed (non-fatal):', err)
+    console.warn('[storehouse-sync] connector projection failed (non-fatal):', err)
   }
 }
 

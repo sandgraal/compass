@@ -120,6 +120,64 @@ export function insertRecords(inputs: RecordInput[], provenance: string): { impo
   return { imported }
 }
 
+/**
+ * Upsert a batch of LIVE-projected records (`electron/ipc/storehouse-sync.ts`).
+ *
+ * Unlike file imports — where `occurredAt` is part of an event's identity (the same
+ * title on two dates is two events) — a live-projected record represents ONE mutable
+ * domain row (a GitHub issue, a Linear task, an email thread) whose `occurredAt`
+ * (updated_at / received_at / start) CHANGES over time. So the dedup key EXCLUDES
+ * `occurredAt` (stable per `source|type|naturalKey`) and a re-projection UPDATES the
+ * existing row in place — refreshing occurred_at/title/body/payload — instead of
+ * spamming the timeline with a new row on every sync. The `records_au` FTS trigger
+ * keeps search in sync on update. Returns new-insert + update counts.
+ */
+export function upsertLiveRecords(
+  inputs: RecordInput[],
+  provenance: string
+): { imported: number; updated: number } {
+  const db = getDb()
+  if (inputs.length === 0) return { imported: 0, updated: 0 }
+  // Stable per-domain-row hash (occurredAt excluded via `null`).
+  const withHash = inputs.map((inp) => ({
+    inp,
+    dedupHash: hashRecord(inp.source, inp.type, null, inp.naturalKey)
+  }))
+  const existing = new Set(
+    db
+      .select({ h: records.dedupHash })
+      .from(records)
+      .where(
+        inArray(
+          records.dedupHash,
+          withHash.map((w) => w.dedupHash)
+        )
+      )
+      .all()
+      .map((r) => r.h)
+  )
+  let imported = 0
+  let updated = 0
+  for (const { inp, dedupHash } of withHash) {
+    const values = {
+      occurredAt: inp.occurredAt != null ? new Date(inp.occurredAt) : null,
+      title: inp.title.slice(0, 2000),
+      body: inp.body ? inp.body.slice(0, 2000) : null,
+      payload: inp.payload !== undefined ? JSON.stringify(inp.payload).slice(0, 100_000) : null
+    }
+    db.insert(records)
+      .values({ source: inp.source, type: inp.type, dedupHash, provenance, ...values })
+      .onConflictDoUpdate({
+        target: records.dedupHash,
+        set: { ...values, provenance, ingestedAt: new Date() }
+      })
+      .run()
+    if (existing.has(dedupHash)) updated++
+    else imported++
+  }
+  return { imported, updated }
+}
+
 /** Insert a batch of snapshot facts, deduping by content hash. Returns counts. */
 function insertSnapshotFacts(facts: SnapshotFact[], provenance: string): { imported: number } {
   const db = getDb()
