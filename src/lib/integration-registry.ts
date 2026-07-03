@@ -1,0 +1,190 @@
+// Single source of truth for every integration the Integrations page and
+// Sidebar can display. Adding a new integration means adding one entry here —
+// see docs/integrations.md step 7 and .claude/skills/add-integration/SKILL.md.
+
+export type IntegrationCategory =
+  | 'finance'
+  | 'health-fitness'
+  | 'communication-productivity'
+  | 'media-entertainment'
+  | 'knowledge-notes'
+  | 'government-legal'
+  | 'travel'
+
+export type IntegrationMethod = 'live' | 'export' | 'cred'
+
+export interface IntegrationMeta {
+  id: string
+  name: string
+  category: IntegrationCategory
+  method: IntegrationMethod
+  description: string
+  scopes: string[]
+  logo: string
+  color: string
+  /** False for roadmap integrations with no connect flow yet (e.g. Slack). */
+  connected: boolean
+}
+
+export const INTEGRATION_CATEGORY_LABELS: Record<IntegrationCategory, string> = {
+  finance: 'Finance',
+  'health-fitness': 'Health & Fitness',
+  'communication-productivity': 'Communication & Productivity',
+  'media-entertainment': 'Media & Entertainment',
+  'knowledge-notes': 'Knowledge & Notes',
+  'government-legal': 'Government & Legal',
+  travel: 'Travel'
+}
+
+// Category display order on the Integrations page.
+export const INTEGRATION_CATEGORY_ORDER: IntegrationCategory[] = [
+  'finance',
+  'health-fitness',
+  'communication-productivity',
+  'knowledge-notes',
+  'media-entertainment',
+  'government-legal',
+  'travel'
+]
+
+export const INTEGRATION_REGISTRY: Record<string, IntegrationMeta> = {
+  google: {
+    id: 'google',
+    name: 'Google',
+    category: 'communication-productivity',
+    method: 'live',
+    description: 'Calendar events, Gmail action items, and Google Drive file index.',
+    scopes: ['calendar.readonly', 'gmail.readonly', 'drive.readonly'],
+    color: 'from-red-500/20 to-yellow-500/20',
+    logo: 'G',
+    connected: true
+  },
+  github: {
+    id: 'github',
+    name: 'GitHub',
+    category: 'communication-productivity',
+    method: 'live',
+    description: 'Issues assigned to you, open pull requests, and project board items.',
+    scopes: ['repo', 'read:project', 'read:user'],
+    color: 'from-gray-500/20 to-gray-700/20',
+    logo: '⌥',
+    connected: true
+  },
+  'apple-calendar': {
+    id: 'apple-calendar',
+    name: 'Apple Calendar',
+    category: 'communication-productivity',
+    method: 'live',
+    description: 'Local-file read of macOS Calendar.app — next 14 days. No OAuth, no network.',
+    scopes: ['local:ics'],
+    color: 'from-zinc-400/20 to-zinc-600/20',
+    logo: '',
+    connected: true
+  },
+  obsidian: {
+    id: 'obsidian',
+    name: 'Obsidian',
+    category: 'knowledge-notes',
+    method: 'live',
+    description:
+      'Two-way markdown bridge with a local vault — vault notes appear in your knowledge base, Compass notes appear in the vault. No cloud.',
+    scopes: ['local:markdown'],
+    color: 'from-purple-500/20 to-violet-600/20',
+    logo: '◆',
+    connected: true
+  },
+  notion: {
+    id: 'notion',
+    name: 'Notion',
+    category: 'knowledge-notes',
+    method: 'live',
+    description:
+      'Imports pages you share with your Notion integration into the knowledge base as markdown.',
+    scopes: ['pages:read'],
+    color: 'from-slate-500/20 to-slate-700/20',
+    logo: 'N',
+    connected: true
+  },
+  linear: {
+    id: 'linear',
+    name: 'Linear',
+    category: 'communication-productivity',
+    method: 'live',
+    description: 'Shows the issues assigned to you alongside GitHub on the dashboard.',
+    scopes: ['issues:read'],
+    color: 'from-indigo-500/20 to-purple-500/20',
+    logo: 'L',
+    connected: true
+  },
+  todoist: {
+    id: 'todoist',
+    name: 'Todoist',
+    category: 'communication-productivity',
+    method: 'live',
+    description: "Imports tasks due today or overdue into today's daily checklist.",
+    scopes: ['tasks:read'],
+    color: 'from-red-500/20 to-orange-500/20',
+    logo: 'T',
+    connected: true
+  },
+  things: {
+    id: 'things',
+    name: 'Things 3',
+    category: 'communication-productivity',
+    method: 'live',
+    description:
+      "Local read of your Things 3 to-dos — today's and overdue tasks into the daily checklist. No cloud.",
+    scopes: ['local:sqlite'],
+    color: 'from-sky-400/20 to-blue-500/20',
+    logo: '✓',
+    connected: true
+  },
+  simplefin: {
+    id: 'simplefin',
+    name: 'SimpleFIN',
+    category: 'finance',
+    method: 'live',
+    description:
+      'Recommended: bank + card sync (incl. Amex) via SimpleFIN Bridge. You sign up & hold the keys ($15/yr) — no business or developer keys needed.',
+    scopes: ['accounts:read', 'transactions:read'],
+    color: 'from-emerald-500/20 to-teal-500/20',
+    logo: 'S',
+    connected: true
+  },
+  plaid: {
+    id: 'plaid',
+    name: 'Plaid',
+    category: 'finance',
+    method: 'live',
+    description:
+      'Advanced: bank sync via your own Plaid developer keys. Most people should use SimpleFIN instead. Tokens encrypted on disk.',
+    scopes: ['transactions:read', 'accounts:read'],
+    color: 'from-blue-500/20 to-indigo-500/20',
+    logo: '$',
+    connected: true
+  },
+  slack: {
+    id: 'slack',
+    name: 'Slack',
+    category: 'communication-productivity',
+    method: 'live',
+    description: 'Action items from DMs and channels.',
+    scopes: ['messages:read'],
+    color: 'from-green-500/20 to-teal-500/20',
+    logo: '#',
+    connected: false
+  }
+}
+
+export function getIntegrationMeta(id: string): IntegrationMeta | undefined {
+  return INTEGRATION_REGISTRY[id]
+}
+
+export function groupByCategory(
+  items: IntegrationMeta[]
+): { category: IntegrationCategory; items: IntegrationMeta[] }[] {
+  return INTEGRATION_CATEGORY_ORDER.map((category) => ({
+    category,
+    items: items.filter((item) => item.category === category)
+  })).filter((group) => group.items.length > 0)
+}

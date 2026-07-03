@@ -17,7 +17,8 @@ This is the canonical pattern, mirrored from how `google` and `github` are wired
 | `electron/knowledge/extractor.ts` | `update<Service>Knowledge(items)` function |
 | `electron/preload.ts` | (only if new IPC namespace beyond auth/sync) |
 | `src/types/electron.d.ts` | (only if new IPC namespace) |
-| `src/pages/Integrations.tsx` | Append to `INTEGRATIONS` array + setup guide section |
+| `src/lib/integration-registry.ts` | Add one `IntegrationMeta` entry (id, name, category, method, description, scopes, color, logo) |
+| `src/pages/Integrations.tsx` | Setup guide section only (if OAuth) — the card grid renders from the registry |
 | `electron/main.ts` | Add API hostname to CSP `connect-src` allowlist |
 
 ## Step-by-step
@@ -112,20 +113,25 @@ export async function update<Service>Knowledge(items: <Type>[]): Promise<void> {
 
 `updateKnowledgeFile` automatically writes a `.prev` snapshot for the diff view.
 
-### 6. Frontend card
-In `src/pages/Integrations.tsx`, append to `INTEGRATIONS`:
+### 6. Frontend registry entry
+In `src/lib/integration-registry.ts`, add one entry to `INTEGRATION_REGISTRY`:
 ```typescript
-{
+'<service>': {
   id: '<service>',
   name: '<Display Name>',
+  category: '<finance|health-fitness|communication-productivity|media-entertainment|knowledge-notes|government-legal|travel>',
+  method: '<live|export|cred>',
   description: '<one-sentence>',
   scopes: ['<scope1>', '<scope2>'],
   color: 'from-<from>/20 to-<to>/20',
-  logo: '<letter>'
+  logo: '<letter>',
+  connected: true
 }
 ```
+This is the *only* frontend touch point needed for the card itself — both `Sidebar.tsx` (connected-count
+summary) and `Integrations.tsx` (category-grouped, searchable grid) read from this one registry.
 
-If OAuth, add a setup guide section matching the Google/GitHub pattern.
+If OAuth, add a setup guide section in `Integrations.tsx` matching the Google/GitHub pattern.
 
 ### 7. CSP allowlist
 In `electron/main.ts`, add the API hostname to `connect-src`. Don't forget the OAuth host if separate.
