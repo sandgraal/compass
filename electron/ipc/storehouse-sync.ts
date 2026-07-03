@@ -17,10 +17,17 @@
  */
 import type { IpcMain } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
-import { financeTransactions } from '../db/schema'
+import { calendarEvents, financeTransactions, gmailActions } from '../db/schema'
 import { captureSnapshots } from '../integrations/finance-snapshot'
 import { refreshDerivedEntities } from '../lib/entities-projection'
-import { type FinanceTxnRow, projectFinanceTransactions } from '../lib/storehouse-projectors'
+import {
+  type CalendarRow,
+  type FinanceTxnRow,
+  type GmailRow,
+  projectCalendar,
+  projectFinanceTransactions,
+  projectGmail
+} from '../lib/storehouse-projectors'
 import { insertRecords } from './records'
 
 /** Read every finance transaction as a projector input row. */
@@ -38,6 +45,35 @@ function readFinanceTxns(): FinanceTxnRow[] {
     .all()
 }
 
+/** Read Gmail inbox rows as projector inputs (timestamp_ms → epoch ms). */
+function readGmail(): GmailRow[] {
+  return getDb()
+    .select({
+      threadId: gmailActions.threadId,
+      subject: gmailActions.subject,
+      fromAddress: gmailActions.fromAddress,
+      snippet: gmailActions.snippet,
+      receivedAt: gmailActions.receivedAt
+    })
+    .from(gmailActions)
+    .all()
+    .map((r) => ({ ...r, receivedAt: r.receivedAt ? r.receivedAt.getTime() : null }))
+}
+
+/** Read calendar events as projector inputs (timestamp_ms → epoch ms). */
+function readCalendar(): CalendarRow[] {
+  return getDb()
+    .select({
+      externalId: calendarEvents.externalId,
+      title: calendarEvents.title,
+      location: calendarEvents.location,
+      startAt: calendarEvents.startAt
+    })
+    .from(calendarEvents)
+    .all()
+    .map((r) => ({ ...r, startAt: r.startAt ? r.startAt.getTime() : null }))
+}
+
 export interface BackfillResult {
   /** Records newly inserted this run (already-present rows dedupe to 0). */
   imported: number
@@ -48,11 +84,18 @@ export interface BackfillResult {
 /**
  * Project all live-integration domain tables into `records`, then rebuild the
  * derived-entity cache ONCE. Idempotent — safe to run on every sync and on demand.
- * Phase 1 covers finance; Gmail/Calendar/GitHub/Linear projectors slot in here.
+ * Covers finance + Gmail + Calendar; GitHub/Linear projectors slot in here next.
+ * Per-source provenance tags keep the batch labels meaningful.
  */
 export function projectAllToRecords(): BackfillResult {
-  const inputs = projectFinanceTransactions(readFinanceTxns())
-  const { imported } = insertRecords(inputs, `live:finance:${Date.now()}`)
+  const now = Date.now()
+  let imported = 0
+  imported += insertRecords(
+    projectFinanceTransactions(readFinanceTxns()),
+    `live:finance:${now}`
+  ).imported
+  imported += insertRecords(projectGmail(readGmail()), `live:gmail:${now}`).imported
+  imported += insertRecords(projectCalendar(readCalendar()), `live:gcal:${now}`).imported
   const { count } = refreshDerivedEntities(getDb())
   return { imported, entities: count }
 }
@@ -76,6 +119,18 @@ export function afterFinanceSync(): void {
     projectAllToRecords()
   } catch (err) {
     console.warn('[storehouse-sync] records projection failed (non-fatal):', err)
+  }
+}
+
+/**
+ * Post-sync hook for the Google sync path (Gmail/Calendar → People/Places). Same
+ * defensive contract as `afterFinanceSync` but without the finance snapshot step.
+ */
+export function afterGoogleSync(): void {
+  try {
+    projectAllToRecords()
+  } catch (err) {
+    console.warn('[storehouse-sync] google projection failed (non-fatal):', err)
   }
 }
 

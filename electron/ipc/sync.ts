@@ -43,7 +43,7 @@ import { readKnowledgeFile } from '../knowledge/writer'
 import { KNOWLEDGE_DIR } from '../paths'
 import { getValidGoogleToken, loadToken } from './auth'
 import { upsertContacts } from './contacts'
-import { afterFinanceSync } from './storehouse-sync'
+import { afterFinanceSync, afterGoogleSync } from './storehouse-sync'
 
 type SyncResult = {
   service: string
@@ -644,6 +644,10 @@ export async function syncGoogle(
     if (runExtractors) {
       await runSuggestionExtractors()
     }
+
+    // Project the freshly synced Gmail senders + calendar locations into the
+    // Storehouse spine so People/Places light up. Defensive — never fails the sync.
+    afterGoogleSync()
 
     maybeSendNotification('google', recordsUpdated)
     return { service: 'google', success: true, recordsUpdated }

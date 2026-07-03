@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { parseMoney } from './entities'
-import { type FinanceTxnRow, projectFinanceTransactions } from './storehouse-projectors'
+import {
+  type CalendarRow,
+  type FinanceTxnRow,
+  type GmailRow,
+  projectCalendar,
+  projectFinanceTransactions,
+  projectGmail
+} from './storehouse-projectors'
 
 const txn = (partial: Partial<FinanceTxnRow> & Pick<FinanceTxnRow, 'hash'>): FinanceTxnRow => ({
   date: '2026-06-01',
@@ -57,5 +64,64 @@ describe('projectFinanceTransactions', () => {
 
   it('skips rows without a stable hash (cannot dedupe safely)', () => {
     expect(projectFinanceTransactions([txn({ hash: '' })])).toHaveLength(0)
+  })
+})
+
+describe('projectGmail', () => {
+  const mail = (p: Partial<GmailRow> & Pick<GmailRow, 'threadId'>): GmailRow => ({
+    subject: 'Lunch?',
+    fromAddress: 'Jane Doe <jane@example.com>',
+    snippet: 'are you free',
+    receivedAt: 1700000000000,
+    ...p
+  })
+
+  it('maps an email with the sender in the first body segment', () => {
+    const [r] = projectGmail([mail({ threadId: 't1' })])
+    expect(r.source).toBe('gmail')
+    expect(r.type).toBe('email')
+    expect(r.title).toBe('Lunch?')
+    expect(r.body).toBe('Jane Doe <jane@example.com> · are you free')
+    expect(r.body?.split(' · ')[0]).toBe('Jane Doe <jane@example.com>') // gmail-person reads this
+    expect(r.naturalKey).toBe('t1')
+    expect(r.occurredAt).toBe(1700000000000)
+  })
+
+  it('omits the preview separator when there is no snippet, and defaults a blank subject', () => {
+    const [r] = projectGmail([mail({ threadId: 't1', snippet: null, subject: '  ' })])
+    expect(r.body).toBe('Jane Doe <jane@example.com>')
+    expect(r.title).toBe('(no subject)')
+  })
+
+  it('skips rows without a thread id', () => {
+    expect(projectGmail([mail({ threadId: '' })])).toHaveLength(0)
+  })
+})
+
+describe('projectCalendar', () => {
+  const ev = (p: Partial<CalendarRow> & Pick<CalendarRow, 'externalId'>): CalendarRow => ({
+    title: 'Team offsite',
+    location: 'Cartago, CR',
+    startAt: 1700000000000,
+    ...p
+  })
+
+  it('maps an event with the location as the body (feeds the gcal-place extractor)', () => {
+    const [r] = projectCalendar([ev({ externalId: 'e1' })])
+    expect(r.source).toBe('gcal')
+    expect(r.type).toBe('event')
+    expect(r.title).toBe('Team offsite')
+    expect(r.body).toBe('Cartago, CR')
+    expect(r.naturalKey).toBe('e1')
+    expect(r.occurredAt).toBe(1700000000000)
+  })
+
+  it('leaves the body undefined when there is no location', () => {
+    const [r] = projectCalendar([ev({ externalId: 'e1', location: null })])
+    expect(r.body).toBeUndefined()
+  })
+
+  it('skips rows without an external id', () => {
+    expect(projectCalendar([ev({ externalId: '' })])).toHaveLength(0)
   })
 })
