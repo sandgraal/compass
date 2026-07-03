@@ -127,6 +127,136 @@ export function deleteComp(sqlite: SqliteForStudio, id: number): void {
   sqlite.prepare('DELETE FROM rental_comps WHERE id = ?').run(id)
 }
 
+// ─── CSV import (retire-early-hub "cabin tracker" export) ────────────────────
+// The old planner exported comps as a CSV with columns:
+//   name, zone, bedrooms, maxGuests, nightlyUSD, cleaningUSD, minNights,
+//   rating, reviewCount, occupancyPct, amenities, notes, url
+// Only name/zone/bedrooms/nightlyUsd/occupancyPct/rating/reviewCount/notes/url
+// have a home in `rental_comps`; the rest (maxGuests, cleaningUSD, minNights,
+// amenities) are folded into `notes` so the import stays lossless.
+
+/** Normalize a header for matching: lowercase, drop everything but a–z0–9. */
+function normHeader(h: string): string {
+  return h.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+/** Parse a numeric cell, tolerating $, %, commas and blanks. Blank → null. */
+function numCell(s: string | undefined): number | null {
+  if (s == null) return null
+  const t = s.trim().replace(/[$,%]/g, '')
+  if (t === '') return null
+  const n = Number(t)
+  return Number.isFinite(n) ? n : null
+}
+
+// Field → accepted (normalized) header aliases. Matched by exact equality so a
+// nightly alias like 'rate' never swallows the 'rating' column.
+const COMP_CSV_ALIASES = {
+  name: ['name', 'listing', 'title', 'property'],
+  url: ['url', 'link'],
+  zone: ['zone', 'location', 'region', 'area'],
+  bedrooms: ['bedrooms', 'bedroom', 'beds', 'br'],
+  nightlyUsd: ['nightlyusd', 'nightly', 'nightlyrate', 'price', 'adr', 'rate'],
+  occupancyPct: ['occupancypct', 'occupancy', 'occ'],
+  rating: ['rating', 'stars', 'score'],
+  reviewCount: ['reviewcount', 'reviews', 'numreviews'],
+  notes: ['notes', 'note', 'comment', 'comments'],
+  savedAt: ['savedat', 'saved', 'date', 'captured'],
+  // folded into notes:
+  maxGuests: ['maxguests', 'guests', 'sleeps'],
+  cleaningUsd: ['cleaningusd', 'cleaning', 'cleaningfee'],
+  minNights: ['minnights', 'minimumnights'],
+  amenities: ['amenities', 'features']
+} as const
+
+/**
+ * Map a retire-early-hub comps CSV (headers + rows from `readCsv`) into
+ * `CompInput`s. Column order is discovered from the header row, so re-ordered or
+ * partial exports still work. Rows with no name, nightly, or url are dropped.
+ */
+export function parseRentalCompsCsv(headers: string[], rows: string[][]): CompInput[] {
+  const norm = headers.map(normHeader)
+  const idxOf = (aliases: readonly string[]): number => norm.findIndex((h) => aliases.includes(h))
+  const cols = Object.fromEntries(
+    Object.entries(COMP_CSV_ALIASES).map(([field, aliases]) => [field, idxOf(aliases)])
+  ) as Record<keyof typeof COMP_CSV_ALIASES, number>
+
+  const cell = (row: string[], i: number): string => (i >= 0 ? (row[i] ?? '').trim() : '')
+
+  const out: CompInput[] = []
+  for (const row of rows) {
+    const name = cell(row, cols.name)
+    const url = cell(row, cols.url)
+    const nightlyUsd = numCell(cell(row, cols.nightlyUsd))
+    // Skip a row that carries no identifying signal at all.
+    if (!name && !url && nightlyUsd == null) continue
+
+    const bedroomsRaw = numCell(cell(row, cols.bedrooms))
+    const bedrooms = bedroomsRaw != null ? Math.min(20, Math.max(1, Math.round(bedroomsRaw))) : 2
+
+    // Fold the columns without a schema home into notes so nothing is lost.
+    const extras: string[] = []
+    const baseNotes = cell(row, cols.notes)
+    if (baseNotes) extras.push(baseNotes)
+    const maxGuests = numCell(cell(row, cols.maxGuests))
+    if (maxGuests != null) extras.push(`sleeps ${maxGuests}`)
+    const cleaning = numCell(cell(row, cols.cleaningUsd))
+    if (cleaning != null) extras.push(`cleaning $${cleaning}`)
+    const minNights = numCell(cell(row, cols.minNights))
+    if (minNights != null) extras.push(`min ${minNights} nights`)
+    const amenities = cell(row, cols.amenities)
+    if (amenities) extras.push(amenities)
+
+    out.push({
+      name,
+      url,
+      zone: cell(row, cols.zone) || 'Cartago',
+      bedrooms,
+      nightlyUsd,
+      occupancyPct: numCell(cell(row, cols.occupancyPct)),
+      rating: numCell(cell(row, cols.rating)),
+      reviewCount: (() => {
+        const n = numCell(cell(row, cols.reviewCount))
+        return n != null ? Math.round(n) : null
+      })(),
+      notes: extras.length ? extras.join(' · ') : null,
+      savedAt: cell(row, cols.savedAt) || null
+    })
+  }
+  return out
+}
+
+/** Stable identity for dedup: name + nightly + zone, case-insensitive. */
+function compKey(c: CompInput): string {
+  return `${(c.name ?? '').trim().toLowerCase()}|${c.nightlyUsd ?? ''}|${(c.zone ?? '').toLowerCase()}`
+}
+
+/**
+ * Bulk-insert parsed comps, skipping any that duplicate an existing comp (or an
+ * earlier row in the same batch) by name + nightly + zone — so re-importing the
+ * same file is a no-op rather than doubling the list.
+ */
+export function importComps(
+  sqlite: SqliteForStudio,
+  inputs: CompInput[],
+  now: number = Date.now()
+): { imported: number; skipped: number } {
+  const seen = new Set(listComps(sqlite).map(compKey))
+  let imported = 0
+  let skipped = 0
+  for (const c of inputs) {
+    const key = compKey(c)
+    if (seen.has(key)) {
+      skipped++
+      continue
+    }
+    addComp(sqlite, c, now)
+    seen.add(key)
+    imported++
+  }
+  return { imported, skipped }
+}
+
 // ─── Units + settings (JSON in app_settings) ─────────────────────────────────
 
 const UNITS_KEY = 'rentalStudioUnits'

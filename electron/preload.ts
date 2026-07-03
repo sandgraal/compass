@@ -505,6 +505,7 @@ const api = {
       ipcRenderer.invoke('finance:set-rental-studio', input),
     suggestNightly: (input: { comps?: unknown[]; listing?: Record<string, unknown> }) =>
       ipcRenderer.invoke('finance:suggest-nightly', input),
+    importRentalComps: () => ipcRenderer.invoke('finance:import-rental-comps'),
 
     // Days-in-country & residency (Phase 11.5)
     getResidencySummary: () => ipcRenderer.invoke('finance:get-residency-summary'),

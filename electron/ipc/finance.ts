@@ -69,6 +69,8 @@ import {
   addComp,
   buildRentalStudio,
   deleteComp,
+  importComps,
+  parseRentalCompsCsv,
   setSettings,
   setUnits,
   studioPlanAnnualNet,
@@ -1222,6 +1224,34 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     setRetirementConfig(sqlite, { airbnbAnnualNet: Math.round(studioPlanAnnualNet(sqlite)) })
 
     return { success: true, studio: buildRentalStudio(sqlite) }
+  })
+
+  // Bulk-import comps from a CSV (the retire-early-hub "cabin tracker" export).
+  // Mirrors `finance:import-holdings`: pick a file, parse, insert-with-dedup,
+  // then re-sync the projected net into the retirement engine.
+  ipcMain.handle('finance:import-rental-comps', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: 'Choose a rental comps CSV',
+      properties: ['openFile'],
+      filters: [{ name: 'CSV', extensions: ['csv'] }]
+    })
+    if (canceled || filePaths.length === 0) return { success: false, canceled: true }
+    try {
+      const sqlite = getRawSqlite()
+      const { headers, rows } = readCsv(filePaths[0])
+      const comps = parseRentalCompsCsv(headers, rows)
+      if (comps.length === 0) {
+        return {
+          success: false,
+          error: 'No comps found — is this a rental comps CSV (it needs a name/nightly/URL column)?'
+        }
+      }
+      const { imported, skipped } = importComps(sqlite, comps)
+      setRetirementConfig(sqlite, { airbnbAnnualNet: Math.round(studioPlanAnnualNet(sqlite)) })
+      return { success: true, imported, skipped, studio: buildRentalStudio(sqlite) }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
   })
 
   // ── Financial goals & milestones (Phase 11.6) ────────────────────────────

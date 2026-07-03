@@ -6,7 +6,9 @@ import {
   deleteComp,
   getSettings,
   getUnits,
+  importComps,
   listComps,
+  parseRentalCompsCsv,
   setSettings,
   setUnits,
   studioPlanAnnualNet,
@@ -132,6 +134,122 @@ describe('buildRentalStudio', () => {
     expect(r.reconciliation.actualsYear).toBe(2026)
     expect(r.reconciliation.deltaPct).not.toBeNull()
     expect(r.reconciliation.note).toMatch(/actual net operating/)
+  })
+})
+
+describe('parseRentalCompsCsv (retire-early-hub cabin-tracker export)', () => {
+  // The real export's header row.
+  const HEADERS = [
+    'name',
+    'zone',
+    'bedrooms',
+    'maxGuests',
+    'nightlyUSD',
+    'cleaningUSD',
+    'minNights',
+    'rating',
+    'reviewCount',
+    'occupancyPct',
+    'amenities',
+    'notes',
+    'url'
+  ]
+
+  it('maps columns and folds maxGuests / notes into the notes field', () => {
+    const rows = [
+      // name, zone, br, guests, nightly, clean, min, rating, reviews, occ, amenities, notes, url
+      [
+        'La Margarita Cabin',
+        'Cartago',
+        '2',
+        '2',
+        '41',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        'https://airbnb/1'
+      ],
+      [
+        'Cartago 1BR — mid, well-reviewed', // embedded comma survives (readCsv handles quoting upstream)
+        'Cartago',
+        '1',
+        '2',
+        '58',
+        '',
+        '',
+        '',
+        '',
+        '21',
+        '',
+        'Market estimate — anchor ×0.73',
+        ''
+      ]
+    ]
+    const comps = parseRentalCompsCsv(HEADERS, rows)
+    expect(comps.length).toBe(2)
+    expect(comps[0]).toMatchObject({
+      name: 'La Margarita Cabin',
+      zone: 'Cartago',
+      bedrooms: 2,
+      nightlyUsd: 41,
+      url: 'https://airbnb/1'
+    })
+    // Blank numeric cells become null, not 0.
+    expect(comps[0].rating).toBeNull()
+    expect(comps[0].reviewCount).toBeNull()
+    // maxGuests has no schema column → folded into notes.
+    expect(comps[0].notes).toBe('sleeps 2')
+    // occupancyPct is captured; notes column + maxGuests both fold in, notes first.
+    expect(comps[1].occupancyPct).toBe(21)
+    expect(comps[1].notes).toBe('Market estimate — anchor ×0.73 · sleeps 2')
+  })
+
+  it('defaults zone/bedrooms, clamps bedrooms, and skips empty rows', () => {
+    const rows = [
+      ['', '', '', '', '', '', '', '', '', '', '', '', ''], // fully empty → skipped
+      ['Big House', '', '99', '', '148', '', '', '', '', '', '', '', ''] // no zone, huge br
+    ]
+    const comps = parseRentalCompsCsv(HEADERS, rows)
+    expect(comps.length).toBe(1)
+    expect(comps[0]).toMatchObject({ name: 'Big House', zone: 'Cartago', bedrooms: 20 })
+    expect(comps[0].notes).toBeNull()
+  })
+
+  it('tolerates reordered / partial headers', () => {
+    const comps = parseRentalCompsCsv(
+      ['url', 'nightly', 'name'],
+      [['https://x/9', '72', 'Orosi Lodge']]
+    )
+    expect(comps[0]).toMatchObject({
+      name: 'Orosi Lodge',
+      nightlyUsd: 72,
+      url: 'https://x/9',
+      bedrooms: 2
+    })
+  })
+})
+
+describe('importComps', () => {
+  it('inserts parsed comps and dedups on re-import', () => {
+    const parsed = parseRentalCompsCsv(
+      ['name', 'zone', 'bedrooms', 'nightlyUSD'],
+      [
+        ['Cabin A', 'Cartago', '2', '90'],
+        ['Cabin B', 'Orosi Valley', '1', '60']
+      ]
+    )
+    const first = importComps(sqlite, parsed)
+    expect(first).toEqual({ imported: 2, skipped: 0 })
+    expect(listComps(sqlite).length).toBe(2)
+
+    // Re-importing the same file is a no-op (dedup by name+nightly+zone).
+    const second = importComps(sqlite, parsed)
+    expect(second).toEqual({ imported: 0, skipped: 2 })
+    expect(listComps(sqlite).length).toBe(2)
   })
 })
 
