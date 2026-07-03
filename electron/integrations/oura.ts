@@ -17,14 +17,15 @@
  * integrations).
  */
 
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { BrowserWindow } from 'electron'
 import { getDb } from '../db/client'
-import { integrations, ouraDailyMetrics, syncEvents } from '../db/schema'
+import { habitEntries, habits, integrations, ouraDailyMetrics, syncEvents } from '../db/schema'
 import { loadToken } from '../ipc/auth'
 import { afterConnectorSync } from '../ipc/storehouse-sync'
 import { updateOuraKnowledge } from '../knowledge/extractor'
 import { localYmd } from '../lib/dates'
+import { computeHabitAutoFills } from '../lib/habit-autolink'
 
 export const OURA_API = 'https://api.ouraring.com'
 /** How many trailing days to pull on every sync — cheap + covers re-sync drift. */
@@ -197,6 +198,65 @@ async function fetchOuraCollection<T>(
 
 type SyncResult = { service: string; success: boolean; recordsUpdated?: number; error?: string }
 
+/** Metric-key → value lookup for one merged Oura day, matching `habits.autoLinkSource` values. */
+function ouraMetricsFor(row: OuraDailyMetricRow): Record<string, number | null> {
+  return {
+    'oura-sleep-score': row.sleepScore,
+    'oura-readiness-score': row.readinessScore,
+    'oura-steps': row.steps
+  }
+}
+
+/**
+ * Cross-domain leverage: auto-fill TODAY's habit entry for any active habit
+ * whose `autoLinkSource` points at an Oura metric that met its threshold.
+ * Same "pre-populated but user-editable" trust model as the Todoist/Things
+ * daily-checklist imports — an entry the user has already touched manually
+ * (source is null, set by `habits:toggle`) is NEVER overwritten; only an
+ * entry this function itself created (`source: 'oura'`) is refreshed on a
+ * later re-sync. Defensive by construction: a bad/missing row is a no-op.
+ */
+function applyOuraHabitAutoLinks(
+  db: ReturnType<typeof getDb>,
+  todayRow: OuraDailyMetricRow | undefined
+): void {
+  if (!todayRow) return
+  const linkedHabits = db
+    .select({
+      id: habits.id,
+      autoLinkSource: habits.autoLinkSource,
+      autoLinkThreshold: habits.autoLinkThreshold
+    })
+    .from(habits)
+    .where(eq(habits.active, true))
+    .all()
+    .filter((h) => h.autoLinkSource?.startsWith('oura-'))
+  if (linkedHabits.length === 0) return
+
+  const fills = computeHabitAutoFills(linkedHabits, todayRow.date, ouraMetricsFor(todayRow))
+  for (const fill of fills) {
+    const existing = db
+      .select({ id: habitEntries.id, source: habitEntries.source })
+      .from(habitEntries)
+      .where(and(eq(habitEntries.habitId, fill.habitId), eq(habitEntries.date, fill.date)))
+      .get()
+    if (existing) {
+      // Only refresh an entry WE previously auto-filled — a manual (or other-source)
+      // entry stays exactly as the user left it.
+      if (existing.source === 'oura') {
+        db.update(habitEntries)
+          .set({ completed: true })
+          .where(eq(habitEntries.id, existing.id))
+          .run()
+      }
+      continue
+    }
+    db.insert(habitEntries)
+      .values({ habitId: fill.habitId, date: fill.date, completed: true, source: 'oura' })
+      .run()
+  }
+}
+
 /**
  * Pull the last `WINDOW_DAYS` of sleep/readiness/activity from Oura and upsert
  * one merged row per date into `oura_daily_metrics`. Same insert-on-conflict
@@ -270,6 +330,17 @@ export async function syncOura(mainWindow?: BrowserWindow | null): Promise<SyncR
 
     if (rows.length > 0) {
       await updateOuraKnowledge(rows)
+    }
+
+    // Cross-domain leverage: auto-fill today's linked habit entries. Defensive
+    // — never allowed to fail the sync (a habit-config bug shouldn't break Oura data).
+    try {
+      applyOuraHabitAutoLinks(
+        db,
+        rows.find((r) => r.date === today)
+      )
+    } catch (err) {
+      console.warn('[oura] habit auto-link failed (non-fatal):', err)
     }
 
     db.insert(integrations)

@@ -389,14 +389,24 @@ export const habits = sqliteTable('habits', {
   icon: text('icon'),
   color: text('color').default('#6272f1'),
   active: integer('active', { mode: 'boolean' }).default(true),
-  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
+  // Cross-domain leverage (2026-07-03): opt a habit into auto-fill from a life-logging
+  // source. `autoLinkSource` is a source-prefixed metric key (e.g. 'oura-sleep-score',
+  // 'oura-readiness-score', 'oura-steps') so multiple wearables can share the same
+  // habits table without key collisions. Both null = manual habit (the default).
+  autoLinkSource: text('auto_link_source'),
+  autoLinkThreshold: real('auto_link_threshold')
 })
 
 export const habitEntries = sqliteTable('habit_entries', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   habitId: integer('habit_id').references(() => habits.id),
   date: text('date').notNull(), // ISO date 'YYYY-MM-DD'
-  completed: integer('completed', { mode: 'boolean' }).default(false)
+  completed: integer('completed', { mode: 'boolean' }).default(false),
+  // 'oura' (etc.) when auto-filled by a sync; null = user-toggled via `habits:toggle`.
+  // The "pre-populated but user-editable" trust model: a manual toggle clears this
+  // back to null, so future auto-fill runs never re-overwrite a user's own edit.
+  source: text('source')
 })
 
 // ---- Records / Timeline (Phase 10 — "The Acquisition Engine", Wave 10.1) ----

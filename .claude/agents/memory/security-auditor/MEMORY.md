@@ -42,6 +42,14 @@ _(empty — no accepted risks yet)_
 
 > One entry per audit run. Date · scope · top findings · status.
 
+### 2026-07-03 — Oura Personal Access Token integration + habit auto-link (uncommitted diff, worktree `optimistic-feynman-c1558b`)
+
+**Scope:** `electron/ipc/auth.ts` (`auth:connect-oura`), `electron/integrations/oura.ts` (`syncOura`, `applyOuraHabitAutoLinks`), `electron/lib/habit-autolink.ts`, `electron/ipc/habits.ts` (`habits:update` widened), `electron/main.ts` CSP, `electron/db/schema.ts` + migrations `0027`/`0028` + `client.ts` fallback tables, `electron/lib/storehouse-projectors.ts` (`projectOuraMetrics`), `electron/knowledge/extractor.ts` (`updateOuraKnowledge`), `src/pages/Integrations.tsx`, `src/lib/integration-registry.ts`, `electron/preload.ts`, `src/types/electron.d.ts`.
+
+**Findings: none.** `auth:connect-oura` is a structural match to `auth:connect-todoist` (length-bound-before-trim/regex, real-endpoint probe against `/v2/usercollection/personal_info` with 401/403 handling, `saveToken` — `safeStorage`-encrypted — before returning `{ success: true }` with no token field ever in the IPC response). Token never logged (`oura.ts`'s only `console.warn` logs the habit-autolink error object, not the token/response). CSP gained exactly `https://api.ouraring.com` in `connect-src`, no other directive touched, no wildcard. Renderer form uses `type="password"`, no client-side gating beyond an empty-string check, clears `ouraTokenInput` to `null` immediately on success. `oura_daily_metrics` is aggregate-only (day-level scores/steps, no raw biometric series), added correctly to BOTH migration `0027` and the `ensureNewTables`/`createTablesIfNeeded` fallback (per the `migrations_bundled_in_asar` pattern from prior sessions). `updateOuraKnowledge` writes only aggregate scores to `knowledge-base/health/oura-summary.md`, matching the pre-existing GitHub-summary knowledge-file pattern — no token, no new export path. `habits:update`/`habits:toggle` widening (`autoLinkSource`/`autoLinkThreshold`/`source` columns) uses Drizzle's typed `.set(updates)` — no raw string interpolation, no path arguments, doesn't touch vault/finance AI-boundary tables at all (habits/habit_entries only).
+
+**Status: clean** (no blockers, no advisories — this diff faithfully followed the established Todoist/Linear/GitHub-PAT precedent with zero deviations found)
+
 ### 2026-06-14 — Phase 9 "Storehouse" Wave 1 (contacts + export)
 
 **Scope:** `electron/ipc/export.ts`, `electron/ipc/contacts.ts`, `electron/lib/vcard.ts`, `electron/lib/ics.ts`, `electron/lib/csv.ts`, `electron/knowledge/contacts-extractor.ts`, `electron/preload.ts` (contacts: and exporter: namespaces)

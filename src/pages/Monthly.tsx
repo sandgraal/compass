@@ -16,12 +16,13 @@ import {
   ChevronRight,
   DollarSign,
   Flame,
+  Link2,
   Plus,
   Target,
   TrendingUp,
   X
 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { computeHabitStreak } from '../lib/habit-streaks'
 import { cn, isoDate } from '../lib/utils'
 
@@ -48,6 +49,15 @@ const WEEKDAY_HEADERS = [
 
 const MONTHLY_GOAL_KEYS = ['goal-1', 'goal-2', 'goal-3']
 
+// Cross-domain leverage: metrics a habit can auto-link to. Oura is the first
+// life-logging source wired up (electron/integrations/oura.ts) — more sources
+// add entries here as they land, using the same `<source>-<metric>` key shape.
+const AUTO_LINK_METRICS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: 'oura-sleep-score', label: 'Oura sleep score ≥' },
+  { value: 'oura-readiness-score', label: 'Oura readiness score ≥' },
+  { value: 'oura-steps', label: 'Oura steps ≥' }
+]
+
 export default function Monthly(): JSX.Element {
   const [month, setMonth] = useState(() => startOfMonth(new Date()))
   const [habits, setHabits] = useState<Habit[]>([])
@@ -68,6 +78,14 @@ export default function Monthly(): JSX.Element {
     { category: string; budget: number; actual: number }[]
   >([])
   const [rollup, setRollup] = useState<MonthlyRollup | null>(null)
+  // Cross-domain leverage: which habit's auto-link editor is open, and its
+  // draft values (source '' = "None" in the <select>; threshold as a string
+  // so an empty input doesn't fight the controlled-input Number coercion).
+  const [autoLinkEditingId, setAutoLinkEditingId] = useState<number | null>(null)
+  const [autoLinkDraft, setAutoLinkDraft] = useState<{ source: string; threshold: string }>({
+    source: '',
+    threshold: ''
+  })
   const newHabitInputRef = useRef<HTMLInputElement>(null)
 
   const monthEnd = endOfMonth(month)
@@ -188,6 +206,32 @@ export default function Monthly(): JSX.Element {
     }))
   }
 
+  function openAutoLinkEditor(habit: Habit) {
+    setAutoLinkDraft({
+      source: habit.autoLinkSource ?? '',
+      threshold: habit.autoLinkThreshold != null ? String(habit.autoLinkThreshold) : ''
+    })
+    setAutoLinkEditingId(habit.id)
+  }
+
+  async function saveAutoLink(habitId: number) {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron) return
+    const source = autoLinkDraft.source || null
+    const threshold = source ? Number(autoLinkDraft.threshold) : null
+    if (source && (threshold == null || Number.isNaN(threshold))) return
+    await window.api.habits.update(habitId, {
+      autoLinkSource: source,
+      autoLinkThreshold: threshold
+    })
+    setHabits((prev) =>
+      prev.map((h) =>
+        h.id === habitId ? { ...h, autoLinkSource: source, autoLinkThreshold: threshold } : h
+      )
+    )
+    setAutoLinkEditingId(null)
+  }
+
   async function addHabit() {
     const name = newHabitName.trim()
     if (!name || !window.api) return
@@ -195,7 +239,16 @@ export default function Monthly(): JSX.Element {
     const { id } = await window.api.habits.create({ name, color })
     setHabits((prev) => [
       ...prev,
-      { id, name, icon: null, color, active: true, createdAt: new Date() }
+      {
+        id,
+        name,
+        icon: null,
+        color,
+        active: true,
+        createdAt: new Date(),
+        autoLinkSource: null,
+        autoLinkThreshold: null
+      }
     ])
     setNewHabitName('')
     setAddingHabit(false)
@@ -533,63 +586,174 @@ export default function Monthly(): JSX.Element {
                       // Streaks use all-time entries so month boundaries are handled
                       // correctly (e.g. Apr 30 → May 2 = 3-day streak, not 2).
                       const streak = computeHabitStreak(allHabitEntries[habit.id] || {})
+                      const isAutoLinked = !!habit.autoLinkSource
                       return (
-                        <tr key={habit.id} className="border-t border-border/40 group">
-                          <td className="py-1.5 pr-3 font-medium" style={{ color }}>
-                            <span className="inline-flex items-center gap-2">
-                              {habit.name}
-                              {streak.current >= 2 && (
-                                <span
-                                  className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-amber-300 bg-amber-500/15 border border-amber-500/30 rounded px-1.5 py-0.5"
-                                  title={`Current streak: ${streak.current} day${streak.current === 1 ? '' : 's'}. Longest ever: ${streak.longest} day${streak.longest === 1 ? '' : 's'}.`}
-                                >
-                                  <Flame size={9} />
-                                  {streak.current}
-                                  {streak.longest > streak.current && (
-                                    <span className="text-amber-300/60 normal-case">
-                                      / best {streak.longest}
-                                    </span>
-                                  )}
-                                </span>
-                              )}
-                            </span>
-                          </td>
-                          {daysInMonth.map((d) => {
-                            const dateStr = isoDate(d)
-                            const isFuture = d > today
-                            const done = entries[dateStr]
-                            return (
-                              <td key={dateStr} className="py-1.5 text-center">
+                        <Fragment key={habit.id}>
+                          <tr className="border-t border-border/40 group">
+                            <td className="py-1.5 pr-3 font-medium" style={{ color }}>
+                              <span className="inline-flex items-center gap-2">
+                                {habit.name}
+                                {streak.current >= 2 && (
+                                  <span
+                                    className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-amber-300 bg-amber-500/15 border border-amber-500/30 rounded px-1.5 py-0.5"
+                                    title={`Current streak: ${streak.current} day${streak.current === 1 ? '' : 's'}. Longest ever: ${streak.longest} day${streak.longest === 1 ? '' : 's'}.`}
+                                  >
+                                    <Flame size={9} />
+                                    {streak.current}
+                                    {streak.longest > streak.current && (
+                                      <span className="text-amber-300/60 normal-case">
+                                        / best {streak.longest}
+                                      </span>
+                                    )}
+                                  </span>
+                                )}
                                 <button
                                   type="button"
-                                  onClick={() => !isFuture && toggleHabit(habit.id, dateStr)}
-                                  disabled={isFuture}
+                                  onClick={() => openAutoLinkEditor(habit)}
                                   className={cn(
-                                    'w-5 h-5 rounded mx-auto transition-colors',
-                                    isFuture && 'bg-secondary/20 cursor-default'
+                                    'transition-opacity',
+                                    isAutoLinked
+                                      ? 'text-primary opacity-100'
+                                      : 'text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground'
                                   )}
-                                  style={
-                                    done
-                                      ? { backgroundColor: color, opacity: 1 }
-                                      : !isFuture
-                                        ? { backgroundColor: 'var(--secondary)', opacity: 0.6 }
-                                        : undefined
+                                  aria-label={
+                                    isAutoLinked
+                                      ? `Edit auto-link for ${habit.name} (currently linked to ${AUTO_LINK_METRICS.find((m) => m.value === habit.autoLinkSource)?.label ?? habit.autoLinkSource} ${habit.autoLinkThreshold})`
+                                      : `Auto-link ${habit.name} to a synced data source`
                                   }
-                                />
-                              </td>
-                            )
-                          })}
-                          <td className="py-1.5 text-center text-muted-foreground pl-2">{pct}%</td>
-                          <td className="py-1.5 pl-1">
-                            <button
-                              type="button"
-                              onClick={() => removeHabit(habit.id)}
-                              className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
-                            >
-                              <X size={11} />
-                            </button>
-                          </td>
-                        </tr>
+                                  title={
+                                    isAutoLinked
+                                      ? `Auto-links from ${AUTO_LINK_METRICS.find((m) => m.value === habit.autoLinkSource)?.label ?? habit.autoLinkSource} ${habit.autoLinkThreshold}`
+                                      : 'Auto-link this habit to a synced data source'
+                                  }
+                                >
+                                  <Link2 size={11} />
+                                </button>
+                              </span>
+                            </td>
+                            {daysInMonth.map((d) => {
+                              const dateStr = isoDate(d)
+                              const isFuture = d > today
+                              const done = entries[dateStr]
+                              return (
+                                <td key={dateStr} className="py-1.5 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => !isFuture && toggleHabit(habit.id, dateStr)}
+                                    disabled={isFuture}
+                                    className={cn(
+                                      'w-5 h-5 rounded mx-auto transition-colors',
+                                      isFuture && 'bg-secondary/20 cursor-default'
+                                    )}
+                                    style={
+                                      done
+                                        ? { backgroundColor: color, opacity: 1 }
+                                        : !isFuture
+                                          ? { backgroundColor: 'var(--secondary)', opacity: 0.6 }
+                                          : undefined
+                                    }
+                                  />
+                                </td>
+                              )
+                            })}
+                            <td className="py-1.5 text-center text-muted-foreground pl-2">
+                              {pct}%
+                            </td>
+                            <td className="py-1.5 pl-1">
+                              <button
+                                type="button"
+                                onClick={() => removeHabit(habit.id)}
+                                className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
+                              >
+                                <X size={11} />
+                              </button>
+                            </td>
+                          </tr>
+                          {autoLinkEditingId === habit.id &&
+                            (() => {
+                              // Save is disabled (rather than a silent no-op) whenever a
+                              // metric is selected but the threshold isn't a valid number
+                              // yet — mirrors saveAutoLink's own guard.
+                              const thresholdNum = autoLinkDraft.source
+                                ? Number(autoLinkDraft.threshold)
+                                : null
+                              const isInvalid =
+                                !!autoLinkDraft.source &&
+                                (autoLinkDraft.threshold.trim() === '' ||
+                                  thresholdNum == null ||
+                                  Number.isNaN(thresholdNum))
+                              const onFieldKeyDown = (
+                                e: React.KeyboardEvent<HTMLSelectElement | HTMLInputElement>
+                              ) => {
+                                if (e.key === 'Enter' && !isInvalid) void saveAutoLink(habit.id)
+                                else if (e.key === 'Escape') setAutoLinkEditingId(null)
+                              }
+                              return (
+                                <tr className="bg-secondary/20">
+                                  <td colSpan={daysInMonth.length + 3} className="py-2 px-1">
+                                    <div className="flex items-center gap-2 text-xs">
+                                      <label
+                                        htmlFor={`autolink-source-${habit.id}`}
+                                        className="text-muted-foreground shrink-0"
+                                      >
+                                        Auto-link:
+                                      </label>
+                                      <select
+                                        id={`autolink-source-${habit.id}`}
+                                        value={autoLinkDraft.source}
+                                        onChange={(e) =>
+                                          setAutoLinkDraft((prev) => ({
+                                            ...prev,
+                                            source: e.target.value
+                                          }))
+                                        }
+                                        onKeyDown={onFieldKeyDown}
+                                        className="bg-background border border-border rounded px-1.5 py-1 text-xs"
+                                      >
+                                        <option value="">None (manual habit)</option>
+                                        {AUTO_LINK_METRICS.map((m) => (
+                                          <option key={m.value} value={m.value}>
+                                            {m.label}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      {autoLinkDraft.source && (
+                                        <input
+                                          type="number"
+                                          value={autoLinkDraft.threshold}
+                                          onChange={(e) =>
+                                            setAutoLinkDraft((prev) => ({
+                                              ...prev,
+                                              threshold: e.target.value
+                                            }))
+                                          }
+                                          onKeyDown={onFieldKeyDown}
+                                          placeholder="threshold"
+                                          aria-label={`Threshold for ${habit.name} auto-link`}
+                                          className="w-24 bg-background border border-border rounded px-1.5 py-1 text-xs"
+                                        />
+                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() => saveAutoLink(habit.id)}
+                                        disabled={isInvalid}
+                                        className="px-2 py-1 bg-primary/20 hover:bg-primary/30 text-primary rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        Save
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setAutoLinkEditingId(null)}
+                                        className="px-2 py-1 text-muted-foreground hover:text-foreground"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )
+                            })()}
+                        </Fragment>
                       )
                     })}
                   </tbody>

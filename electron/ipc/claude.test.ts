@@ -117,13 +117,16 @@ beforeEach(() => {
     CREATE TABLE habits (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      active INTEGER DEFAULT 1
+      active INTEGER DEFAULT 1,
+      auto_link_source TEXT,
+      auto_link_threshold REAL
     );
     CREATE TABLE habit_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       habit_id INTEGER,
       date TEXT NOT NULL,
-      completed INTEGER DEFAULT 0
+      completed INTEGER DEFAULT 0,
+      source TEXT
     );
   `)
   mkdirSync(KB, { recursive: true })

@@ -290,6 +290,8 @@ declare global {
     color: string | null
     active: boolean | null
     createdAt: Date | null
+    autoLinkSource: string | null
+    autoLinkThreshold: number | null
   }
 
   interface ClaudeProposal {
@@ -924,7 +926,14 @@ declare global {
         }>
         update(
           id: number,
-          updates: { name?: string; icon?: string; color?: string; active?: boolean }
+          updates: {
+            name?: string
+            icon?: string
+            color?: string
+            active?: boolean
+            autoLinkSource?: string | null
+            autoLinkThreshold?: number | null
+          }
         ): Promise<{ success: boolean }>
         delete(id: number): Promise<{ success: boolean }>
         getEntries(month: string): Promise<Record<number, Record<string, boolean>>>
