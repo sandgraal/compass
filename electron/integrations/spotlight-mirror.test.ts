@@ -166,6 +166,20 @@ describe('reconcileMirror', () => {
     expect(r2.skipped).toBe(1)
   })
 
+  it('re-copies a same-length edit (content compare, not mtime)', () => {
+    // Same byte length, different content — a mtime-floored-to-seconds
+    // skip could miss this if both writes land in the same second; a
+    // content compare always catches it.
+    writeKb('a.md', 'AAAA')
+    const first = reconcileMirror(kbRoot, mirrorRoot)
+    expect(first.copied).toBe(1)
+    writeKb('a.md', 'BBBB')
+    const second = reconcileMirror(kbRoot, mirrorRoot)
+    expect(second.copied).toBe(1)
+    expect(second.skipped).toBe(0)
+    expect(readFileSync(join(mirrorRoot, 'a.md'), 'utf8')).toBe('BBBB')
+  })
+
   it('prunes mirrored files whose source is gone', () => {
     writeKb('a.md', 'x')
     writeKb('b.md', 'y')

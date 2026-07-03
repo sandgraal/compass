@@ -138,6 +138,36 @@ function walkMarkdown(dir: string, base: string): string[] {
   return out
 }
 
+/**
+ * True iff the mirror at `dst` is already byte-for-byte identical to the
+ * source (`src`, whose size the caller already stat'd as `srcSize`). Size
+ * is the cheap gate; only when sizes tie do we read both files.
+ *
+ * A failure to read the DESTINATION (it exists but is unreadable — odd
+ * permissions/ACLs, or it vanished between the stat and the read) is
+ * treated as "not identical" so the caller re-copies rather than
+ * recording an error: overwriting an unreadable mirror file can still
+ * succeed. A failure to read the SOURCE is a real problem (we couldn't
+ * copy it either) and propagates to the caller's error handler.
+ */
+function mirrorMatchesSource(src: string, srcSize: number, dst: string): boolean {
+  let dstSize: number
+  try {
+    dstSize = statSync(dst).size
+  } catch {
+    return false
+  }
+  if (srcSize !== dstSize) return false
+  const srcBuf = readFileSync(src)
+  let dstBuf: Buffer
+  try {
+    dstBuf = readFileSync(dst)
+  } catch {
+    return false
+  }
+  return srcBuf.equals(dstBuf)
+}
+
 export interface BackfillResult {
   copied: number
   skipped: number
@@ -215,18 +245,15 @@ export function reconcileMirror(kbRoot: string, mirrorRootInput: string): Backfi
       if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true })
 
       const srcStat = statSync(src)
-      if (existsSync(dst)) {
-        const dstStat = statSync(dst)
-        // Skip when the mirror already matches the source byte-for-byte.
-        // Size is the cheap gate; only when sizes tie do we read both
-        // files and compare content. This is deterministic — unlike an
-        // mtime compare, which is at the mercy of `utimesSync`
-        // round-tripping through the host filesystem's timestamp
-        // granularity (see the function doc comment).
-        if (srcStat.size === dstStat.size && readFileSync(src).equals(readFileSync(dst))) {
-          result.skipped++
-          continue
-        }
+      // Skip when the mirror already matches the source byte-for-byte.
+      // Deterministic — unlike an mtime compare, which is at the mercy
+      // of `utimesSync` round-tripping through the host filesystem's
+      // timestamp granularity (see the function doc comment). An
+      // unreadable/absent destination compares as "changed" so we fall
+      // through and re-copy rather than erroring.
+      if (mirrorMatchesSource(src, srcStat.size, dst)) {
+        result.skipped++
+        continue
       }
       copyFileSync(src, dst)
       // Stamp the destination with the source's mtime so the mirrored
