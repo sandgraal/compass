@@ -1760,6 +1760,14 @@ declare global {
             perBedroomP50: number | null
           }
         }>
+        importRentalComps(): Promise<{
+          success: boolean
+          canceled?: boolean
+          error?: string
+          imported?: number
+          skipped?: number
+          studio?: unknown
+        }>
 
         // Days-in-country & residency (Phase 11.5)
         getResidencySummary(): Promise<{

@@ -1,4 +1,4 @@
-import { BedDouble, Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
+import { BedDouble, Plus, RefreshCw, Sparkles, Trash2, Upload } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useToast } from '../components/ui/Toast'
 import { formatMoney } from '../lib/money'
@@ -107,6 +107,24 @@ export default function RentalStudio(): JSX.Element {
       'Comp added.'
     )
     setNewComp({ name: '', zone: 'Cartago', bedrooms: '2', nightlyUsd: '' })
+  }
+
+  const importComps = async (): Promise<void> => {
+    if (!window.api?.finance) return
+    try {
+      const res = await window.api.finance.importRentalComps()
+      if (res.canceled) return
+      if (!res.success) {
+        showToast(res.error ?? 'Import failed.', 'error')
+        return
+      }
+      if (res.studio) applyData(res.studio as StudioData)
+      const skipped = res.skipped ? `, ${res.skipped} skipped (duplicates)` : ''
+      showToast(`Imported ${res.imported ?? 0} comps${skipped}.`, 'success')
+    } catch (err) {
+      console.error('[rental-studio] import failed', err)
+      showToast('Import failed.', 'error')
+    }
   }
 
   const suggestForUnit = async (idx: number): Promise<void> => {
@@ -329,7 +347,17 @@ export default function RentalStudio(): JSX.Element {
 
       {/* Comps */}
       <div className="bg-card border border-border rounded-xl p-5 space-y-3">
-        <h3 className="text-sm font-semibold">Market comps</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold">Market comps</h3>
+          <button
+            type="button"
+            onClick={() => void importComps()}
+            className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-secondary text-foreground hover:bg-secondary/80"
+            title="Import comps from a CSV (e.g. the retire-early-hub cabin tracker export)"
+          >
+            <Upload size={13} /> Import CSV
+          </button>
+        </div>
         {data.comps.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             No comps yet — add a few nearby listings below.
