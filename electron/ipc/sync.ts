@@ -43,7 +43,7 @@ import { readKnowledgeFile } from '../knowledge/writer'
 import { KNOWLEDGE_DIR } from '../paths'
 import { getValidGoogleToken, loadToken } from './auth'
 import { upsertContacts } from './contacts'
-import { afterFinanceSync, afterGoogleSync } from './storehouse-sync'
+import { afterConnectorSync, afterFinanceSync } from './storehouse-sync'
 
 type SyncResult = {
   service: string
@@ -564,8 +564,8 @@ export async function syncGoogle(
           .onConflictDoUpdate({
             target: gmailActions.threadId,
             // Refresh the projection inputs too (sender/snippet/time), not just the
-            // subject — otherwise afterGoogleSync would re-project stale People data
-            // for a thread that already existed.
+            // subject — otherwise afterConnectorSync would re-project stale People
+            // data for a thread that already existed.
             set: {
               subject,
               fromAddress: from,
@@ -656,7 +656,7 @@ export async function syncGoogle(
 
     // Project the freshly synced Gmail senders + calendar locations into the
     // Storehouse spine so People/Places light up. Defensive — never fails the sync.
-    afterGoogleSync()
+    afterConnectorSync()
 
     maybeSendNotification('google', recordsUpdated)
     return { service: 'google', success: true, recordsUpdated }
@@ -735,11 +735,20 @@ export async function syncGitHub(
             state: issue.state,
             body: issue.body?.slice(0, 500),
             labels: JSON.stringify(issue.labels?.map((l: { name: string }) => l.name) || []),
+            author: issue.user?.login ?? null,
+            updatedAt: issue.updated_at ?? null,
             syncedAt: new Date()
           })
           .onConflictDoUpdate({
             target: githubItems.externalId,
-            set: { title: issue.title, state: issue.state, syncedAt: new Date() }
+            // Refresh the Storehouse projection inputs on re-sync, not just the basics.
+            set: {
+              title: issue.title,
+              state: issue.state,
+              author: issue.user?.login ?? null,
+              updatedAt: issue.updated_at ?? null,
+              syncedAt: new Date()
+            }
           })
           .run()
         recordsUpdated++
@@ -772,6 +781,10 @@ export async function syncGitHub(
     if (runExtractors) {
       await runSuggestionExtractors(githubSuggestionInputs)
     }
+
+    // Project the freshly synced issues/PRs into the Storehouse spine (Timeline/
+    // Search + author→People). Defensive — never fails the sync.
+    afterConnectorSync()
 
     maybeSendNotification('github', recordsUpdated)
     return { service: 'github', success: true, recordsUpdated, githubSuggestionInputs }
@@ -1076,5 +1089,6 @@ interface GitHubIssue {
   repository?: { full_name: string }
   assignee?: { login: string } | null
   user?: { login: string } | null
+  updated_at?: string
   pull_request?: object
 }

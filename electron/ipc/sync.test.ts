@@ -147,6 +147,8 @@ beforeEach(() => {
       body TEXT,
       labels TEXT,
       due_date TEXT,
+      author TEXT,
+      updated_at TEXT,
       synced_at INTEGER
     );
     CREATE TABLE gmail_actions (

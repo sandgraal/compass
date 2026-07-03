@@ -41,6 +41,13 @@ function localDayMs(date: string): number | null {
   return Number.isFinite(t) ? t : null
 }
 
+/** Parse an ISO-8601 timestamp (e.g. GitHub/Linear `updated_at`) to epoch ms, or null. */
+function isoMs(iso: string | null): number | null {
+  if (!iso) return null
+  const t = Date.parse(iso)
+  return Number.isFinite(t) ? t : null
+}
+
 /**
  * Format the money segment so `parseMoney` (entities.ts) reads it back: it looks at
  * the FIRST ' · '-separated body segment and matches an optional leading '-', digits,
@@ -139,6 +146,75 @@ export function projectCalendar(rows: CalendarRow[]): RecordInput[] {
       occurredAt: r.startAt ?? null,
       title: r.title?.trim() || '(untitled event)',
       body: r.location?.trim() || undefined,
+      payload: r,
+      naturalKey: r.externalId
+    })
+  }
+  return out
+}
+
+/** A GitHub issue/PR reduced to the projector's fields (`github_items`). */
+export interface GithubRow {
+  externalId: string
+  type: string // 'issue' | 'pr'
+  repo: string
+  title: string
+  state: string
+  author: string | null // opener login; may carry a "[bot]" suffix
+  updatedAt: string | null // ISO
+}
+
+/**
+ * Project `github_items` → records (`source:'github'`, `type:'issue'|'pr'`).
+ *
+ * The opener login is appended as `· @<login>` so the `github-person` extractor can
+ * parse it (and detect a `[bot]` suffix); title = the issue/PR title; occurredAt is
+ * the item's own last-updated time so it sits at the right point on the timeline.
+ */
+export function projectGithub(rows: GithubRow[]): RecordInput[] {
+  const out: RecordInput[] = []
+  for (const r of rows) {
+    if (!r.externalId) continue
+    const author = r.author?.trim()
+    out.push({
+      source: 'github',
+      type: r.type === 'pr' ? 'pr' : 'issue',
+      occurredAt: isoMs(r.updatedAt),
+      title: r.title?.trim() || '(untitled)',
+      body: `${r.repo} · ${r.state}${author ? ` · @${author}` : ''}`,
+      payload: r,
+      naturalKey: r.externalId
+    })
+  }
+  return out
+}
+
+/** A Linear issue reduced to the projector's fields (`linear_issues`). */
+export interface LinearRow {
+  externalId: string
+  identifier: string
+  title: string
+  state: string
+  team: string | null
+  updatedAt: string | null // ISO
+}
+
+/**
+ * Project `linear_issues` → records (`source:'linear'`, `type:'issue'`). title =
+ * "IDENT Title"; body = "team · state". No person extractor: the sync only fetches
+ * the viewer's OWN assigned issues, so there's no other-people signal to derive.
+ */
+export function projectLinear(rows: LinearRow[]): RecordInput[] {
+  const out: RecordInput[] = []
+  for (const r of rows) {
+    if (!r.externalId) continue
+    const title = `${r.identifier ?? ''} ${r.title ?? ''}`.trim() || '(untitled)'
+    out.push({
+      source: 'linear',
+      type: 'issue',
+      occurredAt: isoMs(r.updatedAt),
+      title,
+      body: r.team ? `${r.team} · ${r.state}` : r.state,
       payload: r,
       naturalKey: r.externalId
     })
