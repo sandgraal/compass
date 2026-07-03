@@ -58,28 +58,28 @@ Average Account Age 6 Years, 7 Months
 Length of Credit History 10 Years, 10 Months
 Oldest Account SYNCB/AMAZON PLCC | September 2015
 Personal Information
-CHRIS D ENNIS
-505 SPENCER DR APT 303, WEST PALM BEACH, FL 33409
-Social Security Number: XXX-XX-7187
-Date of Birth: 03/22/1973
-Former Address(es): 1810 KOSTER AV, ALVIN, TX 77511
+PAT SAMPLE-DOE
+100 PRIVACY LN APT 1, TESTVILLE, FL 00000
+Social Security Number: XXX-XX-0000
+Date of Birth: 01/01/1990
+Former Address(es): 200 REDACTED AVE, TESTVILLE, TX 00000
 Credit Accounts
 AMERICAN EXPRESS
 PO Box 981537, El Paso, TX 79998-1537 | (800) 874-2717 Date Reported: 06/28/2026 | Balance: $8,579
-Account Number: *3883 | Owner: Individual Account Credit Limit: $10,000 | High Credit: $10,076
+Account Number: *4010 | Owner: Individual Account Credit Limit: $10,000 | High Credit: $10,076
 Loan/Account Type: Credit Card | Status: Pays As Agreed
 Date Opened: 01/15/2025 Date of 1st Delinquency: Terms Frequency: Monthly
 Date of Last Activity: 06/28/2026 Date Major Delinquency 1st Reported: Months Reviewed: 17
 Term Duration: Activity Designator: Narrative Code(s): 002
 USAA FEDERAL SAVINGS BANK
 PO Box 33009, San Antonio, TX 78265 | (800) 531-2265 Date Reported: 06/16/2026 | Balance: $331
-Account Number: *7130 | Owner: Individual Account Credit Limit: $23,000 | High Credit: $9,695
+Account Number: *5020 | Owner: Individual Account Credit Limit: $23,000 | High Credit: $9,695
 Loan/Account Type: Credit Card | Status: Pays As Agreed
 Date Opened: 01/04/2016 Date of 1st Delinquency: Terms Frequency: Monthly
 Term Duration: Activity Designator: Narrative Code(s): 002
 Bank of America - Closed
 PO Box 982238, El Paso, TX 79998-2238 | (800) 421-2110 Date Reported: 05/28/2022 | Balance: $0
-Account Number: *9462 | Owner: Individual Account Credit Limit: $8,000 | High Credit: $332
+Account Number: *6030 | Owner: Individual Account Credit Limit: $8,000 | High Credit: $332
 Loan/Account Type: Credit Card | Status: Pays As Agreed
 Date Opened: 09/29/2019 Date of Last Payment: 04/01/2022 Date Closed: 01/01/2022
 Term Duration: Activity Designator: Paid and Closed Narrative Code(s): 158, 065
@@ -100,7 +100,7 @@ VERIZON
 Phone: (916) 357-3336
 Soft 11/18/2025
 A Summary of Your Rights Under the Fair Credit Reporting Act
-Social Security Number: XXX-XX-7187`
+Social Security Number: XXX-XX-0000`
 
 describe('credit-report structured parsing', () => {
   const out = CREDIT_REPORT_RECOGNIZER.parse(EQUIFAX_FIXTURE, 'creditReport.pdf')
@@ -116,7 +116,7 @@ describe('credit-report structured parsing', () => {
   it('extracts tradeline fields, closed flag, and utilization', () => {
     const amex = out.find((r) => r.type === 'credit-tradeline' && /AMERICAN EXPRESS/.test(r.title))
     const p = amex?.payload as Record<string, unknown>
-    expect(p.accountLast4).toBe('3883')
+    expect(p.accountLast4).toBe('4010')
     expect(p.balance).toBe(8579)
     expect(p.creditLimit).toBe(10000)
     expect(p.closed).toBe(false)
@@ -147,10 +147,10 @@ describe('credit-report structured parsing', () => {
 
   it('never stores SSN, DOB, or personal-info addresses', () => {
     const blob = JSON.stringify(out)
-    expect(blob).not.toContain('XXX-XX-7187')
-    expect(blob).not.toContain('03/22/1973')
-    expect(blob).not.toContain('SPENCER')
-    expect(blob).not.toContain('KOSTER')
+    expect(blob).not.toContain('XXX-XX-0000')
+    expect(blob).not.toContain('01/01/1990')
+    expect(blob).not.toContain('PRIVACY LN')
+    expect(blob).not.toContain('REDACTED')
     // account numbers are reduced to trailing ≤4 digits
     for (const r of out.filter((x) => x.type === 'credit-tradeline')) {
       expect(
@@ -190,7 +190,7 @@ const EXPERIAN_FIXTURE = [
   '16 Accounts \t0 Public Records \t3 Hard Inquiries',
   ' Account Info',
   'Account Name \tAMERICAN EXPRESS',
-  'Account Number \t3499933315943883',
+  'Account Number \t4000000000004010',
   'Account Type \tCredit card',
   'Date Opened \t01/15/2025',
   'Status \tOpen/Never late.',
@@ -199,7 +199,7 @@ const EXPERIAN_FIXTURE = [
   ' Payment History',
   ' Account Info',
   'Account Name \tBANK OF AMERICA',
-  'Account Number \t546633111541',
+  'Account Number \t400000000020',
   'Account Type \tCredit card',
   'Date Opened \t09/29/2019',
   'Status \tPaid, Closed.',
@@ -227,12 +227,12 @@ describe('Experian structured parsing', () => {
     expect(p.balance).toBe(8579)
     expect(p.creditLimit).toBe(10000)
     expect(p.utilization).toBeCloseTo(0.8579, 3)
-    expect(p.accountLast4).toBe('3883') // derived from the full number
+    expect(p.accountLast4).toBe('4010') // derived from the full number
     expect(out.filter((r) => r.type === 'credit-tradeline')).toHaveLength(2)
   })
 
   it('never stores the full account number Experian exposes', () => {
-    expect(JSON.stringify(out)).not.toContain('3499933315943883')
+    expect(JSON.stringify(out)).not.toContain('4000000000004010')
   })
 
   it('flags closed accounts and counts "days past due" lates', () => {
@@ -258,7 +258,7 @@ describe('Experian structured parsing', () => {
 const TRANSUNION_FIXTURE = [
   'View Credit Report | TransUnion Online Service Center',
   'Account Name',
-  'BANK OF AMERICA 546633111541****',
+  'BANK OF AMERICA 400000000020****',
   'Account Information',
   'Date Opened \t09/29/2019',
   'Responsibility \tIndividual Account',
@@ -282,7 +282,7 @@ const TRANSUNION_FIXTURE = [
   'Rating',
   'Total Months: 31',
   'AMERICAN EXPRESS',
-  '349993331594****',
+  '400000000010****',
   'Account Information',
   'Date Opened \t01/15/2025',
   'Loan Type \tCREDIT CARD',

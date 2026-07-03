@@ -175,16 +175,20 @@ export function summarizeCredit(
   let totalRevolvingLimit = 0
   const perCard: CreditPerCard[] = []
   for (const t of openRevolvingWithLimit) {
-    const bal = t.balance ?? 0
     const lim = t.creditLimit as number
-    totalRevolvingBalance += bal
-    totalRevolvingLimit += lim
+    // Only a KNOWN balance counts toward utilization. A dropped balance (e.g.
+    // TransUnion, whose payment-history balance is unreliable) must NOT read as
+    // 0% or inflate the denominator — its per-card utilization stays null.
+    if (t.balance != null) {
+      totalRevolvingBalance += t.balance
+      totalRevolvingLimit += lim
+    }
     perCard.push({
       creditor: t.creditor,
       accountLast4: t.accountLast4,
       balance: t.balance,
       limit: t.creditLimit,
-      utilization: round4(bal / lim)
+      utilization: t.balance != null ? round4(t.balance / lim) : null
     })
   }
   totalRevolvingBalance = round2(totalRevolvingBalance)
@@ -397,29 +401,28 @@ export function getCreditSummary(sqlite: SqliteForCredit, today: string): Credit
   // day (Equifax + Experian + TransUnion) don't merge and triple-count. Ties break
   // toward the snapshot with the most balances present (TransUnion carries none).
   const tradelineRows = parsed.filter((r) => r.type === 'credit-tradeline')
-  const groups = new Map<string, Parsed[]>()
+  const groups = new Map<string, { bureau: string; reportDate: string; rows: Parsed[] }>()
   for (const r of tradelineRows) {
     const bureau = typeof r.p.bureau === 'string' ? r.p.bureau : ''
     const rd = typeof r.p.reportDate === 'string' ? r.p.reportDate : ''
-    const key = `${bureau} ${rd}`
+    const key = `${bureau}|${rd}`
     const g = groups.get(key)
-    if (g) g.push(r)
-    else groups.set(key, [r])
+    if (g) g.rows.push(r)
+    else groups.set(key, { bureau, reportDate: rd, rows: [r] })
   }
   const bureausAvailable = [
-    ...new Set([...groups.keys()].map((k) => k.split(' ')[0]).filter(Boolean))
+    ...new Set([...groups.values()].map((g) => g.bureau).filter(Boolean))
   ].sort()
   const withBalance = (rows: Parsed[]): number => rows.filter((r) => r.p.balance != null).length
   let best: { bureau: string; reportDate: string; rows: Parsed[] } | null = null
-  for (const [key, rows] of groups) {
-    const [bureau, rd] = key.split(' ')
+  for (const g of groups.values()) {
     const better =
       !best ||
-      rd > best.reportDate ||
-      (rd === best.reportDate &&
-        (withBalance(rows) > withBalance(best.rows) ||
-          (withBalance(rows) === withBalance(best.rows) && rows.length > best.rows.length)))
-    if (better) best = { bureau, reportDate: rd, rows }
+      g.reportDate > best.reportDate ||
+      (g.reportDate === best.reportDate &&
+        (withBalance(g.rows) > withBalance(best.rows) ||
+          (withBalance(g.rows) === withBalance(best.rows) && g.rows.length > best.rows.length)))
+    if (better) best = { bureau: g.bureau, reportDate: g.reportDate, rows: g.rows }
   }
 
   const tradelines: CreditTradeline[] = best

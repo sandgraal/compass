@@ -73,6 +73,14 @@ describe('summarizeCredit', () => {
     expect(s.overallUtilization).toBeNull()
   })
 
+  it('excludes a card with a limit but no balance (TransUnion) — no fake 0%', () => {
+    const s = summarizeCredit([tl({ balance: null, creditLimit: 5000 })], [], baseOpts)
+    expect(s.totalRevolvingLimit).toBe(0) // unknown balance → limit not counted either
+    expect(s.overallUtilization).toBeNull()
+    expect(s.perCard).toHaveLength(1) // still listed…
+    expect(s.perCard[0].utilization).toBeNull() // …but utilization is unknown, not 0
+  })
+
   it('rolls up on-time vs late accounts and inquiry windows', () => {
     const tls = [
       tl({ creditor: 'ONTIME' }),

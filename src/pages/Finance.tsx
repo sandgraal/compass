@@ -2997,9 +2997,11 @@ function CreditTab(): JSX.Element {
                 </tr>
               </thead>
               <tbody>
-                {s.perCard.map((c) => (
+                {s.perCard.map((c, i) => (
                   <tr
-                    key={`${c.creditor}-${c.accountLast4 ?? ''}`}
+                    // creditor+last4 can collide (TransUnion has no last-4, and a
+                    // creditor can repeat) — index guarantees a unique, stable key.
+                    key={`${c.creditor}-${c.accountLast4 ?? ''}-${i}`}
                     className="border-t border-border"
                   >
                     <td className="py-1.5">
