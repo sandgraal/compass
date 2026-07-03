@@ -7,16 +7,42 @@
  * and the null/empty "fall back to FTS" signals.
  */
 
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import Database from 'better-sqlite3'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { EmbedOptions } from './embeddings'
 import {
+  type BuildRecordsIndexOptions,
+  type SearchRecordsSemanticOptions,
   buildRecordsEmbeddingsIndex,
   recordEmbedText,
   searchRecordsSemantic
 } from './records-embeddings'
 
 let sqlite: Database.Database
+
+// Route every build/search through a throwaway index path so the suite never reads
+// the real ~/Library/Application Support/Compass/.data/records-embeddings.json that
+// the shipped app builds. Without this, `existing`/`index`-less calls fall through
+// `?? loadRecordsIndex(INDEX_PATH)` to real record ids and fail locally.
+const TMP_DIR = mkdtempSync(join(tmpdir(), 'compass-records-embed-'))
+const INDEX_PATH = join(TMP_DIR, 'records-embeddings.json')
+
+// Thin wrappers pinning the index to the throwaway path above (never the real
+// DATA_DIR). `indexPath` comes AFTER `...opts` so it always wins — a caller can
+// never override the pin and accidentally read the real on-disk index.
+function buildIndex(db: Database.Database, opts: BuildRecordsIndexOptions = {}) {
+  return buildRecordsEmbeddingsIndex(db, { ...opts, indexPath: INDEX_PATH })
+}
+function searchSemantic(
+  db: Database.Database,
+  query: string,
+  opts: SearchRecordsSemanticOptions = {}
+) {
+  return searchRecordsSemantic(db, query, { ...opts, indexPath: INDEX_PATH })
+}
 
 // Deterministic offline embedding: a fixed-dim vector counting a few keywords, so
 // records that share words land near each other under cosine similarity.
@@ -51,6 +77,7 @@ beforeEach(() => {
   );`)
 })
 afterEach(() => sqlite.close())
+afterAll(() => rmSync(TMP_DIR, { recursive: true, force: true }))
 
 describe('recordEmbedText', () => {
   it('composes title — body (source, date)', () => {
@@ -72,14 +99,14 @@ describe('buildRecordsEmbeddingsIndex (incremental)', () => {
   it('embeds all rows, then only NEW ids on a second pass', async () => {
     add({ source: 'amazon', type: 'order', title: 'Coffee beans' })
     add({ source: 'netflix', type: 'watch', title: 'The Matrix movie' })
-    const first = await buildRecordsEmbeddingsIndex(sqlite, { embed: fakeEmbed, existing: null })
+    const first = await buildIndex(sqlite, { embed: fakeEmbed, existing: null })
     expect(first.result.embedded).toBe(2)
     expect(first.index.maxId).toBe(2)
     expect(first.index.embeddings).toHaveLength(2)
 
     // A new record + an incremental build reusing the prior index → only id 3 embeds.
     add({ source: 'goodreads', type: 'book', title: 'Some book' })
-    const second = await buildRecordsEmbeddingsIndex(sqlite, {
+    const second = await buildIndex(sqlite, {
       embed: fakeEmbed,
       existing: first.index
     })
@@ -90,12 +117,12 @@ describe('buildRecordsEmbeddingsIndex (incremental)', () => {
 
   it('discards prior vectors when the model changes (no mixing)', async () => {
     add({ source: 'amazon', type: 'order', title: 'Coffee' })
-    const a = await buildRecordsEmbeddingsIndex(sqlite, {
+    const a = await buildIndex(sqlite, {
       embed: fakeEmbed,
       existing: null,
       model: 'model-a'
     })
-    const b = await buildRecordsEmbeddingsIndex(sqlite, {
+    const b = await buildIndex(sqlite, {
       embed: fakeEmbed,
       existing: a.index,
       model: 'model-b'
@@ -106,7 +133,7 @@ describe('buildRecordsEmbeddingsIndex (incremental)', () => {
 
   it('honors the cap', async () => {
     for (let i = 0; i < 5; i++) add({ source: 'email', type: 'email', title: `Note ${i}` })
-    const { index, result } = await buildRecordsEmbeddingsIndex(sqlite, {
+    const { index, result } = await buildIndex(sqlite, {
       embed: fakeEmbed,
       cap: 3
     })
@@ -120,21 +147,21 @@ describe('buildRecordsEmbeddingsIndex (incremental)', () => {
     add({ source: 'a', type: 'x', title: 'Coffee three' }) // id 3
     const flaky = (text: string, opts: EmbedOptions): Promise<number[]> =>
       text.includes('two') ? Promise.reject(new Error('Ollama down')) : fakeEmbed(text, opts)
-    const { index, result } = await buildRecordsEmbeddingsIndex(sqlite, { embed: flaky })
+    const { index, result } = await buildIndex(sqlite, { embed: flaky })
     expect(result.embedded).toBe(1)
     expect(index.maxId).toBe(1) // did NOT advance to 2/3 — they're un-embedded
     expect(result.errors).toHaveLength(1)
     // A retry with a working embed resumes from id 2 — nothing permanently skipped.
-    const retry = await buildRecordsEmbeddingsIndex(sqlite, { embed: fakeEmbed, existing: index })
+    const retry = await buildIndex(sqlite, { embed: fakeEmbed, existing: index })
     expect(retry.index.embeddings.map((e) => e.id)).toEqual([1, 2, 3])
     expect(retry.index.maxId).toBe(3)
   })
 
   it('slides the window — a capped index keeps the most recent records', async () => {
     for (let i = 1; i <= 3; i++) add({ source: 'a', type: 'x', title: `Note ${i}` }) // ids 1,2,3
-    const first = await buildRecordsEmbeddingsIndex(sqlite, { embed: fakeEmbed, cap: 2 })
+    const first = await buildIndex(sqlite, { embed: fakeEmbed, cap: 2 })
     expect(first.index.embeddings.map((e) => e.id)).toEqual([1, 2])
-    const second = await buildRecordsEmbeddingsIndex(sqlite, {
+    const second = await buildIndex(sqlite, {
       embed: fakeEmbed,
       existing: first.index,
       cap: 2
@@ -164,13 +191,13 @@ describe('searchRecordsSemantic', () => {
       title: 'Coffee with Sam',
       occurredAt: Date.UTC(2024, 0, 1)
     })
-    const { index } = await buildRecordsEmbeddingsIndex(sqlite, { embed: fakeEmbed })
+    const { index } = await buildIndex(sqlite, { embed: fakeEmbed })
     return index
   }
 
   it('ranks records by meaning (shared keywords land together)', async () => {
     const index = await indexed()
-    const hits = await searchRecordsSemantic(sqlite, 'coffee', {
+    const hits = await searchSemantic(sqlite, 'coffee', {
       embed: fakeEmbed,
       index,
       minScore: 0.1
@@ -183,7 +210,7 @@ describe('searchRecordsSemantic', () => {
     const index = await indexed()
     expect(
       (
-        await searchRecordsSemantic(sqlite, 'coffee', {
+        await searchSemantic(sqlite, 'coffee', {
           embed: fakeEmbed,
           index,
           minScore: 0.1,
@@ -193,7 +220,7 @@ describe('searchRecordsSemantic', () => {
     ).toEqual(['Coffee with Sam'])
     expect(
       (
-        await searchRecordsSemantic(sqlite, 'coffee', {
+        await searchSemantic(sqlite, 'coffee', {
           embed: fakeEmbed,
           index,
           minScore: 0.1,
@@ -205,14 +232,14 @@ describe('searchRecordsSemantic', () => {
 
   it('applies the offset window for pagination', async () => {
     const index = await indexed() // two "coffee" records (beans id1, with-Sam id3)
-    const page1 = await searchRecordsSemantic(sqlite, 'coffee', {
+    const page1 = await searchSemantic(sqlite, 'coffee', {
       embed: fakeEmbed,
       index,
       minScore: 0.1,
       limit: 1,
       offset: 0
     })
-    const page2 = await searchRecordsSemantic(sqlite, 'coffee', {
+    const page2 = await searchSemantic(sqlite, 'coffee', {
       embed: fakeEmbed,
       index,
       minScore: 0.1,
@@ -224,15 +251,13 @@ describe('searchRecordsSemantic', () => {
   })
 
   it('returns null when there is no index (caller falls back to FTS)', async () => {
-    expect(
-      await searchRecordsSemantic(sqlite, 'coffee', { embed: fakeEmbed, index: null })
-    ).toBeNull()
+    expect(await searchSemantic(sqlite, 'coffee', { embed: fakeEmbed, index: null })).toBeNull()
   })
 
   it('returns null when the query model differs from the index model', async () => {
     const index = await indexed()
     expect(
-      await searchRecordsSemantic(sqlite, 'coffee', { embed: fakeEmbed, index, model: 'other' })
+      await searchSemantic(sqlite, 'coffee', { embed: fakeEmbed, index, model: 'other' })
     ).toBeNull()
   })
 })
