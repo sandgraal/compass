@@ -53,6 +53,7 @@ CSP enforced in production builds (no eval, no remote scripts, allowlist for OAu
 | Linear issues sync (assigned issues → dashboard) | `electron/integrations/linear.ts` (+ `auth:connect-linear` in `electron/ipc/auth.ts`) |
 | Todoist task import (actionable tasks → daily checklist) | `electron/integrations/todoist.ts` (+ `auth:connect-todoist` in `electron/ipc/auth.ts`) |
 | Notion import (shared pages → `knowledge-base/notion/`) | `electron/integrations/notion.ts` (+ `auth:connect-notion` in `electron/ipc/auth.ts`) |
+| Integration metadata registry (single source of truth for the Integrations page + Sidebar) | `src/lib/integration-registry.ts` |
 
 ## Database (Drizzle / SQLite via `better-sqlite3`)
 

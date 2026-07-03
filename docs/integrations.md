@@ -46,9 +46,13 @@ Add `update<Service>Knowledge(items)` to `electron/knowledge/extractor.ts`:
 - `sync:trigger` IPC handler dispatches to your sync function based on `service` arg.
 
 ### 7. Frontend
-- Add to `INTEGRATIONS` array in `src/pages/Integrations.tsx` (id, name, description, scopes, color, logo letter)
-- Setup guide entry: append to the OAuth setup guide section if the user needs to create their own OAuth app
-- The card UI auto-renders from the array
+- Add one entry to `INTEGRATION_REGISTRY` in `src/lib/integration-registry.ts` (id, name, category,
+  method, description, scopes, color, logo letter, `connected: true`). This is the single source of
+  truth both `Sidebar.tsx` (connected-count summary) and `Integrations.tsx` (category-grouped,
+  searchable grid) read from — no per-page array to hand-maintain anymore.
+- Setup guide entry: append to the OAuth setup guide section in `Integrations.tsx` if the user needs to
+  create their own OAuth app
+- The card UI auto-renders from the registry, grouped under whichever `category` you picked
 
 ### 8. CSP allowlist
 Every real integration needs its outbound host reachable under the production CSP. In `electron/main.ts`, add the API hostname to the `connect-src` allowlist. Don't forget the OAuth host too, if it's a separate domain from the API host. Skipping this step means the integration works in dev (no CSP) but silently fails to fetch in a packaged build.
@@ -62,7 +66,7 @@ If the data warrants its own view (like Finance), use the `add-page` skill.
 - [ ] OAuth or PAT IPC handler in `electron/ipc/auth.ts` (or a PAT module under `electron/integrations/`)
 - [ ] Sync function in its own `electron/integrations/<service>.ts` module, imported into `electron/ipc/sync.ts` for dispatch
 - [ ] Knowledge extractor in `electron/knowledge/extractor.ts` (or its own sibling module — see `docs/knowledge-extractor.md`)
-- [ ] Frontend card in `src/pages/Integrations.tsx`
+- [ ] Frontend registry entry in `src/lib/integration-registry.ts`
 - [ ] Setup guide in the same file (if OAuth)
 - [ ] Type for the new `window.api.<service>.*` namespace in `src/types/electron.d.ts`
 - [ ] CSP `connect-src` entry in `electron/main.ts` for the API host (and OAuth host if separate)

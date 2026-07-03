@@ -211,32 +211,42 @@ export function Sidebar(): JSX.Element {
         ))}
       </nav>
 
-      {/* Integration status indicators */}
-      {integrations.length > 0 && (
-        <div className="px-4 py-3 border-t border-sidebar-border">
-          <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wider">
-            Integrations
-          </p>
-          <div className="space-y-1.5">
-            {integrations.map((i) => (
-              <div key={i.service} className="flex items-center gap-2">
-                <Circle
-                  size={6}
-                  className={cn(
-                    'fill-current',
-                    i.status === 'connected'
-                      ? 'text-emerald-500'
-                      : i.status === 'error'
-                        ? 'text-red-500'
-                        : 'text-muted-foreground'
-                  )}
-                />
-                <span className="text-xs text-muted-foreground capitalize">{i.service}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Integration status summary — a single bounded row rather than one
+          dotted line per connected service, so this stays a constant size
+          no matter how many integrations are connected (was unbounded). */}
+      {integrations.length > 0 &&
+        (() => {
+          const connectedCount = integrations.filter((i) => i.status === 'connected').length
+          const errorCount = integrations.filter((i) => i.status === 'error').length
+          // Neither connected nor errored (e.g. only pending/disconnected rows) —
+          // a green dot + "0 connected" would read as falsely reassuring, so fall
+          // back to a neutral dot + label that still points at Integrations.
+          const isNeutral = connectedCount === 0 && errorCount === 0
+          return (
+            <NavLink
+              to="/integrations"
+              className="px-4 py-3 border-t border-sidebar-border flex items-center gap-2 hover:bg-sidebar-accent/40 transition-colors"
+            >
+              <Circle
+                size={6}
+                className={cn(
+                  'fill-current',
+                  errorCount > 0
+                    ? 'text-red-500'
+                    : isNeutral
+                      ? 'text-muted-foreground'
+                      : 'text-emerald-500'
+                )}
+              />
+              <span className="text-xs text-muted-foreground">
+                {isNeutral ? 'No integrations connected' : `${connectedCount} connected`}
+                {errorCount > 0 && (
+                  <span className="text-red-400"> · {errorCount} needs attention</span>
+                )}
+              </span>
+            </NavLink>
+          )
+        })()}
 
       {/* ⌘K hint + App version */}
       <div className="px-5 py-3 border-t border-sidebar-border space-y-2">
