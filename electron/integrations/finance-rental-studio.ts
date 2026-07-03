@@ -172,7 +172,9 @@ const COMP_CSV_ALIASES = {
 /**
  * Map a retire-early-hub comps CSV (headers + rows from `readCsv`) into
  * `CompInput`s. Column order is discovered from the header row, so re-ordered or
- * partial exports still work. Rows with no name, nightly, or url are dropped.
+ * partial exports still work. A `name` column is required — a CSV without one
+ * (or a row with a blank name) isn't a comps export, so it yields no comps and
+ * the caller surfaces a "not a comps CSV" error rather than importing junk.
  */
 export function parseRentalCompsCsv(headers: string[], rows: string[][]): CompInput[] {
   const norm = headers.map(normHeader)
@@ -181,15 +183,19 @@ export function parseRentalCompsCsv(headers: string[], rows: string[][]): CompIn
     Object.entries(COMP_CSV_ALIASES).map(([field, aliases]) => [field, idxOf(aliases)])
   ) as Record<keyof typeof COMP_CSV_ALIASES, number>
 
+  // Name is the comp's identity + the required minimum column. Without it this
+  // isn't a comps export — bail so an unrelated CSV can't seed empty-name rows.
+  if (cols.name < 0) return []
+
   const cell = (row: string[], i: number): string => (i >= 0 ? (row[i] ?? '').trim() : '')
 
   const out: CompInput[] = []
   for (const row of rows) {
     const name = cell(row, cols.name)
+    // A comp must have a name — skip blank/summary rows rather than import them.
+    if (!name) continue
     const url = cell(row, cols.url)
     const nightlyUsd = numCell(cell(row, cols.nightlyUsd))
-    // Skip a row that carries no identifying signal at all.
-    if (!name && !url && nightlyUsd == null) continue
 
     const bedroomsRaw = numCell(cell(row, cols.bedrooms))
     const bedrooms = bedroomsRaw != null ? Math.min(20, Math.max(1, Math.round(bedroomsRaw))) : 2
@@ -226,15 +232,17 @@ export function parseRentalCompsCsv(headers: string[], rows: string[][]): CompIn
   return out
 }
 
-/** Stable identity for dedup: name + nightly + zone, case-insensitive. */
+/** Stable identity for dedup: name + nightly + zone, case-insensitive, trimmed. */
 function compKey(c: CompInput): string {
-  return `${(c.name ?? '').trim().toLowerCase()}|${c.nightlyUsd ?? ''}|${(c.zone ?? '').toLowerCase()}`
+  return `${(c.name ?? '').trim().toLowerCase()}|${c.nightlyUsd ?? ''}|${(c.zone ?? '').trim().toLowerCase()}`
 }
 
 /**
  * Bulk-insert parsed comps, skipping any that duplicate an existing comp (or an
  * earlier row in the same batch) by name + nightly + zone — so re-importing the
- * same file is a no-op rather than doubling the list.
+ * same file is a no-op rather than doubling the list. Wrapped in a single
+ * transaction: the whole import commits or rolls back atomically (and is much
+ * faster than per-row autocommit for a large CSV).
  */
 export function importComps(
   sqlite: SqliteForStudio,
@@ -244,15 +252,22 @@ export function importComps(
   const seen = new Set(listComps(sqlite).map(compKey))
   let imported = 0
   let skipped = 0
-  for (const c of inputs) {
-    const key = compKey(c)
-    if (seen.has(key)) {
-      skipped++
-      continue
+  sqlite.prepare('BEGIN').run()
+  try {
+    for (const c of inputs) {
+      const key = compKey(c)
+      if (seen.has(key)) {
+        skipped++
+        continue
+      }
+      addComp(sqlite, c, now)
+      seen.add(key)
+      imported++
     }
-    addComp(sqlite, c, now)
-    seen.add(key)
-    imported++
+    sqlite.prepare('COMMIT').run()
+  } catch (err) {
+    sqlite.prepare('ROLLBACK').run()
+    throw err
   }
   return { imported, skipped }
 }
