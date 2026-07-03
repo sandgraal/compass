@@ -17,6 +17,7 @@ import { ContactsScopeError, buildGoogleContactInputs } from '../integrations/go
 import { syncLinear } from '../integrations/linear'
 import { syncNotion } from '../integrations/notion'
 import { readVaultPathSetting, syncObsidian } from '../integrations/obsidian'
+import { syncOura } from '../integrations/oura'
 import { syncAllPlaid } from '../integrations/plaid/sync'
 import { syncAllSimplefin } from '../integrations/simplefin/sync'
 import { syncThings } from '../integrations/things'
@@ -64,7 +65,8 @@ const SUPPORTED_SYNC_SERVICES = new Set([
   'notion',
   'linear',
   'todoist',
-  'things'
+  'things',
+  'oura'
 ])
 
 function normalizeSupportedSyncService(service: unknown): string | null {
@@ -824,6 +826,7 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     if (service === 'notion') return syncNotion(win)
     if (service === 'linear') return syncLinear(win)
     if (service === 'todoist') return syncTodoist(win)
+    if (service === 'oura') return syncOura(win)
     if (service === 'things') {
       // Things is local + tokenless: Connect (and manual refresh) come through
       // here, so flip the opt-in flag on before syncing. Disconnect sets the
@@ -917,6 +920,9 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     }
     if (loadToken('todoist')) {
       results.push(toPublicSyncResult(await syncTodoist(win)))
+    }
+    if (loadToken('oura')) {
+      results.push(toPublicSyncResult(await syncOura(win)))
     }
     // Things is local + tokenless — it joins the fan-out only once the user has
     // connected it AND hasn't disconnected. A `disconnected` row (e.g. after a

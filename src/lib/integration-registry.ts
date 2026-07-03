@@ -163,6 +163,17 @@ export const INTEGRATION_REGISTRY: Record<string, IntegrationMeta> = {
     logo: '$',
     connected: true
   },
+  oura: {
+    id: 'oura',
+    name: 'Oura',
+    category: 'health-fitness',
+    method: 'live',
+    description: 'Sleep, readiness, and activity scores from your Oura Ring.',
+    scopes: ['personal', 'daily'],
+    color: 'from-slate-600/20 to-indigo-600/20',
+    logo: 'O',
+    connected: true
+  },
   slack: {
     id: 'slack',
     name: 'Slack',

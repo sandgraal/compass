@@ -664,6 +664,24 @@ export const financialGoals = sqliteTable('financial_goals', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
+// ---- Oura daily metrics (health-fitness — first LIVE source in this category) ----
+// One row per calendar day, merged from Oura's three `daily_*` v2 endpoints
+// (sleep/readiness/activity). `date` is the natural key — UNIQUE so a re-sync of
+// the last-30-days window upserts in place instead of duplicating, mirroring the
+// `hash`/`external_id` idempotency idiom used by finance/GitHub/Linear. All score
+// fields are nullable because Oura may not have finished processing "today" yet
+// (a day's data can lag until the ring syncs + Oura's own processing completes).
+export const ouraDailyMetrics = sqliteTable('oura_daily_metrics', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  date: text('date').notNull().unique(), // ISO 'YYYY-MM-DD'
+  sleepScore: integer('sleep_score'), // 0-100
+  readinessScore: integer('readiness_score'), // 0-100
+  activityScore: integer('activity_score'), // 0-100
+  steps: integer('steps'),
+  totalSleepMinutes: integer('total_sleep_minutes'),
+  syncedAt: integer('synced_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
 // CR Rental Studio comps (Phase 10.2) — Airbnb-style listings the user collects to
 // price their own unit. A growing, row-edited list → its own table (modeled on
 // financial_goals). Units + studio settings are small/fixed and live as JSON in

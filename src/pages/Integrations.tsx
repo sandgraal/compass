@@ -123,6 +123,8 @@ export default function Integrations(): JSX.Element {
   const [linearKeyInput, setLinearKeyInput] = useState<string | null>(null)
   // Todoist personal API token form. Same null = collapsed convention.
   const [todoistKeyInput, setTodoistKeyInput] = useState<string | null>(null)
+  // Oura Personal Access Token form. Same null = collapsed convention.
+  const [ouraTokenInput, setOuraTokenInput] = useState<string | null>(null)
   const { toast } = useToast()
   const confirm = useConfirm()
 
@@ -272,6 +274,11 @@ export default function Integrations(): JSX.Element {
     // Notion: paste-once internal-integration token, like the GitHub PAT.
     if (service === 'notion') {
       setNotionTokenInput('')
+      return
+    }
+    // Oura: paste-once Personal Access Token, like the GitHub PAT.
+    if (service === 'oura') {
+      setOuraTokenInput('')
       return
     }
     setConnecting(service)
@@ -447,6 +454,31 @@ export default function Integrations(): JSX.Element {
       setTodoistKeyInput(null)
       await loadStatuses()
       triggerSync('todoist')
+    } catch (err) {
+      toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      setConnecting(null)
+    }
+  }
+
+  async function submitOuraToken() {
+    if (typeof ouraTokenInput !== 'string') return
+    const token = ouraTokenInput.trim()
+    if (!token) {
+      toast('Paste your Oura Personal Access Token first.', 'error')
+      return
+    }
+    setConnecting('oura')
+    try {
+      const r = await window.api.auth.connectOura(token)
+      if (r.error) {
+        toast(`Connection failed: ${r.error}`, 'error')
+        return
+      }
+      toast('Oura connected.', 'success')
+      setOuraTokenInput(null)
+      await loadStatuses()
+      triggerSync('oura')
     } catch (err) {
       toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
     } finally {
@@ -1643,6 +1675,62 @@ export default function Integrations(): JSX.Element {
                     </div>
                   )}
 
+                  {integration.id === 'oura' && !isConnected && ouraTokenInput !== null && (
+                    <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
+                      <div className="text-xs text-muted-foreground leading-relaxed">
+                        Create a Personal Access Token from{' '}
+                        <a
+                          href="https://cloud.ouraring.com/personal-access-tokens"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary underline underline-offset-2 inline-flex items-center gap-0.5"
+                        >
+                          your Oura account → Personal Access Tokens
+                          <ExternalLink size={10} className="opacity-70" />
+                        </a>
+                        , then paste it here. Compass stores it encrypted on disk and pulls sleep,
+                        readiness, and activity scores for the last 30 days.
+                      </div>
+                      <label
+                        htmlFor="oura-token-input"
+                        className="block text-xs text-muted-foreground"
+                      >
+                        Oura Personal Access Token
+                      </label>
+                      <input
+                        id="oura-token-input"
+                        type="password"
+                        placeholder="0123456789abcdef…"
+                        aria-label="Oura Personal Access Token"
+                        value={ouraTokenInput}
+                        onChange={(e) => setOuraTokenInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') void submitOuraToken()
+                          else if (e.key === 'Escape') setOuraTokenInput(null)
+                        }}
+                        className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void submitOuraToken()}
+                          disabled={connecting === 'oura' || !ouraTokenInput.trim()}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
+                        >
+                          <Plug2 size={11} />
+                          {connecting === 'oura' ? 'Connecting…' : 'Connect'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setOuraTokenInput(null)}
+                          className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Inline Google credentials form. Replaces the .env workflow
                   with paste-once UX. Saved values are encrypted via safeStorage
                   and never cross the IPC boundary again. */}
@@ -1812,7 +1900,8 @@ export default function Integrations(): JSX.Element {
                       (integration.id === 'obsidian' && obsidianPathInput !== null) ||
                       (integration.id === 'notion' && notionTokenInput !== null) ||
                       (integration.id === 'linear' && linearKeyInput !== null) ||
-                      (integration.id === 'todoist' && todoistKeyInput !== null) ? null : (
+                      (integration.id === 'todoist' && todoistKeyInput !== null) ||
+                      (integration.id === 'oura' && ouraTokenInput !== null) ? null : (
                       <button
                         type="button"
                         onClick={() => connect(integration.id)}

@@ -6,11 +6,13 @@ import {
   type GithubRow,
   type GmailRow,
   type LinearRow,
+  type OuraRow,
   projectCalendar,
   projectFinanceTransactions,
   projectGithub,
   projectGmail,
-  projectLinear
+  projectLinear,
+  projectOuraMetrics
 } from './storehouse-projectors'
 
 const txn = (partial: Partial<FinanceTxnRow> & Pick<FinanceTxnRow, 'hash'>): FinanceTxnRow => ({
@@ -184,5 +186,49 @@ describe('projectLinear', () => {
   it('drops the team prefix when there is no team', () => {
     const [r] = projectLinear([li({ externalId: 'l1', team: null })])
     expect(r.body).toBe('In Progress')
+  })
+})
+
+describe('projectOuraMetrics', () => {
+  const day = (p: Partial<OuraRow> & Pick<OuraRow, 'date'>): OuraRow => ({
+    sleepScore: 82,
+    readinessScore: 78,
+    activityScore: 91,
+    steps: 8412,
+    ...p
+  })
+
+  it('maps a day to a wellness record with scores in the title and steps in the body', () => {
+    const [r] = projectOuraMetrics([day({ date: '2026-06-12' })])
+    expect(r.source).toBe('oura')
+    expect(r.type).toBe('wellness')
+    expect(r.title).toBe('Oura: Sleep 82 · Readiness 78 · Activity 91')
+    expect(r.body).toBe('8,412 steps')
+    expect(r.naturalKey).toBe('2026-06-12')
+    // occurredAt is the LOCAL day at midnight (avoids off-by-one on the timeline).
+    expect(r.occurredAt).toBe(new Date('2026-06-12T00:00:00').getTime())
+  })
+
+  it('omits missing scores from the title and omits the body when steps is null', () => {
+    const [r] = projectOuraMetrics([day({ date: '2026-06-12', readinessScore: null, steps: null })])
+    expect(r.title).toBe('Oura: Sleep 82 · Activity 91')
+    expect(r.body).toBeUndefined()
+  })
+
+  it('falls back to a placeholder title when every score is null', () => {
+    const [r] = projectOuraMetrics([
+      day({ date: '2026-06-12', sleepScore: null, readinessScore: null, activityScore: null })
+    ])
+    expect(r.title).toBe('Oura: no scores yet')
+  })
+
+  it('skips rows without a date', () => {
+    expect(projectOuraMetrics([day({ date: '' })])).toHaveLength(0)
+  })
+
+  it('naturalKey is the date, so a re-sync upserts the same timeline row', () => {
+    const [a] = projectOuraMetrics([day({ date: '2026-06-12', sleepScore: 50 })])
+    const [b] = projectOuraMetrics([day({ date: '2026-06-12', sleepScore: 90 })])
+    expect(a.naturalKey).toBe(b.naturalKey)
   })
 })

@@ -190,6 +190,13 @@
       "when": 1783042556485,
       "tag": "0026_clumsy_bloodstorm",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1783092559725,
+      "tag": "0027_cold_king_bedlam",
+      "breakpoints": true
     }
   ]
 }
