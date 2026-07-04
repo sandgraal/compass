@@ -160,9 +160,9 @@ FILE. *(All third-party specifics — free cadences, API availability — verify
 |---|---|---|---|
 | **IRS** | account / wage / return transcripts | RIGHTS/CRED (Individual Online Account) | overlaps 4a |
 | **SSA** | lifetime earnings record + benefit estimate | RIGHTS/CRED (my Social Security) | |
-| Property / deed / assessor | ownership, tax, valuation | RIGHTS/CRED (county records) | |
+| Property / deed / assessor | ownership, tax, valuation | RIGHTS/CRED (county records) | **Concierge card shipped** (catalog-only; dropped PDFs index via the generic doc recognizer) |
 | Court records | filings | CRED (PACER federal; state portals) | |
-| Travel history | entry/exit dates, I-94 | RIGHTS (CBP), CRED (Global Entry / TSA) | |
+| Travel history | entry/exit dates, I-94 | RIGHTS (CBP), CRED (Global Entry / TSA) | **Concierge card shipped**; auto-importer (I-94 arrival/departure → `travel_segments` for the SPT) **deferred** — CBP has no clean export + it feeds a tax calc, so validate against a real export before parsing |
 | Voter / DMV / vehicle | registration, title | RIGHTS/CRED (state portals) | |
 | USPS Informed Delivery | scanned mail-piece images | LIVE/CRED | |
 | **Data brokers** | your full file — "what's on record about you" | RIGHTS (LexisNexis full-file FCRA disclosure incl. LexID, Acxiom, Spokeo, Oracle) + opt-out | the eye-opener layer |

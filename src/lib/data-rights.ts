@@ -199,6 +199,20 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
       'Grounds your Retirement projection’s Social Security claiming-age math in your real earnings record.',
     payoffLink: '/retirement'
   },
+  {
+    id: 'property-records',
+    name: 'Property & assessor records',
+    domain: 'Government',
+    method: 'rights',
+    what: 'Deed, parcel & assessed-value records for property you own',
+    // County-specific — no single national portal, so the path is a search
+    // rather than a stable URL (a few other entries do the same).
+    how: "Search '<your county> assessor property search' → look up your parcel → download",
+    format: 'PDF',
+    intoCompass: 'Drop the PDF — indexed as a document',
+    payoff: 'Keeps your property paperwork alongside the Property P&L.',
+    payoffLink: '/finance'
+  },
 
   // ── Health ──────────────────────────────────────────────────────────────────
   {
@@ -230,9 +244,23 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
   },
 
   // ── Travel ──────────────────────────────────────────────────────────────────
-  // (No entries yet — CBP I-94 and Airbnb land in a later wave. The domain
-  // exists now so Travel has a place to grow into; it mirrors
-  // IntegrationCategory's 'travel' value in src/lib/integration-registry.ts.)
+  {
+    id: 'cbp-i94',
+    name: 'US travel history (CBP I-94)',
+    domain: 'Travel',
+    method: 'rights',
+    what: 'Your record of US entries & exits (nonimmigrant admissions)',
+    how: 'i94.cbp.dhs.gov → View Travel History → look up traveler → print or save',
+    format: 'PDF / print',
+    // No auto-importer yet — the export format isn't validated and it feeds a
+    // tax-sensitive calc, so for now it's a reference + manual-entry prompt.
+    // (A validated arrival/departure → travel-segment importer is planned.)
+    intoCompass: 'Log the trips on Finance → Residency (auto-import planned)',
+    url: 'https://i94.cbp.dhs.gov/',
+    payoff: 'Your US days for the Substantial Presence Test — track them on the residency tab.',
+    payoffLink: '/finance'
+  },
+  // (Airbnb booking history lands in a later wave, also feeding travel segments.)
 
   // ── Social & Communications ──────────────────────────────────────────────────
   {
