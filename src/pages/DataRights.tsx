@@ -171,6 +171,7 @@ export default function DataRights(): JSX.Element {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search sources…"
+          aria-label="Search data sources"
           className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/60 sm:w-56"
         />
         <div className="flex flex-wrap gap-1.5">
