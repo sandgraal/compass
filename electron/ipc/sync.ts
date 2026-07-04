@@ -859,8 +859,13 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
       // most Items have no investment accounts, so their fetch "errors" are
       // expected and must NOT flip the transactions-sync success. Fold the
       // imported holdings count into the total; ignore per-Item holdings errors.
-      const investments = await syncAllPlaidInvestments()
-      const holdingsImported = investments.reduce((n, r) => n + r.imported, 0)
+      let holdingsImported = 0
+      try {
+        const investments = await syncAllPlaidInvestments()
+        holdingsImported = investments.reduce((n, r) => n + r.imported, 0)
+      } catch {
+        // ignore — transactions already synced; holdings retry next run
+      }
       return {
         service: 'plaid',
         success: errors.length === 0,
