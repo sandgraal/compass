@@ -138,7 +138,7 @@ FILE. *(All third-party specifics — free cadences, API availability — verify
 | Insurance claims / EOBs | claims, costs | CRED (payer portal), RIGHTS/LIVE (Medicare Blue Button 2.0) | |
 | Prescriptions | fill history | LIVE (FHIR meds), CRED (pharmacy) | |
 | **Genetics** | raw genotype | EXPORT/FILE (23andMe / AncestryDNA download) | sensitive → encrypt at rest |
-| Wearables | recovery, strain, sleep | LIVE (Oura, Whoop, Garmin, Fitbit/Google), EXPORT (Strava) | **Oura first** — supports a Personal Access Token (no OAuth app registration), matching the low-friction Todoist/Linear/Notion pattern; Whoop/Garmin/Fitbit follow once that pattern proves out |
+| Wearables | recovery, strain, sleep | LIVE (Oura, Whoop, Garmin, Fitbit/Google), EXPORT (Strava, Fitbit, Garmin) | **Oura first** (LIVE, PAT). **Fitbit + Garmin EXPORT recognizers shipped** (daily steps/sleep JSON + activities JSON → Timeline; no OAuth/dev-app). LIVE OAuth for Fitbit/Garmin (auto-sync + habit auto-link) **deferred** — both need a full OAuth2 app + client secret (no PAT), Garmin has an approval waitlist; do once a real export validates the shapes. Whoop still open |
 
 ### 4c. Digital footprint & communications
 | Source | What you get | Method(s) | Notes / guardrails |

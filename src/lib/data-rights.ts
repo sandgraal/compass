@@ -242,6 +242,34 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     payoff: 'Keeps a searchable copy of your care history outside any one provider’s portal.',
     payoffLink: '/timeline'
   },
+  {
+    id: 'fitbit',
+    name: 'Fitbit',
+    domain: 'Health',
+    method: 'export',
+    what: 'Steps, calories, distance & sleep history',
+    how: 'fitbit.com → Settings → Data Export (or via Google Takeout → Fitbit)',
+    format: 'JSON (in a .zip)',
+    intoCompass: 'Unzip and drop the steps / sleep JSON files',
+    url: 'https://www.fitbit.com/settings/data/export',
+    recordsSourceId: 'fitbit',
+    payoff: 'Your daily activity & sleep join the Timeline alongside Apple Health.',
+    payoffLink: '/timeline'
+  },
+  {
+    id: 'garmin',
+    name: 'Garmin',
+    domain: 'Health',
+    method: 'export',
+    what: 'Your workout & activity history',
+    how: 'Garmin Connect → Account → Export Your Data',
+    format: 'JSON (in a .zip)',
+    intoCompass: 'Unzip and drop the activities JSON',
+    url: 'https://www.garmin.com/account/datamanagement/exportdata/',
+    recordsSourceId: 'garmin',
+    payoff: 'Every workout lands on the Timeline — your training history, owned.',
+    payoffLink: '/timeline'
+  },
 
   // ── Travel ──────────────────────────────────────────────────────────────────
   {
