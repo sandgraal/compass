@@ -42,10 +42,11 @@ export function registerDataRightsHandlers(ipcMain: IpcMain): void {
   })
 
   ipcMain.handle('data-rights:mark-requested', (_event, sourceId: string) => {
-    if (typeof sourceId !== 'string' || !sourceId) throw new Error('invalid sourceId')
+    const id = String(sourceId ?? '').trim()
+    if (!/^[A-Za-z0-9-]{1,80}$/.test(id)) throw new Error('invalid sourceId')
     const db = getDb()
     const map = readRequestedMap(db)
-    map[sourceId] = { requestedAt: Date.now() }
+    map[id] = { requestedAt: Date.now() }
     writeRequestedMap(db, map)
     return { success: true }
   })
