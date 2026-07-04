@@ -103,7 +103,11 @@ const TYPE_LABEL: Record<string, string> = {
   recommendation: 'Recommendations',
   email: 'Email',
   browse: 'Browsing',
-  document: 'Documents'
+  document: 'Documents',
+  'credit-report': 'Credit Report',
+  'credit-tradeline': 'Tradelines',
+  'credit-inquiry': 'Inquiries',
+  'credit-score': 'Credit Score'
 }
 function typeLabel(t: string): string {
   return TYPE_LABEL[t] ?? t.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
