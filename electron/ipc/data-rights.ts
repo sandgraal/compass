@@ -12,7 +12,9 @@ function readRequestedMap(db: ReturnType<typeof getDb>): RequestedMap {
   if (!row) return {}
   try {
     const parsed = JSON.parse(row.value) as unknown
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as RequestedMap) : {}
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as RequestedMap)
+      : {}
   } catch {
     return {}
   }
@@ -52,10 +54,13 @@ export function registerDataRightsHandlers(ipcMain: IpcMain): void {
   })
 
   ipcMain.handle('data-rights:clear-requested', (_event, sourceId: string) => {
-    if (typeof sourceId !== 'string' || !sourceId) throw new Error('invalid sourceId')
+    // Same normalize + bound as mark-requested, so the key we delete matches the
+    // key that was stored (and the two handlers validate identically).
+    const id = String(sourceId ?? '').trim()
+    if (!/^[A-Za-z0-9-]{1,80}$/.test(id)) throw new Error('invalid sourceId')
     const db = getDb()
     const map = readRequestedMap(db)
-    delete map[sourceId]
+    delete map[id]
     writeRequestedMap(db, map)
     return { success: true }
   })
