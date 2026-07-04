@@ -104,7 +104,7 @@ export default function DataRightsCard({
               rel="noopener noreferrer"
               className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary hover:underline"
             >
-              Request <ArrowUpRight size={13} />
+              {source.method === 'export' ? 'Download' : 'Request'} <ArrowUpRight size={13} />
             </a>
           )}
         </div>
