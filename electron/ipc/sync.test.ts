@@ -52,6 +52,13 @@ vi.mock('../integrations/plaid/sync', () => ({
   syncAllPlaid: () => syncAllPlaidMock()
 }))
 
+// Plaid Investments rides along on the plaid sync but is best-effort — default
+// to no holdings so these tests stay focused on transaction aggregation.
+const syncAllPlaidInvestmentsMock = vi.fn().mockResolvedValue([])
+vi.mock('../integrations/plaid/investments', () => ({
+  syncAllPlaidInvestments: () => syncAllPlaidInvestmentsMock()
+}))
+
 // SimpleFIN sync — also aggregated in the handler, like Plaid.
 const syncAllSimplefinMock = vi.fn()
 vi.mock('../integrations/simplefin/sync', () => ({

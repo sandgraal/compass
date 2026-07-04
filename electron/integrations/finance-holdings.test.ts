@@ -10,6 +10,8 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { beforeEach, describe, expect, it } from 'vitest'
 import * as schema from '../db/schema'
 import {
+  NET_WORTH_HOLDINGS_SOURCES,
+  PLAID_INVESTMENTS_SOURCE,
   getLatestHoldings,
   importHoldings,
   parseHoldingsCsv,
@@ -208,5 +210,45 @@ describe('importHoldings + getLatestHoldings', () => {
     const latest = getLatestHoldings(sqlite)
     expect(latest).toMatchObject({ asOf: null, holdings: [] })
     expect(latest.summary.count).toBe(0)
+  })
+
+  it('merges each source’s own latest snapshot across sources', () => {
+    // Brokerage CSV imported a month ago; Plaid Investments synced today.
+    importHoldings(db, SAMPLE, '2026-05-31', 'schwab.csv') // brokerage: AAPL + VTI
+    importHoldings(
+      db,
+      [{ ...SAMPLE[0], symbol: 'MSFT', marketValue: 5000, costBasis: 4000 }],
+      '2026-06-30',
+      'plaid:item_1',
+      PLAID_INVESTMENTS_SOURCE
+    )
+
+    // Default (brokerage only) still returns just the brokerage snapshot.
+    expect(
+      getLatestHoldings(sqlite)
+        .holdings.map((h) => h.symbol)
+        .sort()
+    ).toEqual(['AAPL', 'VTI'])
+
+    // Net-worth roll-up unions both — a single global MAX would have dropped the
+    // older brokerage snapshot; per-source MAX keeps both.
+    const merged = getLatestHoldings(sqlite, NET_WORTH_HOLDINGS_SOURCES)
+    expect(merged.holdings.map((h) => h.symbol).sort()).toEqual(['AAPL', 'MSFT', 'VTI'])
+    expect(merged.asOf).toBe('2026-06-30') // freshest across sources
+    expect(merged.summary.count).toBe(3)
+  })
+
+  it('keeps brokerage + Plaid rows distinct even for the same symbol/day', () => {
+    importHoldings(db, [SAMPLE[0]], '2026-06-30', 'schwab.csv')
+    const dup = importHoldings(
+      db,
+      [SAMPLE[0]],
+      '2026-06-30',
+      'plaid:item_1',
+      PLAID_INVESTMENTS_SOURCE
+    )
+    // Different source → different dedup hash → not a duplicate.
+    expect(dup.imported).toBe(1)
+    expect(getLatestHoldings(sqlite, NET_WORTH_HOLDINGS_SOURCES).holdings).toHaveLength(2)
   })
 })

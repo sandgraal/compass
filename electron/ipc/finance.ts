@@ -47,6 +47,7 @@ import {
   updateGoal
 } from '../integrations/finance-goals'
 import {
+  NET_WORTH_HOLDINGS_SOURCES,
   getLatestHoldings,
   importHoldings,
   parseHoldingsCsv,
@@ -706,7 +707,9 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     }
   })
 
-  ipcMain.handle('finance:get-holdings', () => getLatestHoldings(getRawSqlite()))
+  ipcMain.handle('finance:get-holdings', () =>
+    getLatestHoldings(getRawSqlite(), NET_WORTH_HOLDINGS_SOURCES)
+  )
 
   // ── Credit report hub (Phase 10.5 — RIGHTS mode) ─────────────────────────
   // A dropped credit-report PDF is parsed into `records` (summary + tradelines +

@@ -17,6 +17,7 @@ import type Database from 'better-sqlite3'
 import { AMAZON_RECOGNIZER } from './amazon'
 import { parseAppleHealth } from './apple-health'
 import { BROWSER_RECOGNIZERS } from './browser-history'
+import { COINBASE_RECOGNIZER, KRAKEN_RECOGNIZER } from './crypto-exchange'
 import { parseCSV } from './csv'
 import { parseWhen } from './dates'
 import {
@@ -30,6 +31,8 @@ import {
   FACEBOOK_PROFILE_RECOGNIZER,
   FACEBOOK_TABLE_RECOGNIZER
 } from './facebook'
+import { FITBIT_ACTIVITY_RECOGNIZER, FITBIT_SLEEP_RECOGNIZER } from './fitbit'
+import { GARMIN_ACTIVITY_RECOGNIZER } from './garmin'
 import { GOODREADS_RECOGNIZER } from './goodreads'
 import {
   GOOGLE_ACTIVITY_RECOGNIZER,
@@ -65,7 +68,10 @@ import {
   SOCIAL_SECURITY_RECOGNIZER,
   TAX_DOC_RECOGNIZER
 } from './pdf'
+import { LYFT_RECOGNIZER, UBER_RECOGNIZER } from './rideshare'
 import { VENMO_RECOGNIZER } from './venmo'
+import { WHATSAPP_RECOGNIZER } from './whatsapp'
+import { X_TWEETS_RECOGNIZER } from './x-archive'
 
 // Re-exported so existing importers keep `import { parseWhen } from './recognizers'`
 // working; the implementation now lives in `./dates` so recognizer files can use it
@@ -294,6 +300,8 @@ export const RECOGNIZERS: Recognizer[] = [
   PAYPAL_RECOGNIZER,
   GOODREADS_RECOGNIZER,
   VENMO_RECOGNIZER,
+  COINBASE_RECOGNIZER,
+  KRAKEN_RECOGNIZER,
   LINKEDIN_RECOGNIZER,
   LINKEDIN_MESSAGES_RECOGNIZER,
   LINKEDIN_POSITIONS_RECOGNIZER,
@@ -319,6 +327,13 @@ export const RECOGNIZERS: Recognizer[] = [
   GOOGLE_CALENDAR_RECOGNIZER,
   GOOGLE_FIT_RECOGNIZER,
   GOOGLE_VOICE_RECOGNIZER,
+  WHATSAPP_RECOGNIZER,
+  X_TWEETS_RECOGNIZER,
+  UBER_RECOGNIZER,
+  LYFT_RECOGNIZER,
+  FITBIT_ACTIVITY_RECOGNIZER,
+  FITBIT_SLEEP_RECOGNIZER,
+  GARMIN_ACTIVITY_RECOGNIZER,
   genericTimeline
 ]
 

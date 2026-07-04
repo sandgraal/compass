@@ -1005,6 +1005,11 @@ declare global {
         importPaths(paths: string[]): Promise<RecordsImportResult>
         pathsForFiles(files: File[]): string[]
       }
+      dataRights: {
+        getRequested(): Promise<Record<string, { requestedAt: number }>>
+        markRequested(sourceId: string): Promise<{ success: boolean }>
+        clearRequested(sourceId: string): Promise<{ success: boolean }>
+      }
       people: {
         list(): Promise<Person[]>
       }

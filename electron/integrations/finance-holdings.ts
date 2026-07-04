@@ -156,9 +156,9 @@ export function summarizeHoldings(holdings: ParsedHolding[]): HoldingsSummary {
 // (vs the legacy `finance.ts` SHA-1, which is pinned only because its existing
 // hashes can't be recomputed) since this feature is new and carries no stored
 // hashes to preserve — so there's no weak-crypto finding to suppress.
-function dedupHash(asOf: string, symbol: string, account: string | null): string {
+function dedupHash(source: string, asOf: string, symbol: string, account: string | null): string {
   return createHash('sha256')
-    .update(`${HOLDINGS_SOURCE}|${asOf}|${symbol}|${account ?? ''}`)
+    .update(`${source}|${asOf}|${symbol}|${account ?? ''}`)
     .digest('hex')
     .slice(0, 16)
 }
@@ -166,12 +166,16 @@ function dedupHash(asOf: string, symbol: string, account: string | null): string
 /**
  * Persist a positions snapshot as `records`. `asOf` (YYYY-MM-DD) keys the
  * snapshot — re-importing the same day dedups, a new day adds a snapshot.
+ * `source` defaults to the FILE-path brokerage CSV source; the Plaid
+ * Investments LIVE path passes `PLAID_INVESTMENTS_SOURCE` so the two feeds
+ * stay distinct rows (and both roll up via `NET_WORTH_HOLDINGS_SOURCES`).
  */
 export function importHoldings(
   db: BetterSQLite3Database<typeof schema>,
   holdings: ParsedHolding[],
   asOf: string,
-  provenance: string
+  provenance: string,
+  source: string = HOLDINGS_SOURCE
 ): { imported: number; duplicates: number } {
   const occurredAt = new Date(`${asOf}T00:00:00`)
   let imported = 0
@@ -179,13 +183,13 @@ export function importHoldings(
     const res = db
       .insert(schema.records)
       .values({
-        source: HOLDINGS_SOURCE,
+        source,
         type: 'holding',
         occurredAt,
         title: `${hd.symbol}${hd.quantity != null ? ` — ${hd.quantity} sh` : ''}`,
         body: hd.marketValue != null ? `$${hd.marketValue.toLocaleString('en-US')}` : null,
         payload: JSON.stringify({ ...hd, asOf }),
-        dedupHash: dedupHash(asOf, hd.symbol, hd.account),
+        dedupHash: dedupHash(source, asOf, hd.symbol, hd.account),
         provenance
       })
       .onConflictDoNothing()
@@ -195,53 +199,71 @@ export function importHoldings(
   return { imported, duplicates: holdings.length - imported }
 }
 
+/** `records.source` for Plaid Investments position snapshots (LIVE path). */
+export const PLAID_INVESTMENTS_SOURCE = 'plaid-investments'
+
+/** Every source whose latest snapshot rolls up into the Net Worth holdings card. */
+export const NET_WORTH_HOLDINGS_SOURCES = [HOLDINGS_SOURCE, PLAID_INVESTMENTS_SOURCE]
+
 export type SqliteForHoldings = {
   prepare(sql: string): { all(...params: unknown[]): unknown[] }
 }
 
-/** The most recent positions snapshot + its summary (empty when none). */
-export function getLatestHoldings(sqlite: SqliteForHoldings): {
-  asOf: string | null
-  holdings: ParsedHolding[]
-  summary: HoldingsSummary
-} {
-  let rows: Array<{ occurred_at: number | null; payload: string | null }> = []
+/** Read one source's most-recent snapshot rows. Empty on any error/none. */
+function latestSnapshotRows(
+  sqlite: SqliteForHoldings,
+  source: string
+): Array<{ occurred_at: number | null; payload: string | null }> {
   try {
     // Scope to the latest snapshot only — don't pull every historical snapshot
     // into memory just to use the most recent one.
-    rows = sqlite
+    return sqlite
       .prepare(
         `SELECT occurred_at, payload FROM records
            WHERE source = ? AND occurred_at = (SELECT MAX(occurred_at) FROM records WHERE source = ?)`
       )
-      .all(HOLDINGS_SOURCE, HOLDINGS_SOURCE) as Array<{
-      occurred_at: number | null
-      payload: string | null
-    }>
+      .all(source, source) as Array<{ occurred_at: number | null; payload: string | null }>
   } catch {
     // `records` may not exist on a very old DB — degrade to empty.
-    return { asOf: null, holdings: [], summary: summarizeHoldings([]) }
+    return []
   }
-  if (rows.length === 0) return { asOf: null, holdings: [], summary: summarizeHoldings([]) }
+}
 
+/**
+ * The most recent positions snapshot across `sources` + its combined summary
+ * (empty when none). Each source contributes ITS OWN latest snapshot — a
+ * month-old brokerage CSV and a fresh Plaid Investments sync land on different
+ * dates, so a single global MAX would wrongly drop the older source. `asOf` is
+ * the freshest snapshot date across the sources.
+ */
+export function getLatestHoldings(
+  sqlite: SqliteForHoldings,
+  sources: string[] = [HOLDINGS_SOURCE]
+): {
+  asOf: string | null
+  holdings: ParsedHolding[]
+  summary: HoldingsSummary
+} {
   const holdings: ParsedHolding[] = []
   let asOf: string | null = null
-  for (const r of rows) {
-    if (!r.payload) continue
-    try {
-      const p = JSON.parse(r.payload) as ParsedHolding & { asOf?: string }
-      asOf = p.asOf ?? asOf
-      holdings.push({
-        symbol: p.symbol,
-        description: p.description ?? null,
-        quantity: p.quantity ?? null,
-        price: p.price ?? null,
-        marketValue: p.marketValue ?? null,
-        costBasis: p.costBasis ?? null,
-        account: p.account ?? null
-      })
-    } catch {
-      // skip a corrupt payload
+  for (const source of sources) {
+    for (const r of latestSnapshotRows(sqlite, source)) {
+      if (!r.payload) continue
+      try {
+        const p = JSON.parse(r.payload) as ParsedHolding & { asOf?: string }
+        if (p.asOf && (asOf == null || p.asOf > asOf)) asOf = p.asOf
+        holdings.push({
+          symbol: p.symbol,
+          description: p.description ?? null,
+          quantity: p.quantity ?? null,
+          price: p.price ?? null,
+          marketValue: p.marketValue ?? null,
+          costBasis: p.costBasis ?? null,
+          account: p.account ?? null
+        })
+      } catch {
+        // skip a corrupt payload
+      }
     }
   }
   return { asOf, holdings, summary: summarizeHoldings(holdings) }

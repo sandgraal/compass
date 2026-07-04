@@ -218,6 +218,15 @@ export const ENTITY_EXTRACTORS: EntityExtractor[] = [
     }
   },
   {
+    id: 'whatsapp-people',
+    match: { source: 'whatsapp', types: ['messages'] },
+    extract: (r) => {
+      // Same "N messages with X" title shape as iMessage → reuse the parser.
+      const n = extractPersonName(r.source, r.type, r.title)
+      return n ? [{ kind: 'person', name: n }] : []
+    }
+  },
+  {
     id: 'google-voice-people',
     match: { source: 'google-voice' },
     extract: (r) => {
@@ -377,6 +386,23 @@ export const ENTITY_EXTRACTORS: EntityExtractor[] = [
   {
     id: 'gcal-place',
     match: { source: 'gcal', types: ['event'] },
+    extract: (r) => {
+      const loc = (r.body ?? '').trim()
+      return loc ? [{ kind: 'place', name: loc }] : []
+    }
+  },
+  // ── Places from rideshare dropoff addresses (dropoff lives in `body`) ──
+  {
+    id: 'uber-place',
+    match: { source: 'uber', types: ['ride'] },
+    extract: (r) => {
+      const loc = (r.body ?? '').trim()
+      return loc ? [{ kind: 'place', name: loc }] : []
+    }
+  },
+  {
+    id: 'lyft-place',
+    match: { source: 'lyft', types: ['ride'] },
     extract: (r) => {
       const loc = (r.body ?? '').trim()
       return loc ? [{ kind: 'place', name: loc }] : []

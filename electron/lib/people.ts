@@ -268,6 +268,7 @@ export const PEOPLE_RECORD_FILTERS: Array<{ source: string; types: string[] }> =
   },
   { source: 'facebook', types: ['connection', 'messages'] },
   { source: 'imessage', types: ['messages'] },
+  { source: 'whatsapp', types: ['messages'] },
   { source: 'paypal', types: ['payment'] }
 ]
 

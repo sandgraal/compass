@@ -336,6 +336,12 @@ const api = {
     importPaths: (paths: string[]) => ipcRenderer.invoke('records:import-paths', paths),
     pathsForFiles: (files: File[]) => files.map((f) => webUtils.getPathForFile(f))
   },
+  dataRights: {
+    getRequested: () => ipcRenderer.invoke('data-rights:get-requested'),
+    markRequested: (sourceId: string) => ipcRenderer.invoke('data-rights:mark-requested', sourceId),
+    clearRequested: (sourceId: string) =>
+      ipcRenderer.invoke('data-rights:clear-requested', sourceId)
+  },
   people: {
     list: () => ipcRenderer.invoke('people:list')
   },

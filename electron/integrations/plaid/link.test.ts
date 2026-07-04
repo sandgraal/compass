@@ -80,7 +80,7 @@ describe('createLinkToken', () => {
     expect(linkTokenCreateMock).toHaveBeenCalledTimes(1)
     const args = linkTokenCreateMock.mock.calls[0][0]
     expect(args.client_name).toBe('Compass')
-    expect(args.products).toEqual(['transactions'])
+    expect(args.products).toEqual(['transactions', 'investments'])
     expect(args.country_codes).toEqual(['US'])
     expect(args.language).toBe('en')
     expect(args.user.client_user_id).toMatch(/^[0-9a-f-]{36}$/)
