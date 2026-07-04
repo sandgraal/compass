@@ -12,7 +12,7 @@ function readRequestedMap(db: ReturnType<typeof getDb>): RequestedMap {
   if (!row) return {}
   try {
     const parsed = JSON.parse(row.value) as unknown
-    return parsed && typeof parsed === 'object' ? (parsed as RequestedMap) : {}
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as RequestedMap) : {}
   } catch {
     return {}
   }
