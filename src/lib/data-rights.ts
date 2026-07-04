@@ -352,6 +352,33 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
       'Message counts and browsing history join the same searchable Timeline as everything else.',
     payoffLink: '/timeline'
   },
+  {
+    id: 'whatsapp',
+    name: 'WhatsApp',
+    domain: 'Social & Communications',
+    method: 'export',
+    what: 'Your chat activity (counts + who, not message text)',
+    how: 'Open a chat → ⋮ / contact name → Export Chat → Without Media',
+    format: '.txt',
+    intoCompass: 'Drop the exported .txt',
+    recordsSourceId: 'whatsapp',
+    payoff: 'Chat partners join your People directory; daily activity lands on the Timeline.',
+    payoffLink: '/people'
+  },
+  {
+    id: 'x',
+    name: 'X (Twitter)',
+    domain: 'Social & Communications',
+    method: 'export',
+    what: 'Your full posting history',
+    how: 'Settings → Your account → Download an archive of your data',
+    format: '.js (in a .zip)',
+    intoCompass: 'Unzip and drop tweets.js',
+    url: 'https://x.com/settings/download_your_data',
+    recordsSourceId: 'x',
+    payoff: 'Every tweet becomes searchable Timeline history — your posts, owned.',
+    payoffLink: '/timeline'
+  },
 
   // ── Lifestyle & Shopping ──────────────────────────────────────────────────────
   {
@@ -395,5 +422,33 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     recordsSourceId: 'goodreads',
     payoff: 'Your reading history joins the Timeline, searchable by title or date read.',
     payoffLink: '/timeline'
+  },
+  {
+    id: 'uber',
+    name: 'Uber',
+    domain: 'Lifestyle & Shopping',
+    method: 'export',
+    what: 'Your trip history',
+    how: 'Account → Privacy → Download Your Data → request the archive',
+    format: 'CSV',
+    intoCompass: 'Drop the trips CSV',
+    url: 'https://myprivacy.uber.com/privacy/exploreyourdata/download',
+    recordsSourceId: 'uber',
+    payoff: 'Every ride joins the Timeline; dropoff addresses become Places you’ve been.',
+    payoffLink: '/places'
+  },
+  {
+    id: 'lyft',
+    name: 'Lyft',
+    domain: 'Lifestyle & Shopping',
+    method: 'export',
+    what: 'Your ride history',
+    how: 'Settings → Privacy → request your data (ride history CSV)',
+    format: 'CSV',
+    intoCompass: 'Drop the ride-history CSV',
+    url: 'https://account.lyft.com/privacy',
+    recordsSourceId: 'lyft',
+    payoff: 'Same as Uber — rides on the Timeline, dropoffs in your Places directory.',
+    payoffLink: '/places'
   }
 ]

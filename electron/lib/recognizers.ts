@@ -66,7 +66,10 @@ import {
   SOCIAL_SECURITY_RECOGNIZER,
   TAX_DOC_RECOGNIZER
 } from './pdf'
+import { LYFT_RECOGNIZER, UBER_RECOGNIZER } from './rideshare'
 import { VENMO_RECOGNIZER } from './venmo'
+import { WHATSAPP_RECOGNIZER } from './whatsapp'
+import { X_TWEETS_RECOGNIZER } from './x-archive'
 
 // Re-exported so existing importers keep `import { parseWhen } from './recognizers'`
 // working; the implementation now lives in `./dates` so recognizer files can use it
@@ -322,6 +325,10 @@ export const RECOGNIZERS: Recognizer[] = [
   GOOGLE_CALENDAR_RECOGNIZER,
   GOOGLE_FIT_RECOGNIZER,
   GOOGLE_VOICE_RECOGNIZER,
+  WHATSAPP_RECOGNIZER,
+  X_TWEETS_RECOGNIZER,
+  UBER_RECOGNIZER,
+  LYFT_RECOGNIZER,
   genericTimeline
 ]
 
