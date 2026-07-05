@@ -17,7 +17,7 @@
 import { randomUUID } from 'node:crypto'
 import type { SqliteForFx } from './finance-fx'
 
-export type AggregatorId = 'terra'
+export type AggregatorId = 'terra' | 'canopy'
 export type RelayMode = 'managed' | 'byo'
 
 /** BYO credentials per aggregator (Terra: dev-id + x-api-key). */
@@ -32,7 +32,8 @@ export type RelayClientConfig = {
 
 /** Upstream API bases for BYO-direct mode (must mirror each relay adapter's `upstreamBase`). */
 export const UPSTREAM_BASE: Record<AggregatorId, string> = {
-  terra: 'https://api.tryterra.co/v2'
+  terra: 'https://api.tryterra.co/v2',
+  canopy: 'https://api.usecanopy.com' // Canopy is managed-only in practice (no consumer dev accounts)
 }
 
 /** Default managed relay host. Overridable via the `relayUrl` app setting. */

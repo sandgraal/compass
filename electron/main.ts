@@ -9,6 +9,7 @@ import { registerAssetsHandlers } from './ipc/assets'
 import { registerAssistantHandlers } from './ipc/assistant'
 import { registerAuthHandlers } from './ipc/auth'
 import { registerBackupHandlers } from './ipc/backup'
+import { registerCanopyHandlers } from './ipc/canopy'
 import { registerClaudeHandlers } from './ipc/claude'
 import { registerContactsHandlers } from './ipc/contacts'
 import { registerCredHandlers } from './ipc/cred'
@@ -115,7 +116,7 @@ function createWindow(): void {
         responseHeaders: {
           ...details.responseHeaders,
           'Content-Security-Policy': [
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://gmail.googleapis.com https://api.github.com https://oauth2.googleapis.com https://github.com https://accounts.google.com https://bridge.simplefin.org https://beta-bridge.simplefin.org https://open.er-api.com https://api.ouraring.com https://api.tryterra.co https://relay.compass.app; frame-src 'none'; object-src 'none'"
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://gmail.googleapis.com https://api.github.com https://oauth2.googleapis.com https://github.com https://accounts.google.com https://bridge.simplefin.org https://beta-bridge.simplefin.org https://open.er-api.com https://api.ouraring.com https://api.tryterra.co https://api.usecanopy.com https://relay.compass.app; frame-src 'none'; object-src 'none'"
           ]
         }
       })
@@ -168,6 +169,7 @@ app.whenReady().then(async () => {
   registerHabitsHandlers(ipcMain)
   registerHealthHandlers(ipcMain)
   registerTerraHandlers(ipcMain)
+  registerCanopyHandlers(ipcMain)
   registerContactsHandlers(ipcMain)
   registerExportHandlers(ipcMain)
   registerSubscriptionsHandlers(ipcMain)

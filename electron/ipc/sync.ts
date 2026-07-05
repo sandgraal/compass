@@ -13,6 +13,7 @@ import {
   syncEvents
 } from '../db/schema'
 import { readAppleCalendars } from '../integrations/apple-calendar'
+import { syncCanopy } from '../integrations/canopy'
 import { ContactsScopeError, buildGoogleContactInputs } from '../integrations/google-contacts'
 import { syncLinear } from '../integrations/linear'
 import { syncNotion } from '../integrations/notion'
@@ -69,7 +70,8 @@ const SUPPORTED_SYNC_SERVICES = new Set([
   'todoist',
   'things',
   'oura',
-  'terra'
+  'terra',
+  'canopy'
 ])
 
 function normalizeSupportedSyncService(service: unknown): string | null {
@@ -831,6 +833,7 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     if (service === 'todoist') return syncTodoist(win)
     if (service === 'oura') return syncOura(win)
     if (service === 'terra') return syncTerra(win)
+    if (service === 'canopy') return syncCanopy(win)
     if (service === 'things') {
       // Things is local + tokenless: Connect (and manual refresh) come through
       // here, so flip the opt-in flag on before syncing. Disconnect sets the

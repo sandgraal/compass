@@ -185,6 +185,17 @@ export const INTEGRATION_REGISTRY: Record<string, IntegrationMeta> = {
     logo: 'T',
     connected: true
   },
+  canopy: {
+    id: 'canopy',
+    name: 'Canopy (Insurance)',
+    category: 'finance',
+    method: 'live',
+    description: 'Your P&C insurance policies (auto, home, umbrella…) via Canopy Connect.',
+    scopes: ['policies', 'coverages'],
+    color: 'from-emerald-600/20 to-lime-600/20',
+    logo: 'C',
+    connected: true
+  },
   slack: {
     id: 'slack',
     name: 'Slack',
