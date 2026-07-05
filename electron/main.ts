@@ -17,6 +17,7 @@ import { registerEntitiesHandlers } from './ipc/entities'
 import { registerExportHandlers } from './ipc/export'
 import { registerFinanceHandlers } from './ipc/finance'
 import { registerHabitsHandlers } from './ipc/habits'
+import { registerHealthHandlers } from './ipc/health'
 import { registerInsightsHandlers } from './ipc/insights'
 import { registerKnowledgeHandlers } from './ipc/knowledge'
 import { registerMonthlyRollupHandlers } from './ipc/monthly-rollup'
@@ -164,6 +165,7 @@ app.whenReady().then(async () => {
   registerSettingsHandlers(ipcMain)
   registerFinanceHandlers(ipcMain)
   registerHabitsHandlers(ipcMain)
+  registerHealthHandlers(ipcMain)
   registerContactsHandlers(ipcMain)
   registerExportHandlers(ipcMain)
   registerSubscriptionsHandlers(ipcMain)

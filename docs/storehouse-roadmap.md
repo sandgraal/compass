@@ -279,7 +279,7 @@ Builds on Phase 9's shipped spine; **does not renumber 9.x**. Each wave is its o
   *Everything else hangs off this — build first.*
 - [~] **10.2 Financial & credit completeness** 🟡 *credit-report + tax-doc PDF recognizers shipped; a generic brokerage-holdings CSV importer (FILE path) shipped (PR #271 — `electron/integrations/finance-holdings.ts`, dated `records` snapshots, Net Worth holdings card); LIVE holdings feed, IRS transcripts, crypto still open (feeds Phase 11)* — credit reports (RIGHTS), brokerage/retirement holdings
   LIVE auto-feed (SnapTrade or Plaid Investments), IRS/tax transcripts, crypto. Extends Phase 4 net worth + forecast.
-- [~] **10.3 Health & medical** 🟡 *Apple Health `export.xml` recognizer shipped; **Oura (LIVE, PAT-based) shipped 2026-07-03**; FHIR/genetics/remaining wearables (Whoop/Garmin/Fitbit) open* — Apple Health (FILE) → FHIR/Blue Button (evaluate Fasten Health) →
+- [~] **10.3 Health & medical** 🟡 *Apple Health `export.xml` recognizer shipped; **Oura (LIVE, PAT-based) shipped 2026-07-03**; **Health hub surface shipped** (pure `health-summary.ts` + `/health` page + aggregates-only `compass_health_summary` MCP tool — unifies Oura + apple-health/fitbit/garmin into step/sleep/score/workout trends); FHIR/genetics/remaining LIVE wearables (Whoop/Garmin/Fitbit OAuth) open* — Apple Health (FILE) → FHIR/Blue Button (evaluate Fasten Health) →
   genetics → wearables. Feeds the Phase 9.4 `medical_*` tables.
 - [~] **10.4 Digital footprint & comms** 🟡 *Google/Meta/LinkedIn/Amazon/Spotify/Netflix/YouTube + browser + iMessage + email shipped; Apple/WhatsApp/Signal/Telegram open* — the big takeouts (Google/Meta/X/LinkedIn/Amazon/Spotify) +
   browser history + iMessage + email archive. Heavy reuse of `archive-importers.ts`.

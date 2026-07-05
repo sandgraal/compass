@@ -132,6 +132,11 @@ const api = {
     cancel: () => ipcRenderer.invoke('assistant:cancel')
   },
 
+  // --- Health hub (Phase 10.3) ---
+  health: {
+    getSummary: () => ipcRenderer.invoke('health:get-summary')
+  },
+
   // --- Encrypted backup / restore (May 2026 Tier 1 #2) ---
   backup: {
     create: (passphrase: string) => ipcRenderer.invoke('backup:create', passphrase),
