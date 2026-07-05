@@ -800,6 +800,10 @@ declare global {
         connect(): Promise<{ success: boolean; error?: string }>
         setByo(devId: string, apiKey: string): Promise<{ success: boolean; error?: string }>
       }
+      // Canopy (Phase 10.9) — relay-fronted insurance aggregator → estate readiness.
+      canopy: {
+        connect(): Promise<{ success: boolean; error?: string }>
+      }
       backup: {
         create(passphrase: string): Promise<{
           success: boolean

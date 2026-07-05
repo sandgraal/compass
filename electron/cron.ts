@@ -5,6 +5,7 @@ import { schedulePlaidDailySync, stopPlaidDailySync } from './cron-plaid'
 import { scheduleSimplefinDailySync, stopSimplefinDailySync } from './cron-simplefin'
 import { getDb, getRawSqlite } from './db/client'
 import { appSettings, integrations } from './db/schema'
+import { syncCanopy } from './integrations/canopy'
 import { syncFxRates } from './integrations/finance-fx-fetch'
 import { captureSnapshots } from './integrations/finance-snapshot'
 import { syncLinear } from './integrations/linear'
@@ -156,6 +157,8 @@ function runSyncForService(service: string): void {
     void syncOura(win)
   } else if (service === 'terra') {
     void syncTerra(win)
+  } else if (service === 'canopy') {
+    void syncCanopy(win)
   }
 }
 

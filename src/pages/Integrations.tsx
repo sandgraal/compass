@@ -301,6 +301,26 @@ export default function Integrations(): JSX.Element {
       }
       return
     }
+    // Canopy: opens the insurance Connect flow (managed via the relay); on success,
+    // pull policies into the estate / insurance-readiness view.
+    if (service === 'canopy') {
+      setConnecting('canopy')
+      try {
+        const r = await window.api.canopy.connect()
+        if (!r.success) {
+          toast(`Canopy connection failed: ${r.error ?? 'unknown error'}`, 'error')
+          return
+        }
+        toast('Canopy connected — importing your policies…', 'success')
+        await loadStatuses()
+        triggerSync('canopy')
+      } catch (err) {
+        toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
+      } finally {
+        setConnecting(null)
+      }
+      return
+    }
     setConnecting(service)
     try {
       // Apple Calendar and Things are local-file based — no OAuth, just kick

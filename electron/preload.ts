@@ -143,6 +143,11 @@ const api = {
     setByo: (devId: string, apiKey: string) => ipcRenderer.invoke('terra:set-byo', devId, apiKey)
   },
 
+  // --- Canopy (Phase 10.9 — relay-fronted insurance aggregator → estate readiness) ---
+  canopy: {
+    connect: () => ipcRenderer.invoke('canopy:connect')
+  },
+
   // --- Encrypted backup / restore (May 2026 Tier 1 #2) ---
   backup: {
     create: (passphrase: string) => ipcRenderer.invoke('backup:create', passphrase),
