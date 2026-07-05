@@ -200,16 +200,18 @@ type UtilityBillPnlRow = {
  * substring) — these attribute to the property. Empty on older installs (table-less).
  */
 function readUtilityBills(sqlite: SqliteForFx, addressFilter: string): UtilityBillPnlRow[] {
-  const pattern = `%${addressFilter.trim().toLowerCase()}%`
+  // INSTR gives a TRUE substring match — LIKE would treat `%`/`_` in a user-entered
+  // address as wildcards and mis-attribute bills.
+  const needle = addressFilter.trim().toLowerCase()
   try {
     return sqlite
       .prepare(
         `SELECT statement_date AS statementDate, amount, currency
            FROM utility_bills
           WHERE amount IS NOT NULL AND statement_date IS NOT NULL
-            AND LOWER(COALESCE(service_address, '')) LIKE ?`
+            AND INSTR(LOWER(COALESCE(service_address, '')), ?) > 0`
       )
-      .all(pattern) as UtilityBillPnlRow[]
+      .all(needle) as UtilityBillPnlRow[]
   } catch {
     return []
   }

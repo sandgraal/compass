@@ -76,7 +76,11 @@ async function resolveAuthHeaders(
       body: r.body
     })
     if (!res.ok) throw new Error(`token exchange HTTP ${res.status}`)
-    return ta.parseToken(await res.json())
+    const parsed = ta.parseToken(await res.json())
+    // Never cache/use an empty bearer — that only produces confusing downstream 401s
+    // and invalidation loops. Fail the request now so the caller gets a clean 502.
+    if (!parsed.accessToken) throw new Error('token exchange returned no access token')
+    return parsed
   })
   return { ...headers, authorization: `Bearer ${bearer}` }
 }

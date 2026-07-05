@@ -274,4 +274,24 @@ describe('buildPropertyPnl — Arcadia utility bills → utilities operating lin
     const pnl = buildPropertyPnl(sqlite, CFG) // utilityAddress: null
     expect(pnl.totals.utilities).toBe(0)
   })
+
+  it('matches the service address literally — a "_"/"%" is not a wildcard (INSTR, not LIKE)', () => {
+    const sqlite = makeDb()
+    sqlite.exec(`
+      CREATE TABLE utility_bills (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE,
+        provider TEXT, service_address TEXT, statement_date TEXT, period_start TEXT,
+        period_end TEXT, amount REAL, currency TEXT NOT NULL DEFAULT 'USD',
+        usage_kwh REAL, ingested_at INTEGER
+      );
+    `)
+    const ins = sqlite.prepare(
+      'INSERT INTO utility_bills (external_id, service_address, statement_date, amount, currency) VALUES (?, ?, ?, ?, ?)'
+    )
+    ins.run('u1', 'A_C Street', '2024-02-01', 40, 'USD') // literal underscore
+    ins.run('u2', 'ABC Street', '2024-02-02', 99, 'USD') // would match 'A_C' if "_" were a wildcard
+
+    const pnl = buildPropertyPnl(sqlite, { ...CFG, utilityAddress: 'A_C' })
+    expect(pnl.totals.utilities).toBe(40) // only literal 'A_C Street' — 'ABC Street' excluded
+  })
 })

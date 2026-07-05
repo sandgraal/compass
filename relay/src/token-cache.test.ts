@@ -49,4 +49,33 @@ describe('TokenCache', () => {
     expect(a).toHaveBeenCalledTimes(1)
     expect(b).toHaveBeenCalledTimes(1)
   })
+
+  it('dedupes concurrent exchanges — two simultaneous callers share one fetch', async () => {
+    const cache = new TokenCache()
+    let calls = 0
+    let resolveFetch: (v: { accessToken: string; expiresInSec: number }) => void = () => {}
+    const fetcher = (): Promise<{ accessToken: string; expiresInSec: number }> => {
+      calls++
+      return new Promise((r) => {
+        resolveFetch = r
+      })
+    }
+    const p1 = cache.get('k', 1000, fetcher)
+    const p2 = cache.get('k', 1000, fetcher) // arrives while p1's exchange is in flight
+    resolveFetch({ accessToken: 'tok', expiresInSec: 3600 })
+    expect(await p1).toBe('tok')
+    expect(await p2).toBe('tok')
+    expect(calls).toBe(1) // only one exchange despite two concurrent gets
+  })
+
+  it('clears the in-flight entry when an exchange fails, so a retry re-exchanges', async () => {
+    const cache = new TokenCache()
+    const fetcher = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce({ accessToken: 'tok-2', expiresInSec: 3600 })
+    await expect(cache.get('k', 1000, fetcher)).rejects.toThrow('boom')
+    expect(await cache.get('k', 1000, fetcher)).toBe('tok-2')
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
 })
