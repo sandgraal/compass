@@ -2406,6 +2406,21 @@ function ResidencyTab(): JSX.Element {
     }
   }
 
+  const rederiveSegments = async () => {
+    if (!window.api?.finance) return
+    try {
+      const res = await window.api.finance.rederiveLocationSegments()
+      showToast(
+        `Location history → ${res.derived} auto trip${res.derived === 1 ? '' : 's'}.`,
+        'success'
+      )
+      await refresh()
+    } catch (err) {
+      console.error('[residency] rederive failed', err)
+      showToast('Failed to recompute from location history.', 'error')
+    }
+  }
+
   if (loading)
     return <p className="text-sm text-muted-foreground p-4">Loading residency summary…</p>
   if (!summary)
@@ -2475,7 +2490,21 @@ function ResidencyTab(): JSX.Element {
 
       {/* Travel log */}
       <div className="bg-card border border-border rounded-xl p-5">
-        <h3 className="text-sm font-semibold mb-3">Travel log</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold">Travel log</h3>
+          <button
+            type="button"
+            onClick={() => void rederiveSegments()}
+            title="Rebuild auto trips from imported location history (OwnTracks / GPX / Google). Manual trips are kept."
+            className="px-2.5 py-1 text-xs border border-border rounded-md hover:bg-muted text-muted-foreground"
+          >
+            Recompute from location history
+          </button>
+        </div>
+        <p className="text-xs text-muted-foreground mb-3">
+          Log trips outside your home country, or drop a location export in the Timeline Drop Zone
+          to fill these in automatically.
+        </p>
         <div className="flex flex-wrap items-end gap-2 mb-4">
           <label className="text-xs text-muted-foreground">
             <span className="block mb-1">Country (ISO-2)</span>
@@ -2524,23 +2553,41 @@ function ResidencyTab(): JSX.Element {
         ) : (
           <table className="w-full text-sm">
             <tbody>
-              {summary.segments.map((s) => (
-                <tr key={s.id} className="border-t border-border">
-                  <td className="py-1.5">{s.country}</td>
-                  <td className="text-muted-foreground">
-                    {s.startDate} → {s.endDate}
-                  </td>
-                  <td className="text-right">
-                    <button
-                      type="button"
-                      onClick={() => void removeSegment(s.id)}
-                      className="text-xs text-muted-foreground hover:text-destructive hover:underline"
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {summary.segments.map((s) => {
+                const auto = s.source === 'location'
+                return (
+                  <tr key={s.id} className="border-t border-border">
+                    <td className="py-1.5">{s.country}</td>
+                    <td className="text-muted-foreground">
+                      {s.startDate} → {s.endDate}
+                    </td>
+                    <td>
+                      <span
+                        className={cn(
+                          'text-[10px] px-1.5 py-0.5 rounded',
+                          auto ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+                        )}
+                        title={auto ? 'Derived from imported location history' : 'Added manually'}
+                      >
+                        {auto ? 'Auto' : 'Manual'}
+                      </span>
+                    </td>
+                    <td className="text-right">
+                      {auto ? (
+                        <span className="text-xs text-muted-foreground/60">from location</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void removeSegment(s.id)}
+                          className="text-xs text-muted-foreground hover:text-destructive hover:underline"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}

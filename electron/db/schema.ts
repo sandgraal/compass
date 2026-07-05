@@ -647,8 +647,29 @@ export const travelSegments = sqliteTable('travel_segments', {
   startDate: text('start_date').notNull(), // ISO 'YYYY-MM-DD' (inclusive)
   endDate: text('end_date').notNull(), // ISO 'YYYY-MM-DD' (inclusive)
   notes: text('notes'),
-  source: text('source').notNull().default('manual'), // 'manual' | 'calendar' | 'i94'
+  source: text('source').notNull().default('manual'), // 'manual' | 'calendar' | 'i94' | 'location'
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
+// ---- Location points (Phase 10.8 — "Location → Residency autopilot") ----
+// Raw GPS points from a location-history export (OwnTracks / GPX / Google Location
+// History). DELIBERATELY its own table, NOT the `records` timeline spine: precise
+// coordinates are the most sensitive stream in the app, and the assistant/MCP
+// timeline search (`searchRecords` / `compass_search_timeline`) has no per-source
+// denylist — so raw location must never enter `records`. This mirrors how finance
+// keeps rows in `finance_transactions` (aggregates-only to the AI); only the
+// derived, coarse `travel_segments` (country + date window) ever surface. Re-import
+// is idempotent via the UNIQUE `dedup_hash` (same content-addressed idiom as
+// `records`/`finance_transactions`).
+export const locationPoints = sqliteTable('location_points', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  occurredAt: integer('occurred_at', { mode: 'timestamp_ms' }).notNull(), // when the point was recorded
+  lat: real('lat').notNull(),
+  lng: real('lng').notNull(),
+  accuracy: real('accuracy'), // meters, when the export provides it
+  src: text('src').notNull(), // 'owntracks' | 'gpx' | 'google'
+  dedupHash: text('dedup_hash').notNull().unique(), // content-addressed dedup key
+  ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
 // ---- Financial goals (Phase 11.6 — "Goals & milestones") ----

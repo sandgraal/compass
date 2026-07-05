@@ -236,10 +236,11 @@ export function listTravelSegments(sqlite: SqliteForFx): Array<{
   startDate: string
   endDate: string
   notes: string | null
+  source: string // 'manual' | 'calendar' | 'i94' | 'location' — drives the Auto/Manual badge
 }> {
   return sqlite
     .prepare(
-      'SELECT id, country, start_date AS startDate, end_date AS endDate, notes FROM travel_segments ORDER BY start_date DESC'
+      'SELECT id, country, start_date AS startDate, end_date AS endDate, notes, source FROM travel_segments ORDER BY start_date DESC'
     )
     .all() as Array<{
     id: number
@@ -247,6 +248,7 @@ export function listTravelSegments(sqlite: SqliteForFx): Array<{
     startDate: string
     endDate: string
     notes: string | null
+    source: string
   }>
 }
 
@@ -352,6 +354,7 @@ export type ResidencySummary = {
     startDate: string
     endDate: string
     notes: string | null
+    source: string // 'manual' | 'calendar' | 'i94' | 'location'
   }>
   years: ResidencyYear[] // current + 2 prior, sorted desc
   substantialPresence: SubstantialPresence

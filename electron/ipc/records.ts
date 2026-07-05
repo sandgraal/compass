@@ -20,7 +20,8 @@ import Database from 'better-sqlite3'
 import { type SQL, and, desc, eq, inArray, like, notInArray, or, sql } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
-import { appSettings, records, snapshotFacts } from '../db/schema'
+import { appSettings, locationPoints, records, snapshotFacts } from '../db/schema'
+import { afterLocationImport } from '../integrations/location-residency'
 import { DEFAULT_EMBED_MODEL } from '../knowledge/embeddings'
 import {
   type RecordSemanticHit,
@@ -32,6 +33,7 @@ import {
 import { updateRecordsKnowledge } from '../knowledge/records-extractor'
 import { serializeCsv } from '../lib/csv'
 import { refreshDerivedEntities } from '../lib/entities-projection'
+import { LOCATION_RECOGNIZER_IDS, type LocationPayload } from '../lib/location'
 import { extractPdfText } from '../lib/pdf'
 import {
   type RecordInput,
@@ -112,6 +114,42 @@ export function insertRecords(inputs: RecordInput[], provenance: string): { impo
         payload: inp.payload !== undefined ? JSON.stringify(inp.payload).slice(0, 100_000) : null,
         dedupHash: hashRecord(inp.source, inp.type, inp.occurredAt, inp.naturalKey),
         provenance
+      })
+      .onConflictDoNothing()
+      .run()
+    if (res.changes > 0) imported++
+  }
+  return { imported }
+}
+
+/**
+ * Insert a batch of location points into the DEDICATED `location_points` table —
+ * deliberately NOT the `records` spine. Raw coordinates are the most sensitive stream
+ * in the app, and the assistant/MCP timeline search has no per-source denylist, so
+ * location must never enter `records` (mirrors finance keeping rows in
+ * `finance_transactions`). Only the derived `travel_segments` surface. Dedup + the
+ * content-addressed hash mirror `insertRecords`. Points without a timestamp or valid
+ * coordinates are skipped (useless for residency).
+ */
+export function insertLocationPoints(
+  inputs: RecordInput[],
+  _provenance: string
+): { imported: number } {
+  const db = getDb()
+  let imported = 0
+  for (const inp of inputs) {
+    if (inp.occurredAt == null) continue
+    const p = inp.payload as LocationPayload | undefined
+    if (!p || typeof p.lat !== 'number' || typeof p.lng !== 'number') continue
+    const res = db
+      .insert(locationPoints)
+      .values({
+        occurredAt: new Date(inp.occurredAt),
+        lat: p.lat,
+        lng: p.lng,
+        accuracy: typeof p.acc === 'number' ? p.acc : null,
+        src: p.src ?? inp.source,
+        dedupHash: hashRecord(inp.source, inp.type, inp.occurredAt, inp.naturalKey)
       })
       .onConflictDoNothing()
       .run()
@@ -209,6 +247,7 @@ interface IngestCtx {
   imported: number
   duplicates: number
   snapshots: number
+  locationImported: number // points routed to `location_points` (off the `records` spine)
 }
 
 /** Detect a ZIP archive (Google Takeout etc.) by extension or local-file-header magic. */
@@ -330,9 +369,18 @@ async function ingestPath(fp: string, name: string, ctx: IngestCtx, depth: numbe
       ctx.perFile.push({ file: name, recognizer: null, imported: 0, duplicates: 0 })
       return
     }
-    const { imported: imp } = inputs ? insertRecords(inputs, name) : { imported: 0 }
+    // Location recognizers divert to the dedicated `location_points` table (raw
+    // coordinates stay OFF the `records` spine / FTS / MCP); everything else lands
+    // in `records`.
+    const isLocation = recognizer != null && LOCATION_RECOGNIZER_IDS.has(recognizer)
+    const { imported: imp } = inputs
+      ? isLocation
+        ? insertLocationPoints(inputs, name)
+        : insertRecords(inputs, name)
+      : { imported: 0 }
     const dup = inputs ? inputs.length - imp : 0
-    ctx.imported += imp
+    if (isLocation) ctx.locationImported += imp
+    else ctx.imported += imp
     ctx.duplicates += dup
     ctx.snapshots += snapImported
     ctx.perFile.push({ file: name, recognizer, imported: imp + snapImported, duplicates: dup })
@@ -416,7 +464,8 @@ export async function ingestFiles(paths: string[]): Promise<RecordsImportResult>
     unrecognized: [],
     imported: 0,
     duplicates: 0,
-    snapshots: 0
+    snapshots: 0,
+    locationImported: 0
   }
   for (const fp of paths) await ingestPath(fp, basename(fp), ctx, 0)
   if (ctx.imported > 0) {
@@ -437,9 +486,20 @@ export async function ingestFiles(paths: string[]): Promise<RecordsImportResult>
     // does anything if the user has already built one, and never blocks the import).
     void refreshRecordsSemanticIndex()
   }
+  // New location points → re-derive travel segments so the residency engine updates
+  // automatically. Guarded to fire only when a location export actually landed
+  // (keeps it off the hot path for every other import) and best-effort (never fails
+  // the import).
+  if (ctx.locationImported > 0) {
+    try {
+      afterLocationImport()
+    } catch {
+      /* location derivation is best-effort */
+    }
+  }
   return {
     success: true,
-    imported: ctx.imported,
+    imported: ctx.imported + ctx.locationImported,
     duplicates: ctx.duplicates,
     snapshots: ctx.snapshots,
     perFile: ctx.perFile,
@@ -710,7 +770,7 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
       filters: [
         {
           name: 'Data exports',
-          extensions: ['csv', 'json', 'xml', 'mbox', 'zip', 'sqlite', 'db', 'pdf']
+          extensions: ['csv', 'json', 'xml', 'mbox', 'zip', 'sqlite', 'db', 'pdf', 'gpx', 'rec']
         },
         // Chrome's history DB is the extensionless file `History`, so allow any file.
         { name: 'All files', extensions: ['*'] }

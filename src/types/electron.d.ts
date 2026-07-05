@@ -1842,6 +1842,7 @@ declare global {
             startDate: string
             endDate: string
             notes: string | null
+            source: string // 'manual' | 'calendar' | 'i94' | 'location'
           }>
           years: Array<{
             year: number
@@ -1873,6 +1874,7 @@ declare global {
           notes?: string | null
         }): Promise<{ success: boolean; id?: number; error?: string }>
         deleteTravelSegment(id: number): Promise<{ success: boolean; error?: string }>
+        rederiveLocationSegments(): Promise<{ derived: number; removed: number }>
         setResidencyConfig(
           input: Record<string, string | number | null>
         ): Promise<{ success: boolean; error?: string }>
