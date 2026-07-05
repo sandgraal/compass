@@ -99,7 +99,9 @@ export async function handleRelayRequest(
       body: method === 'GET' || method === 'HEAD' ? undefined : (req.body ?? undefined)
     })
   } catch (err) {
-    return json(502, { error: 'Upstream fetch failed', detail: String(err) })
+    // Log server-side only — never leak internal error detail (stack traces) to the caller.
+    console.error('[relay] upstream fetch failed', err)
+    return json(502, { error: 'Upstream fetch failed' })
   }
   const text = await upstream.text()
 

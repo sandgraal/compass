@@ -60,8 +60,10 @@ const server = createServer(async (req, res) => {
     res.writeHead(out.status, out.headers)
     res.end(out.body)
   } catch (err) {
+    // Log server-side only — never expose internal error detail (stack traces) to the caller.
+    console.error('[relay] request error', err)
     res.writeHead(500, { 'content-type': 'application/json' })
-    res.end(JSON.stringify({ error: 'Relay error', detail: String(err) }))
+    res.end(JSON.stringify({ error: 'Relay error' }))
   }
 })
 
