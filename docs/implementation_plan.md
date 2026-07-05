@@ -23,7 +23,7 @@
 | **Phase 7** — Daily-Driver & Platform Roadmap | 6 tracks | **In progress.** Track A ✅ (Morning Brief + low-cash/price-hike alerts, weekly/monthly review, multi-type capture; voice deferred) · Track B 🟡 (Obsidian + Notion-import + Linear + Todoist + Things shipped; Slack/Jira/Reminders/Outlook+CalDAV/IMAP/web-clipper/receipts open) · Track C 🟡 (MCP surface expanded; webhooks/plugin-API/marketplace/Zapier open) · Track D ⬜ (E2E sync, mobile, sharing — not started) · Track E ✅ (proactive insights + agentic plan-my-week) · Track F 🟡 (theming shipped; mobile-responsive + a11y open). See § Phase 7. |
 | **Phase 8** — Claude Integration (bidirectional) | 6 items | **100% — all shipped** (MCP read+propose tools, in-app Claude Inbox, one-click `.mcpb` Desktop bundle, end-user plugin, 5 skills, agentic Ask Compass) — see § Phase 8 + [`claude-integration.md`](claude-integration.md) |
 | **Phase 9** — The Storehouse (own everything, export anywhere) | 8 items | **~70%.** 9.0 Contacts + Universal Export ✅ · 9.1 archive importers ✅ (**live Google Contacts sync ✅** via the People API — needs a Google reconnect for `contacts.readonly`; macOS Contacts live-sync open) · 9.3 Subscriptions ✅ · 9.5 Assets ✅ · 9.6 Storehouse overview ✅ · **9.2 documents, 9.4 medical, 9.7 reverse-connectors open** — see § Phase 9 |
-| **Phase 10** — The Acquisition Engine (go get everything) | 7 waves | **~45%.** 10.1 spine ✅ (Drop Zone + `records`/Timeline + **42 recognizers**, growing — crypto/WhatsApp/X/rideshare/Fitbit/Garmin landed 2026-07) · **live-sync projectors ✅ (finance + Gmail + Calendar + GitHub + Linear → the `records` spine, so live-synced data reaches People/Merchants/Places/Timeline/Search — Gmail senders → People via an automated-sender filter, calendar locations → Places, GitHub authors → People (bots/self filtered), GitHub/Linear issues → Timeline/Search; migration `0026` added GitHub `author`+`updated_at` and Linear `updated_at` for real timeline dates)** · 10.5 Data-Rights Concierge ✅ (redesigned 2026-07 to **27 sources across 6 domains**, + tax/SSA PDF recognizers) · 10.6 CRED sandbox ✅ (SSA adapter, gated off by default) · 10.7 Converse/Connect/Curate ✅ · **10.2 LIVE crypto valuation/IRS transcripts, 10.3 FHIR/remaining wearables, 10.4 Apple Data & Privacy, full 10.6 open** — see § Phase 10 + [`storehouse-roadmap.md`](storehouse-roadmap.md) |
+| **Phase 10** — The Acquisition Engine (go get everything) | 7 waves | **~45%.** 10.1 spine ✅ (Drop Zone + `records`/Timeline + **44 recognizers**, growing — crypto/WhatsApp/X/rideshare/Fitbit/Garmin landed 2026-07) · **live-sync projectors ✅ (finance + Gmail + Calendar + GitHub + Linear → the `records` spine, so live-synced data reaches People/Merchants/Places/Timeline/Search — Gmail senders → People via an automated-sender filter, calendar locations → Places, GitHub authors → People (bots/self filtered), GitHub/Linear issues → Timeline/Search; migration `0026` added GitHub `author`+`updated_at` and Linear `updated_at` for real timeline dates)** · 10.5 Data-Rights Concierge ✅ (redesigned 2026-07 to **27 sources across 6 domains**, + tax/SSA PDF recognizers) · 10.6 CRED sandbox ✅ (SSA adapter, gated off by default) · 10.7 Converse/Connect/Curate ✅ · **10.8 Location→Residency autopilot ✅** (location export → offline point-in-polygon → auto `travel_segments`; raw coords kept OFF the AI-searchable spine) · **10.2 LIVE crypto valuation/IRS transcripts, 10.3 FHIR/remaining wearables, 10.4 Apple Data & Privacy, full 10.6, 10.9 paid-aggregator relay open** — see § Phase 10 + [`storehouse-roadmap.md`](storehouse-roadmap.md) |
 | **Phase 11** — Life Planning & Cross-Border (NEW) | 7 items | **✅ Complete (2026-06-30).** Output of the June expert panel ([`strategic-review-2026-06.md`](strategic-review-2026-06.md)): all 7 items shipped — 11.1 multi-currency, 11.2 expat tax (FBAR/FATCA), 11.3 Airbnb P&L, 11.4 long-horizon retirement, 11.5 residency/days-in-country, 11.6 goals, 11.7 estate. The optional 11.1 follow-ups (ingest-time txn currency, base-currency forecast rollup, unrealized FX gain/loss) are now implemented — PRs #268/#269 + the FX-gain/loss change. See § Phase 11 |
 
 PRD-completion of the running app: **~99%** (all Phases 1–3 + Phase 4.0–4.5 merged with UIs).
@@ -449,7 +449,7 @@ Baseline was 78; the `noExplicitAny` was cleared incidentally by 6.5, leaving 77
 > exported in plaintext; the assistant/MCP see summaries only — **except the `records` timeline, which the
 > user opted to make searchable in detail (Phase 10.7 "Converse"; vault + raw finance stay aggregates-only).**
 
-**Status (2026-07):** the spine (10.1) and the leverage layer (10.7) shipped; **42 recognizers** across
+**Status (2026-07):** the spine (10.1) and the leverage layer (10.7) shipped; **44 recognizers** across
 CSV/JSON, archive, streaming (Apple Health, mbox), SQLite (browser/iMessage), and PDF dispatch
 (`electron/lib/recognizers.ts`) — a "Get Your Data" expansion (5 PRs, 2026-07) added crypto exchanges
 (Coinbase/Kraken), WhatsApp, X (Twitter), Uber/Lyft, and Fitbit/Garmin; the Data-Rights Concierge
@@ -546,10 +546,22 @@ CRED (10.6).
     with X" / "— X", strips "Chat with"). Title-based, no payload parsing. *Deferred: Venmo (ambiguous "From → To"
     in the body) + email senders (payload + newsletter noise).* **This completes the Phase 10.7 leverage arc**
     (Converse · Connect · Curate); candidate for a v0.14.0 release.
+- [x] **10.8 Location → Residency autopilot** ✅ *shipped* — the first **completes-a-feature** source: a dropped
+  location export (OwnTracks `.rec`/`.json`, GPX, Google `Records.json` streamed) → raw points in a dedicated
+  `location_points` table (migration `0029`, BOTH paths) → an offline point-in-polygon projector
+  (`electron/lib/location-country.ts` over bundled Natural Earth 110m boundaries — zero network/deps) collapses
+  them into `travel_segments` (`source='location'`, replace-in-place; manual rows untouched) via
+  `electron/integrations/location-residency.ts` + a best-effort post-import hook, so the Phase 11.5 residency
+  engine (days-in-country / US substantial-presence / CR-183) goes **manual → automatic**. Raw coordinates stay
+  OFF the `records`/FTS/MCP spine (aggregates-only, like finance); new IPC `finance:rederive-location-segments`
+  + a Residency-tab source badge & recompute button. *Next: a live self-hosted GPS push endpoint.*
+- [ ] **10.9 The metered aggregator relay + first paid aggregators** — the aggregator-of-aggregators breadth push
+  (Terra/Nylas/SnapTrade/Canopy/Argyle/Arcadia/Metriport/Knot), each completing a Compass engine. Hybrid access
+  model (stateless relay + quotas for un-self-servable aggregators; BYO for the rest). See [`storehouse-roadmap.md`](storehouse-roadmap.md) §3.G/§4f.
 
 > Build order: 10.1 (spine) → 10.2 / 10.3 / 10.4 (independent, parallelizable) → 10.5 → 10.6 (gated) → 10.7
-> (delivered incrementally throughout). Each wave is its own PR(s) with tests + a `security-auditor` pass on
-> any new credential or export path.
+> (delivered incrementally throughout) → 10.8 (location→residency ✅) → 10.9 (paid-aggregator relay). Each wave
+> is its own PR(s) with tests + a `security-auditor` pass on any new credential or export path.
 
 ---
 

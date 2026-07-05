@@ -60,6 +60,7 @@ import {
   LINKEDIN_RECOMMENDATIONS_GIVEN_RECOGNIZER,
   LINKEDIN_RECOMMENDATIONS_RECEIVED_RECOGNIZER
 } from './linkedin'
+import { GOOGLE_LOCATION_STREAM, GPX_RECOGNIZER, OWNTRACKS_RECOGNIZER } from './location'
 import { parseMbox } from './mbox'
 import { PAYPAL_RECOGNIZER } from './paypal'
 import {
@@ -334,6 +335,8 @@ export const RECOGNIZERS: Recognizer[] = [
   FITBIT_ACTIVITY_RECOGNIZER,
   FITBIT_SLEEP_RECOGNIZER,
   GARMIN_ACTIVITY_RECOGNIZER,
+  OWNTRACKS_RECOGNIZER,
+  GPX_RECOGNIZER,
   genericTimeline
 ]
 
@@ -379,7 +382,11 @@ const email: StreamingRecognizer = {
   parseStream: parseMbox
 }
 
-export const STREAM_RECOGNIZERS: StreamingRecognizer[] = [appleHealth, email]
+export const STREAM_RECOGNIZERS: StreamingRecognizer[] = [
+  appleHealth,
+  email,
+  GOOGLE_LOCATION_STREAM
+]
 
 /** First streaming recognizer that claims this file (by head sniff), or null. */
 export function recognizeStream(f: StreamHead): StreamingRecognizer | null {

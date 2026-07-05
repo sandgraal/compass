@@ -110,6 +110,26 @@ Linear/Todoist sync without widening the renderer CSP.
   Goals/Travel/Rental Comps are candidates for the same pattern once a source warrants it.
 - **Universal Export** (Phase 9.0) — the durable backstop; every new source registers with it.
 
+### G. The metered aggregator relay *(new — the paid-breadth primitive, wave 10.9)*
+The **aggregator-of-aggregators** move: one paid aggregator integration = *hundreds* of underlying sources
+(Terra = 500+ wearables, Nylas = 250+ mail providers, SnapTrade = every major brokerage, Canopy = 300+ P&C
+insurers, Argyle = ~80% of US payrolls, Arcadia = 125+ utilities). Compass already proved the pattern with
+Plaid (banks) and SimpleFIN. But these aggregators require a **paid developer account** the end-user can't
+self-serve, so — per the "pay for it, don't get abused" decision (§7) — Compass fronts them with a **thin,
+stateless relay**:
+- **Stateless pass-through** — the relay forwards the aggregator's response to the local client and **stores no
+  user data**; every source still lands on the user's disk. It is *not* a new data custodian, only a meter.
+- **Keys server-side** — the paid Terra/Nylas/Canopy/Argyle keys live only in the relay, never shipped to
+  clients (that's the whole point — users skip the impossible-to-get dev account).
+- **Metered + abuse-capped** — a device-bound license token is the quota key; per-user caps (accounts, syncs/day,
+  volume), a global + per-user **monthly cost ceiling** with graceful degradation, and an anomaly circuit-breaker.
+  Metering logs **counters only, never payloads**.
+- **BYO escape hatch** — every relay-fronted aggregator also accepts a user-supplied key that bypasses the relay
+  entirely (power users / privacy-maximalists / quota-exhausted users). Same code path, different key source.
+- **Local-first preserved** — CSP `connect-src` adds exactly one host (the relay), no wildcards, main-process-only
+  (the Linear/Todoist rule). Self-servable aggregators (Plaid, SnapTrade, exchange keys, self-hosted GPS) skip the
+  relay and stay pure-BYO. Riskiest/most-infra of the primitives → built after the clean local paths (10.9).
+
 ---
 
 ## 4. The data-source catalog
@@ -180,6 +200,33 @@ FILE. *(All third-party specifics — free cadences, API availability — verify
 3. **Chat archive recognizers** (WhatsApp/Signal/Telegram, feeds 4c) — cheap EXPORT wins reusing `archive-importers.ts`.
 4. **Lifestyle-spend recognizers** (Uber/DoorDash/Instacart, this section) — newly catalogued, not yet scheduled.
 
+### 4f. Aggregator-of-aggregators — the force multiplier *(new — the paid-breadth thesis, wave 10.9)*
+
+The highest-leverage integrations aren't 200 bespoke connectors — they're a handful of **paid aggregators** that
+each cover *hundreds* of underlying sources through one integration, fronted by the metered relay (primitive **G**).
+The sharpest picks don't just add data — they **complete a Compass engine that is manual today**. **Boundary:**
+health / medical / income / insurance / precise-location are **aggregates-only** to the assistant + MCP (§5), like
+finance/vault; low-sensitivity media/purchase history can be records-readable.
+
+| Aggregator | Coverage (one integration) | Mode | Completes / unlocks | AI boundary |
+|---|---|---|---|---|
+| **Terra** (or Vital/Rook) | 500+ wearables/health apps (Fitbit, Garmin, Oura, Whoop, Apple Health, Strava) | LIVE-relay | **new Health hub** (sleep/HRV/activity trends; correlations w/ spend + productivity) | aggregates-only |
+| **Metriport / Flexpa** | 300M+ medical records via FHIR/TEFCA/Carequality | LIVE-relay | longitudinal **medical timeline** → Phase 9.4 `medical_*` | aggregates-only |
+| **SnapTrade** | every major brokerage (Robinhood/Schwab/Fidelity/E*TRADE) | LIVE-**BYO** | completes **holdings + net worth** (today: unvalidated CSV) | aggregates-only |
+| **Canopy Connect** | 300+ P&C insurers ("Plaid for insurance") | LIVE-relay | completes **`finance-estate` insurance-adequacy / gap** engine (today: manual) | aggregates-only |
+| **Argyle / Pinwheel** | payroll/income for ~80% of US workers | LIVE-relay | completes **Phase 4.5 forecast** + expat-tax withholding (today: inferred income) | aggregates-only |
+| **Arcadia (Plug) / UtilityAPI** | 125+ utilities (bill + interval data) | LIVE-relay | completes **`finance-property` Schedule-E P&L** (missing expense line) + carbon | aggregates-only |
+| **Knot (TransactionLink)** | SKU-level purchase detail from merchants | LIVE-relay | supercharges **subscriptions audit** + spend categorization (what, not just "Amazon $47") | records-readable |
+| **Nylas** | 250+ email/calendar/contact providers (Gmail, Outlook, iCloud, Yahoo) | LIVE-relay | broadens **People / relationship intelligence** beyond Google-direct | aggregates-only |
+| **Location history** *(shipped 10.8)* | OwnTracks / GPX / Google Timeline export | EXPORT (local) | completes **`residency.ts`** days-in-country / SPT / CR-183 (today: manual) | aggregates-only |
+| MX / Finicity / Teller | Plaid alternatives — coverage / enrichment / income-verification | LIVE-relay/BYO | banking-connection depth beyond Plaid/SimpleFIN | aggregates-only |
+
+**The leverage layer this unlocks** (cross-domain, the real payoff): *residency autopilot* (location → auto SPT +
+alerts); *health × everything* (sleep/HRV vs. spend, productivity, calendar load; recovery-aware scheduling);
+*true cash-flow* (Argyle income + Plaid spend + Knot SKU + utility bills); *coverage graph* (Canopy + assets +
+estate docs → "what happens to X if Y"); *life year-in-review*; *ask-Compass over the whole life graph* (within
+the aggregates-only boundary).
+
 ---
 
 ## 5. Security & guardrails
@@ -188,6 +235,9 @@ Every item below is non-negotiable and consistent with [architecture.md](archite
 
 - **Local-first preserved.** Every source lands on disk. CSP `connect-src` is extended **per source**, no
   wildcards; prefer **main-process-only** API calls (like Linear/Todoist) so the renderer CSP never widens.
+  The metered aggregator relay (primitive G) is consistent with this: it's a **stateless pass-through that stores
+  no user data** (data still lands on disk), adds **exactly one** CSP host, keeps paid keys server-side, and always
+  offers a BYO-key bypass. It exists to spare users an un-gettable dev account, not to custody data.
 - **Credential handling (CRED).** New vault category `portal-credentials`. Credentials **never cross IPC to
   the renderer, never appear in logs** (the SimpleFIN/Plaid rule: the Access URL / token lives only in
   `.vault/*.enc`). Automation runs in the **main process / an isolated sandboxed `BrowserWindow`**. **Per
@@ -202,7 +252,12 @@ Every item below is non-negotiable and consistent with [architecture.md](archite
   `propose_task` only). **Exception (Phase 10.7 "Converse", user-opted-in):** the `records` timeline is
   searchable in detail via `search_records` / `compass_search_timeline` (capped, char-budgeted, payload
   never returned) — scoped to `records` only; vault + raw finance stay aggregates-only. Any new agent tool
-  is reviewed against this.
+  is reviewed against this. **Sensitive raw streams stay OFF the `records` spine entirely:** firehose
+  source-tiering (`source-tiers.ts`) is UI-only and does **not** gate `search_records`, so anything in `records`
+  is assistant/MCP-searchable once Converse is on. Health, medical, income, insurance, and **precise location**
+  are therefore **aggregates-only** — they get a dedicated table (the way finance uses `finance_transactions`),
+  and only coarse derived aggregates surface. The first instance is **10.8's `location_points`**: raw coordinates
+  never enter `records`; only the country/date `travel_segments` do.
 - **Export excludes the vault.** The Universal Export Center stays plaintext-portable but **deliberately
   vault-free** (`export:export-all` reads no `VAULT_DIR`). Encrypted backup (`backup.ts`) remains the only
   path that includes secrets, passphrase-wrapped.
@@ -236,9 +291,20 @@ Builds on Phase 9's shipped spine; **does not renumber 9.x**. Each wave is its o
 - [x] **10.7 Advanced leverage** ✅ *Converse (FTS + semantic) · Connect (People + "on this day") · Curate (firehose tiering) shipped; combined dashboards remain* — rich unified timeline, the cross-source insights/correlation engine,
   Ask-Compass-over-everything, combined dashboards. *(Basic timeline + Ask-over-it ship incrementally from
   10.1 — each wave must be immediately leverageable, not deferred to the end.)*
+- [x] **10.8 Location → Residency autopilot** ✅ *shipped* — the first **completes-a-feature** source: a dropped
+  location export (OwnTracks `.rec`/`.json`, GPX, Google "Records.json" streamed) → raw points in a dedicated
+  `location_points` table (migration `0029`) → an offline point-in-polygon projector (`location-country.ts`,
+  bundled Natural Earth 110m boundaries, zero network/deps) collapses them into `travel_segments`
+  (`source='location'`) so the Phase 11.5 residency engine (days-in-country / US substantial-presence / CR-183)
+  goes from **manual** to **automatic**. Raw coordinates stay OFF the `records`/FTS/MCP spine (§5 aggregates-only);
+  only the coarse country/date segments surface. *Next: a live self-hosted GPS endpoint (Overland/OwnTracks push).*
+- [ ] **10.9 The metered aggregator relay + first paid aggregators** — primitive **G** (§3): the thin stateless
+  relay + the first relay-fronted aggregator (**Terra**, 500+ wearables → Health hub), then Canopy / Argyle /
+  Arcadia. Self-servable aggregators (SnapTrade, exchanges) stay BYO. Gated + quota-metered (§5). See §4f.
 
 > **Build order:** 10.1 (spine) → 10.2 / 10.3 / 10.4 (independent, parallelizable, each reuses the spine) →
-> 10.5 → 10.6 (cross-cutting, gated) → 10.7 (leverage, but delivered incrementally throughout).
+> 10.5 → 10.6 (cross-cutting, gated) → 10.7 (leverage, but delivered incrementally throughout) →
+> 10.8 (location→residency, shipped) → 10.9 (paid-aggregator relay, the breadth push).
 
 ---
 
@@ -251,6 +317,11 @@ Builds on Phase 9's shipped spine; **does not renumber 9.x**. Each wave is its o
 - **CRED automation framework** → a sandboxed Electron `BrowserWindow` with **assisted-login Mode A and no
   stored credentials** in v1 (`electron/integrations/cred/`), gated off by default. Stored-credential mode
   is a later, separately-gated step. Full design in [`cred-engine-design.md`](cred-engine-design.md).
+- **Paid-aggregator access model** → **Hybrid** (2026-07). A thin **stateless relay** (primitive G) holds paid keys
+  only for aggregators users can't self-serve (Terra/Nylas/Canopy/Argyle/Arcadia/Metriport), metered with per-user
+  quotas + a cost ceiling + anomaly caps; self-servable aggregators (Plaid/SnapTrade/exchanges/self-hosted GPS)
+  stay pure-BYO; every relay-fronted source also accepts a BYO key. Rationale: makes "get *all* your data" one-click
+  without forcing an impossible dev-account signup, while the relay stores nothing and can't be abused (§3.G, §4f).
 
 **Still open (resolve when each wave is greenlit):**
 - **FHIR strategy** — adopt the self-hosted **Fasten Health** aggregator vs. a native SMART-on-FHIR client

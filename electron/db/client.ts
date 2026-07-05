@@ -189,6 +189,21 @@ function ensureNewTables(sqlite: Database.Database): void {
       synced_at INTEGER
     );
     CREATE UNIQUE INDEX IF NOT EXISTS oura_daily_metrics_date_unique ON oura_daily_metrics (date);
+    -- Location points (Phase 10.8 — "Location → Residency autopilot"). Mirrors
+    -- migration 0029 here (the always-run fallback) since packaged builds skip
+    -- migrations. Deliberately OFF the records spine (raw coordinates stay out of
+    -- assistant/MCP timeline search); only derived travel_segments surface.
+    CREATE TABLE IF NOT EXISTS location_points (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      occurred_at INTEGER NOT NULL,
+      lat REAL NOT NULL,
+      lng REAL NOT NULL,
+      accuracy REAL,
+      src TEXT NOT NULL,
+      dedup_hash TEXT NOT NULL,
+      ingested_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS location_points_dedup_unique ON location_points (dedup_hash);
     -- FX-rate snapshots (Phase 11.1). Lives here (the always-run fallback) as
     -- well as migration 0019 because the packaged app doesn't bundle migrations.
     CREATE TABLE IF NOT EXISTS fx_rates (

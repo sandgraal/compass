@@ -99,6 +99,7 @@ import {
   startFinanceWatcher,
   stopFinanceWatcher
 } from '../integrations/finance-watcher'
+import { deriveLocationSegments } from '../integrations/location-residency'
 import {
   type ResidencyConfig,
   addTravelSegment,
@@ -1457,6 +1458,14 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     }
     deleteTravelSegment(getRawSqlite(), id)
     return { success: true }
+  })
+
+  // Re-derive location-sourced travel segments from imported location history
+  // (`location_points`). Replaces only `source='location'` rows; manual entries
+  // are preserved. Raw coordinates never leave the main process — only the coarse
+  // country/date segments are written.
+  ipcMain.handle('finance:rederive-location-segments', () => {
+    return deriveLocationSegments(getRawSqlite())
   })
 
   ipcMain.handle(
