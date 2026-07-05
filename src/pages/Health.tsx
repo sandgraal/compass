@@ -173,7 +173,11 @@ export default function Health(): JSX.Element {
             <StatCard
               icon={<Scale size={15} />}
               label="Weight"
-              value={summary.weight.latest ? fmtInt(summary.weight.latest.value) : '—'}
+              value={
+                summary.weight.latest
+                  ? `${fmtInt(summary.weight.latest.value)} ${summary.weight.latest.unit}`
+                  : '—'
+              }
               sub={summary.weight.latest?.date}
             />
           </div>
@@ -221,9 +225,9 @@ export default function Health(): JSX.Element {
             <div className="bg-card border border-border rounded-xl p-4">
               <div className="text-xs font-medium text-muted-foreground mb-3">Recent workouts</div>
               <ul className="space-y-1.5">
-                {summary.workouts.recent.map((w) => (
+                {summary.workouts.recent.map((w, i) => (
                   <li
-                    key={`${w.date}-${w.title}`}
+                    key={`${w.date}-${w.title}-${i}`}
                     className="flex items-center justify-between text-sm"
                   >
                     <span className="text-foreground">{w.title}</span>

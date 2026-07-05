@@ -61,7 +61,7 @@ export type HealthSummary = {
     activity7Avg: number | null
   }
   restingHr: { latest: { date: string; bpm: number } | null; last30Avg: number | null }
-  weight: { latest: { date: string; value: number } | null }
+  weight: { latest: { date: string; value: number; unit: string } | null }
   workouts: { last30Count: number; recent: Array<{ date: string; title: string; source: string }> }
   activeDays30: number
 }
@@ -155,7 +155,7 @@ export function buildHealthSummary(
   const stepsByDay = new Map<string, number>()
   const sleepByDay = new Map<string, number>()
   const restingHrByDay = new Map<string, number>()
-  const weightByDay = new Map<string, number>()
+  const weightByDay = new Map<string, { value: number; unit: string }>()
   const workouts: Array<{ date: string; title: string; source: string; at: number }> = []
 
   const bump = (map: Map<string, number>, day: string, v: number | null): void => {
@@ -191,7 +191,13 @@ export function buildHealthSummary(
       if (v != null) restingHrByDay.set(day, v) // last-write-wins per day
     } else if (r.type === 'weight') {
       const v = num(p.value)
-      if (v != null) weightByDay.set(day, v)
+      // Apple Health weight records carry their own unit (kg/lb); keep it so the UI
+      // isn't an ambiguous unitless number. Default to kg when the export omits it.
+      if (v != null)
+        weightByDay.set(day, {
+          value: v,
+          unit: typeof p.unit === 'string' && p.unit ? p.unit : 'kg'
+        })
     } else if (r.type === 'workout') {
       workouts.push({ date: day, title: r.title, source: r.source, at: r.at })
     }
@@ -223,13 +229,15 @@ export function buildHealthSummary(
     if (!restingLatest || date > restingLatest.date) restingLatest = { date, bpm }
 
   // ── weight ──
-  let weightLatest: { date: string; value: number } | null = null
-  for (const [date, value] of weightByDay)
-    if (!weightLatest || date > weightLatest.date) weightLatest = { date, value }
+  let weightLatest: { date: string; value: number; unit: string } | null = null
+  for (const [date, w] of weightByDay)
+    if (!weightLatest || date > weightLatest.date)
+      weightLatest = { date, value: w.value, unit: w.unit }
 
-  // ── workouts ──
+  // ── workouts ── (recent is drawn from the SAME 30-day window as the count, so the
+  // card can't show "0 workouts" alongside a non-empty recent list)
   const workouts30 = workouts.filter((w) => w.date >= start30 && w.date <= today)
-  const recentWorkouts = [...workouts]
+  const recentWorkouts = [...workouts30]
     .sort((a, b) => b.at - a.at)
     .slice(0, 5)
     .map((w) => ({ date: w.date, title: w.title, source: w.source }))

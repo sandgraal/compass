@@ -787,7 +787,7 @@ declare global {
             activity7Avg: number | null
           }
           restingHr: { latest: { date: string; bpm: number } | null; last30Avg: number | null }
-          weight: { latest: { date: string; value: number } | null }
+          weight: { latest: { date: string; value: number; unit: string } | null }
           workouts: {
             last30Count: number
             recent: Array<{ date: string; title: string; source: string }>

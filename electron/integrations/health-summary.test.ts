@@ -90,7 +90,7 @@ describe('buildHealthSummary', () => {
     rec(sqlite, 'fitbit', 'sleep', dayMs(14), '7h 30m asleep', { minutesAsleep: 450 })
     rec(sqlite, 'garmin', 'workout', dayMs(15), 'Running · 5 km', { type: 'running' })
     rec(sqlite, 'apple-health', 'resting-hr', dayMs(15), '55 bpm', { value: 55 })
-    rec(sqlite, 'apple-health', 'weight', dayMs(14), '70 kg', { value: 70 })
+    rec(sqlite, 'apple-health', 'weight', dayMs(14), '70 lb', { value: 70, unit: 'lb' })
 
     const s = buildHealthSummary(sqlite, TODAY)
 
@@ -104,7 +104,7 @@ describe('buildHealthSummary', () => {
     expect(s.oura.sleepScore7Avg).toBe(85) // (80+90)/2
     // resting HR + weight latest
     expect(s.restingHr.latest).toEqual({ date: '2025-06-15', bpm: 55 })
-    expect(s.weight.latest).toEqual({ date: '2025-06-14', value: 70 })
+    expect(s.weight.latest).toEqual({ date: '2025-06-14', value: 70, unit: 'lb' }) // unit carried through
     // workouts
     expect(s.workouts.last30Count).toBe(1)
     expect(s.workouts.recent[0]).toMatchObject({ source: 'garmin', title: 'Running · 5 km' })
