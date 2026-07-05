@@ -3731,7 +3731,10 @@ function ForecastTab({ accounts }: { accounts: Account[] }): JSX.Element {
           </div>
           <ul className="divide-y divide-border">
             {income.sources.map((s) => (
-              <li key={s.employer} className="py-2 flex items-center justify-between text-sm gap-3">
+              <li
+                key={`${s.employer}::${s.currency}`}
+                className="py-2 flex items-center justify-between text-sm gap-3"
+              >
                 <div className="min-w-0">
                   <span className="font-medium text-foreground">{s.employer}</span>
                   <span className="ml-2 text-xs text-muted-foreground">

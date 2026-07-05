@@ -273,7 +273,12 @@ export async function openArgyleConnect(
       parent: parent ?? undefined,
       modal: !!parent,
       title: 'Connect Argyle',
-      webPreferences: { sandbox: true, partition: 'argyle-connect', contextIsolation: true }
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+        partition: 'argyle-connect'
+      }
     })
     let settled = false
     const finish = (result: { success: boolean; error?: string }): void => {
