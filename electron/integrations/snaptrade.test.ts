@@ -58,6 +58,15 @@ describe('buildSignedContent — the canonical string SnapTrade signs', () => {
       '{"content":{"userId":"a","userSecret":"b"},"path":"/p","query":"q=1"}'
     )
   })
+
+  it('omits undefined object keys (matching JSON.stringify) so sign matches the sent body', () => {
+    // The wire body goes out via JSON.stringify, which DROPS undefined keys — the
+    // signed content must do the same or the server recomputes a different signature.
+    expect(JSON.stringify({ a: 'x', b: undefined })).toBe('{"a":"x"}')
+    expect(buildSignedContent('/p', 'q=1', { a: 'x', b: undefined })).toBe(
+      '{"content":{"a":"x"},"path":"/p","query":"q=1"}'
+    )
+  })
 })
 
 describe('signSnaptrade — HMAC-SHA256 signature', () => {
@@ -104,6 +113,22 @@ describe('normalizeSnaptradeHoldings', () => {
       { account: { id: 'a' }, positions: [{ units: 10 }, { symbol: { symbol: { symbol: 'X' } } }] }
     ])
     expect(partial).toEqual([]) // first has no symbol, second has no units
+  })
+
+  it('uppercases symbols so case-variant tickers dedup as one position', () => {
+    const parsed = snaptradeHoldingsToParsed([
+      {
+        symbol: 'aapl',
+        description: null,
+        units: 1,
+        price: 10,
+        value: 10,
+        costBasis: null,
+        currency: 'USD',
+        account: 'a'
+      }
+    ])
+    expect(parsed[0].symbol).toBe('AAPL')
   })
 })
 

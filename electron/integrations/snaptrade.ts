@@ -53,10 +53,16 @@ function get(obj: unknown, ...path: string[]): unknown {
 
 /** Recursively key-sorted JSON — SnapTrade signs the canonical (sorted) form. */
 function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null'
+  // Mirror JSON.stringify semantics for `undefined` so the SIGNED shape equals the
+  // SENT shape (the body goes out via JSON.stringify): a standalone/array undefined
+  // becomes null; an object key whose value is undefined is OMITTED, not null.
+  if (value === undefined || value === null) return 'null'
+  if (typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
   const obj = value as Record<string, unknown>
-  const keys = Object.keys(obj).sort()
+  const keys = Object.keys(obj)
+    .filter((k) => obj[k] !== undefined)
+    .sort()
   return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`
 }
 
@@ -160,7 +166,9 @@ export function normalizeSnaptradeHoldings(json: unknown): SnaptradeHolding[] {
 /** Map SnapTrade holdings to the shared `ParsedHolding` shape the net-worth store reads. */
 export function snaptradeHoldingsToParsed(holdings: SnaptradeHolding[]): ParsedHolding[] {
   return holdings.map((h) => ({
-    symbol: h.symbol,
+    // Uppercase like the CSV + Plaid-Investments importers — `importHoldings` dedups
+    // by symbol, so mixed-case would split one position into two snapshots.
+    symbol: h.symbol.toUpperCase(),
     description: h.description,
     quantity: h.units,
     price: h.price,
@@ -302,6 +310,9 @@ function openPortalWindow(
         partition: 'snaptrade-connect'
       }
     })
+    // Deny popups — a connect page should never spawn child windows (mirrors the
+    // CRED sandbox). Keeps the isolation model intact against unexpected navigations.
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     let settled = false
     const finish = (result: { success: boolean; error?: string }): void => {
       if (settled) return
