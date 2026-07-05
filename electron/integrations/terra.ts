@@ -156,6 +156,7 @@ type TerraToken = { userId?: string; devId?: string; apiKey?: string }
 
 const WINDOW_DAYS = 30
 const TERRA_SUCCESS_URL = 'https://compass.app/terra/success' // sentinel we intercept, never actually load
+const TERRA_SUCCESS = new URL(TERRA_SUCCESS_URL) // parsed once for exact origin+path matching
 const TERRA_PROVIDERS = 'GARMIN,FITBIT,OURA,WHOOP,GOOGLE,APPLE,SAMSUNG,POLAR,SUUNTO,PELOTON,STRAVA'
 
 function loadTerraToken(): TerraToken {
@@ -302,19 +303,28 @@ export async function openTerraConnect(
     // Intercept the success redirect BEFORE it navigates — preventDefault so the sentinel
     // URL (which carries user_id) is never actually requested / logged.
     const onNavigate = (e: Electron.Event, url: string): void => {
-      if (!url.startsWith(TERRA_SUCCESS_URL)) return
-      e.preventDefault()
+      let target: URL
       try {
-        const userId = new URL(url).searchParams.get('user_id') ?? ''
-        if (!userId) {
-          finish({ success: false, error: 'Terra returned no user_id' })
-          return
-        }
-        saveToken('terra', { ...loadTerraToken(), userId })
-        finish({ success: true })
-      } catch (err) {
-        finish({ success: false, error: String(err) })
+        target = new URL(url)
+      } catch {
+        return
       }
+      // Exact origin+pathname match — `startsWith` would also fire on e.g.
+      // `.../terra/successful-import`, and this navigation decides what we store as userId.
+      if (target.origin !== TERRA_SUCCESS.origin || target.pathname !== TERRA_SUCCESS.pathname) {
+        return
+      }
+      e.preventDefault()
+      const userId = target.searchParams.get('user_id') ?? ''
+      // Terra user ids are UUIDs; validate against the relay allowlist charset (the same one
+      // canopy uses for pull ids) before storing — it's sent straight back as the `user_id`
+      // query param on every relay data pull.
+      if (!/^[A-Za-z0-9_-]+$/.test(userId)) {
+        finish({ success: false, error: 'Terra returned no valid user_id' })
+        return
+      }
+      saveToken('terra', { ...loadTerraToken(), userId })
+      finish({ success: true })
     }
     win.webContents.on('will-redirect', onNavigate)
     win.webContents.on('will-navigate', onNavigate)
