@@ -2565,7 +2565,7 @@ function ResidencyTab(): JSX.Element {
                       <span
                         className={cn(
                           'text-[10px] px-1.5 py-0.5 rounded',
-                          auto ? 'bg-sky-500/15 text-sky-300' : 'bg-muted text-muted-foreground'
+                          auto ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
                         )}
                         title={auto ? 'Derived from imported location history' : 'Added manually'}
                       >

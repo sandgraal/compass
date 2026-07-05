@@ -203,7 +203,7 @@ function ensureNewTables(sqlite: Database.Database): void {
       dedup_hash TEXT NOT NULL,
       ingested_at INTEGER
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS location_points_dedup_unique ON location_points (dedup_hash);
+    CREATE UNIQUE INDEX IF NOT EXISTS location_points_dedup_hash_unique ON location_points (dedup_hash);
     -- FX-rate snapshots (Phase 11.1). Lives here (the always-run fallback) as
     -- well as migration 0019 because the packaged app doesn't bundle migrations.
     CREATE TABLE IF NOT EXISTS fx_rates (

@@ -50,19 +50,26 @@ export function deriveLocationSegments(
   const home = getResidencyConfig(sqlite).homeCountry
   const segments = pointsToSegments(points, { homeCountry: home, localDayOf: localYmd })
 
-  // Replace-in-place: only the derived rows. Manual rows are never touched.
-  const removed = sqlite
-    .prepare("DELETE FROM travel_segments WHERE source = 'location'")
-    .run().changes
+  // Replace-in-place: only the derived rows (manual rows are never touched),
+  // wrapped in a transaction so a failure between the delete and the inserts
+  // can't leave the user with NO derived segments — and one fsync, not one per row.
   const insert = sqlite.prepare(
     "INSERT INTO travel_segments (country, start_date, end_date, notes, source, created_at) VALUES (?, ?, ?, ?, 'location', ?)"
   )
-  let derived = 0
-  for (const s of segments) {
-    insert.run(s.country, s.startDate, s.endDate, `auto · ${s.pointCount} points`, now)
-    derived++
+  sqlite.prepare('BEGIN').run()
+  try {
+    const removed = sqlite
+      .prepare("DELETE FROM travel_segments WHERE source = 'location'")
+      .run().changes
+    for (const s of segments) {
+      insert.run(s.country, s.startDate, s.endDate, `auto · ${s.pointCount} points`, now)
+    }
+    sqlite.prepare('COMMIT').run()
+    return { derived: segments.length, removed: Number(removed) }
+  } catch (err) {
+    sqlite.prepare('ROLLBACK').run()
+    throw err
   }
-  return { derived, removed: Number(removed) }
 }
 
 /**

@@ -66,6 +66,16 @@ describe('OwnTracks recognizer', () => {
     expect(out).toHaveLength(1)
     expect(payloadOf(out[0])).toMatchObject({ lat: 40.7128, lng: -74.006, src: 'owntracks' })
   })
+
+  it('gives distinct natural keys to same-timestamp points at different coords (no dedup collision)', () => {
+    const rec = [
+      '2025-03-10T12:00:00Z\t*\t{"_type":"location","lat":9.9,"lon":-84.0,"tst":1741608000}',
+      '2025-03-10T12:00:00Z\t*\t{"_type":"location","lat":40.7,"lon":-74.0,"tst":1741608000}'
+    ].join('\n')
+    const out = OWNTRACKS_RECOGNIZER.parse(file('same-ts.rec', rec))
+    expect(out).toHaveLength(2)
+    expect(out[0].naturalKey).not.toBe(out[1].naturalKey) // coords in the key prevent a UNIQUE-hash drop
+  })
 })
 
 // ─── GPX ──────────────────────────────────────────────────────────────────────

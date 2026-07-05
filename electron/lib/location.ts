@@ -47,7 +47,10 @@ function locationPoint(
     occurredAt,
     title: `${lat.toFixed(2)}, ${lng.toFixed(2)}`,
     payload,
-    naturalKey: `${src}|${occurredAt}`
+    // Include coordinates (≈1 m precision) so two DISTINCT points that share a
+    // second-resolution timestamp don't collide on the same dedup hash and get
+    // dropped — while a re-imported identical point still dedupes.
+    naturalKey: `${src}|${occurredAt}|${lat.toFixed(5)}|${lng.toFixed(5)}`
   }
 }
 
