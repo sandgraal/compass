@@ -3618,6 +3618,7 @@ function EstateTab(): JSX.Element {
 
 type ForecastResult = Awaited<ReturnType<Window['api']['finance']['getForecast']>>
 type ForecastEvent = ForecastResult['events'][number]
+type IncomeSummary = Awaited<ReturnType<Window['api']['finance']['getIncomeSummary']>>
 
 const SOURCE_LABEL: Record<string, string> = {
   subscription: 'Subscription',
@@ -3635,6 +3636,7 @@ const CONFIDENCE_DOT_CLASS: Record<string, string> = {
 
 function ForecastTab({ accounts }: { accounts: Account[] }): JSX.Element {
   const [forecast, setForecast] = useState<ForecastResult | null>(null)
+  const [income, setIncome] = useState<IncomeSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<ForecastEvent | null>(null)
   const { toast: showToast } = useToast()
@@ -3653,6 +3655,15 @@ function ForecastTab({ accounts }: { accounts: Account[] }): JSX.Element {
     try {
       const result = await window.api.finance.getForecast({ windowDays: 90 })
       setForecast(result)
+      // Real-income summary (Argyle paystubs) — optional; the forecast already
+      // incorporates it, this card just surfaces it.
+      if (window.api.finance.getIncomeSummary) {
+        try {
+          setIncome(await window.api.finance.getIncomeSummary())
+        } catch {
+          setIncome(null)
+        }
+      }
     } catch (err) {
       console.error('[forecast] refresh failed', err)
       showToast('Failed to load forecast.', 'error')
@@ -3701,6 +3712,47 @@ function ForecastTab({ accounts }: { accounts: Account[] }): JSX.Element {
               ))}
             </ul>
           </div>
+        </div>
+      )}
+
+      {/* Real income (Argyle paystubs) — the forecast prefers these over deposit inference */}
+      {income?.hasPaystubs && (
+        <div className="bg-card border border-border rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="text-sm font-semibold">Real income · Argyle</h3>
+              <p className="text-xs text-muted-foreground">
+                Paystub-verified — the forecast uses these instead of guessing from deposits
+              </p>
+            </div>
+            <span className="text-xs text-muted-foreground">
+              {fmtMoney(income.totalAnnualizedNet)}/yr net
+            </span>
+          </div>
+          <ul className="divide-y divide-border">
+            {income.sources.map((s) => (
+              <li
+                key={`${s.employer}::${s.currency}`}
+                className="py-2 flex items-center justify-between text-sm gap-3"
+              >
+                <div className="min-w-0">
+                  <span className="font-medium text-foreground">{s.employer}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {s.cadence}
+                    {s.effectiveWithholdingRate != null
+                      ? ` · ${Math.round(s.effectiveWithholdingRate * 100)}% withheld`
+                      : ''}
+                  </span>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-foreground">{fmtMoney(s.annualizedNet)}/yr</div>
+                  {s.nextExpectedPayday && (
+                    <div className="text-xs text-muted-foreground">next {s.nextExpectedPayday}</div>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

@@ -196,6 +196,17 @@ export const INTEGRATION_REGISTRY: Record<string, IntegrationMeta> = {
     logo: 'C',
     connected: true
   },
+  argyle: {
+    id: 'argyle',
+    name: 'Argyle (Payroll)',
+    category: 'finance',
+    method: 'live',
+    description: 'Real paystubs — powers the cash-flow forecast with true income, not guesses.',
+    scopes: ['paystubs', 'employment'],
+    color: 'from-amber-500/20 to-orange-600/20',
+    logo: 'A',
+    connected: true
+  },
   slack: {
     id: 'slack',
     name: 'Slack',

@@ -195,6 +195,12 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false }
   },
   {
+    name: 'compass_income_summary',
+    description:
+      'Returns AGGREGATE income figures only, from connected payroll (Argyle paystubs): per-employer pay cadence, annualized net (and gross when known), effective withholding rate, and the next expected payday — plus blended totals. NEVER returns raw paystub lines, individual checks, per-tax detail, or account numbers (privacy boundary — aggregates only, like finance/health). Read-only.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
     name: 'compass_habit_streaks',
     description:
       'Returns each active habit with its current streak (consecutive days completed, ending today or yesterday) and longest streak. Read-only.',
@@ -651,6 +657,154 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         db.close()
         return textResult(JSON.stringify(summary, null, 2))
+      } catch (err) {
+        db.close()
+        return errorResult(String(err))
+      }
+    }
+
+    // Aggregates-only income view (mirrors electron/integrations/finance-income.ts;
+    // re-implemented here because the MCP process can't import electron/). Returns
+    // only rollups — never raw paystub lines or per-tax detail.
+    if (name === 'compass_income_summary') {
+      const db = openDb()
+      if (!db) return errorResult('Compass DB not found')
+      try {
+        type PsRow = {
+          employer: string | null
+          gross: number | null
+          net: number | null
+          withholding: number | null
+          paidAt: string | null
+          payCycle: string | null
+        }
+        let rows: PsRow[] = []
+        try {
+          rows = db
+            .prepare(
+              'SELECT employer, gross_pay AS gross, net_pay AS net, withholding, paid_at AS paidAt, pay_cycle AS payCycle FROM argyle_paystubs'
+            )
+            .all() as PsRow[]
+        } catch {
+          /* table absent → no paystubs */
+        }
+
+        const PER_YEAR: Record<string, number> = {
+          weekly: 52,
+          biweekly: 26,
+          monthly: 12,
+          quarterly: 4,
+          'semi-annual': 2,
+          yearly: 1
+        }
+        const STEP: Record<string, number> = {
+          weekly: 7,
+          biweekly: 14,
+          monthly: 30,
+          quarterly: 91,
+          'semi-annual': 182,
+          yearly: 365
+        }
+        const median = (ns: number[]): number => {
+          const s = [...ns].sort((a, b) => a - b)
+          const m = Math.floor(s.length / 2)
+          return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
+        }
+        const addDays = (iso: string, d: number): string => {
+          const dt = new Date(`${iso}T00:00:00Z`)
+          dt.setUTCDate(dt.getUTCDate() + d)
+          return dt.toISOString().slice(0, 10)
+        }
+        const cadenceOf = (cycle: string | null, dates: string[]): string | null => {
+          if (cycle) {
+            const s = cycle.toLowerCase()
+            if (/week/.test(s) && /(bi|two|2|fortn)/.test(s)) return 'biweekly'
+            if (/(semi|twice|15th)/.test(s)) return 'biweekly'
+            if (/week/.test(s)) return 'weekly'
+            if (/month/.test(s)) return 'monthly'
+            if (/quarter/.test(s)) return 'quarterly'
+            if (/(year|annual)/.test(s)) return 'yearly'
+          }
+          const ds = [...dates].sort()
+          if (ds.length < 2) return null
+          const gaps: number[] = []
+          for (let i = 1; i < ds.length; i++) {
+            const g = Math.round((Date.parse(ds[i]) - Date.parse(ds[i - 1])) / DAY_MS)
+            if (g > 0) gaps.push(g)
+          }
+          if (!gaps.length) return null
+          const md = median(gaps)
+          if (md >= 5 && md <= 9) return 'weekly'
+          if (md >= 12 && md <= 18) return 'biweekly'
+          if (md >= 25 && md <= 35) return 'monthly'
+          if (md >= 80 && md <= 100) return 'quarterly'
+          return null
+        }
+
+        const today = localYmd(Date.now())
+        const groups = new Map<string, PsRow[]>()
+        for (const r of rows) {
+          if (r.net == null || r.net <= 0 || !r.paidAt) continue
+          const key = (r.employer || 'Payroll').toLowerCase()
+          const g = groups.get(key) ?? []
+          g.push(r)
+          groups.set(key, g)
+        }
+
+        const sources: Array<Record<string, unknown>> = []
+        let totalNet = 0
+        let totalGross = 0
+        let totalWithholding = 0
+        let anyGross = false
+        for (const g of groups.values()) {
+          const dates = g.map((r) => r.paidAt as string).sort()
+          const cad = cadenceOf(g[0].payCycle, dates)
+          if (!cad) continue
+          const perYear = PER_YEAR[cad]
+          const annualizedNet = Math.round(median(g.map((r) => r.net as number)) * perYear)
+          const grossVals = g.map((r) => r.gross).filter((v): v is number => v != null && v > 0)
+          const annualizedGross = grossVals.length ? Math.round(median(grossVals) * perYear) : null
+          const sumGross = grossVals.reduce((a, b) => a + b, 0)
+          const sumWith = g
+            .map((r) => r.withholding)
+            .filter((v): v is number => v != null)
+            .reduce((a, b) => a + b, 0)
+          let nextPayday = addDays(dates[dates.length - 1], STEP[cad])
+          let guard = 0
+          while (nextPayday <= today && guard++ < 400) nextPayday = addDays(nextPayday, STEP[cad])
+          sources.push({
+            employer: g[0].employer || 'Payroll',
+            cadence: cad,
+            annualizedNet,
+            annualizedGross,
+            effectiveWithholdingRate:
+              sumGross > 0 ? Math.round((sumWith / sumGross) * 1000) / 1000 : null,
+            nextExpectedPayday: nextPayday,
+            paystubs: g.length
+          })
+          totalNet += annualizedNet
+          if (annualizedGross != null) {
+            totalGross += annualizedGross
+            anyGross = true
+          }
+          totalWithholding += sumWith * (perYear / g.length)
+        }
+        sources.sort((a, b) => (b.annualizedNet as number) - (a.annualizedNet as number))
+        db.close()
+        return textResult(
+          JSON.stringify(
+            {
+              hasPaystubs: sources.length > 0,
+              sources,
+              totalAnnualizedNet: Math.round(totalNet),
+              totalAnnualizedGross: anyGross ? Math.round(totalGross) : null,
+              blendedWithholdingRate:
+                totalGross > 0 ? Math.round((totalWithholding / totalGross) * 1000) / 1000 : null
+            },
+            null,
+            2
+          )
+        )
       } catch (err) {
         db.close()
         return errorResult(String(err))

@@ -53,6 +53,7 @@ import {
   parseHoldingsCsv,
   summarizeHoldings
 } from '../integrations/finance-holdings'
+import { type IncomeSummary, buildIncomeSummary } from '../integrations/finance-income'
 import {
   type PropertyConfig,
   buildPropertyPnl,
@@ -1563,6 +1564,14 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
         lowCashThreshold
       })
     }
+  )
+
+  // ── Income summary (Phase 10.9) — aggregates over real Argyle paystubs ────
+  // Per-employer annualized net/gross, effective withholding rate, and next
+  // payday. Aggregates only (no raw paystub lines) — safe for the AI/MCP boundary.
+  ipcMain.handle(
+    'finance:get-income-summary',
+    (): IncomeSummary => buildIncomeSummary(getRawSqlite())
   )
 
   // ── Upsert a forecast override ───────────────────────────────────────────

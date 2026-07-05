@@ -21,6 +21,7 @@
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type * as schema from '../db/schema'
 import { convert, getBaseCurrency, loadFxRates } from './finance-fx'
+import { mergeIncomeStreams, paystubsToIncomeStreams, readArgylePaystubs } from './finance-income'
 import { type Cadence, type Subscription, auditSubscriptions } from './finance-subscriptions'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -632,14 +633,24 @@ export function buildForecast(
   for (const a of accounts) accountIdByName.set(a.name, a.id)
   const subEvents = projectSubscriptionEvents(audit.active, accountIdByName, today, windowDays)
 
-  // 2. Recurring income.
-  const incomeStreams = detectRecurringIncome(sqlite, { today })
+  // The default cash account — where paystub income and debt/bill outflows are
+  // routed (the forecast answers "will my cash be short?").
+  const defaultCashAccountId = accounts.find((a) => a.is_debt !== 1)?.id ?? null
+
+  // 2. Recurring income. Prefer REAL Argyle paystubs (ground-truth cadence + net
+  // pay) over bank-deposit inference; the matching inferred stream is suppressed
+  // so the same paycheck isn't double-counted. With no paystubs the merge returns
+  // the inferred streams unchanged → zero change for users without Argyle.
+  const inferredIncome = detectRecurringIncome(sqlite, { today })
+  const paystubIncome = paystubsToIncomeStreams(readArgylePaystubs(sqlite), {
+    defaultCashAccountId
+  })
+  const incomeStreams = mergeIncomeStreams(paystubIncome, inferredIncome)
   const incomeEvents = projectIncomeEvents(incomeStreams, today, windowDays)
 
   // 3. Debt minimums — routed to a cash account so the forecast captures
   // the cash impact (the whole point of "will I be short?"). Net Worth
   // tracks the corresponding liability decrease.
-  const defaultCashAccountId = accounts.find((a) => a.is_debt !== 1)?.id ?? null
   const debts = accounts
     .filter((a) => a.is_debt === 1)
     .map((a) => ({

@@ -204,6 +204,25 @@ function ensureNewTables(sqlite: Database.Database): void {
       ingested_at INTEGER
     );
     CREATE UNIQUE INDEX IF NOT EXISTS location_points_dedup_hash_unique ON location_points (dedup_hash);
+    -- Argyle paystubs (Phase 10.9). Here (always-run fallback) as well as the
+    -- migration because packaged builds skip migrations. OFF the records spine —
+    -- payroll is aggregates-only at the AI/MCP boundary; feeds the forecast.
+    CREATE TABLE IF NOT EXISTS argyle_paystubs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      external_id TEXT NOT NULL,
+      employer TEXT,
+      gross_pay REAL,
+      net_pay REAL,
+      withholding REAL,
+      deductions REAL,
+      currency TEXT NOT NULL DEFAULT 'USD',
+      period_start TEXT,
+      period_end TEXT,
+      paid_at TEXT,
+      pay_cycle TEXT,
+      ingested_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS argyle_paystubs_external_id_unique ON argyle_paystubs (external_id);
     -- FX-rate snapshots (Phase 11.1). Lives here (the always-run fallback) as
     -- well as migration 0019 because the packaged app doesn't bundle migrations.
     CREATE TABLE IF NOT EXISTS fx_rates (
