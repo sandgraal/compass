@@ -153,6 +153,14 @@ const api = {
     connect: () => ipcRenderer.invoke('argyle:connect')
   },
 
+  // --- SnapTrade (Phase 10.9 — BYO-direct brokerage aggregator → net worth) ---
+  snaptrade: {
+    connect: () => ipcRenderer.invoke('snaptrade:connect'),
+    setByo: (clientId: string, consumerKey: string) =>
+      ipcRenderer.invoke('snaptrade:set-byo', clientId, consumerKey),
+    hasCreds: () => ipcRenderer.invoke('snaptrade:has-creds')
+  },
+
   // --- Encrypted backup / restore (May 2026 Tier 1 #2) ---
   backup: {
     create: (passphrase: string) => ipcRenderer.invoke('backup:create', passphrase),

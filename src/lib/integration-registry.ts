@@ -207,6 +207,17 @@ export const INTEGRATION_REGISTRY: Record<string, IntegrationMeta> = {
     logo: 'A',
     connected: true
   },
+  snaptrade: {
+    id: 'snaptrade',
+    name: 'SnapTrade (Brokerage)',
+    category: 'finance',
+    method: 'live',
+    description: 'Live brokerage holdings (Robinhood, Schwab, Fidelity…) feed your net worth.',
+    scopes: ['accounts:read', 'positions:read'],
+    color: 'from-blue-500/20 to-cyan-500/20',
+    logo: '§',
+    connected: true
+  },
   slack: {
     id: 'slack',
     name: 'Slack',

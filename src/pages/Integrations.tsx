@@ -54,6 +54,12 @@ export default function Integrations(): JSX.Element {
   // current input value. Single-instance because the only PAT-connectable
   // integration today is GitHub.
   const [githubPatInput, setGithubPatInput] = useState<string | null>(null)
+  // SnapTrade BYO setup form (clientId + consumerKey), shown on Connect when the
+  // partner credentials aren't stored yet. Null = collapsed.
+  const [snaptradeSetupInput, setSnaptradeSetupInput] = useState<{
+    clientId: string
+    consumerKey: string
+  } | null>(null)
   // Null = Google credentials form is collapsed. Object = form is open
   // with the current Client ID + Secret values. Stays open until either
   // (a) the user successfully submits, or (b) they click Cancel.
@@ -339,6 +345,17 @@ export default function Integrations(): JSX.Element {
       } finally {
         setConnecting(null)
       }
+      return
+    }
+    // SnapTrade (BYO-direct): needs partner credentials first, then opens the
+    // Connection Portal; a sync pulls holdings into net worth.
+    if (service === 'snaptrade') {
+      const hasCreds = await window.api.snaptrade.hasCreds().catch(() => false)
+      if (!hasCreds) {
+        setSnaptradeSetupInput({ clientId: '', consumerKey: '' })
+        return
+      }
+      await runSnaptradeConnect()
       return
     }
     setConnecting(service)
@@ -709,6 +726,43 @@ export default function Integrations(): JSX.Element {
     } finally {
       setConnecting(null)
     }
+  }
+
+  // Open the SnapTrade Connection Portal, then kick off a holdings sync.
+  async function runSnaptradeConnect() {
+    setConnecting('snaptrade')
+    try {
+      const r = await window.api.snaptrade.connect()
+      if (!r.success) {
+        toast(`SnapTrade connection failed: ${r.error ?? 'unknown error'}`, 'error')
+        return
+      }
+      toast('SnapTrade connected — importing your holdings…', 'success')
+      await loadStatuses()
+      triggerSync('snaptrade')
+    } catch (err) {
+      toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      setConnecting(null)
+    }
+  }
+
+  // Save the user's SnapTrade partner credentials, then open the portal.
+  async function submitSnaptradeSetup() {
+    if (snaptradeSetupInput === null) return
+    const clientId = snaptradeSetupInput.clientId.trim()
+    const consumerKey = snaptradeSetupInput.consumerKey.trim()
+    if (!clientId || !consumerKey) {
+      toast('Enter both your SnapTrade clientId and consumerKey.', 'error')
+      return
+    }
+    const r = await window.api.snaptrade.setByo(clientId, consumerKey)
+    if (!r.success) {
+      toast(r.error ?? 'Failed to save credentials.', 'error')
+      return
+    }
+    setSnaptradeSetupInput(null)
+    await runSnaptradeConnect()
   }
 
   async function submitGitHubPat() {
@@ -1940,6 +1994,88 @@ export default function Integrations(): JSX.Element {
                     </div>
                   )}
 
+                  {integration.id === 'snaptrade' &&
+                    !isConnected &&
+                    snaptradeSetupInput !== null && (
+                      <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
+                        <div className="text-xs text-muted-foreground leading-relaxed">
+                          Paste your SnapTrade partner keys (free dev tier). Compass stores them
+                          encrypted on disk and signs each request locally.{' '}
+                          <a
+                            href="https://snaptrade.com/register"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary underline underline-offset-2 inline-flex items-center gap-0.5"
+                          >
+                            Get keys
+                            <ExternalLink size={10} className="opacity-70" />
+                          </a>
+                        </div>
+                        <label
+                          htmlFor="snaptrade-client-id"
+                          className="block text-xs text-muted-foreground"
+                        >
+                          Client ID
+                        </label>
+                        <input
+                          id="snaptrade-client-id"
+                          type="text"
+                          placeholder="Your SnapTrade clientId"
+                          value={snaptradeSetupInput.clientId}
+                          onChange={(e) =>
+                            setSnaptradeSetupInput((s) =>
+                              s ? { ...s, clientId: e.target.value } : s
+                            )
+                          }
+                          className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+                        />
+                        <label
+                          htmlFor="snaptrade-consumer-key"
+                          className="block text-xs text-muted-foreground"
+                        >
+                          Consumer Key
+                        </label>
+                        <input
+                          id="snaptrade-consumer-key"
+                          type="password"
+                          placeholder="Your SnapTrade consumerKey"
+                          value={snaptradeSetupInput.consumerKey}
+                          onChange={(e) =>
+                            setSnaptradeSetupInput((s) =>
+                              s ? { ...s, consumerKey: e.target.value } : s
+                            )
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') void submitSnaptradeSetup()
+                            else if (e.key === 'Escape') setSnaptradeSetupInput(null)
+                          }}
+                          className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void submitSnaptradeSetup()}
+                            disabled={
+                              connecting === 'snaptrade' ||
+                              !snaptradeSetupInput.clientId.trim() ||
+                              !snaptradeSetupInput.consumerKey.trim()
+                            }
+                            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
+                          >
+                            <Plug2 size={11} />
+                            {connecting === 'snaptrade' ? 'Connecting…' : 'Connect'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSnaptradeSetupInput(null)}
+                            className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                   <div className="flex gap-2">
                     {/* Plaid is multi-Item: Disconnect is a per-row button inside
                     the card body, NOT this card-level Disconnect. The
@@ -1961,7 +2097,8 @@ export default function Integrations(): JSX.Element {
                       (integration.id === 'notion' && notionTokenInput !== null) ||
                       (integration.id === 'linear' && linearKeyInput !== null) ||
                       (integration.id === 'todoist' && todoistKeyInput !== null) ||
-                      (integration.id === 'oura' && ouraTokenInput !== null) ? null : (
+                      (integration.id === 'oura' && ouraTokenInput !== null) ||
+                      (integration.id === 'snaptrade' && snaptradeSetupInput !== null) ? null : (
                       <button
                         type="button"
                         onClick={() => connect(integration.id)}

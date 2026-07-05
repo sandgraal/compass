@@ -212,7 +212,7 @@ finance/vault; low-sensitivity media/purchase history can be records-readable.
 |---|---|---|---|---|
 | **Terra** (or Vital/Rook) | 500+ wearables/health apps (Fitbit, Garmin, Oura, Whoop, Apple Health, Strava) | LIVE-relay | **new Health hub** (sleep/HRV/activity trends; correlations w/ spend + productivity) | aggregates-only |
 | **Metriport / Flexpa** | 300M+ medical records via FHIR/TEFCA/Carequality | LIVE-relay | longitudinal **medical timeline** → Phase 9.4 `medical_*` | aggregates-only |
-| **SnapTrade** | every major brokerage (Robinhood/Schwab/Fidelity/E*TRADE) | LIVE-**BYO** | completes **holdings + net worth** (today: unvalidated CSV) | aggregates-only |
+| **SnapTrade** *(shipped 10.9)* | every major brokerage (Robinhood/Schwab/Fidelity/E*TRADE) | LIVE-**BYO** | completes **holdings + net worth** (live positions replace the unvalidated CSV) | aggregates-only |
 | **Canopy Connect** | 300+ P&C insurers ("Plaid for insurance") | LIVE-relay | completes **`finance-estate` insurance-adequacy / gap** engine (today: manual) | aggregates-only |
 | **Argyle / Pinwheel** *(shipped 10.9)* | payroll/income for ~80% of US workers | LIVE-relay | completes **Phase 4.5 forecast** (real paystubs replace inferred income; effective withholding rate) | aggregates-only |
 | **Arcadia (Plug) / UtilityAPI** | 125+ utilities (bill + interval data) | LIVE-relay | completes **`finance-property` Schedule-E P&L** (missing expense line) + carbon | aggregates-only |
@@ -306,8 +306,11 @@ Builds on Phase 9's shipped spine; **does not renumber 9.x**. Each wave is its o
   insurance rows → the `finance-estate` adequacy/gap engine, replacing hand-entered policies), and **Argyle**
   (`argyle.ts` → `argyle_paystubs` → `finance-income.ts` → the cash-flow forecast prefers real paystubs over
   bank-deposit inference; adds an effective-withholding income summary). Client seam `relay-client.ts`
-  (managed↔BYO; Canopy + Argyle are managed-only). Self-servable aggregators (SnapTrade, exchanges) stay BYO.
-  Next relay-fronted: SnapTrade / Arcadia / Metriport / Nylas / Knot. See §4f.
+  (managed↔BYO; Canopy + Argyle are managed-only). Plus **SnapTrade** — the first **BYO-direct** aggregator (no
+  relay): its per-request HMAC signature doesn't fit the relay's static auth and its partner keys are self-serve,
+  so Compass signs + calls it directly (like Plaid/SimpleFIN) → live brokerage holdings roll into net worth via
+  `NET_WORTH_HOLDINGS_SOURCES` (`importHoldings(…, SNAPTRADE_SOURCE)`, zero engine change). Next: Arcadia /
+  Metriport / Nylas / Knot. See §4f.
 
 > **Build order:** 10.1 (spine) → 10.2 / 10.3 / 10.4 (independent, parallelizable, each reuses the spine) →
 > 10.5 → 10.6 (cross-cutting, gated) → 10.7 (leverage, but delivered incrementally throughout) →
