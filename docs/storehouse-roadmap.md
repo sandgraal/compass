@@ -298,9 +298,12 @@ Builds on Phase 9's shipped spine; **does not renumber 9.x**. Each wave is its o
   (`source='location'`) so the Phase 11.5 residency engine (days-in-country / US substantial-presence / CR-183)
   goes from **manual** to **automatic**. Raw coordinates stay OFF the `records`/FTS/MCP spine (§5 aggregates-only);
   only the coarse country/date segments surface. *Next: a live self-hosted GPS endpoint (Overland/OwnTracks push).*
-- [ ] **10.9 The metered aggregator relay + first paid aggregators** — primitive **G** (§3): the thin stateless
-  relay + the first relay-fronted aggregator (**Terra**, 500+ wearables → Health hub), then Canopy / Argyle /
-  Arcadia. Self-servable aggregators (SnapTrade, exchanges) stay BYO. Gated + quota-metered (§5). See §4f.
+- [~] **10.9 The metered aggregator relay + first paid aggregators** 🟡 *relay + Terra client shipped (needs a
+  deployed relay + real Terra keys to run live)* — primitive **G** (§3): the thin stateless **relay** (a new
+  zero-dependency `relay/` workspace — metering/quota/anomaly engine + deny-by-default adapter allowlist + Terra
+  adapter + proxy server, 28 tests, deploy-ready) + the Electron **Terra client** (`relay-client.ts` managed↔BYO
+  seam + `terra.ts` connect/sync → health `records` source `'terra'` → the Health hub). Self-servable aggregators
+  (SnapTrade, exchanges) stay BYO. Next relay-fronted: Canopy / Argyle / Arcadia / Metriport / Nylas / Knot. See §4f.
 
 > **Build order:** 10.1 (spine) → 10.2 / 10.3 / 10.4 (independent, parallelizable, each reuses the spine) →
 > 10.5 → 10.6 (cross-cutting, gated) → 10.7 (leverage, but delivered incrementally throughout) →

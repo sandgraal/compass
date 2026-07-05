@@ -37,6 +37,7 @@ import { registerStorehouseHandlers } from './ipc/storehouse'
 import { registerStorehouseSyncHandlers } from './ipc/storehouse-sync'
 import { registerSubscriptionsHandlers } from './ipc/subscriptions'
 import { registerSyncHandlers } from './ipc/sync'
+import { registerTerraHandlers } from './ipc/terra'
 import { initAutoUpdater, registerUpdaterHandlers, scheduleUpdateChecks } from './ipc/updater'
 import { registerVaultHandlers } from './ipc/vault'
 import { registerWeeklyReviewHandlers } from './ipc/weekly-review'
@@ -114,7 +115,7 @@ function createWindow(): void {
         responseHeaders: {
           ...details.responseHeaders,
           'Content-Security-Policy': [
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://gmail.googleapis.com https://api.github.com https://oauth2.googleapis.com https://github.com https://accounts.google.com https://bridge.simplefin.org https://beta-bridge.simplefin.org https://open.er-api.com https://api.ouraring.com; frame-src 'none'; object-src 'none'"
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://gmail.googleapis.com https://api.github.com https://oauth2.googleapis.com https://github.com https://accounts.google.com https://bridge.simplefin.org https://beta-bridge.simplefin.org https://open.er-api.com https://api.ouraring.com https://api.tryterra.co https://relay.compass.app; frame-src 'none'; object-src 'none'"
           ]
         }
       })
@@ -166,6 +167,7 @@ app.whenReady().then(async () => {
   registerFinanceHandlers(ipcMain)
   registerHabitsHandlers(ipcMain)
   registerHealthHandlers(ipcMain)
+  registerTerraHandlers(ipcMain)
   registerContactsHandlers(ipcMain)
   registerExportHandlers(ipcMain)
   registerSubscriptionsHandlers(ipcMain)

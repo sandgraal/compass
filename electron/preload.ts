@@ -137,6 +137,12 @@ const api = {
     getSummary: () => ipcRenderer.invoke('health:get-summary')
   },
 
+  // --- Terra (Phase 10.9 — relay-fronted wearables aggregator) ---
+  terra: {
+    connect: () => ipcRenderer.invoke('terra:connect'),
+    setByo: (devId: string, apiKey: string) => ipcRenderer.invoke('terra:set-byo', devId, apiKey)
+  },
+
   // --- Encrypted backup / restore (May 2026 Tier 1 #2) ---
   backup: {
     create: (passphrase: string) => ipcRenderer.invoke('backup:create', passphrase),
