@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import * as schema from '../db/schema'
 import {
   type CanopyAsset,
+  hashedPolicyId,
   lineOfBusinessName,
   maskPolicyNumber,
   normalizeCanopyPull,
@@ -64,6 +65,20 @@ describe('normalizeCanopyPull', () => {
     expect(normalizeCanopyPull({})).toEqual([])
     expect(normalizeCanopyPull({ policies: 'nope' })).toEqual([])
     expect(normalizeCanopyPull({ policies: [{ policy_type: 'AUTO' }] })).toEqual([]) // no id
+  })
+
+  it('never leaks a raw policy number into external_id — hashes it as the fallback id', () => {
+    const out = normalizeCanopyPull({
+      policies: [{ policy_number: 'AUTO-9876', policy_type: 'AUTO', carrier_name: 'GEICO' }]
+    })
+    expect(out).toHaveLength(1)
+    // fallback id is the hash, NOT the raw number
+    expect(out[0].externalId).toBe(`canopy:${hashedPolicyId('AUTO-9876')}`)
+    expect(out[0].externalId).not.toContain('AUTO-9876')
+    // …and it's stable across pulls (so re-sync dedups)
+    expect(hashedPolicyId('AUTO-9876')).toBe(hashedPolicyId('AUTO-9876'))
+    // …but the visible reference is still masked to the last 4
+    expect(out[0].asset.reference).toBe('••••9876')
   })
 })
 

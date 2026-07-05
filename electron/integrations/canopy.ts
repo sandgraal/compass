@@ -16,6 +16,7 @@
  * API but are **unvalidated against a real pull** — sharpen the field paths when one lands.
  */
 
+import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { BrowserWindow } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
@@ -66,6 +67,15 @@ export function maskPolicyNumber(pn: unknown): string | null {
   return s.length <= 4 ? s : `••••${s.slice(-4)}`
 }
 
+/**
+ * Stable, non-reversible id derived from a raw policy number — a fallback when Canopy
+ * gives no `id`/`policy_id`. Hashing keeps dedup working WITHOUT ever writing the full
+ * policy number into `assets.external_id` (which is stored plainly and export-visible).
+ */
+export function hashedPolicyId(pn: string): string {
+  return `pn_${createHash('sha256').update(pn).digest('hex').slice(0, 16)}`
+}
+
 function coverageOf(policy: Record<string, unknown>): number | null {
   const covs = policy.coverages
   if (Array.isArray(covs)) {
@@ -93,7 +103,10 @@ export type CanopyAsset = { externalId: string; asset: AssetInput }
 export function normalizeCanopyPull(json: unknown): CanopyAsset[] {
   const out: CanopyAsset[] = []
   for (const p of policiesOf(json)) {
-    const id = str(p.id) ?? str(p.policy_id) ?? str(p.policy_number)
+    const pn = str(p.policy_number)
+    // Never fall back to the raw policy number as the id — it would land unmasked in
+    // `external_id`. Hash it instead so dedup still works but nothing sensitive is stored.
+    const id = str(p.id) ?? str(p.policy_id) ?? (pn ? hashedPolicyId(pn) : null)
     if (!id) continue
     const lob = str(p.policy_type) ?? str(p.line_of_business) ?? str(p.type) ?? ''
     const carrier = str(p.carrier_name) ?? str(p.carrier) ?? str(p.insurance_company)
@@ -106,7 +119,7 @@ export function normalizeCanopyPull(json: unknown): CanopyAsset[] {
         name: lineOfBusinessName(lob),
         value: coverageOf(p),
         provider: carrier,
-        reference: maskPolicyNumber(p.policy_number),
+        reference: maskPolicyNumber(pn),
         renewalDate: expiration,
         status: 'active',
         notes: premium != null ? `Premium ${Math.round(premium).toLocaleString('en-US')}` : null
@@ -122,6 +135,7 @@ type SyncResult = { service: string; success: boolean; recordsUpdated?: number; 
 type CanopyToken = { pullId?: string }
 
 const CANOPY_SUCCESS_URL = 'https://compass.app/canopy/success' // sentinel we intercept, never load
+const CANOPY_SUCCESS = new URL(CANOPY_SUCCESS_URL) // parsed once for exact origin+path matching
 
 function loadCanopyToken(): CanopyToken {
   return (loadToken('canopy') as CanopyToken | null) ?? {}
@@ -204,6 +218,16 @@ export async function syncCanopy(mainWindow?: BrowserWindow | null): Promise<Syn
         set: { status: 'error', errorMessage: message }
       })
       .run()
+    const integrationId = db
+      .select({ id: integrations.id })
+      .from(integrations)
+      .where(eq(integrations.service, 'canopy'))
+      .get()?.id
+    if (integrationId != null) {
+      db.insert(syncEvents)
+        .values({ integrationId, syncedAt: new Date(), recordsUpdated: 0, errors: message })
+        .run()
+    }
     mainWindow?.webContents.send('sync:update', {
       service: 'canopy',
       status: 'error',
@@ -262,19 +286,26 @@ export async function openCanopyConnect(
       resolve(result)
     }
     const onNavigate = (e: Electron.Event, url: string): void => {
-      if (!url.startsWith(CANOPY_SUCCESS_URL)) return
-      e.preventDefault()
+      let target: URL
       try {
-        const pullId = new URL(url).searchParams.get('pull_id') ?? ''
-        if (!pullId) {
-          finish({ success: false, error: 'Canopy returned no pull_id' })
-          return
-        }
-        saveToken('canopy', { ...loadCanopyToken(), pullId })
-        finish({ success: true })
-      } catch (err) {
-        finish({ success: false, error: String(err) })
+        target = new URL(url)
+      } catch {
+        return
       }
+      // Exact origin+pathname match — `startsWith` would also fire on e.g.
+      // `.../canopy/successful-import`, and this navigation decides what we store as pullId.
+      if (target.origin !== CANOPY_SUCCESS.origin || target.pathname !== CANOPY_SUCCESS.pathname) {
+        return
+      }
+      e.preventDefault()
+      const pullId = target.searchParams.get('pull_id') ?? ''
+      // Validate against the same charset the relay allowlist accepts for `/pulls/{id}`.
+      if (!/^[A-Za-z0-9_-]+$/.test(pullId)) {
+        finish({ success: false, error: 'Canopy returned no valid pull_id' })
+        return
+      }
+      saveToken('canopy', { ...loadCanopyToken(), pullId })
+      finish({ success: true })
     }
     win.webContents.on('will-redirect', onNavigate)
     win.webContents.on('will-navigate', onNavigate)
