@@ -218,6 +218,17 @@ export const INTEGRATION_REGISTRY: Record<string, IntegrationMeta> = {
     logo: '§',
     connected: true
   },
+  arcadia: {
+    id: 'arcadia',
+    name: 'Arcadia (Utilities)',
+    category: 'finance',
+    method: 'live',
+    description: 'Utility bills from 125+ providers — the utilities line in your rental P&L.',
+    scopes: ['statements:read'],
+    color: 'from-lime-500/20 to-green-600/20',
+    logo: '⚡',
+    connected: true
+  },
   slack: {
     id: 'slack',
     name: 'Slack',

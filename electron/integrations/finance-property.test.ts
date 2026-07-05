@@ -142,7 +142,8 @@ const CFG: PropertyConfig = {
   placedInService: '2024-06-15',
   landValue: 0,
   recoveryYears: 30,
-  basisOverride: null
+  basisOverride: null,
+  utilityAddress: null
 }
 
 let sqlite: Database.Database
@@ -233,5 +234,44 @@ describe('buildPropertyPnl', () => {
     expect(pnl.totals.netOperating).toBe(0)
     expect(pnl.depreciation).toEqual([]) // basis 0 → nothing to depreciate
     expect(pnl.netYieldOnBasis).toBeNull()
+  })
+})
+
+describe('buildPropertyPnl — Arcadia utility bills → utilities operating line (Phase 10.9)', () => {
+  function seedUtilityBills(sqlite: Database.Database): void {
+    sqlite.exec(`
+      CREATE TABLE utility_bills (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE,
+        provider TEXT, service_address TEXT, statement_date TEXT, period_start TEXT,
+        period_end TEXT, amount REAL, currency TEXT NOT NULL DEFAULT 'USD',
+        usage_kwh REAL, ingested_at INTEGER
+      );
+    `)
+    const ins = sqlite.prepare(
+      'INSERT INTO utility_bills (external_id, provider, service_address, statement_date, amount, currency) VALUES (?, ?, ?, ?, ?, ?)'
+    )
+    ins.run('arcadia:a', 'PG&E', '123 Rental Way, San José', '2024-03-15', 100, 'USD') // matches
+    ins.run('arcadia:b', 'City Water', '123 Rental Way, San José', '2024-06-20', 50, 'USD') // matches
+    ins.run('arcadia:c', 'Home Electric', '999 Primary St, Austin', '2024-05-01', 300, 'USD') // no match
+  }
+
+  it('adds only bills matching the configured service address, into operating + utilities', () => {
+    const sqlite = makeDb()
+    seedUtilityBills(sqlite)
+    // an existing tagged operating expense, so we can see utilities add on top of it
+    addTxn(sqlite, { date: '2024-04-01', amount: -200, taxTag: 'tax:schedule-e-expense' })
+
+    const pnl = buildPropertyPnl(sqlite, { ...CFG, utilityAddress: 'Rental Way' })
+    const y2024 = pnl.byYear.find((y) => y.year === 2024)
+    expect(y2024?.utilities).toBe(150) // 100 + 50 — the two matching bills
+    expect(y2024?.operating).toBe(350) // 200 tagged expense + 150 utilities
+    expect(pnl.totals.utilities).toBe(150) // the Austin bill (non-matching address) is excluded
+  })
+
+  it('counts no utilities when no service address is configured', () => {
+    const sqlite = makeDb()
+    seedUtilityBills(sqlite)
+    const pnl = buildPropertyPnl(sqlite, CFG) // utilityAddress: null
+    expect(pnl.totals.utilities).toBe(0)
   })
 })

@@ -696,6 +696,27 @@ export const argylePaystubs = sqliteTable('argyle_paystubs', {
   ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
+// ---- Utility bills (Phase 10.9 — "Arcadia → property P&L") ----
+// Utility statements from the Arcadia aggregator, feeding the Schedule-E property P&L
+// (`finance-property.ts`) as the utilities operating-expense line. DELIBERATELY OFF the
+// `records`/finance_transactions spine: keeps utility STATEMENTS out of the cash ledger
+// (no double-count vs the bank payment) and the service address off the AI timeline
+// (aggregates-only). Holds `usage_kwh` for future carbon leverage. Amounts are positive
+// (bill totals) in the statement's own `currency`; dates are local-day 'YYYY-MM-DD'.
+export const utilityBills = sqliteTable('utility_bills', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  externalId: text('external_id').notNull().unique(), // Arcadia statement id (dedup key)
+  provider: text('provider'), // utility company
+  serviceAddress: text('service_address'), // matched against the property config to attribute the bill
+  statementDate: text('statement_date'), // 'YYYY-MM-DD' — the expense date the P&L buckets by year
+  periodStart: text('period_start'),
+  periodEnd: text('period_end'),
+  amount: real('amount'), // bill total (positive)
+  currency: text('currency').notNull().default('USD'),
+  usageKwh: real('usage_kwh'), // energy usage when provided (future carbon leverage)
+  ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
 // ---- Financial goals (Phase 11.6 — "Goals & milestones") ----
 // Target-date savings goals that tie the cross-border picture together: a tax
 // reserve, the next CR capex draw, the retirement number, an emergency fund.

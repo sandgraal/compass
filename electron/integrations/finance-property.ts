@@ -35,19 +35,24 @@ export type PropertyConfig = {
   landValue: number // base currency; excluded from the depreciable basis
   recoveryYears: number // 30 (foreign ADS) | 27.5 (US GDS) | 40 (pre-2018 ADS)
   basisOverride: number | null // base currency; overrides accumulated-capex basis when set
+  // Service-address substring that attributes Arcadia utility bills (Phase 10.9) to this
+  // property → they become the utilities operating-expense line. null = none counted.
+  utilityAddress: string | null
 }
 
 export const DEFAULT_PROPERTY_CONFIG: PropertyConfig = {
   placedInService: null,
   landValue: 0,
   recoveryYears: PROPERTY_RECOVERY_YEARS_DEFAULT,
-  basisOverride: null
+  basisOverride: null,
+  utilityAddress: null
 }
 
 export type PropertyPnlYear = {
   year: number
   revenue: number // base currency
-  operating: number // base currency, positive = expense magnitude
+  operating: number // base currency, positive = expense magnitude (INCLUDES utilities)
+  utilities: number // base currency, positive — the utilities portion of `operating` (Arcadia)
   capex: number // base currency, positive
   netOperating: number // revenue - operating
 }
@@ -62,7 +67,13 @@ export type DepreciationYear = {
 export type PropertyPnl = {
   baseCurrency: string
   byYear: PropertyPnlYear[]
-  totals: { revenue: number; operating: number; capex: number; netOperating: number }
+  totals: {
+    revenue: number
+    operating: number
+    utilities: number
+    capex: number
+    netOperating: number
+  }
   basisToDate: number // cumulative capex (base currency)
   depreciableBasis: number // basis (override or accumulated capex) minus land
   netYieldOnBasis: number | null // total netOperating / depreciableBasis (null if no basis)
@@ -178,6 +189,32 @@ function convertAsOf(
   return amount * rate
 }
 
+type UtilityBillPnlRow = {
+  statementDate: string | null
+  amount: number | null
+  currency: string | null
+}
+
+/**
+ * Read Arcadia utility bills whose service address matches `addressFilter` (case-insensitive
+ * substring) — these attribute to the property. Empty on older installs (table-less).
+ */
+function readUtilityBills(sqlite: SqliteForFx, addressFilter: string): UtilityBillPnlRow[] {
+  const pattern = `%${addressFilter.trim().toLowerCase()}%`
+  try {
+    return sqlite
+      .prepare(
+        `SELECT statement_date AS statementDate, amount, currency
+           FROM utility_bills
+          WHERE amount IS NOT NULL AND statement_date IS NOT NULL
+            AND LOWER(COALESCE(service_address, '')) LIKE ?`
+      )
+      .all(pattern) as UtilityBillPnlRow[]
+  } catch {
+    return []
+  }
+}
+
 /**
  * Assemble the property P&L + depreciation. `config` is supplied by the caller
  * (read from app_settings at the IPC boundary). Pure SQLite — no Drizzle.
@@ -202,7 +239,7 @@ export function buildPropertyPnl(
   const ensureYear = (year: number): PropertyPnlYear => {
     let y = byYear.get(year)
     if (!y) {
-      y = { year, revenue: 0, operating: 0, capex: 0, netOperating: 0 }
+      y = { year, revenue: 0, operating: 0, utilities: 0, capex: 0, netOperating: 0 }
       byYear.set(year, y)
     }
     return y
@@ -233,10 +270,36 @@ export function buildPropertyPnl(
     else y.capex += -converted
   }
 
+  // Utility bills (Arcadia, Phase 10.9) → the utilities operating line, when a service
+  // address is configured to attribute them to this property. They add to `operating`
+  // (and a visible `utilities` sub-total) alongside the tagged transaction expenses.
+  if (config.utilityAddress?.trim()) {
+    for (const b of readUtilityBills(sqlite, config.utilityAddress)) {
+      if (b.amount == null || !b.statementDate) continue
+      const year = Number.parseInt(b.statementDate.slice(0, 4), 10)
+      if (!Number.isFinite(year)) continue
+      const converted = convertAsOf(
+        b.amount,
+        (b.currency || base).toUpperCase(),
+        base,
+        rates,
+        b.statementDate
+      )
+      if (converted == null) {
+        unconvertedCount++
+        continue
+      }
+      const y = ensureYear(year)
+      y.operating += converted // positive = expense magnitude
+      y.utilities += converted
+    }
+  }
+
   const years = [...byYear.values()].sort((a, b) => a.year - b.year)
   for (const y of years) {
     y.revenue = round2(y.revenue)
     y.operating = round2(y.operating)
+    y.utilities = round2(y.utilities)
     y.capex = round2(y.capex)
     y.netOperating = round2(y.revenue - y.operating)
   }
@@ -245,13 +308,15 @@ export function buildPropertyPnl(
     (acc, y) => ({
       revenue: acc.revenue + y.revenue,
       operating: acc.operating + y.operating,
+      utilities: acc.utilities + y.utilities,
       capex: acc.capex + y.capex,
       netOperating: acc.netOperating + y.netOperating
     }),
-    { revenue: 0, operating: 0, capex: 0, netOperating: 0 }
+    { revenue: 0, operating: 0, utilities: 0, capex: 0, netOperating: 0 }
   )
   totals.revenue = round2(totals.revenue)
   totals.operating = round2(totals.operating)
+  totals.utilities = round2(totals.utilities)
   totals.capex = round2(totals.capex)
   totals.netOperating = round2(totals.netOperating)
 
@@ -291,7 +356,8 @@ export const PROPERTY_CONFIG_KEYS = {
   placedInService: 'propertyPlacedInService',
   landValue: 'propertyLandValue',
   recoveryYears: 'propertyRecoveryYears',
-  basisOverride: 'propertyBasisOverride'
+  basisOverride: 'propertyBasisOverride',
+  utilityAddress: 'propertyUtilityAddress'
 } as const
 
 /** Read the property config from `app_settings`, falling back to the defaults. */
@@ -312,6 +378,7 @@ export function getPropertyConfig(sqlite: SqliteForFx): PropertyConfig {
   const recoveryYears = Number(read(PROPERTY_CONFIG_KEYS.recoveryYears))
   const basisRaw = read(PROPERTY_CONFIG_KEYS.basisOverride)
   const basisOverride = basisRaw == null || basisRaw === '' ? null : Number(basisRaw)
+  const utilityAddress = read(PROPERTY_CONFIG_KEYS.utilityAddress)
   return {
     placedInService,
     landValue: Number.isFinite(landValue) && landValue >= 0 ? landValue : 0,
@@ -322,7 +389,8 @@ export function getPropertyConfig(sqlite: SqliteForFx): PropertyConfig {
     basisOverride:
       basisOverride != null && Number.isFinite(basisOverride) && basisOverride >= 0
         ? basisOverride
-        : null
+        : null,
+    utilityAddress: utilityAddress?.trim() ? utilityAddress.trim() : null
   }
 }
 
@@ -358,5 +426,8 @@ export function setPropertyConfig(
       PROPERTY_CONFIG_KEYS.basisOverride,
       patch.basisOverride == null ? '' : String(patch.basisOverride)
     )
+  }
+  if ('utilityAddress' in patch) {
+    write(PROPERTY_CONFIG_KEYS.utilityAddress, patch.utilityAddress ?? '')
   }
 }

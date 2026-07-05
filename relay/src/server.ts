@@ -14,7 +14,7 @@
 
 import { createHash } from 'node:crypto'
 import { getAdapter } from './adapters/index.js'
-import type { RelayEnv } from './adapters/types.js'
+import type { AggregatorAdapter, RelayEnv } from './adapters/types.js'
 import {
   type MeteringStore,
   type Quota,
@@ -23,6 +23,7 @@ import {
   recordCall,
   rollover
 } from './metering.js'
+import { TokenCache } from './token-cache.js'
 
 export type RelayRequest = {
   method: string
@@ -42,10 +43,42 @@ export type RelayConfig = {
   clientTokens: Set<string>
   fetchImpl?: typeof fetch // injected in tests
   now?: () => number // injected in tests
+  tokenCache?: TokenCache // OAuth bearer cache for tokenAuth adapters; defaults to a shared one
 }
 
 function json(status: number, obj: unknown): RelayResponse {
   return { status, headers: { 'content-type': 'application/json' }, body: JSON.stringify(obj) }
+}
+
+// Shared cache for OAuth client-credentials bearers (Arcadia). Holds only the relay's own
+// short-lived service tokens — never user data. Tests may inject their own via cfg.tokenCache.
+const sharedTokenCache = new TokenCache()
+
+/**
+ * Resolve the auth headers for a proxied request: the adapter's static `authHeaders`,
+ * plus — for `tokenAuth` adapters — a cached OAuth bearer merged into Authorization.
+ */
+async function resolveAuthHeaders(
+  adapter: AggregatorAdapter,
+  cfg: RelayConfig,
+  now: number,
+  doFetch: typeof fetch
+): Promise<Record<string, string>> {
+  const headers = adapter.authHeaders(cfg.env)
+  const ta = adapter.tokenAuth
+  if (!ta) return headers
+  const cache = cfg.tokenCache ?? sharedTokenCache
+  const bearer = await cache.get(adapter.id, now, async () => {
+    const r = ta.buildRequest(cfg.env)
+    const res = await doFetch(ta.tokenUrl, {
+      method: r.method ?? 'POST',
+      headers: r.headers,
+      body: r.body
+    })
+    if (!res.ok) throw new Error(`token exchange HTTP ${res.status}`)
+    return ta.parseToken(await res.json())
+  })
+  return { ...headers, authorization: `Bearer ${bearer}` }
 }
 
 export async function handleRelayRequest(
@@ -94,11 +127,19 @@ export async function handleRelayRequest(
 
   // ── Proxy (inject secret credentials; forward method/query/body) ──
   const url = adapter.upstreamBase + upstreamPath + (req.query ?? '')
+  let headers: Record<string, string>
+  try {
+    headers = await resolveAuthHeaders(adapter, cfg, now, doFetch)
+  } catch (err) {
+    // A failed OAuth token exchange — log server-side only, return a generic error.
+    console.error('[relay] token exchange failed', err)
+    return json(502, { error: 'Upstream auth failed' })
+  }
   let upstream: Response
   try {
     upstream = await doFetch(url, {
       method,
-      headers: adapter.authHeaders(cfg.env),
+      headers,
       body: method === 'GET' || method === 'HEAD' ? undefined : (req.body ?? undefined),
       // Never auto-follow redirects: the secret credentials are attached to THIS request
       // and must not be replayed to a redirect target. Hand any 3xx back to the client.
@@ -108,6 +149,12 @@ export async function handleRelayRequest(
     // Log server-side only — never leak internal error detail (stack traces) to the caller.
     console.error('[relay] upstream fetch failed', err)
     return json(502, { error: 'Upstream fetch failed' })
+  }
+
+  // A 401 from a tokenAuth upstream means the cached bearer went stale — drop it so the
+  // NEXT request re-exchanges (the 60s skew makes mid-flight expiry rare; this is the backstop).
+  if (upstream.status === 401 && adapter.tokenAuth) {
+    ;(cfg.tokenCache ?? sharedTokenCache).invalidate(adapter.id)
   }
 
   // Enforce the daily byte cap as a HARD cap: reject before reading the body when the
