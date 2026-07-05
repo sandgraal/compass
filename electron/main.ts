@@ -34,6 +34,7 @@ import { registerRecordsHandlers } from './ipc/records'
 import { registerSearchHandlers } from './ipc/search'
 import { registerSettingsHandlers } from './ipc/settings'
 import { registerSimplefinHandlers } from './ipc/simplefin'
+import { registerSnaptradeHandlers } from './ipc/snaptrade'
 import { registerSpotlightHandlers, startKnowledgeMirrorWatcher } from './ipc/spotlight'
 import { registerStorehouseHandlers } from './ipc/storehouse'
 import { registerStorehouseSyncHandlers } from './ipc/storehouse-sync'
@@ -172,6 +173,7 @@ app.whenReady().then(async () => {
   registerTerraHandlers(ipcMain)
   registerCanopyHandlers(ipcMain)
   registerArgyleHandlers(ipcMain)
+  registerSnaptradeHandlers(ipcMain)
   registerContactsHandlers(ipcMain)
   registerExportHandlers(ipcMain)
   registerSubscriptionsHandlers(ipcMain)

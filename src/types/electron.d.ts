@@ -808,6 +808,12 @@ declare global {
       argyle: {
         connect(): Promise<{ success: boolean; error?: string }>
       }
+      // SnapTrade (Phase 10.9) — BYO-direct brokerage aggregator → net worth.
+      snaptrade: {
+        connect(): Promise<{ success: boolean; error?: string }>
+        setByo(clientId: string, consumerKey: string): Promise<{ success: boolean; error?: string }>
+        hasCreds(): Promise<boolean>
+      }
       backup: {
         create(passphrase: string): Promise<{
           success: boolean

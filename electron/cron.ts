@@ -13,6 +13,7 @@ import { syncLinear } from './integrations/linear'
 import { syncNotion } from './integrations/notion'
 import { syncObsidian } from './integrations/obsidian'
 import { syncOura } from './integrations/oura'
+import { syncSnaptrade } from './integrations/snaptrade'
 import { syncTerra } from './integrations/terra'
 import { syncThings } from './integrations/things'
 import { syncTodoist } from './integrations/todoist'
@@ -162,6 +163,8 @@ function runSyncForService(service: string): void {
     void syncCanopy(win)
   } else if (service === 'argyle') {
     void syncArgyle(win)
+  } else if (service === 'snaptrade') {
+    void syncSnaptrade(win)
   }
 }
 

@@ -202,8 +202,15 @@ export function importHoldings(
 /** `records.source` for Plaid Investments position snapshots (LIVE path). */
 export const PLAID_INVESTMENTS_SOURCE = 'plaid-investments'
 
+/** `records.source` for SnapTrade position snapshots (LIVE BYO-direct path, Phase 10.9). */
+export const SNAPTRADE_SOURCE = 'snaptrade'
+
 /** Every source whose latest snapshot rolls up into the Net Worth holdings card. */
-export const NET_WORTH_HOLDINGS_SOURCES = [HOLDINGS_SOURCE, PLAID_INVESTMENTS_SOURCE]
+export const NET_WORTH_HOLDINGS_SOURCES = [
+  HOLDINGS_SOURCE,
+  PLAID_INVESTMENTS_SOURCE,
+  SNAPTRADE_SOURCE
+]
 
 export type SqliteForHoldings = {
   prepare(sql: string): { all(...params: unknown[]): unknown[] }
