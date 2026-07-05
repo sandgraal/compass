@@ -8,7 +8,8 @@ const SOURCE_LABEL: Record<string, string> = {
   oura: 'Oura',
   'apple-health': 'Apple Health',
   fitbit: 'Fitbit',
-  garmin: 'Garmin'
+  garmin: 'Garmin',
+  terra: 'Terra'
 }
 
 function fmtInt(n: number | null, suffix = ''): string {

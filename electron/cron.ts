@@ -11,6 +11,7 @@ import { syncLinear } from './integrations/linear'
 import { syncNotion } from './integrations/notion'
 import { syncObsidian } from './integrations/obsidian'
 import { syncOura } from './integrations/oura'
+import { syncTerra } from './integrations/terra'
 import { syncThings } from './integrations/things'
 import { syncTodoist } from './integrations/todoist'
 import {
@@ -153,6 +154,8 @@ function runSyncForService(service: string): void {
     void syncThings(win)
   } else if (service === 'oura') {
     void syncOura(win)
+  } else if (service === 'terra') {
+    void syncTerra(win)
   }
 }
 

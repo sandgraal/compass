@@ -21,6 +21,7 @@ import { syncOura } from '../integrations/oura'
 import { syncAllPlaidInvestments } from '../integrations/plaid/investments'
 import { syncAllPlaid } from '../integrations/plaid/sync'
 import { syncAllSimplefin } from '../integrations/simplefin/sync'
+import { syncTerra } from '../integrations/terra'
 import { syncThings } from '../integrations/things'
 import { syncTodoist } from '../integrations/todoist'
 import {
@@ -67,7 +68,8 @@ const SUPPORTED_SYNC_SERVICES = new Set([
   'linear',
   'todoist',
   'things',
-  'oura'
+  'oura',
+  'terra'
 ])
 
 function normalizeSupportedSyncService(service: unknown): string | null {
@@ -828,6 +830,7 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     if (service === 'linear') return syncLinear(win)
     if (service === 'todoist') return syncTodoist(win)
     if (service === 'oura') return syncOura(win)
+    if (service === 'terra') return syncTerra(win)
     if (service === 'things') {
       // Things is local + tokenless: Connect (and manual refresh) come through
       // here, so flip the opt-in flag on before syncing. Disconnect sets the

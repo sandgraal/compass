@@ -174,6 +174,17 @@ export const INTEGRATION_REGISTRY: Record<string, IntegrationMeta> = {
     logo: 'O',
     connected: true
   },
+  terra: {
+    id: 'terra',
+    name: 'Terra',
+    category: 'health-fitness',
+    method: 'live',
+    description: '500+ wearables (Fitbit, Garmin, Whoop, Apple Health…) through one connection.',
+    scopes: ['daily', 'sleep', 'activity'],
+    color: 'from-emerald-600/20 to-teal-600/20',
+    logo: 'T',
+    connected: true
+  },
   slack: {
     id: 'slack',
     name: 'Slack',

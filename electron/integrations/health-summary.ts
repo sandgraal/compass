@@ -25,7 +25,7 @@ import type { SqliteForFx } from './finance-fx'
 const DAY_MS = 86_400_000
 export const STEP_GOAL = 8000 // an "active day" = a workout OR ≥ this many steps
 
-export type HealthSource = 'oura' | 'apple-health' | 'fitbit' | 'garmin'
+export type HealthSource = 'oura' | 'apple-health' | 'fitbit' | 'garmin' | 'terra'
 
 export type HealthSummary = {
   today: string // local 'YYYY-MM-DD'
@@ -129,7 +129,7 @@ function readHealthRecords(sqlite: SqliteForFx): HealthRecordRow[] {
   try {
     return sqlite
       .prepare(
-        "SELECT occurred_at AS at, source, type, title, payload FROM records WHERE source IN ('apple-health','fitbit','garmin') AND occurred_at IS NOT NULL ORDER BY occurred_at"
+        "SELECT occurred_at AS at, source, type, title, payload FROM records WHERE source IN ('apple-health','fitbit','garmin','terra') AND occurred_at IS NOT NULL ORDER BY occurred_at"
       )
       .all() as HealthRecordRow[]
   } catch {
@@ -259,7 +259,7 @@ export function buildHealthSummary(
       firstDate: ouraFirst,
       lastDate: ouraLast
     },
-    ...(['apple-health', 'fitbit', 'garmin'] as const).map((src) => {
+    ...(['apple-health', 'fitbit', 'garmin', 'terra'] as const).map((src) => {
       const cov = coverage[src]
       return {
         source: src,

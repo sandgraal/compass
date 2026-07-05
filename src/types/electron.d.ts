@@ -757,7 +757,7 @@ declare global {
           today: string
           stepGoal: number
           sources: Array<{
-            source: 'oura' | 'apple-health' | 'fitbit' | 'garmin'
+            source: 'oura' | 'apple-health' | 'fitbit' | 'garmin' | 'terra'
             hasData: boolean
             count: number
             firstDate: string | null
@@ -794,6 +794,11 @@ declare global {
           }
           activeDays30: number
         }>
+      }
+      // Terra (Phase 10.9) — relay-fronted wearables aggregator.
+      terra: {
+        connect(): Promise<{ success: boolean; error?: string }>
+        setByo(devId: string, apiKey: string): Promise<{ success: boolean; error?: string }>
       }
       backup: {
         create(passphrase: string): Promise<{

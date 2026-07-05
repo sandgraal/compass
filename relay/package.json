@@ -1,0 +1,14 @@
+{
+  "name": "compass-relay",
+  "version": "0.1.0",
+  "description": "Stateless metered relay fronting paid data-aggregator APIs (Terra first) for Compass — holds the paid keys server-side, meters per-user, stores no user data.",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}
