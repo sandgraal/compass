@@ -214,7 +214,7 @@ finance/vault; low-sensitivity media/purchase history can be records-readable.
 | **Metriport / Flexpa** | 300M+ medical records via FHIR/TEFCA/Carequality | LIVE-relay | longitudinal **medical timeline** → Phase 9.4 `medical_*` | aggregates-only |
 | **SnapTrade** | every major brokerage (Robinhood/Schwab/Fidelity/E*TRADE) | LIVE-**BYO** | completes **holdings + net worth** (today: unvalidated CSV) | aggregates-only |
 | **Canopy Connect** | 300+ P&C insurers ("Plaid for insurance") | LIVE-relay | completes **`finance-estate` insurance-adequacy / gap** engine (today: manual) | aggregates-only |
-| **Argyle / Pinwheel** | payroll/income for ~80% of US workers | LIVE-relay | completes **Phase 4.5 forecast** + expat-tax withholding (today: inferred income) | aggregates-only |
+| **Argyle / Pinwheel** *(shipped 10.9)* | payroll/income for ~80% of US workers | LIVE-relay | completes **Phase 4.5 forecast** (real paystubs replace inferred income; effective withholding rate) | aggregates-only |
 | **Arcadia (Plug) / UtilityAPI** | 125+ utilities (bill + interval data) | LIVE-relay | completes **`finance-property` Schedule-E P&L** (missing expense line) + carbon | aggregates-only |
 | **Knot (TransactionLink)** | SKU-level purchase detail from merchants | LIVE-relay | supercharges **subscriptions audit** + spend categorization (what, not just "Amazon $47") | records-readable |
 | **Nylas** | 250+ email/calendar/contact providers (Gmail, Outlook, iCloud, Yahoo) | LIVE-relay | broadens **People / relationship intelligence** beyond Google-direct | aggregates-only |
@@ -298,14 +298,16 @@ Builds on Phase 9's shipped spine; **does not renumber 9.x**. Each wave is its o
   (`source='location'`) so the Phase 11.5 residency engine (days-in-country / US substantial-presence / CR-183)
   goes from **manual** to **automatic**. Raw coordinates stay OFF the `records`/FTS/MCP spine (§5 aggregates-only);
   only the coarse country/date segments surface. *Next: a live self-hosted GPS endpoint (Overland/OwnTracks push).*
-- [~] **10.9 The metered aggregator relay + first paid aggregators** 🟡 *relay + Terra + Canopy clients shipped
-  (need a deployed relay + real keys to run live)* — primitive **G** (§3): the thin stateless **relay** (a new
-  zero-dependency `relay/` workspace — metering/quota/anomaly engine + deny-by-default adapter allowlist + proxy
-  server, 36 tests, deploy-ready). Two aggregators fronted so far, each **completing an engine**: **Terra**
-  (`terra.ts` → health `records` `source:'terra'` → the Health hub) and **Canopy** (`canopy.ts` → `assets`
-  insurance rows → the `finance-estate` adequacy/gap engine, replacing hand-entered policies). Client seam
-  `relay-client.ts` (managed↔BYO; Canopy is managed-only). Self-servable aggregators (SnapTrade, exchanges) stay
-  BYO. Next relay-fronted: Argyle / Arcadia / Metriport / Nylas / Knot. See §4f.
+- [~] **10.9 The metered aggregator relay + first paid aggregators** 🟡 *relay + Terra + Canopy + Argyle clients
+  shipped (need a deployed relay + real keys to run live)* — primitive **G** (§3): the thin stateless **relay** (a
+  new zero-dependency `relay/` workspace — metering/quota/anomaly engine + deny-by-default adapter allowlist +
+  proxy server, deploy-ready). Three aggregators fronted so far, each **completing an engine**: **Terra**
+  (`terra.ts` → health `records` `source:'terra'` → the Health hub), **Canopy** (`canopy.ts` → `assets`
+  insurance rows → the `finance-estate` adequacy/gap engine, replacing hand-entered policies), and **Argyle**
+  (`argyle.ts` → `argyle_paystubs` → `finance-income.ts` → the cash-flow forecast prefers real paystubs over
+  bank-deposit inference; adds an effective-withholding income summary). Client seam `relay-client.ts`
+  (managed↔BYO; Canopy + Argyle are managed-only). Self-servable aggregators (SnapTrade, exchanges) stay BYO.
+  Next relay-fronted: SnapTrade / Arcadia / Metriport / Nylas / Knot. See §4f.
 
 > **Build order:** 10.1 (spine) → 10.2 / 10.3 / 10.4 (independent, parallelizable, each reuses the spine) →
 > 10.5 → 10.6 (cross-cutting, gated) → 10.7 (leverage, but delivered incrementally throughout) →

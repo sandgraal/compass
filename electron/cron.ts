@@ -5,6 +5,7 @@ import { schedulePlaidDailySync, stopPlaidDailySync } from './cron-plaid'
 import { scheduleSimplefinDailySync, stopSimplefinDailySync } from './cron-simplefin'
 import { getDb, getRawSqlite } from './db/client'
 import { appSettings, integrations } from './db/schema'
+import { syncArgyle } from './integrations/argyle'
 import { syncCanopy } from './integrations/canopy'
 import { syncFxRates } from './integrations/finance-fx-fetch'
 import { captureSnapshots } from './integrations/finance-snapshot'
@@ -159,6 +160,8 @@ function runSyncForService(service: string): void {
     void syncTerra(win)
   } else if (service === 'canopy') {
     void syncCanopy(win)
+  } else if (service === 'argyle') {
+    void syncArgyle(win)
   }
 }
 

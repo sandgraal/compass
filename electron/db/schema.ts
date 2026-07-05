@@ -672,6 +672,30 @@ export const locationPoints = sqliteTable('location_points', {
   ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
+// ---- Argyle paystubs (Phase 10.9 — "Argyle → forecast") ----
+// Real payroll paystubs from the Argyle aggregator, feeding the cash-flow
+// forecast (ground-truth income cadence + net pay, replacing bank-deposit
+// inference) and an income summary. DELIBERATELY OFF the `records` spine (like
+// location_points / finance_transactions): payroll is sensitive → aggregates-
+// only at the AI/MCP boundary, never raw paystub lines. Only summed withholding
+// / deductions are kept — never the per-tax breakdown. Amounts are numeric in
+// the paystub's own `currency`; dates are local-day 'YYYY-MM-DD' strings.
+export const argylePaystubs = sqliteTable('argyle_paystubs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  externalId: text('external_id').notNull().unique(), // Argyle paystub id (dedup key)
+  employer: text('employer'),
+  grossPay: real('gross_pay'),
+  netPay: real('net_pay'), // what actually lands in the bank — the cash-forecast inflow
+  withholding: real('withholding'), // Σ taxes (for the effective-rate summary; no per-line detail)
+  deductions: real('deductions'), // Σ non-tax deductions (401k, benefits…)
+  currency: text('currency').notNull().default('USD'),
+  periodStart: text('period_start'), // 'YYYY-MM-DD'
+  periodEnd: text('period_end'),
+  paidAt: text('paid_at'), // 'YYYY-MM-DD' — the deposit date the forecast keys on
+  payCycle: text('pay_cycle'), // raw Argyle frequency hint if provided ('weekly'|'biweekly'|…)
+  ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
 // ---- Financial goals (Phase 11.6 — "Goals & milestones") ----
 // Target-date savings goals that tie the cross-border picture together: a tax
 // reserve, the next CR capex draw, the retirement number, an emergency fund.

@@ -804,6 +804,10 @@ declare global {
       canopy: {
         connect(): Promise<{ success: boolean; error?: string }>
       }
+      // Argyle (Phase 10.9) — relay-fronted payroll aggregator → cash-flow forecast.
+      argyle: {
+        connect(): Promise<{ success: boolean; error?: string }>
+      }
       backup: {
         create(passphrase: string): Promise<{
           success: boolean
@@ -2015,6 +2019,24 @@ declare global {
           }>
           trajectory: Array<{ date: string; accountId: number; balance: number }>
           lowDates: Array<{ accountId: number; date: string; balance: number }>
+        }>
+        // Argyle income summary (Phase 10.9) — aggregates over real paystubs.
+        getIncomeSummary(): Promise<{
+          hasPaystubs: boolean
+          sources: Array<{
+            employer: string
+            currency: string
+            cadence: 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'semi-annual' | 'yearly'
+            annualizedGross: number | null
+            annualizedNet: number
+            effectiveWithholdingRate: number | null
+            lastPaidAt: string
+            nextExpectedPayday: string | null
+            paystubs: number
+          }>
+          totalAnnualizedNet: number
+          totalAnnualizedGross: number | null
+          blendedWithholdingRate: number | null
         }>
         setForecastOverride(override: {
           accountId: number

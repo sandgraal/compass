@@ -321,6 +321,26 @@ export default function Integrations(): JSX.Element {
       }
       return
     }
+    // Argyle: opens the payroll Connect flow (managed via the relay); on success,
+    // pull paystubs so the cash-flow forecast uses real income instead of inference.
+    if (service === 'argyle') {
+      setConnecting('argyle')
+      try {
+        const r = await window.api.argyle.connect()
+        if (!r.success) {
+          toast(`Argyle connection failed: ${r.error ?? 'unknown error'}`, 'error')
+          return
+        }
+        toast('Argyle connected — importing your paystubs…', 'success')
+        await loadStatuses()
+        triggerSync('argyle')
+      } catch (err) {
+        toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
+      } finally {
+        setConnecting(null)
+      }
+      return
+    }
     setConnecting(service)
     try {
       // Apple Calendar and Things are local-file based — no OAuth, just kick

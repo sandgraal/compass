@@ -148,6 +148,11 @@ const api = {
     connect: () => ipcRenderer.invoke('canopy:connect')
   },
 
+  // --- Argyle (Phase 10.9 — relay-fronted payroll aggregator → cash-flow forecast) ---
+  argyle: {
+    connect: () => ipcRenderer.invoke('argyle:connect')
+  },
+
   // --- Encrypted backup / restore (May 2026 Tier 1 #2) ---
   backup: {
     create: (passphrase: string) => ipcRenderer.invoke('backup:create', passphrase),
@@ -569,6 +574,7 @@ const api = {
     // Cash-flow forecast (Phase 4.5)
     getForecast: (opts?: { windowDays?: number; lowCashThreshold?: number }) =>
       ipcRenderer.invoke('finance:get-forecast', opts),
+    getIncomeSummary: () => ipcRenderer.invoke('finance:get-income-summary'),
     setForecastOverride: (override: {
       accountId: number
       date: string
