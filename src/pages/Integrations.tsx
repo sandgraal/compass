@@ -281,6 +281,26 @@ export default function Integrations(): JSX.Element {
       setOuraTokenInput('')
       return
     }
+    // Terra: open the Connect widget (managed via the relay) in a child window;
+    // on success, kick off the first wearables sync.
+    if (service === 'terra') {
+      setConnecting('terra')
+      try {
+        const r = await window.api.terra.connect()
+        if (!r.success) {
+          toast(`Terra connection failed: ${r.error ?? 'unknown error'}`, 'error')
+          return
+        }
+        toast('Terra connected — syncing your wearables…', 'success')
+        await loadStatuses()
+        triggerSync('terra')
+      } catch (err) {
+        toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
+      } finally {
+        setConnecting(null)
+      }
+      return
+    }
     setConnecting(service)
     try {
       // Apple Calendar and Things are local-file based — no OAuth, just kick

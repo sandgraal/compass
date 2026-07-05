@@ -1,8 +1,11 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_QUOTA, InMemoryMeteringStore, emptyState } from './metering.js'
 import { type RelayConfig, type RelayRequest, handleRelayRequest } from './server.js'
 
 const NOW = Date.UTC(2025, 5, 15, 12)
+// The relay meters by a sha256 of the bearer token (never the raw token) → store key = uid(token).
+const uid = (token: string): string => createHash('sha256').update(token).digest('hex')
 
 function mockFetch(status = 200, body = '{"data":[]}') {
   const calls: Array<{ url: string; init: RequestInit }> = []
@@ -73,9 +76,10 @@ describe('handleRelayRequest — proxy + metering', () => {
     const headers = mock.calls[0].init.headers as Record<string, string>
     expect(headers['dev-id']).toBe('dev')
     expect(headers['x-api-key']).toBe('secret')
+    expect(mock.calls[0].init.redirect).toBe('manual') // never auto-follow with secrets attached
 
     // usage recorded (counters only — UsageState has no payload field by construction)
-    const used = store.get('tok-1')
+    const used = store.get(uid('tok-1'))
     expect(used?.callsToday).toBe(1)
     expect(used?.bytesToday).toBeGreaterThan(0)
   })
@@ -83,10 +87,24 @@ describe('handleRelayRequest — proxy + metering', () => {
   it('429s (and does NOT proxy) when the daily quota is already spent', async () => {
     const mock = mockFetch()
     const store = new InMemoryMeteringStore()
-    store.set('tok-1', { ...emptyState(NOW), callsToday: DEFAULT_QUOTA.callsPerDay })
+    store.set(uid('tok-1'), { ...emptyState(NOW), callsToday: DEFAULT_QUOTA.callsPerDay })
     const r = await handleRelayRequest(req(), cfg({ fetchImpl: mock.fn, store }))
     expect(r.status).toBe(429)
     expect(mock.calls).toHaveLength(0) // never hit the upstream
+  })
+
+  it('rejects (429) before reading the body when Content-Length would exceed the daily byte cap', async () => {
+    const calls: string[] = []
+    const fetchImpl = (async (url: string | URL) => {
+      calls.push(String(url))
+      return new Response('irrelevant', { status: 200, headers: { 'content-length': '10000' } })
+    }) as unknown as typeof fetch
+    const r = await handleRelayRequest(
+      req(),
+      cfg({ fetchImpl, quota: { ...DEFAULT_QUOTA, bytesPerDay: 5000 } })
+    )
+    expect(r.status).toBe(429)
+    expect(calls).toHaveLength(1) // the request was made, but the oversized body was never read
   })
 
   it('counts a widget-session POST as a connected account', async () => {
@@ -103,6 +121,6 @@ describe('handleRelayRequest — proxy + metering', () => {
     )
     expect(r.status).toBe(200)
     expect(mock.calls[0].init.body).toBe('{"reference_id":"u","providers":"OURA"}') // body forwarded
-    expect(store.get('tok-1')?.accounts).toBe(1)
+    expect(store.get(uid('tok-1'))?.accounts).toBe(1)
   })
 })

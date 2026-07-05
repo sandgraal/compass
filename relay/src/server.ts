@@ -12,6 +12,7 @@
  * payload is never stored — the relay is a stateless meter, not a data custodian.
  */
 
+import { createHash } from 'node:crypto'
 import { getAdapter } from './adapters/index.js'
 import type { RelayEnv } from './adapters/types.js'
 import {
@@ -64,7 +65,9 @@ export async function handleRelayRequest(
   if (cfg.clientTokens.size > 0 && !cfg.clientTokens.has(token)) {
     return json(403, { error: 'Unknown client token' })
   }
-  const userId = token
+  // Metering key = a NON-reversible hash of the token, so a shared KV store never
+  // persists raw client auth tokens. The raw token is used only for the allowlist above.
+  const userId = createHash('sha256').update(token).digest('hex')
 
   // ── Route: /<aggregatorId>/<upstreamPath…> ──
   const segments = req.path.replace(/^\/+/, '').split('/')
@@ -96,17 +99,29 @@ export async function handleRelayRequest(
     upstream = await doFetch(url, {
       method,
       headers: adapter.authHeaders(cfg.env),
-      body: method === 'GET' || method === 'HEAD' ? undefined : (req.body ?? undefined)
+      body: method === 'GET' || method === 'HEAD' ? undefined : (req.body ?? undefined),
+      // Never auto-follow redirects: the secret credentials are attached to THIS request
+      // and must not be replayed to a redirect target. Hand any 3xx back to the client.
+      redirect: 'manual'
     })
   } catch (err) {
     // Log server-side only — never leak internal error detail (stack traces) to the caller.
     console.error('[relay] upstream fetch failed', err)
     return json(502, { error: 'Upstream fetch failed' })
   }
+
+  // Enforce the daily byte cap as a HARD cap: reject before reading the body when the
+  // advertised Content-Length would push the user past their remaining quota.
+  const contentLength = Number(upstream.headers.get('content-length'))
+  if (Number.isFinite(contentLength) && state.bytesToday + contentLength > cfg.quota.bytesPerDay) {
+    return json(429, {
+      error: 'Daily data quota would be exceeded. Connect your own aggregator key to continue.'
+    })
+  }
   const text = await upstream.text()
 
   // Record usage — counters only. The response body is passed through, never stored.
-  const bytes = Buffer.byteLength(text, 'utf8')
+  const bytes = new TextEncoder().encode(text).length // portable (no Node Buffer)
   cfg.store.set(userId, recordCall(state, { ...call, bytes }, now))
 
   return {

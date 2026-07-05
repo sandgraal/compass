@@ -11,6 +11,10 @@ import { createServer } from 'node:http'
 import { DEFAULT_QUOTA, InMemoryMeteringStore, type Quota } from './metering.js'
 import { type RelayConfig, handleRelayRequest } from './server.js'
 
+// The only bodies we forward are tiny JSON (e.g. the Terra widget-session POST).
+// Cap the read so an internet-facing relay can't be memory/CPU-DoS'd by a large body.
+const MAX_BODY_BYTES = 64 * 1024
+
 function quotaFromEnv(): Quota {
   const n = (key: string, fallback: number): number => {
     const v = Number(process.env[key])
@@ -40,7 +44,17 @@ const cfg: RelayConfig = {
 const server = createServer(async (req, res) => {
   try {
     const chunks: Buffer[] = []
-    for await (const c of req) chunks.push(c as Buffer)
+    let size = 0
+    for await (const c of req) {
+      size += (c as Buffer).length
+      if (size > MAX_BODY_BYTES) {
+        res.writeHead(413, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' }))
+        req.destroy()
+        return
+      }
+      chunks.push(c as Buffer)
+    }
     const raw = Buffer.concat(chunks).toString('utf8')
     const parsed = new URL(req.url ?? '/', 'http://localhost')
     const headers: Record<string, string | undefined> = {}

@@ -283,7 +283,14 @@ export async function openTerraConnect(
       parent: mainWindow ?? undefined,
       modal: !!mainWindow,
       title: 'Connect a wearable (Terra)',
-      webPreferences: { nodeIntegration: false, contextIsolation: true }
+      // Loads third-party remote content → tighten the boundary: sandboxed renderer,
+      // no Node, and an in-memory partition so nothing persists (mirrors the Plaid/CRED windows).
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+        partition: 'terra-connect'
+      }
     })
     let settled = false
     const finish = (result: { success: boolean; error?: string }): void => {
@@ -292,8 +299,11 @@ export async function openTerraConnect(
       if (!win.isDestroyed()) win.close()
       resolve(result)
     }
-    const onNavigate = (_e: unknown, url: string): void => {
+    // Intercept the success redirect BEFORE it navigates — preventDefault so the sentinel
+    // URL (which carries user_id) is never actually requested / logged.
+    const onNavigate = (e: Electron.Event, url: string): void => {
       if (!url.startsWith(TERRA_SUCCESS_URL)) return
+      e.preventDefault()
       try {
         const userId = new URL(url).searchParams.get('user_id') ?? ''
         if (!userId) {
@@ -307,7 +317,7 @@ export async function openTerraConnect(
       }
     }
     win.webContents.on('will-redirect', onNavigate)
-    win.webContents.on('did-navigate', onNavigate)
+    win.webContents.on('will-navigate', onNavigate)
     win.on('closed', () => finish({ success: false, error: 'Connection window closed' }))
     void win.loadURL(widgetUrl)
   })

@@ -7,7 +7,7 @@ import {
   emptyState,
   recordCall,
   rollover
-} from './metering'
+} from './metering.js'
 
 const T = Date.UTC(2025, 5, 15, 12, 0, 0) // 2025-06-15 12:00:00 UTC
 
