@@ -10,6 +10,7 @@ import {
   Clock,
   CreditCard,
   Download,
+  HeartPulse,
   Home,
   IdCard,
   Inbox,
@@ -120,6 +121,10 @@ export function Sidebar(): JSX.Element {
         { label: 'Subscriptions', to: '/subscriptions', icon: <CreditCard size={18} /> },
         { label: 'Household & Assets', to: '/assets', icon: <Home size={18} /> }
       ]
+    },
+    {
+      title: 'Health',
+      items: [{ label: 'Health', to: '/health', icon: <HeartPulse size={18} /> }]
     },
     {
       title: 'Planner',

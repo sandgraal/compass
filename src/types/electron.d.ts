@@ -751,6 +751,50 @@ declare global {
         >
         cancel(): Promise<{ success: boolean; error?: string }>
       }
+      // Health hub (Phase 10.3) — unified aggregate over Oura + apple-health/fitbit/garmin.
+      health: {
+        getSummary(): Promise<{
+          today: string
+          stepGoal: number
+          sources: Array<{
+            source: 'oura' | 'apple-health' | 'fitbit' | 'garmin'
+            hasData: boolean
+            count: number
+            firstDate: string | null
+            lastDate: string | null
+          }>
+          steps: {
+            last7Avg: number | null
+            last30Avg: number | null
+            best: { date: string; steps: number } | null
+            series: Array<{ date: string; steps: number }>
+          }
+          sleep: {
+            last7AvgMin: number | null
+            last30AvgMin: number | null
+            series: Array<{ date: string; minutes: number }>
+          }
+          oura: {
+            hasData: boolean
+            latest: {
+              date: string
+              sleepScore: number | null
+              readinessScore: number | null
+              activityScore: number | null
+            } | null
+            sleepScore7Avg: number | null
+            readiness7Avg: number | null
+            activity7Avg: number | null
+          }
+          restingHr: { latest: { date: string; bpm: number } | null; last30Avg: number | null }
+          weight: { latest: { date: string; value: number; unit: string } | null }
+          workouts: {
+            last30Count: number
+            recent: Array<{ date: string; title: string; source: string }>
+          }
+          activeDays30: number
+        }>
+      }
       backup: {
         create(passphrase: string): Promise<{
           success: boolean

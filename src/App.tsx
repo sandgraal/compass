@@ -15,6 +15,7 @@ import DataRights from './pages/DataRights'
 import Export from './pages/Export'
 import Finance from './pages/Finance'
 import GoogleSaved from './pages/GoogleSaved'
+import Health from './pages/Health'
 import Integrations from './pages/Integrations'
 import KnowledgeBase from './pages/KnowledgeBase'
 import Monthly from './pages/Monthly'
@@ -92,6 +93,7 @@ export default function App(): JSX.Element {
           <Route path="people" element={<People />} />
           <Route path="places" element={<Places />} />
           <Route path="finance" element={<Finance />} />
+          <Route path="health" element={<Health />} />
           <Route path="retirement" element={<Retirement />} />
           <Route path="rental-studio" element={<RentalStudio />} />
           <Route path="subscriptions" element={<Subscriptions />} />

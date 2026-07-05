@@ -12,6 +12,7 @@ import {
   Download,
   FileText,
   FolderOpen,
+  HeartPulse,
   Home,
   Inbox,
   Layers,
@@ -119,6 +120,23 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       icon: <LayoutDashboard size={15} />,
       action: () => nav('/dashboard'),
       keywords: ['home', 'today']
+    },
+    {
+      id: 'health',
+      label: 'Health',
+      description: 'Sleep, activity, and recovery trends',
+      icon: <HeartPulse size={15} />,
+      action: () => nav('/health'),
+      keywords: [
+        'health',
+        'fitness',
+        'sleep',
+        'steps',
+        'workout',
+        'oura',
+        'apple health',
+        'wearable'
+      ]
     },
     {
       id: 'storehouse',
