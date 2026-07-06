@@ -253,6 +253,18 @@ export const INTEGRATION_REGISTRY: Record<string, IntegrationMeta> = {
     logo: 'ny',
     connected: true
   },
+  knot: {
+    id: 'knot',
+    name: 'Knot (Purchases)',
+    category: 'finance',
+    method: 'live',
+    description:
+      'SKU-level order history from merchants (Amazon, Walmart, DoorDash…) into your timeline.',
+    scopes: ['transactions.read'],
+    color: 'from-amber-500/20 to-orange-600/20',
+    logo: 'kn',
+    connected: true
+  },
   slack: {
     id: 'slack',
     name: 'Slack',

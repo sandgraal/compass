@@ -10,6 +10,7 @@ import { syncArgyle } from './integrations/argyle'
 import { syncCanopy } from './integrations/canopy'
 import { syncFxRates } from './integrations/finance-fx-fetch'
 import { captureSnapshots } from './integrations/finance-snapshot'
+import { syncKnot } from './integrations/knot'
 import { syncLinear } from './integrations/linear'
 import { syncMetriport } from './integrations/metriport'
 import { syncNotion } from './integrations/notion'
@@ -174,6 +175,8 @@ function runSyncForService(service: string): void {
     void syncMetriport()
   } else if (service === 'nylas') {
     void syncNylas(win)
+  } else if (service === 'knot') {
+    void syncKnot(win)
   }
 }
 

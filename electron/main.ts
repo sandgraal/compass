@@ -22,6 +22,7 @@ import { registerFinanceHandlers } from './ipc/finance'
 import { registerHabitsHandlers } from './ipc/habits'
 import { registerHealthHandlers } from './ipc/health'
 import { registerInsightsHandlers } from './ipc/insights'
+import { registerKnotHandlers } from './ipc/knot'
 import { registerKnowledgeHandlers } from './ipc/knowledge'
 import { registerMedicalHandlers } from './ipc/medical'
 import { registerMonthlyRollupHandlers } from './ipc/monthly-rollup'
@@ -180,6 +181,7 @@ app.whenReady().then(async () => {
   registerSnaptradeHandlers(ipcMain)
   registerArcadiaHandlers(ipcMain)
   registerNylasHandlers(ipcMain)
+  registerKnotHandlers(ipcMain)
   registerContactsHandlers(ipcMain)
   registerExportHandlers(ipcMain)
   registerSubscriptionsHandlers(ipcMain)

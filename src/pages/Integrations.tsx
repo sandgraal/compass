@@ -418,6 +418,26 @@ export default function Integrations(): JSX.Element {
       }
       return
     }
+    // Knot: opens the merchant connect flow (managed via the relay); on success, pull
+    // SKU-level order history into the purchase timeline.
+    if (service === 'knot') {
+      setConnecting('knot')
+      try {
+        const r = await window.api.knot.connect()
+        if (!r.success) {
+          toast(`Knot connection failed: ${r.error ?? 'unknown error'}`, 'error')
+          return
+        }
+        toast('Knot connected — importing your purchases…', 'success')
+        await loadStatuses()
+        triggerSync('knot')
+      } catch (err) {
+        toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
+      } finally {
+        setConnecting(null)
+      }
+      return
+    }
     setConnecting(service)
     try {
       // Apple Calendar and Things are local-file based — no OAuth, just kick

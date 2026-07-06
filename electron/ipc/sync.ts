@@ -17,6 +17,7 @@ import { syncArcadia } from '../integrations/arcadia'
 import { syncArgyle } from '../integrations/argyle'
 import { syncCanopy } from '../integrations/canopy'
 import { ContactsScopeError, buildGoogleContactInputs } from '../integrations/google-contacts'
+import { syncKnot } from '../integrations/knot'
 import { syncLinear } from '../integrations/linear'
 import { syncMetriport } from '../integrations/metriport'
 import { syncNotion } from '../integrations/notion'
@@ -81,7 +82,8 @@ const SUPPORTED_SYNC_SERVICES = new Set([
   'snaptrade',
   'arcadia',
   'metriport',
-  'nylas'
+  'nylas',
+  'knot'
 ])
 
 function normalizeSupportedSyncService(service: unknown): string | null {
@@ -849,6 +851,7 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     if (service === 'arcadia') return syncArcadia(win)
     if (service === 'metriport') return syncMetriport()
     if (service === 'nylas') return syncNylas(win)
+    if (service === 'knot') return syncKnot(win)
     if (service === 'things') {
       // Things is local + tokenless: Connect (and manual refresh) come through
       // here, so flip the opt-in flag on before syncing. Disconnect sets the
