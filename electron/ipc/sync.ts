@@ -20,6 +20,7 @@ import { ContactsScopeError, buildGoogleContactInputs } from '../integrations/go
 import { syncLinear } from '../integrations/linear'
 import { syncMetriport } from '../integrations/metriport'
 import { syncNotion } from '../integrations/notion'
+import { syncNylas } from '../integrations/nylas'
 import { readVaultPathSetting, syncObsidian } from '../integrations/obsidian'
 import { syncOura } from '../integrations/oura'
 import { syncAllPlaidInvestments } from '../integrations/plaid/investments'
@@ -79,7 +80,8 @@ const SUPPORTED_SYNC_SERVICES = new Set([
   'argyle',
   'snaptrade',
   'arcadia',
-  'metriport'
+  'metriport',
+  'nylas'
 ])
 
 function normalizeSupportedSyncService(service: unknown): string | null {
@@ -846,6 +848,7 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     if (service === 'snaptrade') return syncSnaptrade(win)
     if (service === 'arcadia') return syncArcadia(win)
     if (service === 'metriport') return syncMetriport()
+    if (service === 'nylas') return syncNylas(win)
     if (service === 'things') {
       // Things is local + tokenless: Connect (and manual refresh) come through
       // here, so flip the opt-in flag on before syncing. Disconnect sets the

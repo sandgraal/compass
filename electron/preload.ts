@@ -168,6 +168,11 @@ const api = {
     connect: () => ipcRenderer.invoke('arcadia:connect')
   },
 
+  // --- Nylas (Phase 10.9 — relay-fronted email/contacts aggregator → People) ---
+  nylas: {
+    connect: () => ipcRenderer.invoke('nylas:connect')
+  },
+
   // --- SnapTrade (Phase 10.9 — BYO-direct brokerage aggregator → net worth) ---
   snaptrade: {
     connect: () => ipcRenderer.invoke('snaptrade:connect'),

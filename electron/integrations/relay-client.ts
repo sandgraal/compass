@@ -17,7 +17,7 @@
 import { randomUUID } from 'node:crypto'
 import type { SqliteForFx } from './finance-fx'
 
-export type AggregatorId = 'terra' | 'canopy' | 'argyle' | 'arcadia' | 'metriport'
+export type AggregatorId = 'terra' | 'canopy' | 'argyle' | 'arcadia' | 'metriport' | 'nylas'
 export type RelayMode = 'managed' | 'byo'
 
 /** BYO credentials per aggregator (Terra: dev-id + x-api-key). */
@@ -36,7 +36,8 @@ export const UPSTREAM_BASE: Record<AggregatorId, string> = {
   canopy: 'https://api.usecanopy.com', // Canopy is managed-only in practice (no consumer dev accounts)
   argyle: 'https://api.argyle.com/v2', // Argyle is managed-only (B2B; Basic auth key lives in the relay)
   arcadia: 'https://api.arcadia.com', // Arcadia is managed-only (B2B; OAuth token exchanged in the relay)
-  metriport: 'https://api.metriport.com' // Metriport is managed-only (B2B; x-api-key lives in the relay)
+  metriport: 'https://api.metriport.com', // Metriport is managed-only (B2B; x-api-key lives in the relay)
+  nylas: 'https://api.us.nylas.com' // Nylas is managed-only (B2B; static Bearer app key in the relay)
 }
 
 /** Default managed relay host. Overridable via the `relayUrl` app setting. */

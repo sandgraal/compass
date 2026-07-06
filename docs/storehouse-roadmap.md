@@ -217,7 +217,7 @@ finance/vault; low-sensitivity media/purchase history can be records-readable.
 | **Argyle / Pinwheel** *(shipped 10.9)* | payroll/income for ~80% of US workers | LIVE-relay | completes **Phase 4.5 forecast** (real paystubs replace inferred income; effective withholding rate) | aggregates-only |
 | **Arcadia (Plug) / UtilityAPI** *(shipped 10.9)* | 125+ utilities (bill + interval data) | LIVE-relay | completes **`finance-property` Schedule-E P&L** (utility bills → the utilities operating line) + carbon | aggregates-only |
 | **Knot (TransactionLink)** | SKU-level purchase detail from merchants | LIVE-relay | supercharges **subscriptions audit** + spend categorization (what, not just "Amazon $47") | records-readable |
-| **Nylas** | 250+ email/calendar/contact providers (Gmail, Outlook, iCloud, Yahoo) | LIVE-relay | broadens **People / relationship intelligence** beyond Google-direct | aggregates-only |
+| **Nylas** *(contacts shipped 10.9)* | 250+ email/calendar/contact providers (Gmail, Outlook, iCloud, Yahoo) | LIVE-relay | broadens the **owned address book / People** beyond Google-direct (email/calendar = follow-ups) | aggregates-only |
 | **Location history** *(shipped 10.8)* | OwnTracks / GPX / Google Timeline export | EXPORT (local) | completes **`residency.ts`** days-in-country / SPT / CR-183 (today: manual) | aggregates-only |
 | MX / Finicity / Teller | Plaid alternatives — coverage / enrichment / income-verification | LIVE-relay/BYO | banking-connection depth beyond Plaid/SimpleFIN | aggregates-only |
 
@@ -298,10 +298,10 @@ Builds on Phase 9's shipped spine; **does not renumber 9.x**. Each wave is its o
   (`source='location'`) so the Phase 11.5 residency engine (days-in-country / US substantial-presence / CR-183)
   goes from **manual** to **automatic**. Raw coordinates stay OFF the `records`/FTS/MCP spine (§5 aggregates-only);
   only the coarse country/date segments surface. *Next: a live self-hosted GPS endpoint (Overland/OwnTracks push).*
-- [~] **10.9 The metered aggregator relay + first paid aggregators** 🟡 *relay + Terra/Canopy/Argyle/Arcadia +
-  BYO-direct SnapTrade clients shipped (need a deployed relay + real keys to run live)* — primitive **G** (§3):
+- [~] **10.9 The metered aggregator relay + first paid aggregators** 🟡 *relay + Terra/Canopy/Argyle/Arcadia/Nylas/Metriport
+  + BYO-direct SnapTrade clients shipped (need a deployed relay + real keys to run live)* — primitive **G** (§3):
   the thin stateless **relay** (a new zero-dependency `relay/` workspace — metering/quota/anomaly engine +
-  deny-by-default adapter allowlist + OAuth `tokenAuth`/`TokenCache` + proxy server, deploy-ready). Four relay
+  deny-by-default adapter allowlist + OAuth `tokenAuth`/`TokenCache` + proxy server, deploy-ready). Six relay
   aggregators fronted so far, each **completing an engine**: **Terra**
   (`terra.ts` → health `records` `source:'terra'` → the Health hub), **Canopy** (`canopy.ts` → `assets`
   insurance rows → the `finance-estate` adequacy/gap engine, replacing hand-entered policies), and **Argyle**
@@ -314,11 +314,14 @@ Builds on Phase 9's shipped spine; **does not renumber 9.x**. Each wave is its o
   relay-fronted but the first `tokenAuth` adapter: its OAuth2 client-credentials bearer is exchanged + cached in
   the relay (`token-cache.ts` — the relay's first auth extension beyond static keys), then utility statements
   land in the dedicated `utility_bills` table (off the ledger — no double-count) and `finance-property.ts` reads
-  them into the Schedule-E **utilities operating line** (matched by service address). Plus **Metriport** — the
-  first MEDICAL aggregator (static `x-api-key`): a patient's clinical records arrive as FHIR R4, and
-  `normalizeMetriportBundle` maps them into the dedicated `medical_records` table (OFF the AI spine — medical is
-  the strictest privacy boundary), surfaced as a Medical card on `/health` + an aggregates-only
-  `compass_medical_summary` (counts + dates, never a diagnosis/lab value). Next: Nylas / Knot. See §4f.
+  them into the Schedule-E **utilities operating line** (matched by service address). Plus **Nylas** —
+  relay-fronted static-Bearer (like Canopy); its **contacts** slice reuses the exported `upsertContacts` writer
+  (`source:'nylas'`) to broaden the owned address book beyond Google-direct, no schema/engine change (email +
+  calendar are follow-ups). Plus **Metriport** — the first MEDICAL aggregator (static `x-api-key`): a patient's
+  clinical records arrive as FHIR R4, and `normalizeMetriportBundle` maps them into the dedicated
+  `medical_records` table (OFF the AI spine — medical is the strictest privacy boundary), surfaced as a Medical
+  card on `/health` + an aggregates-only `compass_medical_summary` (counts + dates, never a diagnosis/lab value).
+  Next: Knot. See §4f.
 
 > **Build order:** 10.1 (spine) → 10.2 / 10.3 / 10.4 (independent, parallelizable, each reuses the spine) →
 > 10.5 → 10.6 (cross-cutting, gated) → 10.7 (leverage, but delivered incrementally throughout) →

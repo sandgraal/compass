@@ -13,6 +13,7 @@ import { captureSnapshots } from './integrations/finance-snapshot'
 import { syncLinear } from './integrations/linear'
 import { syncMetriport } from './integrations/metriport'
 import { syncNotion } from './integrations/notion'
+import { syncNylas } from './integrations/nylas'
 import { syncObsidian } from './integrations/obsidian'
 import { syncOura } from './integrations/oura'
 import { syncSnaptrade } from './integrations/snaptrade'
@@ -171,6 +172,8 @@ function runSyncForService(service: string): void {
     void syncArcadia(win)
   } else if (service === 'metriport') {
     void syncMetriport()
+  } else if (service === 'nylas') {
+    void syncNylas(win)
   }
 }
 
