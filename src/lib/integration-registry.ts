@@ -185,6 +185,18 @@ export const INTEGRATION_REGISTRY: Record<string, IntegrationMeta> = {
     logo: 'T',
     connected: true
   },
+  metriport: {
+    id: 'metriport',
+    name: 'Metriport (Medical)',
+    category: 'health-fitness',
+    method: 'live',
+    description:
+      'Your clinical records (diagnoses, meds, labs, immunizations) from health networks.',
+    scopes: ['medical:read'],
+    color: 'from-rose-500/20 to-red-600/20',
+    logo: '✚',
+    connected: true
+  },
   canopy: {
     id: 'canopy',
     name: 'Canopy (Insurance)',

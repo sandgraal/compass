@@ -795,6 +795,27 @@ declare global {
           activeDays30: number
         }>
       }
+      // Medical records (Phase 10.9) — aggregates over Metriport FHIR (clinical lists here,
+      // aggregates-only at the MCP boundary).
+      medical: {
+        getSummary(): Promise<{
+          today: string
+          hasData: boolean
+          count: number
+          firstDate: string | null
+          lastDate: string | null
+          byCategory: Record<string, number>
+          activeConditions: number
+          conditions: Array<{ description: string; status: string | null; date: string | null }>
+          medications: Array<{ description: string; status: string | null; date: string | null }>
+          immunizations: Array<{ description: string; status: string | null; date: string | null }>
+          allergies: Array<{ description: string; status: string | null; date: string | null }>
+        }>
+      }
+      // Metriport (Phase 10.9) — relay-fronted medical aggregator → medical records.
+      metriport: {
+        connect(): Promise<{ success: boolean; error?: string }>
+      }
       // Terra (Phase 10.9) — relay-fronted wearables aggregator.
       terra: {
         connect(): Promise<{ success: boolean; error?: string }>

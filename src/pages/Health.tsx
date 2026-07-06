@@ -3,6 +3,7 @@ import { type JSX, useEffect, useState } from 'react'
 import { cn } from '../lib/utils'
 
 type HealthSummary = Awaited<ReturnType<Window['api']['health']['getSummary']>>
+type MedicalSummary = Awaited<ReturnType<Window['api']['medical']['getSummary']>>
 
 const SOURCE_LABEL: Record<string, string> = {
   oura: 'Oura',
@@ -65,6 +66,7 @@ function Bars({ data }: { data: Array<{ date: string; value: number }> }): JSX.E
 
 export default function Health(): JSX.Element {
   const [summary, setSummary] = useState<HealthSummary | null>(null)
+  const [medical, setMedical] = useState<MedicalSummary | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -78,6 +80,13 @@ export default function Health(): JSX.Element {
       .then((s) => setSummary(s))
       .catch(() => setSummary(null))
       .finally(() => setLoading(false))
+    // Medical records (Metriport) — optional; renders its own card when present.
+    if (window.api.medical?.getSummary) {
+      window.api.medical
+        .getSummary()
+        .then((m) => setMedical(m))
+        .catch(() => setMedical(null))
+    }
   }, [])
 
   if (loading)
@@ -235,6 +244,76 @@ export default function Health(): JSX.Element {
                     <span className="text-xs text-muted-foreground">
                       {w.date} · {SOURCE_LABEL[w.source] ?? w.source}
                     </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Medical records (Metriport FHIR) — renders independently of wearable data. */}
+      {medical?.hasData && (
+        <div className="bg-card border border-border rounded-xl p-4 mt-6">
+          <div className="flex items-center gap-2 text-muted-foreground mb-3">
+            <HeartPulse size={15} />
+            <span className="text-xs font-medium">
+              Medical records · {medical.count} from Metriport
+              {medical.lastDate ? ` · latest ${medical.lastDate}` : ''}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            <StatCard
+              icon={<HeartPulse size={15} />}
+              label="Active conditions"
+              value={fmtInt(medical.activeConditions)}
+            />
+            <StatCard
+              icon={<HeartPulse size={15} />}
+              label="Medications"
+              value={fmtInt(medical.byCategory.medication ?? 0)}
+            />
+            <StatCard
+              icon={<HeartPulse size={15} />}
+              label="Immunizations"
+              value={fmtInt(medical.byCategory.immunization ?? 0)}
+            />
+            <StatCard
+              icon={<HeartPulse size={15} />}
+              label="Labs"
+              value={fmtInt(medical.byCategory.lab ?? 0)}
+            />
+          </div>
+          {medical.conditions.length > 0 && (
+            <div className="mb-3">
+              <div className="text-xs font-medium text-muted-foreground mb-1.5">Conditions</div>
+              <ul className="space-y-1">
+                {medical.conditions.slice(0, 8).map((c) => (
+                  <li
+                    key={`${c.description}-${c.date ?? ''}`}
+                    className="flex items-center justify-between text-sm gap-3"
+                  >
+                    <span className="text-foreground min-w-0 truncate">{c.description}</span>
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {c.status ?? ''}
+                      {c.date ? ` · ${c.date}` : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {medical.medications.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-muted-foreground mb-1.5">Medications</div>
+              <ul className="space-y-1">
+                {medical.medications.slice(0, 8).map((m) => (
+                  <li
+                    key={`${m.description}-${m.date ?? ''}`}
+                    className="flex items-center justify-between text-sm gap-3"
+                  >
+                    <span className="text-foreground min-w-0 truncate">{m.description}</span>
+                    <span className="text-xs text-muted-foreground shrink-0">{m.status ?? ''}</span>
                   </li>
                 ))}
               </ul>

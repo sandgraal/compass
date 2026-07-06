@@ -717,6 +717,25 @@ export const utilityBills = sqliteTable('utility_bills', {
   ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
+// ---- Medical records (Phase 10.9 — "Metriport → medical records") ----
+// Clinical records pulled from the health-information networks via Metriport (FHIR R4):
+// conditions, medications, labs, immunizations, allergies, encounters. DELIBERATELY OFF
+// the `records`/AI spine (like location_points / argyle_paystubs) — medical is the most
+// sensitive domain, so it's aggregates-only at the AI/MCP boundary and never timeline-
+// searchable. Stores the clinical SUMMARY (category + display name + status + date), never
+// raw values, patient identifiers, MRN/SSN, or provider contact info. `category` is one of
+// 'condition'|'medication'|'lab'|'immunization'|'allergy'|'encounter'|'procedure'.
+export const medicalRecords = sqliteTable('medical_records', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  externalId: text('external_id').notNull().unique(), // 'metriport:<ResourceType>:<id>' (dedup key)
+  category: text('category').notNull(),
+  description: text('description'), // the clinical name/text (Aspirin, Type 2 diabetes, Influenza…)
+  code: text('code'), // the coding code (ICD-10 / RxNorm / LOINC / CVX), when present
+  status: text('status'), // active | resolved | completed | …
+  recordedAt: text('recorded_at'), // 'YYYY-MM-DD' — onset/effective/recorded date
+  ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
 // ---- Financial goals (Phase 11.6 — "Goals & milestones") ----
 // Target-date savings goals that tie the cross-border picture together: a tax
 // reserve, the next CR capex draw, the retirement number, an emergency fund.

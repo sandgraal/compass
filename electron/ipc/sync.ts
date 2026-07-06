@@ -18,6 +18,7 @@ import { syncArgyle } from '../integrations/argyle'
 import { syncCanopy } from '../integrations/canopy'
 import { ContactsScopeError, buildGoogleContactInputs } from '../integrations/google-contacts'
 import { syncLinear } from '../integrations/linear'
+import { syncMetriport } from '../integrations/metriport'
 import { syncNotion } from '../integrations/notion'
 import { readVaultPathSetting, syncObsidian } from '../integrations/obsidian'
 import { syncOura } from '../integrations/oura'
@@ -77,7 +78,8 @@ const SUPPORTED_SYNC_SERVICES = new Set([
   'canopy',
   'argyle',
   'snaptrade',
-  'arcadia'
+  'arcadia',
+  'metriport'
 ])
 
 function normalizeSupportedSyncService(service: unknown): string | null {
@@ -843,6 +845,7 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     if (service === 'argyle') return syncArgyle(win)
     if (service === 'snaptrade') return syncSnaptrade(win)
     if (service === 'arcadia') return syncArcadia(win)
+    if (service === 'metriport') return syncMetriport()
     if (service === 'things') {
       // Things is local + tokenless: Connect (and manual refresh) come through
       // here, so flip the opt-in flag on before syncing. Disconnect sets the

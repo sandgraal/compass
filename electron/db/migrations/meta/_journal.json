@@ -225,6 +225,13 @@
       "when": 1783293601562,
       "tag": "0031_right_orphan",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1783305137379,
+      "tag": "0032_mute_lady_deathstrike",
+      "breakpoints": true
     }
   ]
 }

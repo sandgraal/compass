@@ -378,6 +378,26 @@ export default function Integrations(): JSX.Element {
       }
       return
     }
+    // Metriport: onboards the patient (managed via the relay — no consent widget); on
+    // success, a sync pulls the consolidated clinical records into the Medical view.
+    if (service === 'metriport') {
+      setConnecting('metriport')
+      try {
+        const r = await window.api.metriport.connect()
+        if (!r.success) {
+          toast(`Metriport connection failed: ${r.error ?? 'unknown error'}`, 'error')
+          return
+        }
+        toast('Metriport connected — fetching your medical records…', 'success')
+        await loadStatuses()
+        triggerSync('metriport')
+      } catch (err) {
+        toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
+      } finally {
+        setConnecting(null)
+      }
+      return
+    }
     setConnecting(service)
     try {
       // Apple Calendar and Things are local-file based — no OAuth, just kick

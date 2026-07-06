@@ -211,7 +211,7 @@ finance/vault; low-sensitivity media/purchase history can be records-readable.
 | Aggregator | Coverage (one integration) | Mode | Completes / unlocks | AI boundary |
 |---|---|---|---|---|
 | **Terra** (or Vital/Rook) | 500+ wearables/health apps (Fitbit, Garmin, Oura, Whoop, Apple Health, Strava) | LIVE-relay | **new Health hub** (sleep/HRV/activity trends; correlations w/ spend + productivity) | aggregates-only |
-| **Metriport / Flexpa** | 300M+ medical records via FHIR/TEFCA/Carequality | LIVE-relay | longitudinal **medical timeline** → Phase 9.4 `medical_*` | aggregates-only |
+| **Metriport / Flexpa** *(medical records shipped 10.9)* | 300M+ medical records via FHIR/TEFCA/Carequality | LIVE-relay | new **Medical records** surface (FHIR → dedicated off-spine table + a Medical card on /health) | aggregates-only |
 | **SnapTrade** *(shipped 10.9)* | every major brokerage (Robinhood/Schwab/Fidelity/E*TRADE) | LIVE-**BYO** | completes **holdings + net worth** (live positions replace the unvalidated CSV) | aggregates-only |
 | **Canopy Connect** | 300+ P&C insurers ("Plaid for insurance") | LIVE-relay | completes **`finance-estate` insurance-adequacy / gap** engine (today: manual) | aggregates-only |
 | **Argyle / Pinwheel** *(shipped 10.9)* | payroll/income for ~80% of US workers | LIVE-relay | completes **Phase 4.5 forecast** (real paystubs replace inferred income; effective withholding rate) | aggregates-only |
@@ -314,8 +314,11 @@ Builds on Phase 9's shipped spine; **does not renumber 9.x**. Each wave is its o
   relay-fronted but the first `tokenAuth` adapter: its OAuth2 client-credentials bearer is exchanged + cached in
   the relay (`token-cache.ts` — the relay's first auth extension beyond static keys), then utility statements
   land in the dedicated `utility_bills` table (off the ledger — no double-count) and `finance-property.ts` reads
-  them into the Schedule-E **utilities operating line** (matched by service address). Next: Metriport / Nylas /
-  Knot. See §4f.
+  them into the Schedule-E **utilities operating line** (matched by service address). Plus **Metriport** — the
+  first MEDICAL aggregator (static `x-api-key`): a patient's clinical records arrive as FHIR R4, and
+  `normalizeMetriportBundle` maps them into the dedicated `medical_records` table (OFF the AI spine — medical is
+  the strictest privacy boundary), surfaced as a Medical card on `/health` + an aggregates-only
+  `compass_medical_summary` (counts + dates, never a diagnosis/lab value). Next: Nylas / Knot. See §4f.
 
 > **Build order:** 10.1 (spine) → 10.2 / 10.3 / 10.4 (independent, parallelizable, each reuses the spine) →
 > 10.5 → 10.6 (cross-cutting, gated) → 10.7 (leverage, but delivered incrementally throughout) →
