@@ -73,13 +73,16 @@ export function normalizeNylasContacts(json: unknown): ContactInput[] {
   const out: ContactInput[] = []
   for (const c of contactsOf(json)) {
     const id = str(c.id)
+    // A remote sync source MUST have a stable external id — without one, upsertContacts
+    // would mint a fresh uuid every run and duplicate the contact on each sync.
+    if (!id) continue
     const given = str(c.given_name)
     const surname = str(c.surname)
     const emails = emailsOf(c)
     const displayName = [given, surname].filter(Boolean).join(' ') || emails[0]?.value || ''
     if (!displayName) continue // no name and no email → nothing to show
     out.push({
-      externalId: id ? `nylas:${id}` : undefined, // upsertContacts mints a uuid if absent
+      externalId: `nylas:${id}`,
       displayName,
       givenName: given,
       familyName: surname,
@@ -182,35 +185,41 @@ export async function syncNylas(mainWindow?: BrowserWindow | null): Promise<Sync
   }
 }
 
+const NYLAS_BASE = 'https://api.us.nylas.com'
+
+function readSetting(sqlite: SqliteForFx, key: string): string | null {
+  try {
+    const row = sqlite.prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as
+      | { value?: string }
+      | undefined
+    return row?.value?.trim() || null
+  } catch {
+    return null
+  }
+}
+
 /**
- * Open Nylas Hosted Auth in a sandboxed modal window; on the success redirect, capture
- * the connected account's `grant_id`. Hardened like the other connect flows (popups
- * denied, exact origin+pathname match, id charset-validated).
+ * Nylas Hosted Auth is a standard OAuth **authorization-code** flow:
+ *   1. Open Nylas's hosted consent page (`/v3/connect/auth?...response_type=code`) — the
+ *      user authenticates at their own provider. The `client_id` is public (a `nylasClientId`
+ *      app setting); the redirect_uri sentinel is registered in the Nylas app.
+ *   2. Nylas redirects back with `?code=<AUTH_CODE>` — we intercept it (exact origin+pathname).
+ *   3. Exchange the code for a **grant** via the relay `POST /v3/connect/token` (the relay
+ *      injects the secret app key) → `{ grant_id }`, which we store as the sync handle.
  *
- * CAVEAT: Hosted Auth (the provider-consent OAuth flow) + the code→grant exchange run
- * against a deployed relay with real Nylas app credentials; this path is not
- * test-exercised. The relay holds the app key; the client only ever sees the grant id.
+ * Hardened: popups denied, exact-redirect match, code + grant charset-validated. CAVEAT:
+ * this whole path needs a DEPLOYED relay + a configured Nylas app; it is not test-exercised.
  */
 export async function openNylasConnect(
   sqlite: SqliteForFx,
   parent: BrowserWindow | null
 ): Promise<{ success: boolean; error?: string }> {
-  const cfg = resolveRelayConfig(sqlite, 'nylas', () => null)
-
-  // Ask the relay to mint a Hosted-Auth URL (it holds the Nylas app id + key).
-  let authUrl: string
-  try {
-    const res = await relayFetch(cfg, 'nylas', 'POST', '/v3/connect/token', {
-      body: JSON.stringify({ action: 'auth-url', redirect_uri: NYLAS_SUCCESS_URL })
-    })
-    if (!res.ok) throw new Error(`Nylas connect → HTTP ${res.status}`)
-    const body = (await res.json()) as { url?: string; authUrl?: string }
-    const url = str(body.url) ?? str(body.authUrl)
-    if (!url) throw new Error('Nylas did not return a Hosted Auth URL')
-    authUrl = url
-  } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) }
+  const clientId = readSetting(sqlite, 'nylasClientId')
+  if (!clientId) {
+    return { success: false, error: 'Nylas is not configured (missing app client id).' }
   }
+  const cfg = resolveRelayConfig(sqlite, 'nylas', () => null)
+  const authUrl = `${NYLAS_BASE}/v3/connect/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(NYLAS_SUCCESS_URL)}&response_type=code`
 
   return new Promise((resolve) => {
     const win = new BrowserWindow({
@@ -244,14 +253,39 @@ export async function openNylasConnect(
       if (target.origin !== NYLAS_SUCCESS.origin || target.pathname !== NYLAS_SUCCESS.pathname) {
         return
       }
-      e.preventDefault()
-      const grantId = target.searchParams.get('grant_id') ?? ''
-      if (!/^[A-Za-z0-9_-]+$/.test(grantId)) {
-        finish({ success: false, error: 'Nylas returned no valid grant id' })
+      e.preventDefault() // synchronous — stop the navigation before the async exchange
+      const code = target.searchParams.get('code') ?? ''
+      if (!/^[\w.\-]+$/.test(code)) {
+        finish({ success: false, error: 'Nylas returned no valid auth code' })
         return
       }
-      saveToken('nylas', { ...loadNylasToken(), grantId })
-      finish({ success: true })
+      // Exchange the auth code for a grant via the relay (which injects the app secret).
+      void (async () => {
+        try {
+          const res = await relayFetch(cfg, 'nylas', 'POST', '/v3/connect/token', {
+            body: JSON.stringify({
+              code,
+              client_id: clientId,
+              redirect_uri: NYLAS_SUCCESS_URL,
+              grant_type: 'authorization_code'
+            })
+          })
+          if (!res.ok) {
+            finish({ success: false, error: `Nylas token exchange → HTTP ${res.status}` })
+            return
+          }
+          const body = (await res.json()) as { grant_id?: string }
+          const grantId = str(body.grant_id)
+          if (!grantId || !/^[\w.\-]+$/.test(grantId)) {
+            finish({ success: false, error: 'Nylas returned no grant id' })
+            return
+          }
+          saveToken('nylas', { ...loadNylasToken(), grantId })
+          finish({ success: true })
+        } catch (err) {
+          finish({ success: false, error: err instanceof Error ? err.message : String(err) })
+        }
+      })()
     }
     win.webContents.on('will-redirect', onNavigate)
     win.webContents.on('will-navigate', onNavigate)

@@ -53,6 +53,11 @@ describe('normalizeNylasContacts', () => {
     expect(normalizeNylasContacts({ data: 'nope' })).toEqual([])
     expect(normalizeNylasContacts({ data: [{ id: 'x' }] })).toEqual([]) // no name/email
   })
+
+  it('skips contacts without a stable id (would otherwise duplicate on every sync)', () => {
+    // A named contact with NO id → dropped, since upsertContacts would mint a fresh uuid.
+    expect(normalizeNylasContacts({ data: [{ given_name: 'No', surname: 'Id' }] })).toEqual([])
+  })
 })
 
 describe('Nylas → owned contacts (real DB)', () => {

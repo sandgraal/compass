@@ -1,15 +1,18 @@
 /**
  * Nylas adapter (Phase 10.9) — the sixth relay-fronted aggregator. Nylas connects 250+
  * email/calendar/contact providers (Gmail, Outlook, iCloud, Yahoo, Exchange) through one
- * integration. Like Canopy it's keyed by a static app-level **Bearer API key** (no OAuth
- * token exchange) — the key lives only in the relay. The end-user consents via Nylas
- * Hosted Auth (which produces a per-account `grant_id`); the relay then fronts the
- * grant-scoped contacts read + the auth-code→grant token exchange.
+ * integration. It's keyed by a static app-level **Bearer API key** (the secret app key,
+ * which doubles as the OAuth client secret) — that key lives only in the relay and is the
+ * single injected credential for BOTH permitted calls. The end-user consents via Nylas
+ * Hosted Auth; the relay fronts (a) the grant-scoped contacts read and (b) the OAuth
+ * authorization-code→grant token exchange (`POST /v3/connect/token`, where the injected
+ * Bearer key authorizes the exchange). The client sends the auth `code` + public
+ * `client_id`; only the app key stays server-side.
  *
- * It broadens the **People** directory beyond Google-direct contacts. DENY-by-default:
- * only the grant's contacts GET + the connect-token POST are forwarded. Base + shapes
- * confirmed against https://developer.nylas.com/docs/v3 (US region); unvalidated against
- * a real grant.
+ * It broadens the owned **contacts** / People directory beyond Google-direct. DENY-by-
+ * default: only the grant's contacts GET + the connect-token POST are forwarded. Base +
+ * shapes confirmed against https://developer.nylas.com/docs/v3 (US region); unvalidated
+ * against a real grant.
  */
 
 import type { AggregatorAdapter, RelayEnv } from './types.js'
