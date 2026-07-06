@@ -137,6 +137,16 @@ const api = {
     getSummary: () => ipcRenderer.invoke('health:get-summary')
   },
 
+  // --- Medical records (Phase 10.9 — Metriport FHIR, aggregates-only) ---
+  medical: {
+    getSummary: () => ipcRenderer.invoke('medical:get-summary')
+  },
+
+  // --- Metriport (Phase 10.9 — relay-fronted medical aggregator → medical records) ---
+  metriport: {
+    connect: () => ipcRenderer.invoke('metriport:connect')
+  },
+
   // --- Terra (Phase 10.9 — relay-fronted wearables aggregator) ---
   terra: {
     connect: () => ipcRenderer.invoke('terra:connect'),

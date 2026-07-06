@@ -11,6 +11,7 @@ import { syncCanopy } from './integrations/canopy'
 import { syncFxRates } from './integrations/finance-fx-fetch'
 import { captureSnapshots } from './integrations/finance-snapshot'
 import { syncLinear } from './integrations/linear'
+import { syncMetriport } from './integrations/metriport'
 import { syncNotion } from './integrations/notion'
 import { syncNylas } from './integrations/nylas'
 import { syncObsidian } from './integrations/obsidian'
@@ -169,6 +170,8 @@ function runSyncForService(service: string): void {
     void syncSnaptrade(win)
   } else if (service === 'arcadia') {
     void syncArcadia(win)
+  } else if (service === 'metriport') {
+    void syncMetriport()
   } else if (service === 'nylas') {
     void syncNylas(win)
   }

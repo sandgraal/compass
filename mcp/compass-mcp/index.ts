@@ -201,6 +201,12 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false }
   },
   {
+    name: 'compass_medical_summary',
+    description:
+      'Returns AGGREGATE medical figures only, from connected clinical records (Metriport FHIR): total record count, counts per category (conditions/medications/labs/immunizations/allergies/encounters), active-condition count, and the earliest + most-recent record dates. NEVER returns a diagnosis, medication, vaccine, lab value, provider, or any PHI (STRICT privacy boundary — counts + dates only). Read-only.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
     name: 'compass_habit_streaks',
     description:
       'Returns each active habit with its current streak (consecutive days completed, ending today or yesterday) and longest streak. Read-only.',
@@ -800,6 +806,53 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               totalAnnualizedGross: anyGross ? Math.round(totalGross) : null,
               blendedWithholdingRate:
                 totalGross > 0 ? Math.round((totalWithholding / totalGross) * 1000) / 1000 : null
+            },
+            null,
+            2
+          )
+        )
+      } catch (err) {
+        db.close()
+        return errorResult(String(err))
+      }
+    }
+
+    // Aggregates-only medical view — counts + dates ONLY, never a diagnosis/medication/lab
+    // value or any PHI. Medical is the strictest privacy boundary in the app.
+    if (name === 'compass_medical_summary') {
+      const db = openDb()
+      if (!db) return errorResult('Compass DB not found')
+      try {
+        type MedRow = { category: string; status: string | null; recordedAt: string | null }
+        let rows: MedRow[] = []
+        try {
+          rows = db
+            .prepare('SELECT category, status, recorded_at AS recordedAt FROM medical_records')
+            .all() as MedRow[]
+        } catch {
+          /* table absent → no records */
+        }
+        const byCategory: Record<string, number> = {}
+        const dates: string[] = []
+        let activeConditions = 0
+        for (const r of rows) {
+          byCategory[r.category] = (byCategory[r.category] ?? 0) + 1
+          if (r.recordedAt) dates.push(r.recordedAt)
+          if (r.category === 'condition' && (r.status ?? '').toLowerCase() === 'active') {
+            activeConditions++
+          }
+        }
+        dates.sort()
+        db.close()
+        return textResult(
+          JSON.stringify(
+            {
+              hasData: rows.length > 0,
+              count: rows.length,
+              byCategory,
+              activeConditions,
+              firstDate: dates[0] ?? null,
+              lastDate: dates.length ? dates[dates.length - 1] : null
             },
             null,
             2

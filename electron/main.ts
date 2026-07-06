@@ -23,6 +23,7 @@ import { registerHabitsHandlers } from './ipc/habits'
 import { registerHealthHandlers } from './ipc/health'
 import { registerInsightsHandlers } from './ipc/insights'
 import { registerKnowledgeHandlers } from './ipc/knowledge'
+import { registerMedicalHandlers } from './ipc/medical'
 import { registerMonthlyRollupHandlers } from './ipc/monthly-rollup'
 import { registerMorningBriefHandlers } from './ipc/morning-brief'
 import { registerNylasHandlers } from './ipc/nylas'
@@ -172,6 +173,7 @@ app.whenReady().then(async () => {
   registerFinanceHandlers(ipcMain)
   registerHabitsHandlers(ipcMain)
   registerHealthHandlers(ipcMain)
+  registerMedicalHandlers(ipcMain)
   registerTerraHandlers(ipcMain)
   registerCanopyHandlers(ipcMain)
   registerArgyleHandlers(ipcMain)

@@ -240,6 +240,20 @@ function ensureNewTables(sqlite: Database.Database): void {
       ingested_at INTEGER
     );
     CREATE UNIQUE INDEX IF NOT EXISTS utility_bills_external_id_unique ON utility_bills (external_id);
+    -- Medical records (Phase 10.9). Here (always-run fallback) as well as the migration
+    -- because packaged builds skip migrations. OFF the records/AI spine — medical is the
+    -- most sensitive domain, aggregates-only; stores the clinical summary, never PHI.
+    CREATE TABLE IF NOT EXISTS medical_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      external_id TEXT NOT NULL,
+      category TEXT NOT NULL,
+      description TEXT,
+      code TEXT,
+      status TEXT,
+      recorded_at TEXT,
+      ingested_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS medical_records_external_id_unique ON medical_records (external_id);
     -- FX-rate snapshots (Phase 11.1). Lives here (the always-run fallback) as
     -- well as migration 0019 because the packaged app doesn't bundle migrations.
     CREATE TABLE IF NOT EXISTS fx_rates (
