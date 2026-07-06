@@ -184,10 +184,39 @@ export function upsertMedicalRecords(
 // ── connect + sync (impure; managed via the relay) ─────────────────────────────
 
 type SyncResult = { service: string; success: boolean; recordsUpdated?: number; error?: string }
-type MetriportToken = { patientId?: string }
+// Demographics (name/DOB/address) are PHI — they live ONLY in the encrypted token
+// blob (`safeStorage`), never in plaintext `app_settings`. `patientId` is the
+// Metriport-assigned handle we sync against.
+type MetriportToken = { patientId?: string; demographics?: unknown }
 
 function loadMetriportToken(): MetriportToken {
   return (loadToken('metriport') as MetriportToken | null) ?? {}
+}
+
+/**
+ * Resolve the patient demographics needed to create/onboard the Metriport patient.
+ * Reads them from the encrypted token store. If an older install seeded them into
+ * the plaintext `app_settings['metriportPatient']` row, migrate that value into the
+ * encrypted store and **purge the plaintext copy** so PHI never lingers on disk.
+ */
+export function loadMetriportDemographics(sqlite: SqliteForFx): unknown {
+  const tok = loadMetriportToken()
+  if (tok.demographics) return tok.demographics
+  // Legacy plaintext seed → migrate into the encrypted blob, then delete it.
+  try {
+    const row = sqlite
+      .prepare('SELECT value FROM app_settings WHERE key = ?')
+      .get('metriportPatient') as { value?: string } | undefined
+    const legacy = row?.value ? JSON.parse(row.value) : null
+    if (legacy) {
+      saveToken('metriport', { ...tok, demographics: legacy })
+      sqlite.prepare('DELETE FROM app_settings WHERE key = ?').run('metriportPatient')
+      return legacy
+    }
+  } catch {
+    // fall through to "not configured"
+  }
+  return null
 }
 
 /** Pull the connected patient's consolidated FHIR bundle → upsert into `medical_records`. */
@@ -258,7 +287,8 @@ export async function syncMetriport(): Promise<SyncResult> {
  * Onboard the patient with Metriport and kick off a document query. There's no consumer
  * consent widget — the developer (the relay) represents the patient's authorization — so
  * this is a pair of API calls, not a browser flow: create the patient from demographics
- * (a `metriportPatient` JSON setting) → store the `patientId` → start a consolidated query.
+ * (held in the encrypted token blob — PHI never touches plaintext `app_settings`) → store
+ * the `patientId` → start a consolidated query.
  * The bundle arrives asynchronously (Metriport → webhook); a later `syncMetriport` reads
  * the cached consolidated data.
  *
@@ -268,15 +298,7 @@ export async function syncMetriport(): Promise<SyncResult> {
 export async function openMetriportConnect(
   sqlite: SqliteForFx
 ): Promise<{ success: boolean; error?: string }> {
-  let demographics: unknown
-  try {
-    const row = sqlite
-      .prepare('SELECT value FROM app_settings WHERE key = ?')
-      .get('metriportPatient') as { value?: string } | undefined
-    demographics = row?.value ? JSON.parse(row.value) : null
-  } catch {
-    demographics = null
-  }
+  const demographics = loadMetriportDemographics(sqlite)
   if (!demographics) {
     return {
       success: false,

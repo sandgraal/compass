@@ -288,9 +288,9 @@ export default function Health(): JSX.Element {
             <div className="mb-3">
               <div className="text-xs font-medium text-muted-foreground mb-1.5">Conditions</div>
               <ul className="space-y-1">
-                {medical.conditions.slice(0, 8).map((c) => (
+                {medical.conditions.slice(0, 8).map((c, i) => (
                   <li
-                    key={`${c.description}-${c.date ?? ''}`}
+                    key={`${c.description}-${c.date ?? ''}-${i}`}
                     className="flex items-center justify-between text-sm gap-3"
                   >
                     <span className="text-foreground min-w-0 truncate">{c.description}</span>
@@ -307,9 +307,9 @@ export default function Health(): JSX.Element {
             <div>
               <div className="text-xs font-medium text-muted-foreground mb-1.5">Medications</div>
               <ul className="space-y-1">
-                {medical.medications.slice(0, 8).map((m) => (
+                {medical.medications.slice(0, 8).map((m, i) => (
                   <li
-                    key={`${m.description}-${m.date ?? ''}`}
+                    key={`${m.description}-${m.date ?? ''}-${i}`}
                     className="flex items-center justify-between text-sm gap-3"
                   >
                     <span className="text-foreground min-w-0 truncate">{m.description}</span>

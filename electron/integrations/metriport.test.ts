@@ -1,8 +1,23 @@
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as schema from '../db/schema'
-import { normalizeMetriportBundle, upsertMedicalRecords } from './metriport'
+
+// Stateful stand-in for the encrypted (safeStorage-backed) token store so we can
+// assert PHI demographics land there and never in plaintext app_settings.
+const tokenStore = vi.hoisted(() => ({ current: {} as Record<string, unknown> }))
+vi.mock('../ipc/auth', () => ({
+  loadToken: (id: string) => tokenStore.current[id] ?? null,
+  saveToken: (id: string, value: unknown) => {
+    tokenStore.current[id] = value
+  }
+}))
+
+import {
+  loadMetriportDemographics,
+  normalizeMetriportBundle,
+  upsertMedicalRecords
+} from './metriport'
 
 const BUNDLE = {
   resourceType: 'Bundle',
@@ -136,5 +151,38 @@ describe('upsertMedicalRecords (real DB)', () => {
         .prepare("SELECT status FROM medical_records WHERE external_id = 'metriport:Condition:c1'")
         .get()
     ).toEqual({ status: 'resolved' })
+  })
+})
+
+describe('loadMetriportDemographics (PHI stays encrypted)', () => {
+  let sqlite: InstanceType<typeof Database>
+
+  beforeEach(() => {
+    tokenStore.current = {}
+    sqlite = new Database(':memory:')
+    sqlite.exec('CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER);')
+  })
+
+  it('migrates a legacy plaintext seed into the encrypted store and purges the plaintext row', () => {
+    const demo = { firstName: 'Ada', lastName: 'Lovelace', dob: '1815-12-10' }
+    sqlite
+      .prepare('INSERT INTO app_settings (key, value) VALUES (?, ?)')
+      .run('metriportPatient', JSON.stringify(demo))
+
+    // First read migrates the seed, then returns it.
+    expect(loadMetriportDemographics(sqlite)).toEqual(demo)
+    // Plaintext PHI is gone from app_settings.
+    expect(
+      sqlite.prepare("SELECT value FROM app_settings WHERE key = 'metriportPatient'").get()
+    ).toBeUndefined()
+    // …and now lives only in the encrypted token blob.
+    expect((tokenStore.current.metriport as { demographics?: unknown }).demographics).toEqual(demo)
+
+    // Second read comes straight from the encrypted store (no plaintext needed).
+    expect(loadMetriportDemographics(sqlite)).toEqual(demo)
+  })
+
+  it('returns null when nothing is configured', () => {
+    expect(loadMetriportDemographics(sqlite)).toBeNull()
   })
 })
