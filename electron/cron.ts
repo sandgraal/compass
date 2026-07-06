@@ -12,6 +12,7 @@ import { syncFxRates } from './integrations/finance-fx-fetch'
 import { captureSnapshots } from './integrations/finance-snapshot'
 import { syncLinear } from './integrations/linear'
 import { syncNotion } from './integrations/notion'
+import { syncNylas } from './integrations/nylas'
 import { syncObsidian } from './integrations/obsidian'
 import { syncOura } from './integrations/oura'
 import { syncSnaptrade } from './integrations/snaptrade'
@@ -168,6 +169,8 @@ function runSyncForService(service: string): void {
     void syncSnaptrade(win)
   } else if (service === 'arcadia') {
     void syncArcadia(win)
+  } else if (service === 'nylas') {
+    void syncNylas(win)
   }
 }
 

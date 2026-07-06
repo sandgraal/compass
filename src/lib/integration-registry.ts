@@ -229,6 +229,18 @@ export const INTEGRATION_REGISTRY: Record<string, IntegrationMeta> = {
     logo: '⚡',
     connected: true
   },
+  nylas: {
+    id: 'nylas',
+    name: 'Nylas (Contacts)',
+    category: 'communication-productivity',
+    method: 'live',
+    description:
+      'Contacts from 250+ providers (Outlook, iCloud, Exchange…) into your address book.',
+    scopes: ['contacts.read'],
+    color: 'from-sky-500/20 to-indigo-500/20',
+    logo: 'ny',
+    connected: true
+  },
   slack: {
     id: 'slack',
     name: 'Slack',

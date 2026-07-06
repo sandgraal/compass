@@ -378,6 +378,26 @@ export default function Integrations(): JSX.Element {
       }
       return
     }
+    // Nylas: opens Hosted Auth (managed via the relay); on success, pull contacts
+    // into the owned address book.
+    if (service === 'nylas') {
+      setConnecting('nylas')
+      try {
+        const r = await window.api.nylas.connect()
+        if (!r.success) {
+          toast(`Nylas connection failed: ${r.error ?? 'unknown error'}`, 'error')
+          return
+        }
+        toast('Nylas connected — importing your contacts…', 'success')
+        await loadStatuses()
+        triggerSync('nylas')
+      } catch (err) {
+        toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
+      } finally {
+        setConnecting(null)
+      }
+      return
+    }
     setConnecting(service)
     try {
       // Apple Calendar and Things are local-file based — no OAuth, just kick
