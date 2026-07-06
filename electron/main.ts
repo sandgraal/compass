@@ -35,6 +35,7 @@ import { registerPlacesHandlers } from './ipc/places'
 import { registerPlaidHandlers } from './ipc/plaid'
 import { registerQuickCaptureHandlers } from './ipc/quick-capture'
 import { registerRecordsHandlers } from './ipc/records'
+import { registerRelayHandlers } from './ipc/relay'
 import { registerSearchHandlers } from './ipc/search'
 import { registerSettingsHandlers } from './ipc/settings'
 import { registerSimplefinHandlers } from './ipc/simplefin'
@@ -176,6 +177,7 @@ app.whenReady().then(async () => {
   registerHealthHandlers(ipcMain)
   registerMedicalHandlers(ipcMain)
   registerTerraHandlers(ipcMain)
+  registerRelayHandlers(ipcMain)
   registerCanopyHandlers(ipcMain)
   registerArgyleHandlers(ipcMain)
   registerSnaptradeHandlers(ipcMain)

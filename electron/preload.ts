@@ -186,6 +186,13 @@ const api = {
     hasCreds: () => ipcRenderer.invoke('snaptrade:has-creds')
   },
 
+  // --- Relay (aggregator relay URL + connectivity test) ---
+  relay: {
+    getConfig: () => ipcRenderer.invoke('relay:get-config'),
+    setUrl: (url: string | null) => ipcRenderer.invoke('relay:set-url', url),
+    test: (url?: string) => ipcRenderer.invoke('relay:test', url)
+  },
+
   // --- Encrypted backup / restore (May 2026 Tier 1 #2) ---
   backup: {
     create: (passphrase: string) => ipcRenderer.invoke('backup:create', passphrase),

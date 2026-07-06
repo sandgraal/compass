@@ -847,6 +847,25 @@ declare global {
         setByo(clientId: string, consumerKey: string): Promise<{ success: boolean; error?: string }>
         hasCreds(): Promise<boolean>
       }
+      // Relay — aggregator relay URL override + connectivity test.
+      relay: {
+        getConfig(): Promise<{
+          relayUrl: string
+          isDefault: boolean
+          defaultUrl: string
+          byoAggregators: string[]
+        }>
+        setUrl(
+          url: string | null
+        ): Promise<{ success: boolean; relayUrl?: string; isDefault?: boolean; error?: string }>
+        test(url?: string): Promise<{
+          ok: boolean
+          status?: number
+          error?: string
+          latencyMs: number
+          relayUrl: string
+        }>
+      }
       backup: {
         create(passphrase: string): Promise<{
           success: boolean
