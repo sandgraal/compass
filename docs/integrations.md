@@ -50,9 +50,20 @@ Add `update<Service>Knowledge(items)` to `electron/knowledge/extractor.ts`:
   method, description, scopes, color, logo letter, `connected: true`). This is the single source of
   truth both `Sidebar.tsx` (connected-count summary) and `Integrations.tsx` (category-grouped,
   searchable grid) read from — no per-page array to hand-maintain anymore.
+- **Add a matching `INTEGRATION_SETUP` entry** in `src/lib/integration-setup.ts` (same `id`). This is
+  the declarative "how to connect" spec — `authKind`, `requiresRelay`, `byoSupported`, `cost`,
+  `prerequisites`, `whatYoullNeed`, numbered `steps` (with links), `docUrl`/`signupUrl`, and the
+  credential `fields` for the generic form. The parity test (`integration-setup.test.ts`) fails if a
+  connected registry entry has no setup entry, so this is required, not optional.
+- The card UI auto-renders from the registry + setup spec via `<IntegrationCard>` + `<IntegrationSetupPanel>`
+  (`src/components/integrations/`). For the simple auth kinds (`paste-token`, `relay-widget`, `local-file`)
+  the panel renders the whole connect flow from the spec — no per-service JSX. The multi-field /
+  multi-connection / stateful flows (Google, Plaid, SimpleFIN, SnapTrade, and Obsidian — `local-path`)
+  keep bespoke JSX, slotted via `renderCardBody` in `Integrations.tsx`.
 - Setup guide entry: append to the OAuth setup guide section in `Integrations.tsx` if the user needs to
-  create their own OAuth app
-- The card UI auto-renders from the registry, grouped under whichever `category` you picked
+  create their own OAuth app.
+- Relay-fronted aggregators route through `electron/integrations/relay-client.ts`; they need a reachable
+  relay (`relay:` IPC + the Relay Settings panel let a user self-host — see `relay/README.md`).
 
 ### 8. CSP allowlist
 Every real integration needs its outbound host reachable under the production CSP. In `electron/main.ts`, add the API hostname to the `connect-src` allowlist. Don't forget the OAuth host too, if it's a separate domain from the API host. Skipping this step means the integration works in dev (no CSP) but silently fails to fetch in a packaged build.
@@ -67,6 +78,7 @@ If the data warrants its own view (like Finance), use the `add-page` skill.
 - [ ] Sync function in its own `electron/integrations/<service>.ts` module, imported into `electron/ipc/sync.ts` for dispatch
 - [ ] Knowledge extractor in `electron/knowledge/extractor.ts` (or its own sibling module — see `docs/knowledge-extractor.md`)
 - [ ] Frontend registry entry in `src/lib/integration-registry.ts`
+- [ ] Declarative setup entry in `src/lib/integration-setup.ts` (enforced by `integration-setup.test.ts`)
 - [ ] Setup guide in the same file (if OAuth)
 - [ ] Type for the new `window.api.<service>.*` namespace in `src/types/electron.d.ts`
 - [ ] CSP `connect-src` entry in `electron/main.ts` for the API host (and OAuth host if separate)

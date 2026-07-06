@@ -18,7 +18,8 @@ This is the canonical pattern, mirrored from how `google` and `github` are wired
 | `electron/preload.ts` | (only if new IPC namespace beyond auth/sync) |
 | `src/types/electron.d.ts` | (only if new IPC namespace) |
 | `src/lib/integration-registry.ts` | Add one `IntegrationMeta` entry (id, name, category, method, description, scopes, color, logo) |
-| `src/pages/Integrations.tsx` | Setup guide section only (if OAuth) — the card grid renders from the registry |
+| `src/lib/integration-setup.ts` | Add one `IntegrationSetup` entry (authKind, prerequisites, steps, fields…) — **required**, enforced by `integration-setup.test.ts` |
+| `src/pages/Integrations.tsx` | Setup guide section only (if OAuth). Card + connect flow auto-render from the registry + setup spec; only multi-field/multi-connection flows need bespoke JSX |
 | `electron/main.ts` | Add API hostname to CSP `connect-src` allowlist |
 
 ## Step-by-step
@@ -128,8 +129,30 @@ In `src/lib/integration-registry.ts`, add one entry to `INTEGRATION_REGISTRY`:
   connected: true
 }
 ```
-This is the *only* frontend touch point needed for the card itself — both `Sidebar.tsx` (connected-count
-summary) and `Integrations.tsx` (category-grouped, searchable grid) read from this one registry.
+Both `Sidebar.tsx` (connected-count summary) and `Integrations.tsx` (category-grouped, searchable grid)
+read from this one registry.
+
+Then add a **matching `INTEGRATION_SETUP` entry** in `src/lib/integration-setup.ts` (same `id`) — the
+declarative connect spec the card renders:
+```typescript
+'<service>': {
+  id: '<service>',
+  authKind: '<oauth-dev-keys|paste-token|dev-creds-modal|setup-token|local-file|local-path|relay-widget>',
+  requiresRelay: false,   // true only for relay-fronted aggregators
+  byoSupported: false,    // true if the user can supply their own upstream keys
+  cost: '<Free | $X/yr | …>',
+  prerequisites: ['<what the user must already have>'],
+  whatYoullNeed: ['<what to gather>'],
+  steps: [{ text: '…', href: 'https://…', hrefLabel: '…' }],
+  signupUrl: 'https://…',
+  fields: [{ key: 'token', label: '…', type: 'password' }]  // empty for relay/local; bespoke flows own their own form
+}
+```
+The parity test `src/lib/integration-setup.test.ts` fails if any connected registry entry lacks a setup
+entry, so this is required. For the simple `paste-token` / `relay-widget` / `local-file` kinds the card's
+`<IntegrationSetupPanel>` renders the whole flow from this spec — no per-service JSX. The multi-field /
+multi-connection / stateful flows (Google, Plaid, SimpleFIN, SnapTrade, and Obsidian — `local-path`) add
+bespoke JSX via `renderCardBody`.
 
 If OAuth, add a setup guide section in `Integrations.tsx` matching the Google/GitHub pattern.
 

@@ -5,11 +5,12 @@ import {
   ChevronRight,
   ExternalLink,
   Plug2,
-  RefreshCw,
-  Search,
-  XCircle
+  Search
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import IntegrationCard from '../components/integrations/IntegrationCard'
+import IntegrationSetupPanel from '../components/integrations/IntegrationSetupPanel'
+import RelaySettings from '../components/integrations/RelaySettings'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
 import {
@@ -20,6 +21,8 @@ import {
   type IntegrationMeta,
   groupByCategory
 } from '../lib/integration-registry'
+import { getIntegrationSetup } from '../lib/integration-setup'
+import { type CardState, deriveCardState } from '../lib/integration-status'
 import { cn, formatRelative } from '../lib/utils'
 
 type IntegrationConfig = IntegrationMeta
@@ -28,13 +31,10 @@ const ALL_INTEGRATIONS = Object.values(INTEGRATION_REGISTRY)
 const INTEGRATIONS = ALL_INTEGRATIONS.filter((i) => i.connected)
 const UPCOMING_INTEGRATIONS = ALL_INTEGRATIONS.filter((i) => !i.connected)
 
-const SYNC_INTERVAL_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
-  { value: 5, label: 'Every 5m' },
-  { value: 15, label: 'Every 15m' },
-  { value: 30, label: 'Every 30m' },
-  { value: 60, label: 'Every hour' },
-  { value: 0, label: 'Manual only' }
-]
+// Ids whose card body is a bespoke, multi-field / multi-connection flow that
+// predates the declarative setup panel. Everything else renders through
+// <IntegrationSetupPanel>. Keep in sync with the switch in the card body below.
+const BESPOKE_BODY_IDS = new Set(['google', 'plaid', 'simplefin', 'snaptrade', 'obsidian'])
 
 export default function Integrations(): JSX.Element {
   const [statuses, setStatuses] = useState<Record<string, IntegrationStatus>>({})
@@ -44,16 +44,15 @@ export default function Integrations(): JSX.Element {
     Array<{ service: string; time: Date; records: number; error?: string }>
   >([])
   const [setupOpen, setSetupOpen] = useState(false)
+  // Relay Settings section (self-host URL + connectivity test). Opened directly
+  // by the "Open Relay settings" link on a relay aggregator's error banner.
+  const [relayOpen, setRelayOpen] = useState(false)
   // Search + category filter for the integration grid — kept simple (client-
   // side substring match) since the registry is small enough today, but this
   // is what keeps the page scannable as more integrations land.
   const [integrationSearch, setIntegrationSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<IntegrationCategory | 'all'>('all')
   const [redirectUris, setRedirectUris] = useState<{ google: string; github: string } | null>(null)
-  // Null = the inline PAT form is collapsed. String = it's open, with the
-  // current input value. Single-instance because the only PAT-connectable
-  // integration today is GitHub.
-  const [githubPatInput, setGithubPatInput] = useState<string | null>(null)
   // SnapTrade BYO setup form (clientId + consumerKey), shown on Connect when the
   // partner credentials aren't stored yet. Null = collapsed.
   const [snaptradeSetupInput, setSnaptradeSetupInput] = useState<{
@@ -122,17 +121,38 @@ export default function Integrations(): JSX.Element {
     error: string | null
   } | null>(null)
   const [obsidianPathInput, setObsidianPathInput] = useState<string | null>(null)
-  // Notion internal-integration token form. Same convention as the GitHub
-  // PAT input above: null = form collapsed, string = form open.
-  const [notionTokenInput, setNotionTokenInput] = useState<string | null>(null)
-  // Linear personal API key form. Same null = collapsed convention.
-  const [linearKeyInput, setLinearKeyInput] = useState<string | null>(null)
-  // Todoist personal API token form. Same null = collapsed convention.
-  const [todoistKeyInput, setTodoistKeyInput] = useState<string | null>(null)
-  // Oura Personal Access Token form. Same null = collapsed convention.
-  const [ouraTokenInput, setOuraTokenInput] = useState<string | null>(null)
+  // Generic credential inputs for declarative (setup-panel) integrations,
+  // keyed by integration id → { fieldKey → value }. Replaces the per-service
+  // *Input string states (GitHub PAT, Notion/Linear/Todoist/Oura tokens): the
+  // panel renders the inputs inline from the spec and writes here.
+  const [fieldValues, setFieldValues] = useState<Record<string, Record<string, string>>>({})
+  // Terra BYO-direct credentials (dev-id + x-api-key) — the "advanced" escape
+  // hatch surfaced by the setup panel for the one relay aggregator that allows it.
+  const [terraByo, setTerraByo] = useState<Record<string, string>>({})
+  // Persistent per-card connect errors — a failed connect (esp. a relay
+  // aggregator with no integrations row yet) surfaces here so the card banner
+  // stays visible instead of vanishing with the toast.
+  const [connectErrors, setConnectErrors] = useState<Record<string, string>>({})
   const { toast } = useToast()
   const confirm = useConfirm()
+
+  function setField(id: string, key: string, value: string): void {
+    setFieldValues((prev) => ({ ...prev, [id]: { ...prev[id], [key]: value } }))
+  }
+  function clearFields(id: string): void {
+    setFieldValues((prev) => ({ ...prev, [id]: {} }))
+  }
+  function setConnectError(id: string, message: string | null): void {
+    setConnectErrors((prev) => {
+      if (message === null) {
+        if (!(id in prev)) return prev
+        const next = { ...prev }
+        delete next[id]
+        return next
+      }
+      return { ...prev, [id]: message }
+    })
+  }
 
   useEffect(() => {
     loadStatuses()
@@ -214,29 +234,38 @@ export default function Integrations(): JSX.Element {
     }
   }
 
+  // Bespoke "Connect" entry points — the multi-field / multi-connection flows
+  // that own their own card body (Google, Plaid, SimpleFIN, SnapTrade,
+  // Obsidian). Paste-token / relay-widget / local-file integrations go through
+  // the declarative setup panel (submitToken / relayConnect / localConnect).
   async function connect(service: string) {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
-    // GitHub now uses Personal Access Tokens by default — much friendlier
-    // than walking a non-developer through registering an OAuth App. Open
-    // the inline PAT form instead of starting the OAuth dance.
-    if (service === 'github') {
-      setGithubPatInput('')
-      return
-    }
     // Google: if credentials aren't stored yet, open the credentials form
-    // first. Once stored, subsequent Connect clicks proceed to the OAuth
-    // dance directly.
-    if (service === 'google' && !googleCredsConfigured) {
-      setGoogleCredsInput({ clientId: '', clientSecret: '' })
+    // first. Once stored, Connect proceeds to the OAuth dance directly.
+    if (service === 'google') {
+      if (!googleCredsConfigured) {
+        setGoogleCredsInput({ clientId: '', clientSecret: '' })
+        return
+      }
+      setConnecting('google')
+      try {
+        const result = await window.api.auth.connectGoogle()
+        if (result.error) {
+          toast(`Connection failed: ${result.error}`, 'error')
+        } else {
+          await loadStatuses()
+          triggerSync('google')
+        }
+      } finally {
+        setConnecting(null)
+      }
       return
     }
     // Plaid:
-    //   - Status not yet loaded → kick off the load + bail. Without this
-    //     guard, an early click reads `plaidStatus?.configured` as
-    //     undefined and opens the form against stale state.
-    //   - Not fully configured (no client_id/env, or no secret) → open the
-    //     in-app setup form, prefilling any client_id/env we already have.
+    //   - Status not yet loaded → kick off the load + bail.
+    //   - Not fully configured → open the in-app setup form, prefilling any
+    //     client_id/env we already have.
     //   - Otherwise → start Plaid Link (the child window flow).
     if (service === 'plaid') {
       if (plaidStatus === null) {
@@ -255,96 +284,14 @@ export default function Integrations(): JSX.Element {
       void connectPlaidBank()
       return
     }
-    // SimpleFIN: paste-once setup token (base64). Connect opens the token form;
-    // claiming it stores the encrypted Access URL and runs a first sync.
+    // SimpleFIN: paste-once setup token (base64). Connect opens the token form.
     if (service === 'simplefin') {
       setSimplefinTokenInput('')
       return
     }
-    // Obsidian: no OAuth — Connect opens the vault-path form; once a vault
-    // is configured the card's refresh icon (or cron) handles syncing.
+    // Obsidian: Connect opens the vault-path form.
     if (service === 'obsidian') {
       setObsidianPathInput(obsidianStatus?.vaultPath ?? '')
-      return
-    }
-    // Linear: paste-once personal API key, like the GitHub PAT.
-    if (service === 'linear') {
-      setLinearKeyInput('')
-      return
-    }
-    // Todoist: paste-once personal API token, like the GitHub PAT.
-    if (service === 'todoist') {
-      setTodoistKeyInput('')
-      return
-    }
-    // Notion: paste-once internal-integration token, like the GitHub PAT.
-    if (service === 'notion') {
-      setNotionTokenInput('')
-      return
-    }
-    // Oura: paste-once Personal Access Token, like the GitHub PAT.
-    if (service === 'oura') {
-      setOuraTokenInput('')
-      return
-    }
-    // Terra: open the Connect widget (managed via the relay) in a child window;
-    // on success, kick off the first wearables sync.
-    if (service === 'terra') {
-      setConnecting('terra')
-      try {
-        const r = await window.api.terra.connect()
-        if (!r.success) {
-          toast(`Terra connection failed: ${r.error ?? 'unknown error'}`, 'error')
-          return
-        }
-        toast('Terra connected — syncing your wearables…', 'success')
-        await loadStatuses()
-        triggerSync('terra')
-      } catch (err) {
-        toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
-      } finally {
-        setConnecting(null)
-      }
-      return
-    }
-    // Canopy: opens the insurance Connect flow (managed via the relay); on success,
-    // pull policies into the estate / insurance-readiness view.
-    if (service === 'canopy') {
-      setConnecting('canopy')
-      try {
-        const r = await window.api.canopy.connect()
-        if (!r.success) {
-          toast(`Canopy connection failed: ${r.error ?? 'unknown error'}`, 'error')
-          return
-        }
-        toast('Canopy connected — importing your policies…', 'success')
-        await loadStatuses()
-        triggerSync('canopy')
-      } catch (err) {
-        toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
-      } finally {
-        setConnecting(null)
-      }
-      return
-    }
-    // Argyle: opens the payroll Connect flow (managed via the relay); on success,
-    // pull paystubs so the cash-flow forecast uses real income instead of inference.
-    if (service === 'argyle') {
-      setConnecting('argyle')
-      try {
-        const r = await window.api.argyle.connect()
-        if (!r.success) {
-          toast(`Argyle connection failed: ${r.error ?? 'unknown error'}`, 'error')
-          return
-        }
-        toast('Argyle connected — importing your paystubs…', 'success')
-        await loadStatuses()
-        triggerSync('argyle')
-      } catch (err) {
-        toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
-      } finally {
-        setConnecting(null)
-      }
       return
     }
     // SnapTrade (BYO-direct): needs partner credentials first, then opens the
@@ -356,107 +303,170 @@ export default function Integrations(): JSX.Element {
         return
       }
       await runSnaptradeConnect()
+    }
+  }
+
+  // Paste-token integrations (GitHub PAT, Notion, Linear, Todoist, Oura) — the
+  // panel renders the token input inline; this claims it. Preserves each
+  // service's friendly success message (login / workspace).
+  async function submitToken(id: string) {
+    const token = (fieldValues[id]?.token ?? '').trim()
+    if (!token) {
+      toast('Paste your token first.', 'error')
       return
     }
-    // Arcadia: opens the utility Connect widget (managed via the relay); on success,
-    // pull utility bills into the property P&L.
-    if (service === 'arcadia') {
-      setConnecting('arcadia')
-      try {
-        const r = await window.api.arcadia.connect()
-        if (!r.success) {
-          toast(`Arcadia connection failed: ${r.error ?? 'unknown error'}`, 'error')
-          return
-        }
-        toast('Arcadia connected — importing your utility bills…', 'success')
-        await loadStatuses()
-        triggerSync('arcadia')
-      } catch (err) {
-        toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
-      } finally {
-        setConnecting(null)
-      }
-      return
-    }
-    // Metriport: onboards the patient (managed via the relay — no consent widget); on
-    // success, a sync pulls the consolidated clinical records into the Medical view.
-    if (service === 'metriport') {
-      setConnecting('metriport')
-      try {
-        const r = await window.api.metriport.connect()
-        if (!r.success) {
-          toast(`Metriport connection failed: ${r.error ?? 'unknown error'}`, 'error')
-          return
-        }
-        toast('Metriport connected — fetching your medical records…', 'success')
-        await loadStatuses()
-        triggerSync('metriport')
-      } catch (err) {
-        toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
-      } finally {
-        setConnecting(null)
-      }
-      return
-    }
-    // Nylas: opens Hosted Auth (managed via the relay); on success, pull contacts
-    // into the owned address book.
-    if (service === 'nylas') {
-      setConnecting('nylas')
-      try {
-        const r = await window.api.nylas.connect()
-        if (!r.success) {
-          toast(`Nylas connection failed: ${r.error ?? 'unknown error'}`, 'error')
-          return
-        }
-        toast('Nylas connected — importing your contacts…', 'success')
-        await loadStatuses()
-        triggerSync('nylas')
-      } catch (err) {
-        toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
-      } finally {
-        setConnecting(null)
-      }
-      return
-    }
-    // Knot: opens the merchant connect flow (managed via the relay); on success, pull
-    // SKU-level order history into the purchase timeline.
-    if (service === 'knot') {
-      setConnecting('knot')
-      try {
-        const r = await window.api.knot.connect()
-        if (!r.success) {
-          toast(`Knot connection failed: ${r.error ?? 'unknown error'}`, 'error')
-          return
-        }
-        toast('Knot connected — importing your purchases…', 'success')
-        await loadStatuses()
-        triggerSync('knot')
-      } catch (err) {
-        toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
-      } finally {
-        setConnecting(null)
-      }
-      return
-    }
-    setConnecting(service)
+    setConnecting(id)
     try {
-      // Apple Calendar and Things are local-file based — no OAuth, just kick
-      // off a sync which will create the integration row on first success.
-      if (service === 'apple-calendar' || service === 'things') {
-        const r = await window.api.sync.triggerSync(service)
-        if (r && 'error' in r && r.error) {
-          toast(`Sync failed: ${r.error}`, 'error')
-        }
+      let error: string | undefined
+      let okMsg = `${INTEGRATION_REGISTRY[id]?.name ?? id} connected.`
+      if (id === 'github') {
+        const r = await window.api.auth.connectGitHubWithPAT(token)
+        error = r.error
+        if (!error) okMsg = `Connected as @${r.login ?? 'github user'}`
+      } else if (id === 'notion') {
+        const r = await window.api.auth.connectNotion(token)
+        error = r.error
+        if (!error && r.workspace) okMsg = `Connected to ${r.workspace}.`
+      } else if (id === 'linear') {
+        const r = await window.api.auth.connectLinear(token)
+        error = r.error
+        if (!error && r.name) okMsg = `Connected as ${r.name}.`
+      } else if (id === 'todoist') {
+        error = (await window.api.auth.connectTodoist(token)).error
+      } else if (id === 'oura') {
+        error = (await window.api.auth.connectOura(token)).error
+      }
+      if (error) {
+        toast(`Connection failed: ${error}`, 'error')
+        setConnectError(id, error)
+        return
+      }
+      setConnectError(id, null)
+      toast(okMsg, 'success')
+      clearFields(id)
+      await loadStatuses()
+      triggerSync(id)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      toast(`Couldn't connect: ${msg}`, 'error')
+      setConnectError(id, msg)
+    } finally {
+      setConnecting(null)
+    }
+  }
+
+  // Relay-fronted aggregators (Terra, Canopy, Argyle, Arcadia, Metriport,
+  // Nylas, Knot). One generic path: open the relay widget, then sync. On
+  // failure the error is persisted on the card (loadStatuses reads the
+  // integrations row errorMessage) in addition to the toast.
+  async function relayConnect(id: string) {
+    const connectors: Record<
+      string,
+      { call: () => Promise<{ success: boolean; error?: string }>; okMsg: string }
+    > = {
+      terra: {
+        call: () => window.api.terra.connect(),
+        okMsg: 'Terra connected — syncing your wearables…'
+      },
+      canopy: {
+        call: () => window.api.canopy.connect(),
+        okMsg: 'Canopy connected — importing your policies…'
+      },
+      argyle: {
+        call: () => window.api.argyle.connect(),
+        okMsg: 'Argyle connected — importing your paystubs…'
+      },
+      arcadia: {
+        call: () => window.api.arcadia.connect(),
+        okMsg: 'Arcadia connected — importing your utility bills…'
+      },
+      metriport: {
+        call: () => window.api.metriport.connect(),
+        okMsg: 'Metriport connected — fetching your medical records…'
+      },
+      nylas: {
+        call: () => window.api.nylas.connect(),
+        okMsg: 'Nylas connected — importing your contacts…'
+      },
+      knot: {
+        call: () => window.api.knot.connect(),
+        okMsg: 'Knot connected — importing your purchases…'
+      }
+    }
+    const conn = connectors[id]
+    if (!conn) return
+    setConnecting(id)
+    try {
+      const r = await conn.call()
+      if (!r.success) {
+        const msg = r.error ?? 'unknown error'
+        toast(`${INTEGRATION_REGISTRY[id]?.name ?? id} connection failed: ${msg}`, 'error')
+        setConnectError(id, msg)
         await loadStatuses()
         return
       }
-      const result = await window.api.auth.connectGoogle()
-      if (result.error) {
-        toast(`Connection failed: ${result.error}`, 'error')
-      } else {
-        await loadStatuses()
-        triggerSync(service)
+      setConnectError(id, null)
+      toast(conn.okMsg, 'success')
+      await loadStatuses()
+      triggerSync(id)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      toast(`Couldn't connect: ${msg}`, 'error')
+      setConnectError(id, msg)
+      await loadStatuses()
+    } finally {
+      setConnecting(null)
+    }
+  }
+
+  // Terra BYO-direct: store the user's own Terra dev-id + x-api-key, then run
+  // the (now BYO) connect which bypasses the relay entirely.
+  async function submitTerraByo() {
+    const devId = (terraByo.devId ?? '').trim()
+    const apiKey = (terraByo.apiKey ?? '').trim()
+    if (!devId || !apiKey) {
+      toast('Enter both your Terra dev-id and x-api-key.', 'error')
+      return
+    }
+    setConnecting('terra')
+    try {
+      const r = await window.api.terra.setByo(devId, apiKey)
+      if (!r.success) {
+        toast(r.error ?? 'Failed to save Terra keys.', 'error')
+        return
       }
+      setTerraByo({})
+      await relayConnect('terra')
+    } finally {
+      setConnecting(null)
+    }
+  }
+
+  // Local-file integrations (Apple Calendar, Things) — no OAuth, just kick off
+  // a sync which creates the integration row on first success. Surfaces the
+  // record count so the user gets real feedback instead of a silent no-op.
+  async function localConnect(id: string) {
+    setConnecting(id)
+    try {
+      const r = await window.api.sync.triggerSync(id)
+      if (r && 'error' in r && r.error) {
+        toast(`Sync failed: ${r.error}`, 'error')
+        setConnectError(id, r.error)
+      } else if (r && 'recordsUpdated' in r && typeof r.recordsUpdated === 'number') {
+        setConnectError(id, null)
+        toast(
+          `${INTEGRATION_REGISTRY[id]?.name ?? id} connected — ${r.recordsUpdated} items synced.`,
+          'success'
+        )
+      } else {
+        setConnectError(id, null)
+        toast(`${INTEGRATION_REGISTRY[id]?.name ?? id} connected.`, 'success')
+      }
+      await loadStatuses()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      toast(`Couldn't connect: ${msg}`, 'error')
+      setConnectError(id, msg)
     } finally {
       setConnecting(null)
     }
@@ -538,106 +548,6 @@ export default function Integrations(): JSX.Element {
         `Couldn't save vault path: ${err instanceof Error ? err.message : String(err)}`,
         'error'
       )
-    } finally {
-      setConnecting(null)
-    }
-  }
-
-  async function submitNotionToken() {
-    if (typeof notionTokenInput !== 'string') return
-    const token = notionTokenInput.trim()
-    if (!token) {
-      toast('Paste your Notion integration token first.', 'error')
-      return
-    }
-    setConnecting('notion')
-    try {
-      const r = await window.api.auth.connectNotion(token)
-      if (r.error) {
-        toast(`Connection failed: ${r.error}`, 'error')
-        return
-      }
-      toast(r.workspace ? `Connected to ${r.workspace}.` : 'Notion connected.', 'success')
-      setNotionTokenInput(null)
-      await loadStatuses()
-      triggerSync('notion')
-    } catch (err) {
-      toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
-    } finally {
-      setConnecting(null)
-    }
-  }
-
-  async function submitLinearKey() {
-    if (typeof linearKeyInput !== 'string') return
-    const token = linearKeyInput.trim()
-    if (!token) {
-      toast('Paste your Linear API key first.', 'error')
-      return
-    }
-    setConnecting('linear')
-    try {
-      const r = await window.api.auth.connectLinear(token)
-      if (r.error) {
-        toast(`Connection failed: ${r.error}`, 'error')
-        return
-      }
-      toast(r.name ? `Connected as ${r.name}.` : 'Linear connected.', 'success')
-      setLinearKeyInput(null)
-      await loadStatuses()
-      triggerSync('linear')
-    } catch (err) {
-      toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
-    } finally {
-      setConnecting(null)
-    }
-  }
-
-  async function submitTodoistKey() {
-    if (typeof todoistKeyInput !== 'string') return
-    const token = todoistKeyInput.trim()
-    if (!token) {
-      toast('Paste your Todoist API token first.', 'error')
-      return
-    }
-    setConnecting('todoist')
-    try {
-      const r = await window.api.auth.connectTodoist(token)
-      if (r.error) {
-        toast(`Connection failed: ${r.error}`, 'error')
-        return
-      }
-      toast('Todoist connected.', 'success')
-      setTodoistKeyInput(null)
-      await loadStatuses()
-      triggerSync('todoist')
-    } catch (err) {
-      toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
-    } finally {
-      setConnecting(null)
-    }
-  }
-
-  async function submitOuraToken() {
-    if (typeof ouraTokenInput !== 'string') return
-    const token = ouraTokenInput.trim()
-    if (!token) {
-      toast('Paste your Oura Personal Access Token first.', 'error')
-      return
-    }
-    setConnecting('oura')
-    try {
-      const r = await window.api.auth.connectOura(token)
-      if (r.error) {
-        toast(`Connection failed: ${r.error}`, 'error')
-        return
-      }
-      toast('Oura connected.', 'success')
-      setOuraTokenInput(null)
-      await loadStatuses()
-      triggerSync('oura')
-    } catch (err) {
-      toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
     } finally {
       setConnecting(null)
     }
@@ -845,29 +755,6 @@ export default function Integrations(): JSX.Element {
     await runSnaptradeConnect()
   }
 
-  async function submitGitHubPat() {
-    if (typeof githubPatInput !== 'string') return
-    const trimmed = githubPatInput.trim()
-    if (!trimmed) {
-      toast('Paste a Personal Access Token first.', 'error')
-      return
-    }
-    setConnecting('github')
-    try {
-      const r = await window.api.auth.connectGitHubWithPAT(trimmed)
-      if (r.error) {
-        toast(`Connection failed: ${r.error}`, 'error')
-        return
-      }
-      toast(`Connected as @${r.login ?? 'github user'}`, 'success')
-      setGithubPatInput(null)
-      await loadStatuses()
-      triggerSync('github')
-    } finally {
-      setConnecting(null)
-    }
-  }
-
   async function disconnect(service: string) {
     const ok = await confirm({
       title: `Disconnect ${service}?`,
@@ -932,6 +819,604 @@ export default function Integrations(): JSX.Element {
     () => groupByCategory(UPCOMING_INTEGRATIONS.filter(matchesFilter)),
     [matchesFilter]
   )
+
+  // The bespoke inner body (config forms + connection lists) for the five
+  // multi-field / multi-connection integrations that predate the setup panel.
+  function renderBespokeBody(integration: IntegrationMeta, state: CardState): JSX.Element | null {
+    const id = integration.id
+    const isConnected = state.isConnected
+
+    if (id === 'plaid' && plaidStatus) {
+      return (
+        <div className="mb-3 space-y-2">
+          {plaidSetupInput !== null && (
+            <div className="p-3 bg-background/40 border border-border rounded-lg space-y-2">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Compass uses your own Plaid developer keys. Get a free Client ID + Secret from{' '}
+                <a
+                  href="https://dashboard.plaid.com/developers/keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  the Plaid dashboard
+                </a>{' '}
+                (Sandbox is instant; Production needs Plaid approval).
+              </p>
+              <label htmlFor="plaid-client-id" className="block text-xs text-muted-foreground">
+                Client ID
+              </label>
+              <input
+                id="plaid-client-id"
+                type="text"
+                placeholder="e.g. 5f1a2b3c4d5e6f7a8b9c0d1e"
+                aria-label="Plaid Client ID"
+                value={plaidSetupInput.clientId}
+                onChange={(e) =>
+                  setPlaidSetupInput((p) => (p ? { ...p, clientId: e.target.value } : p))
+                }
+                className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+              />
+              <label htmlFor="plaid-env" className="block text-xs text-muted-foreground">
+                Environment
+              </label>
+              <select
+                id="plaid-env"
+                aria-label="Plaid environment"
+                value={plaidSetupInput.env}
+                onChange={(e) =>
+                  setPlaidSetupInput((p) =>
+                    p ? { ...p, env: e.target.value as 'sandbox' | 'production' } : p
+                  )
+                }
+                className="w-full text-xs px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="sandbox">Sandbox (test data)</option>
+                <option value="production">Production (real banks)</option>
+              </select>
+              <label htmlFor="plaid-secret-input" className="block text-xs text-muted-foreground">
+                {plaidSetupInput.env} Secret
+              </label>
+              <input
+                id="plaid-secret-input"
+                type="password"
+                placeholder={`Paste your Plaid ${plaidSetupInput.env} secret`}
+                aria-label="Plaid API secret"
+                value={plaidSetupInput.secret}
+                onChange={(e) =>
+                  setPlaidSetupInput((p) => (p ? { ...p, secret: e.target.value } : p))
+                }
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void submitPlaidSetup()
+                  else if (e.key === 'Escape') setPlaidSetupInput(null)
+                }}
+                className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void submitPlaidSetup()}
+                  disabled={
+                    connecting === 'plaid' ||
+                    !plaidSetupInput.clientId.trim() ||
+                    !plaidSetupInput.secret.trim()
+                  }
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
+                >
+                  <Plug2 size={11} />
+                  {connecting === 'plaid' ? 'Saving…' : 'Save & connect'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPlaidSetupInput(null)}
+                  className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+          {!plaidStatus.configured && plaidSetupInput === null && (
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Connect to set up Plaid with your own (free) Plaid developer keys — no files to edit.
+            </p>
+          )}
+          {plaidStatus.configured && plaidSetupInput === null && (
+            <div className="space-y-1.5">
+              {plaidItems.length === 0 && (
+                <p className="text-xs text-muted-foreground">No banks connected yet.</p>
+              )}
+              {plaidItems.map((item) => (
+                <div
+                  key={item.itemId}
+                  className="flex items-center justify-between gap-2 px-2 py-1.5 bg-background/40 border border-border rounded text-xs"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium text-foreground truncate">
+                      {item.institutionName}
+                    </div>
+                    <div className="text-muted-foreground">
+                      {item.errorCode ? (
+                        <span className="text-red-400">
+                          {item.errorCode === 'ITEM_LOGIN_REQUIRED'
+                            ? 'Re-authentication required'
+                            : item.errorCode}
+                        </span>
+                      ) : item.lastSyncedAt ? (
+                        `Last synced ${formatRelative(new Date(item.lastSyncedAt))}`
+                      ) : (
+                        'Never synced'
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void disconnectPlaidItem(item.itemId, item.institutionName)}
+                    className="shrink-0 text-xs px-2 py-1 text-muted-foreground hover:text-destructive transition-colors"
+                  >
+                    Disconnect
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() =>
+                  setPlaidSetupInput({
+                    clientId: plaidStatus.clientId ?? '',
+                    env: plaidStatus.env ?? 'sandbox',
+                    secret: ''
+                  })
+                }
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Edit Plaid credentials
+              </button>
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    if (id === 'simplefin') {
+      return (
+        <div className="mb-3 space-y-2">
+          {simplefinTokenInput !== null && (
+            <div className="p-3 bg-background/40 border border-border rounded-lg space-y-2">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                You hold the keys with SimpleFIN. Create an account at{' '}
+                <a
+                  href="https://bridge.simplefin.org"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  bridge.simplefin.org
+                </a>{' '}
+                ($15/yr), link your banks &amp; cards, generate a one-time setup token, and paste it
+                below. Compass claims it for a read-only access key stored encrypted on this Mac.
+              </p>
+              <label
+                htmlFor="simplefin-token-input"
+                className="block text-xs text-muted-foreground"
+              >
+                Setup token
+              </label>
+              <textarea
+                id="simplefin-token-input"
+                placeholder="Paste your SimpleFIN setup token (a long base64 string)"
+                aria-label="SimpleFIN setup token"
+                value={simplefinTokenInput}
+                onChange={(e) => setSimplefinTokenInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setSimplefinTokenInput(null)
+                }}
+                rows={3}
+                className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40 resize-none"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void submitSimplefinToken()}
+                  disabled={connecting === 'simplefin' || !simplefinTokenInput.trim()}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
+                >
+                  <Plug2 size={11} />
+                  {connecting === 'simplefin' ? 'Connecting…' : 'Claim & sync'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSimplefinTokenInput(null)}
+                  className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+          {simplefinTokenInput === null && (
+            <div className="space-y-1.5">
+              {simplefinConnections.length === 0 && (
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Connect to link your banks &amp; cards through SimpleFIN — no business or
+                  developer keys, just a one-time setup token.
+                </p>
+              )}
+              {simplefinConnections.map((conn) => (
+                <div
+                  key={conn.connectionId}
+                  className="flex items-center justify-between gap-2 px-2 py-1.5 bg-background/40 border border-border rounded text-xs"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium text-foreground truncate">
+                      {conn.orgName || 'SimpleFIN connection'}
+                    </div>
+                    <div className="text-muted-foreground">
+                      {conn.errorCode ? (
+                        <span className="text-red-400">{conn.errorCode}</span>
+                      ) : conn.lastSyncedAt ? (
+                        `Last synced ${formatRelative(new Date(conn.lastSyncedAt))}`
+                      ) : (
+                        'Never synced'
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void disconnectSimplefinConnection(conn.connectionId, conn.orgName)
+                    }
+                    className="shrink-0 text-xs px-2 py-1 text-muted-foreground hover:text-destructive transition-colors"
+                  >
+                    Disconnect
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    if (id === 'obsidian') {
+      return (
+        <>
+          {obsidianPathInput !== null && (
+            <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
+              <label
+                htmlFor="obsidian-vault-path-input"
+                className="block text-xs text-muted-foreground"
+              >
+                Vault folder (absolute path, ~ allowed)
+              </label>
+              <input
+                id="obsidian-vault-path-input"
+                type="text"
+                placeholder="~/Documents/My Vault"
+                aria-label="Obsidian vault folder path"
+                value={obsidianPathInput}
+                onChange={(e) => setObsidianPathInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void submitObsidianPath()
+                  else if (e.key === 'Escape') setObsidianPathInput(null)
+                }}
+                className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+              />
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Vault notes are imported under <code className="font-mono">obsidian/</code> in your
+                knowledge base; Compass notes are exported to a{' '}
+                <code className="font-mono">Compass/</code> folder in the vault. Each side is
+                one-way — no conflicts.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void submitObsidianPath()}
+                  disabled={connecting === 'obsidian' || !obsidianPathInput.trim()}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
+                >
+                  <Plug2 size={11} />
+                  {connecting === 'obsidian' ? 'Connecting…' : 'Connect & Sync'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setObsidianPathInput(null)}
+                  className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+          {obsidianPathInput === null && obsidianStatus?.configured && (
+            <div className="mb-3 flex items-center justify-between gap-2 px-2 py-1.5 bg-background/40 border border-border rounded text-xs">
+              <div className="min-w-0">
+                <div className="font-medium text-foreground truncate">
+                  {obsidianStatus.vaultPath}
+                </div>
+                {obsidianStatus.error ? (
+                  <div className="text-red-400">{obsidianStatus.error}</div>
+                ) : (
+                  !obsidianStatus.looksLikeVault && (
+                    <div className="text-muted-foreground">Plain folder (no .obsidian found)</div>
+                  )
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setObsidianPathInput(obsidianStatus.vaultPath ?? '')}
+                className="shrink-0 text-xs px-2 py-1 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Change vault
+              </button>
+            </div>
+          )}
+        </>
+      )
+    }
+
+    if (id === 'google' && !isConnected && googleCredsInput !== null) {
+      return (
+        <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
+          <div className="text-xs text-muted-foreground leading-relaxed">
+            Paste your Google OAuth Client ID + Secret from{' '}
+            <a
+              href="https://console.cloud.google.com/apis/credentials"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary underline underline-offset-2 inline-flex items-center gap-0.5"
+            >
+              Google Cloud Console
+              <ExternalLink size={10} className="opacity-70" />
+            </a>
+            . Compass stores them encrypted on disk and reuses them on every <em>Connect</em>; no{' '}
+            <code className="bg-secondary px-1 py-0.5 rounded font-mono">.env</code> editing.
+          </div>
+          <label htmlFor="google-client-id-input" className="block text-xs text-muted-foreground">
+            Client ID
+          </label>
+          <input
+            id="google-client-id-input"
+            type="text"
+            placeholder="123456789012-abc...apps.googleusercontent.com"
+            aria-label="Google OAuth Client ID"
+            value={googleCredsInput.clientId}
+            onChange={(e) =>
+              setGoogleCredsInput((prev) => (prev ? { ...prev, clientId: e.target.value } : prev))
+            }
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setGoogleCredsInput(null)
+            }}
+            className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+          />
+          <label
+            htmlFor="google-client-secret-input"
+            className="block text-xs text-muted-foreground"
+          >
+            Client Secret
+          </label>
+          <input
+            id="google-client-secret-input"
+            type="password"
+            placeholder="GOCSPX-..."
+            aria-label="Google OAuth Client Secret"
+            value={googleCredsInput.clientSecret}
+            onChange={(e) =>
+              setGoogleCredsInput((prev) =>
+                prev ? { ...prev, clientSecret: e.target.value } : prev
+              )
+            }
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void submitGoogleCredentials()
+              else if (e.key === 'Escape') setGoogleCredsInput(null)
+            }}
+            className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => void submitGoogleCredentials()}
+              disabled={
+                connecting === 'google' ||
+                !googleCredsInput.clientId.trim() ||
+                !googleCredsInput.clientSecret.trim()
+              }
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
+            >
+              <Plug2 size={11} />
+              {connecting === 'google' ? 'Connecting…' : 'Save & Connect'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setGoogleCredsInput(null)}
+              className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    if (id === 'snaptrade' && !isConnected && snaptradeSetupInput !== null) {
+      return (
+        <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
+          <div className="text-xs text-muted-foreground leading-relaxed">
+            Paste your SnapTrade partner keys (free dev tier). Compass stores them encrypted on disk
+            and signs each request locally.{' '}
+            <a
+              href="https://snaptrade.com/register"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary underline underline-offset-2 inline-flex items-center gap-0.5"
+            >
+              Get keys
+              <ExternalLink size={10} className="opacity-70" />
+            </a>
+          </div>
+          <label htmlFor="snaptrade-client-id" className="block text-xs text-muted-foreground">
+            Client ID
+          </label>
+          <input
+            id="snaptrade-client-id"
+            type="text"
+            placeholder="Your SnapTrade clientId"
+            value={snaptradeSetupInput.clientId}
+            onChange={(e) =>
+              setSnaptradeSetupInput((s) => (s ? { ...s, clientId: e.target.value } : s))
+            }
+            className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+          />
+          <label htmlFor="snaptrade-consumer-key" className="block text-xs text-muted-foreground">
+            Consumer Key
+          </label>
+          <input
+            id="snaptrade-consumer-key"
+            type="password"
+            placeholder="Your SnapTrade consumerKey"
+            value={snaptradeSetupInput.consumerKey}
+            onChange={(e) =>
+              setSnaptradeSetupInput((s) => (s ? { ...s, consumerKey: e.target.value } : s))
+            }
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void submitSnaptradeSetup()
+              else if (e.key === 'Escape') setSnaptradeSetupInput(null)
+            }}
+            className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => void submitSnaptradeSetup()}
+              disabled={
+                connecting === 'snaptrade' ||
+                !snaptradeSetupInput.clientId.trim() ||
+                !snaptradeSetupInput.consumerKey.trim()
+              }
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
+            >
+              <Plug2 size={11} />
+              {connecting === 'snaptrade' ? 'Connecting…' : 'Connect'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSnaptradeSetupInput(null)}
+              className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    return null
+  }
+
+  // Shared connect/disconnect footer for the bespoke (multi-field /
+  // multi-connection) card bodies. Declarative integrations render their own
+  // footer inside <IntegrationSetupPanel>.
+  function renderBespokeFooter(integration: IntegrationMeta, state: CardState): JSX.Element {
+    const id = integration.id
+    const formOpen =
+      (id === 'google' && googleCredsInput !== null) ||
+      (id === 'plaid' && plaidSetupInput !== null) ||
+      (id === 'simplefin' && simplefinTokenInput !== null) ||
+      (id === 'obsidian' && obsidianPathInput !== null) ||
+      (id === 'snaptrade' && snaptradeSetupInput !== null)
+    const connectLabel =
+      (id === 'plaid' && plaidItems.length > 0) ||
+      (id === 'simplefin' && simplefinConnections.length > 0)
+        ? 'Connect bank'
+        : 'Connect'
+    return (
+      <div className="flex gap-2 mt-3">
+        {state.isConnected && !state.isMultiConn ? (
+          <button
+            type="button"
+            onClick={() => disconnect(id)}
+            className="text-xs px-3 py-1.5 border border-border hover:border-destructive text-muted-foreground hover:text-destructive rounded-lg transition-colors"
+          >
+            Disconnect
+          </button>
+        ) : formOpen ? null : (
+          <button
+            type="button"
+            onClick={() => connect(id)}
+            disabled={connecting === id}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
+          >
+            <Plug2 size={11} />
+            {connecting === id ? 'Connecting…' : connectLabel}
+          </button>
+        )}
+        {id === 'google' && googleCredsConfigured && googleCredsInput === null && (
+          <button
+            type="button"
+            onClick={() => editGoogleCredentials()}
+            className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Edit credentials
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  // The card body: a declarative setup panel for simple auth kinds, or the
+  // existing bespoke flow for Google / Plaid / SimpleFIN / SnapTrade / Obsidian.
+  function renderCardBody(integration: IntegrationMeta, state: CardState): JSX.Element {
+    const id = integration.id
+    const setup = getIntegrationSetup(id)
+
+    if (!BESPOKE_BODY_IDS.has(id) && setup) {
+      return (
+        <IntegrationSetupPanel
+          setup={setup}
+          connected={state.isConnected}
+          busy={connecting === id}
+          values={fieldValues[id] ?? {}}
+          onChange={(key, value) => setField(id, key, value)}
+          onConnect={() => {
+            if (setup.authKind === 'paste-token') void submitToken(id)
+            else if (setup.authKind === 'relay-widget') void relayConnect(id)
+            else if (setup.authKind === 'local-file') void localConnect(id)
+          }}
+          onDisconnect={() => disconnect(id)}
+          byo={
+            id === 'terra'
+              ? {
+                  fields: [
+                    {
+                      key: 'devId',
+                      label: 'Terra dev-id',
+                      type: 'text',
+                      placeholder: 'Your Terra dev-id'
+                    },
+                    {
+                      key: 'apiKey',
+                      label: 'Terra x-api-key',
+                      type: 'password',
+                      placeholder: 'Your Terra x-api-key'
+                    }
+                  ],
+                  values: terraByo,
+                  onChange: (key, value) => setTerraByo((prev) => ({ ...prev, [key]: value })),
+                  onSubmit: () => void submitTerraByo(),
+                  busy: connecting === 'terra'
+                }
+              : undefined
+          }
+        />
+      )
+    }
+
+    return (
+      <>
+        {renderBespokeBody(integration, state)}
+        {renderBespokeFooter(integration, state)}
+      </>
+    )
+  }
 
   return (
     <div className="p-8 pt-14 max-w-4xl mx-auto animate-fade-in">
@@ -1109,6 +1594,10 @@ export default function Integrations(): JSX.Element {
         )}
       </div>
 
+      {/* Relay settings — self-host URL + connectivity test for the aggregators
+          that route through the Compass relay. */}
+      <RelaySettings open={relayOpen} onOpenChange={setRelayOpen} />
+
       {/* Available integrations — searchable + grouped by category so this
           stays scannable as the registry grows well past today's 11. Each
           card shows its own live connect/disconnect state below. */}
@@ -1187,1030 +1676,41 @@ export default function Integrations(): JSX.Element {
           <div className="grid grid-cols-2 gap-4">
             {group.items.map((integration) => {
               const status = statuses[integration.id]
-              const baseIsConnected = status?.status === 'connected'
-              const baseHasError = status?.status === 'error'
-              // Plaid's "connected" + "error" come from the per-Item state, not
-              // from the singleton `integrations` row — there can be 0 or many
-              // Items, and one bad Item shouldn't poison the whole card.
-              // Plaid + SimpleFIN are multi-connection: "connected" / "error" come
-              // from the per-connection rows, not the singleton `integrations` row.
-              const isMultiConn = integration.id === 'plaid' || integration.id === 'simplefin'
-              const isConnected =
-                integration.id === 'plaid'
-                  ? plaidItems.length > 0
-                  : integration.id === 'simplefin'
-                    ? simplefinConnections.length > 0
-                    : baseIsConnected
-              const hasError =
-                integration.id === 'plaid'
-                  ? plaidItems.some((i) => i.errorCode)
-                  : integration.id === 'simplefin'
-                    ? simplefinConnections.some((c) => c.errorCode)
-                    : baseHasError
-              const isSyncing = syncing.has(integration.id)
-
+              const state = deriveCardState({
+                id: integration.id,
+                baseStatus: status?.status,
+                baseErrorMessage: status?.errorMessage,
+                hasStatusRow: Boolean(status),
+                plaidItems,
+                simplefinConnections
+              })
+              const setup = getIntegrationSetup(integration.id)
+              const cardError = connectErrors[integration.id] ?? state.errorMessage
+              const errorAction =
+                setup?.requiresRelay && cardError ? (
+                  <button
+                    type="button"
+                    onClick={() => setRelayOpen(true)}
+                    className="underline hover:text-foreground"
+                  >
+                    Open Relay settings
+                  </button>
+                ) : undefined
               return (
-                <div
+                <IntegrationCard
                   key={integration.id}
-                  className={cn(
-                    'bg-gradient-to-br border border-border rounded-xl p-5',
-                    integration.color
-                  )}
+                  meta={integration}
+                  state={state}
+                  lastSyncedAt={status?.lastSyncedAt ?? null}
+                  syncIntervalMinutes={status?.syncIntervalMinutes}
+                  isSyncing={syncing.has(integration.id)}
+                  onSync={() => triggerSync(integration.id)}
+                  onChangeInterval={(m) => changeSyncInterval(integration.id, m)}
+                  errorMessage={connectErrors[integration.id] ?? undefined}
+                  errorAction={errorAction}
                 >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-background/60 flex items-center justify-center text-lg font-bold text-foreground">
-                        {integration.logo}
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-foreground">{integration.name}</h3>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          {/* Plaid is multi-Item: an Item can need re-auth while
-                          others are healthy. When that's the case, surface
-                          the error state at the card level (a single bad
-                          institution shouldn't read as a quiet green
-                          "Connected"). For non-Plaid integrations the
-                          original isConnected-wins logic is unchanged. */}
-                          {(() => {
-                            const errorWins = hasError && (isMultiConn || !isConnected)
-                            return (
-                              <>
-                                {!errorWins && isConnected && (
-                                  <CheckCircle2 size={11} className="text-emerald-400" />
-                                )}
-                                {errorWins && <AlertCircle size={11} className="text-red-400" />}
-                                {!status && !isMultiConn && (
-                                  <XCircle size={11} className="text-muted-foreground/40" />
-                                )}
-                                <span
-                                  className={cn(
-                                    'text-xs',
-                                    errorWins
-                                      ? 'text-red-400'
-                                      : isConnected
-                                        ? 'text-emerald-400'
-                                        : 'text-muted-foreground'
-                                  )}
-                                >
-                                  {errorWins
-                                    ? isMultiConn && isConnected
-                                      ? 'Needs attention'
-                                      : 'Error'
-                                    : isConnected
-                                      ? 'Connected'
-                                      : 'Not connected'}
-                                </span>
-                              </>
-                            )
-                          })()}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {isConnected && (
-                        <button
-                          type="button"
-                          onClick={() => triggerSync(integration.id)}
-                          disabled={isSyncing}
-                          className="p-1.5 rounded-lg bg-background/40 hover:bg-background/60 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                        >
-                          <RefreshCw size={13} className={cn(isSyncing && 'animate-spin')} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <p className="text-sm text-muted-foreground mb-3">{integration.description}</p>
-
-                  <div className="flex flex-wrap gap-1 mb-4">
-                    {integration.scopes.map((scope) => (
-                      <span
-                        key={scope}
-                        className="text-xs px-2 py-0.5 bg-background/40 rounded-full text-muted-foreground font-mono"
-                      >
-                        {scope}
-                      </span>
-                    ))}
-                  </div>
-
-                  {isConnected && status?.lastSyncedAt && (
-                    <p className="text-xs text-muted-foreground mb-3">
-                      Last synced {formatRelative(status.lastSyncedAt)}
-                    </p>
-                  )}
-
-                  {isConnected && (
-                    <label className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
-                      <span>Sync</span>
-                      <select
-                        value={status?.syncIntervalMinutes ?? 15}
-                        onChange={(e) =>
-                          changeSyncInterval(integration.id, Number.parseInt(e.target.value, 10))
-                        }
-                        className="bg-background/40 border border-border rounded-md px-2 py-1 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary"
-                      >
-                        {SYNC_INTERVAL_OPTIONS.map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-
-                  {hasError && status?.errorMessage && (
-                    <p className="text-xs text-red-400 mb-3 bg-red-500/10 px-2 py-1 rounded">
-                      {status.errorMessage}
-                    </p>
-                  )}
-
-                  {/* ─── Plaid card body ───────────────────────────────────────
-                  Custom subsection that renders inside the standard card
-                  shell. Two states:
-                    1. No secret stored → inline secret form (sandbox vs
-                       production picked up from the SDK config).
-                    2. Has secret → list of connected Items as sub-rows
-                       with last-synced timestamp, error CTA if applicable,
-                       and a "Connect new bank" anchor.
-                  Both branches assume the Plaid SDK is configured — the
-                  outer Connect button noop+toasts if it isn't. */}
-                  {integration.id === 'plaid' && plaidStatus && (
-                    <div className="mb-3 space-y-2">
-                      {/* In-app setup form (client_id + environment + secret).
-                      Opened by the Connect button when not fully configured,
-                      and re-openable via "Edit credentials" to fix a wrong
-                      client_id/secret — replaces hand-editing plaid.env. */}
-                      {plaidSetupInput !== null && (
-                        <div className="p-3 bg-background/40 border border-border rounded-lg space-y-2">
-                          <p className="text-xs text-muted-foreground leading-relaxed">
-                            Compass uses your own Plaid developer keys. Get a free Client ID +
-                            Secret from{' '}
-                            <a
-                              href="https://dashboard.plaid.com/developers/keys"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-primary hover:underline"
-                            >
-                              the Plaid dashboard
-                            </a>{' '}
-                            (Sandbox is instant; Production needs Plaid approval).
-                          </p>
-                          <label
-                            htmlFor="plaid-client-id"
-                            className="block text-xs text-muted-foreground"
-                          >
-                            Client ID
-                          </label>
-                          <input
-                            id="plaid-client-id"
-                            type="text"
-                            placeholder="e.g. 5f1a2b3c4d5e6f7a8b9c0d1e"
-                            aria-label="Plaid Client ID"
-                            value={plaidSetupInput.clientId}
-                            onChange={(e) =>
-                              setPlaidSetupInput((p) =>
-                                p ? { ...p, clientId: e.target.value } : p
-                              )
-                            }
-                            className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
-                          />
-                          <label
-                            htmlFor="plaid-env"
-                            className="block text-xs text-muted-foreground"
-                          >
-                            Environment
-                          </label>
-                          <select
-                            id="plaid-env"
-                            aria-label="Plaid environment"
-                            value={plaidSetupInput.env}
-                            onChange={(e) =>
-                              setPlaidSetupInput((p) =>
-                                p ? { ...p, env: e.target.value as 'sandbox' | 'production' } : p
-                              )
-                            }
-                            className="w-full text-xs px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary"
-                          >
-                            <option value="sandbox">Sandbox (test data)</option>
-                            <option value="production">Production (real banks)</option>
-                          </select>
-                          <label
-                            htmlFor="plaid-secret-input"
-                            className="block text-xs text-muted-foreground"
-                          >
-                            {plaidSetupInput.env} Secret
-                          </label>
-                          <input
-                            id="plaid-secret-input"
-                            type="password"
-                            placeholder={`Paste your Plaid ${plaidSetupInput.env} secret`}
-                            aria-label="Plaid API secret"
-                            value={plaidSetupInput.secret}
-                            onChange={(e) =>
-                              setPlaidSetupInput((p) => (p ? { ...p, secret: e.target.value } : p))
-                            }
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') void submitPlaidSetup()
-                              else if (e.key === 'Escape') setPlaidSetupInput(null)
-                            }}
-                            className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
-                          />
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => void submitPlaidSetup()}
-                              disabled={
-                                connecting === 'plaid' ||
-                                !plaidSetupInput.clientId.trim() ||
-                                !plaidSetupInput.secret.trim()
-                              }
-                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
-                            >
-                              <Plug2 size={11} />
-                              {connecting === 'plaid' ? 'Saving…' : 'Save & connect'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setPlaidSetupInput(null)}
-                              className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      {/* Not set up and the form isn't open → one-line nudge; the
-                      card's Connect button opens the setup form. */}
-                      {!plaidStatus.configured && plaidSetupInput === null && (
-                        <p className="text-xs text-muted-foreground leading-relaxed">
-                          Connect to set up Plaid with your own (free) Plaid developer keys — no
-                          files to edit.
-                        </p>
-                      )}
-                      {/* Connected Items list. Shown when fully configured AND the
-                      setup form isn't open. */}
-                      {plaidStatus.configured && plaidSetupInput === null && (
-                        <div className="space-y-1.5">
-                          {plaidItems.length === 0 && (
-                            <p className="text-xs text-muted-foreground">No banks connected yet.</p>
-                          )}
-                          {plaidItems.map((item) => (
-                            <div
-                              key={item.itemId}
-                              className="flex items-center justify-between gap-2 px-2 py-1.5 bg-background/40 border border-border rounded text-xs"
-                            >
-                              <div className="min-w-0">
-                                <div className="font-medium text-foreground truncate">
-                                  {item.institutionName}
-                                </div>
-                                <div className="text-muted-foreground">
-                                  {item.errorCode ? (
-                                    <span className="text-red-400">
-                                      {item.errorCode === 'ITEM_LOGIN_REQUIRED'
-                                        ? 'Re-authentication required'
-                                        : item.errorCode}
-                                    </span>
-                                  ) : item.lastSyncedAt ? (
-                                    `Last synced ${formatRelative(new Date(item.lastSyncedAt))}`
-                                  ) : (
-                                    'Never synced'
-                                  )}
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void disconnectPlaidItem(item.itemId, item.institutionName)
-                                }
-                                className="shrink-0 text-xs px-2 py-1 text-muted-foreground hover:text-destructive transition-colors"
-                              >
-                                Disconnect
-                              </button>
-                            </div>
-                          ))}
-                          {/* Re-open the setup form to fix a wrong client_id /
-                          secret (the cause of an INVALID_API_KEYS 400). */}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setPlaidSetupInput({
-                                clientId: plaidStatus.clientId ?? '',
-                                env: plaidStatus.env ?? 'sandbox',
-                                secret: ''
-                              })
-                            }
-                            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            Edit Plaid credentials
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* ─── SimpleFIN card body ───────────────────────────────────
-                  Paste-setup-token form (Connect) + connected-connections
-                  list. Simpler than Plaid: no client_id/env/secret, no Link
-                  child window — the user owns the SimpleFIN account. */}
-                  {integration.id === 'simplefin' && (
-                    <div className="mb-3 space-y-2">
-                      {simplefinTokenInput !== null && (
-                        <div className="p-3 bg-background/40 border border-border rounded-lg space-y-2">
-                          <p className="text-xs text-muted-foreground leading-relaxed">
-                            You hold the keys with SimpleFIN. Create an account at{' '}
-                            <a
-                              href="https://bridge.simplefin.org"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-primary hover:underline"
-                            >
-                              bridge.simplefin.org
-                            </a>{' '}
-                            ($15/yr), link your banks &amp; cards, generate a one-time setup token,
-                            and paste it below. Compass claims it for a read-only access key stored
-                            encrypted on this Mac.
-                          </p>
-                          <label
-                            htmlFor="simplefin-token-input"
-                            className="block text-xs text-muted-foreground"
-                          >
-                            Setup token
-                          </label>
-                          <textarea
-                            id="simplefin-token-input"
-                            placeholder="Paste your SimpleFIN setup token (a long base64 string)"
-                            aria-label="SimpleFIN setup token"
-                            value={simplefinTokenInput}
-                            onChange={(e) => setSimplefinTokenInput(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Escape') setSimplefinTokenInput(null)
-                            }}
-                            rows={3}
-                            className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40 resize-none"
-                          />
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => void submitSimplefinToken()}
-                              disabled={connecting === 'simplefin' || !simplefinTokenInput.trim()}
-                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
-                            >
-                              <Plug2 size={11} />
-                              {connecting === 'simplefin' ? 'Connecting…' : 'Claim & sync'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setSimplefinTokenInput(null)}
-                              className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      {simplefinTokenInput === null && (
-                        <div className="space-y-1.5">
-                          {simplefinConnections.length === 0 && (
-                            <p className="text-xs text-muted-foreground leading-relaxed">
-                              Connect to link your banks &amp; cards through SimpleFIN — no business
-                              or developer keys, just a one-time setup token.
-                            </p>
-                          )}
-                          {simplefinConnections.map((conn) => (
-                            <div
-                              key={conn.connectionId}
-                              className="flex items-center justify-between gap-2 px-2 py-1.5 bg-background/40 border border-border rounded text-xs"
-                            >
-                              <div className="min-w-0">
-                                <div className="font-medium text-foreground truncate">
-                                  {conn.orgName || 'SimpleFIN connection'}
-                                </div>
-                                <div className="text-muted-foreground">
-                                  {conn.errorCode ? (
-                                    <span className="text-red-400">{conn.errorCode}</span>
-                                  ) : conn.lastSyncedAt ? (
-                                    `Last synced ${formatRelative(new Date(conn.lastSyncedAt))}`
-                                  ) : (
-                                    'Never synced'
-                                  )}
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void disconnectSimplefinConnection(
-                                    conn.connectionId,
-                                    conn.orgName
-                                  )
-                                }
-                                className="shrink-0 text-xs px-2 py-1 text-muted-foreground hover:text-destructive transition-colors"
-                              >
-                                Disconnect
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* ─── Obsidian card body ────────────────────────────────────
-                  Vault-path form (Connect / Change vault) or the configured
-                  vault row. Local folder only — no secrets involved. */}
-                  {integration.id === 'obsidian' && obsidianPathInput !== null && (
-                    <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
-                      <label
-                        htmlFor="obsidian-vault-path-input"
-                        className="block text-xs text-muted-foreground"
-                      >
-                        Vault folder (absolute path, ~ allowed)
-                      </label>
-                      <input
-                        id="obsidian-vault-path-input"
-                        type="text"
-                        placeholder="~/Documents/My Vault"
-                        aria-label="Obsidian vault folder path"
-                        value={obsidianPathInput}
-                        onChange={(e) => setObsidianPathInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') void submitObsidianPath()
-                          else if (e.key === 'Escape') setObsidianPathInput(null)
-                        }}
-                        className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
-                      />
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        Vault notes are imported under <code className="font-mono">obsidian/</code>{' '}
-                        in your knowledge base; Compass notes are exported to a{' '}
-                        <code className="font-mono">Compass/</code> folder in the vault. Each side
-                        is one-way — no conflicts.
-                      </p>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void submitObsidianPath()}
-                          disabled={connecting === 'obsidian' || !obsidianPathInput.trim()}
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
-                        >
-                          <Plug2 size={11} />
-                          {connecting === 'obsidian' ? 'Connecting…' : 'Connect & Sync'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setObsidianPathInput(null)}
-                          className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  {integration.id === 'obsidian' &&
-                    obsidianPathInput === null &&
-                    obsidianStatus?.configured && (
-                      <div className="mb-3 flex items-center justify-between gap-2 px-2 py-1.5 bg-background/40 border border-border rounded text-xs">
-                        <div className="min-w-0">
-                          <div className="font-medium text-foreground truncate">
-                            {obsidianStatus.vaultPath}
-                          </div>
-                          {obsidianStatus.error ? (
-                            <div className="text-red-400">{obsidianStatus.error}</div>
-                          ) : (
-                            !obsidianStatus.looksLikeVault && (
-                              <div className="text-muted-foreground">
-                                Plain folder (no .obsidian found)
-                              </div>
-                            )
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setObsidianPathInput(obsidianStatus.vaultPath ?? '')}
-                          className="shrink-0 text-xs px-2 py-1 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          Change vault
-                        </button>
-                      </div>
-                    )}
-
-                  {/* Inline Notion token form — internal-integration token,
-                  same paste-once flow as the GitHub PAT. Only pages shared
-                  with the integration are visible to the API. */}
-                  {integration.id === 'notion' && !isConnected && notionTokenInput !== null && (
-                    <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
-                      <div className="text-xs text-muted-foreground leading-relaxed">
-                        Create an internal integration at{' '}
-                        <a
-                          href="https://www.notion.so/my-integrations"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-primary underline underline-offset-2 inline-flex items-center gap-0.5"
-                        >
-                          notion.so/my-integrations
-                          <ExternalLink size={10} className="opacity-70" />
-                        </a>
-                        , paste its token here, then <em>share</em> the pages you want imported with
-                        that integration (page menu ▸ Connections). Compass stores the token
-                        encrypted on disk and only ever reads.
-                      </div>
-                      <label
-                        htmlFor="notion-token-input"
-                        className="block text-xs text-muted-foreground"
-                      >
-                        Notion integration token
-                      </label>
-                      <input
-                        id="notion-token-input"
-                        type="password"
-                        placeholder="ntn_… or secret_…"
-                        aria-label="Notion integration token"
-                        value={notionTokenInput}
-                        onChange={(e) => setNotionTokenInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') void submitNotionToken()
-                          else if (e.key === 'Escape') setNotionTokenInput(null)
-                        }}
-                        className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void submitNotionToken()}
-                          disabled={connecting === 'notion' || !notionTokenInput.trim()}
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
-                        >
-                          <Plug2 size={11} />
-                          {connecting === 'notion' ? 'Connecting…' : 'Connect'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setNotionTokenInput(null)}
-                          className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Inline Linear API-key form — personal API key, same
-                  paste-once flow as the GitHub PAT. */}
-                  {integration.id === 'linear' && !isConnected && linearKeyInput !== null && (
-                    <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
-                      <div className="text-xs text-muted-foreground leading-relaxed">
-                        Create a Personal API key in{' '}
-                        <a
-                          href="https://linear.app/settings/api"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-primary underline underline-offset-2 inline-flex items-center gap-0.5"
-                        >
-                          Linear → Settings → API
-                          <ExternalLink size={10} className="opacity-70" />
-                        </a>
-                        , then paste it here. Compass stores it encrypted on disk and only ever
-                        reads the issues assigned to you.
-                      </div>
-                      <label
-                        htmlFor="linear-key-input"
-                        className="block text-xs text-muted-foreground"
-                      >
-                        Linear API key
-                      </label>
-                      <input
-                        id="linear-key-input"
-                        type="password"
-                        placeholder="lin_api_…"
-                        aria-label="Linear personal API key"
-                        value={linearKeyInput}
-                        onChange={(e) => setLinearKeyInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') void submitLinearKey()
-                          else if (e.key === 'Escape') setLinearKeyInput(null)
-                        }}
-                        className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void submitLinearKey()}
-                          disabled={connecting === 'linear' || !linearKeyInput.trim()}
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
-                        >
-                          <Plug2 size={11} />
-                          {connecting === 'linear' ? 'Connecting…' : 'Connect'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setLinearKeyInput(null)}
-                          className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Inline Todoist API-token form — personal token, same
-                  paste-once flow as the GitHub PAT. */}
-                  {integration.id === 'todoist' && !isConnected && todoistKeyInput !== null && (
-                    <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
-                      <div className="text-xs text-muted-foreground leading-relaxed">
-                        Copy your API token from{' '}
-                        <a
-                          href="https://todoist.com/app/settings/integrations/developer"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-primary underline underline-offset-2 inline-flex items-center gap-0.5"
-                        >
-                          Todoist → Settings → Integrations → Developer
-                          <ExternalLink size={10} className="opacity-70" />
-                        </a>
-                        , then paste it here. Compass stores it encrypted on disk and imports tasks
-                        due today or overdue into today's checklist.
-                      </div>
-                      <label
-                        htmlFor="todoist-key-input"
-                        className="block text-xs text-muted-foreground"
-                      >
-                        Todoist API token
-                      </label>
-                      <input
-                        id="todoist-key-input"
-                        type="password"
-                        placeholder="0123456789abcdef…"
-                        aria-label="Todoist API token"
-                        value={todoistKeyInput}
-                        onChange={(e) => setTodoistKeyInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') void submitTodoistKey()
-                          else if (e.key === 'Escape') setTodoistKeyInput(null)
-                        }}
-                        className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void submitTodoistKey()}
-                          disabled={connecting === 'todoist' || !todoistKeyInput.trim()}
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
-                        >
-                          <Plug2 size={11} />
-                          {connecting === 'todoist' ? 'Connecting…' : 'Connect'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setTodoistKeyInput(null)}
-                          className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {integration.id === 'oura' && !isConnected && ouraTokenInput !== null && (
-                    <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
-                      <div className="text-xs text-muted-foreground leading-relaxed">
-                        Create a Personal Access Token from{' '}
-                        <a
-                          href="https://cloud.ouraring.com/personal-access-tokens"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-primary underline underline-offset-2 inline-flex items-center gap-0.5"
-                        >
-                          your Oura account → Personal Access Tokens
-                          <ExternalLink size={10} className="opacity-70" />
-                        </a>
-                        , then paste it here. Compass stores it encrypted on disk and pulls sleep,
-                        readiness, and activity scores for the last 30 days.
-                      </div>
-                      <label
-                        htmlFor="oura-token-input"
-                        className="block text-xs text-muted-foreground"
-                      >
-                        Oura Personal Access Token
-                      </label>
-                      <input
-                        id="oura-token-input"
-                        type="password"
-                        placeholder="0123456789abcdef…"
-                        aria-label="Oura Personal Access Token"
-                        value={ouraTokenInput}
-                        onChange={(e) => setOuraTokenInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') void submitOuraToken()
-                          else if (e.key === 'Escape') setOuraTokenInput(null)
-                        }}
-                        className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void submitOuraToken()}
-                          disabled={connecting === 'oura' || !ouraTokenInput.trim()}
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
-                        >
-                          <Plug2 size={11} />
-                          {connecting === 'oura' ? 'Connecting…' : 'Connect'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setOuraTokenInput(null)}
-                          className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Inline Google credentials form. Replaces the .env workflow
-                  with paste-once UX. Saved values are encrypted via safeStorage
-                  and never cross the IPC boundary again. */}
-                  {integration.id === 'google' && !isConnected && googleCredsInput !== null && (
-                    <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
-                      <div className="text-xs text-muted-foreground leading-relaxed">
-                        Paste your Google OAuth Client ID + Secret from{' '}
-                        <a
-                          href="https://console.cloud.google.com/apis/credentials"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-primary underline underline-offset-2 inline-flex items-center gap-0.5"
-                        >
-                          Google Cloud Console
-                          <ExternalLink size={10} className="opacity-70" />
-                        </a>
-                        . Compass stores them encrypted on disk and reuses them on every{' '}
-                        <em>Connect</em>; no{' '}
-                        <code className="bg-secondary px-1 py-0.5 rounded font-mono">.env</code>{' '}
-                        editing.
-                      </div>
-                      <label
-                        htmlFor="google-client-id-input"
-                        className="block text-xs text-muted-foreground"
-                      >
-                        Client ID
-                      </label>
-                      <input
-                        id="google-client-id-input"
-                        type="text"
-                        placeholder="123456789012-abc...apps.googleusercontent.com"
-                        aria-label="Google OAuth Client ID"
-                        value={googleCredsInput.clientId}
-                        onChange={(e) =>
-                          setGoogleCredsInput((prev) =>
-                            prev ? { ...prev, clientId: e.target.value } : prev
-                          )
-                        }
-                        onKeyDown={(e) => {
-                          if (e.key === 'Escape') setGoogleCredsInput(null)
-                        }}
-                        className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
-                      />
-                      <label
-                        htmlFor="google-client-secret-input"
-                        className="block text-xs text-muted-foreground"
-                      >
-                        Client Secret
-                      </label>
-                      <input
-                        id="google-client-secret-input"
-                        type="password"
-                        placeholder="GOCSPX-..."
-                        aria-label="Google OAuth Client Secret"
-                        value={googleCredsInput.clientSecret}
-                        onChange={(e) =>
-                          setGoogleCredsInput((prev) =>
-                            prev ? { ...prev, clientSecret: e.target.value } : prev
-                          )
-                        }
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') void submitGoogleCredentials()
-                          else if (e.key === 'Escape') setGoogleCredsInput(null)
-                        }}
-                        className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void submitGoogleCredentials()}
-                          disabled={
-                            connecting === 'google' ||
-                            !googleCredsInput.clientId.trim() ||
-                            !googleCredsInput.clientSecret.trim()
-                          }
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
-                        >
-                          <Plug2 size={11} />
-                          {connecting === 'google' ? 'Connecting…' : 'Save & Connect'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setGoogleCredsInput(null)}
-                          className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Inline PAT form — only for GitHub, only when the user has
-                  clicked Connect. Replaces the OAuth-App dance with a 3-click
-                  flow: open the GitHub tokens page, generate, paste back. */}
-                  {integration.id === 'github' && !isConnected && githubPatInput !== null && (
-                    <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
-                      <div className="text-xs text-muted-foreground leading-relaxed">
-                        Paste a GitHub Personal Access Token. Compass stores it encrypted on disk —
-                        no OAuth App needed.{' '}
-                        <a
-                          href="https://github.com/settings/tokens/new?scopes=repo,read:project,read:user&description=Compass"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-primary underline underline-offset-2 inline-flex items-center gap-0.5"
-                        >
-                          Open GitHub
-                          <ExternalLink size={10} className="opacity-70" />
-                        </a>{' '}
-                        (the scopes are pre-selected; just click <em>Generate</em>).
-                      </div>
-                      <label
-                        htmlFor="github-pat-input"
-                        className="block text-xs text-muted-foreground"
-                      >
-                        GitHub Personal Access Token
-                      </label>
-                      <input
-                        id="github-pat-input"
-                        type="password"
-                        placeholder="ghp_… or github_pat_…"
-                        value={githubPatInput}
-                        onChange={(e) => setGithubPatInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') void submitGitHubPat()
-                          else if (e.key === 'Escape') setGithubPatInput(null)
-                        }}
-                        className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void submitGitHubPat()}
-                          disabled={connecting === 'github' || !githubPatInput.trim()}
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
-                        >
-                          <Plug2 size={11} />
-                          {connecting === 'github' ? 'Connecting…' : 'Connect'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setGithubPatInput(null)}
-                          className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {integration.id === 'snaptrade' &&
-                    !isConnected &&
-                    snaptradeSetupInput !== null && (
-                      <div className="mb-3 p-3 bg-background/40 border border-border rounded-lg space-y-2">
-                        <div className="text-xs text-muted-foreground leading-relaxed">
-                          Paste your SnapTrade partner keys (free dev tier). Compass stores them
-                          encrypted on disk and signs each request locally.{' '}
-                          <a
-                            href="https://snaptrade.com/register"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-primary underline underline-offset-2 inline-flex items-center gap-0.5"
-                          >
-                            Get keys
-                            <ExternalLink size={10} className="opacity-70" />
-                          </a>
-                        </div>
-                        <label
-                          htmlFor="snaptrade-client-id"
-                          className="block text-xs text-muted-foreground"
-                        >
-                          Client ID
-                        </label>
-                        <input
-                          id="snaptrade-client-id"
-                          type="text"
-                          placeholder="Your SnapTrade clientId"
-                          value={snaptradeSetupInput.clientId}
-                          onChange={(e) =>
-                            setSnaptradeSetupInput((s) =>
-                              s ? { ...s, clientId: e.target.value } : s
-                            )
-                          }
-                          className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
-                        />
-                        <label
-                          htmlFor="snaptrade-consumer-key"
-                          className="block text-xs text-muted-foreground"
-                        >
-                          Consumer Key
-                        </label>
-                        <input
-                          id="snaptrade-consumer-key"
-                          type="password"
-                          placeholder="Your SnapTrade consumerKey"
-                          value={snaptradeSetupInput.consumerKey}
-                          onChange={(e) =>
-                            setSnaptradeSetupInput((s) =>
-                              s ? { ...s, consumerKey: e.target.value } : s
-                            )
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') void submitSnaptradeSetup()
-                            else if (e.key === 'Escape') setSnaptradeSetupInput(null)
-                          }}
-                          className="w-full text-xs font-mono px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/40"
-                        />
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => void submitSnaptradeSetup()}
-                            disabled={
-                              connecting === 'snaptrade' ||
-                              !snaptradeSetupInput.clientId.trim() ||
-                              !snaptradeSetupInput.consumerKey.trim()
-                            }
-                            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors disabled:opacity-50"
-                          >
-                            <Plug2 size={11} />
-                            {connecting === 'snaptrade' ? 'Connecting…' : 'Connect'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setSnaptradeSetupInput(null)}
-                            className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                  <div className="flex gap-2">
-                    {/* Plaid is multi-Item: Disconnect is a per-row button inside
-                    the card body, NOT this card-level Disconnect. The
-                    card-level button is always "Connect bank" so the user
-                    can add additional institutions. */}
-                    {isConnected && !isMultiConn ? (
-                      <button
-                        type="button"
-                        onClick={() => disconnect(integration.id)}
-                        className="text-xs px-3 py-1.5 border border-border hover:border-destructive text-muted-foreground hover:text-destructive rounded-lg transition-colors"
-                      >
-                        Disconnect
-                      </button>
-                    ) : (integration.id === 'github' && githubPatInput !== null) ||
-                      (integration.id === 'google' && googleCredsInput !== null) ||
-                      (integration.id === 'plaid' && plaidSetupInput !== null) ||
-                      (integration.id === 'simplefin' && simplefinTokenInput !== null) ||
-                      (integration.id === 'obsidian' && obsidianPathInput !== null) ||
-                      (integration.id === 'notion' && notionTokenInput !== null) ||
-                      (integration.id === 'linear' && linearKeyInput !== null) ||
-                      (integration.id === 'todoist' && todoistKeyInput !== null) ||
-                      (integration.id === 'oura' && ouraTokenInput !== null) ||
-                      (integration.id === 'snaptrade' && snaptradeSetupInput !== null) ? null : (
-                      <button
-                        type="button"
-                        onClick={() => connect(integration.id)}
-                        disabled={connecting === integration.id}
-                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
-                      >
-                        <Plug2 size={11} />
-                        {connecting === integration.id
-                          ? 'Connecting…'
-                          : (integration.id === 'plaid' && plaidItems.length > 0) ||
-                              (integration.id === 'simplefin' && simplefinConnections.length > 0)
-                            ? 'Connect bank'
-                            : 'Connect'}
-                      </button>
-                    )}
-                    {/* Edit credentials — visible whenever Google creds are stored
-                    and the form isn't already open. Without this, a user who
-                    pastes the wrong secret (or rotates it on Google's side)
-                    has no in-app way to fix it. */}
-                    {integration.id === 'google' &&
-                      googleCredsConfigured &&
-                      googleCredsInput === null && (
-                        <button
-                          type="button"
-                          onClick={() => editGoogleCredentials()}
-                          className="text-xs px-3 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          Edit credentials
-                        </button>
-                      )}
-                  </div>
-                </div>
+                  {renderCardBody(integration, state)}
+                </IntegrationCard>
               )
             })}
           </div>
