@@ -13,7 +13,7 @@
 
 /** The connect mechanism a card uses. Drives which form/affordance renders. */
 export type AuthKind =
-  | 'oauth-dev-keys' // Google, GitHub — user registers their own OAuth app / PAT
+  | 'oauth-dev-keys' // Google — user registers their own OAuth app (GitHub uses paste-token/PAT)
   | 'paste-token' // GitHub PAT, Linear, Todoist, Notion, Oura — paste an API key
   | 'dev-creds-modal' // Plaid (client_id+secret+env → Link), SnapTrade (BYO → portal)
   | 'setup-token' // SimpleFIN — paste a one-time setup token

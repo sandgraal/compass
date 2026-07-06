@@ -104,17 +104,28 @@ export function registerRelayHandlers(ipcMain: IpcMain): void {
   })
 
   // Connectivity probe against <relayUrl>/healthz. Optionally test a
-  // not-yet-saved URL passed from the settings form.
+  // not-yet-saved URL passed from the settings form — validated the same way
+  // relay:set-url validates it, so the test can't succeed against a URL the
+  // save would reject.
   ipcMain.handle('relay:test', async (_event, url: unknown) => {
-    const candidate = typeof url === 'string' && url.trim() ? url.trim() : readRelayUrlSetting()
+    const raw = typeof url === 'string' && url.trim() ? url.trim() : null
+    let candidate: string | null
+    if (raw) {
+      const v = validateRelayUrl(raw)
+      if (!v.ok || !v.url) {
+        return { ok: false, error: v.error ?? 'Invalid relay URL.', latencyMs: 0, relayUrl: raw }
+      }
+      candidate = v.url
+    } else {
+      candidate = readRelayUrlSetting()
+    }
     const { relayUrl } = pickRelayUrl(candidate)
     const base = relayUrl.replace(/\/+$/, '')
     const started = Date.now()
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 5000)
     try {
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 5000)
       const res = await fetch(`${base}/healthz`, { signal: controller.signal })
-      clearTimeout(timer)
       return { ok: res.ok, status: res.status, latencyMs: Date.now() - started, relayUrl: base }
     } catch (err) {
       return {
@@ -123,6 +134,8 @@ export function registerRelayHandlers(ipcMain: IpcMain): void {
         latencyMs: Date.now() - started,
         relayUrl: base
       }
+    } finally {
+      clearTimeout(timer)
     }
   })
 }

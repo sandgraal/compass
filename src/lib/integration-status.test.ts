@@ -65,7 +65,7 @@ describe('deriveCardState', () => {
     expect(s.errorMessage).toBeNull()
   })
 
-  it('simplefin: only-bad connection → Error', () => {
+  it('simplefin: only-bad connection → Needs attention', () => {
     const s = deriveCardState({
       id: 'simplefin',
       simplefinConnections: [{ errorCode: 'AUTH_FAILED', lastSyncedAt: null }]

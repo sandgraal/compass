@@ -149,9 +149,10 @@ declarative connect spec the card renders:
 }
 ```
 The parity test `src/lib/integration-setup.test.ts` fails if any connected registry entry lacks a setup
-entry, so this is required. For `paste-token` / `relay-widget` / `local-file` / `local-path` the card's
-`<IntegrationSetupPanel>` renders the whole flow from this spec — no per-service JSX. Only multi-field /
-multi-connection flows (Google, Plaid, SimpleFIN, SnapTrade, Obsidian) add bespoke JSX via `renderCardBody`.
+entry, so this is required. For the simple `paste-token` / `relay-widget` / `local-file` kinds the card's
+`<IntegrationSetupPanel>` renders the whole flow from this spec — no per-service JSX. The multi-field /
+multi-connection / stateful flows (Google, Plaid, SimpleFIN, SnapTrade, and Obsidian — `local-path`) add
+bespoke JSX via `renderCardBody`.
 
 If OAuth, add a setup guide section in `Integrations.tsx` matching the Google/GitHub pattern.
 

@@ -56,10 +56,10 @@ Add `update<Service>Knowledge(items)` to `electron/knowledge/extractor.ts`:
   credential `fields` for the generic form. The parity test (`integration-setup.test.ts`) fails if a
   connected registry entry has no setup entry, so this is required, not optional.
 - The card UI auto-renders from the registry + setup spec via `<IntegrationCard>` + `<IntegrationSetupPanel>`
-  (`src/components/integrations/`). For simple auth kinds (`paste-token`, `relay-widget`, `local-file`,
-  `local-path`) the panel renders the whole connect flow from the spec — no per-service JSX. Only
-  multi-field / multi-connection flows (Google, Plaid, SimpleFIN, SnapTrade, Obsidian) need bespoke JSX,
-  slotted via `renderCardBody` in `Integrations.tsx`.
+  (`src/components/integrations/`). For the simple auth kinds (`paste-token`, `relay-widget`, `local-file`)
+  the panel renders the whole connect flow from the spec — no per-service JSX. The multi-field /
+  multi-connection / stateful flows (Google, Plaid, SimpleFIN, SnapTrade, and Obsidian — `local-path`)
+  keep bespoke JSX, slotted via `renderCardBody` in `Integrations.tsx`.
 - Setup guide entry: append to the OAuth setup guide section in `Integrations.tsx` if the user needs to
   create their own OAuth app.
 - Relay-fronted aggregators route through `electron/integrations/relay-client.ts`; they need a reachable
