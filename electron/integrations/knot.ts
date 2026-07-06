@@ -186,8 +186,22 @@ export async function syncKnot(mainWindow?: BrowserWindow | null): Promise<SyncR
         }
         const recs = normalizeKnotTransactions(pageJson)
         if (recs.length > 0) recordsUpdated += upsertLiveRecords(recs, 'knot').imported
-        cursor = str(pageJson.next_cursor) ?? cursor
-        if (!pageJson.has_more) break
+        const nextCursor = str(pageJson.next_cursor)
+        if (!pageJson.has_more) {
+          // Terminal page: the returned cursor (if any) is where next sync resumes.
+          cursor = nextCursor ?? cursor
+          break
+        }
+        // `has_more` is set → we can only continue if the cursor actually advanced.
+        // If Knot omits `next_cursor` or hands back the same one, stop rather than
+        // re-request the identical page (defensive guard, like the Plaid sync loop).
+        if (!nextCursor || nextCursor === cursor) {
+          console.warn(
+            `[knot] pagination cursor did not advance for merchant ${merchant}; stopping`
+          )
+          break
+        }
+        cursor = nextCursor
       }
       if (cursor) cursors[merchant] = cursor
     }
@@ -301,6 +315,8 @@ export async function openKnotConnect(
         partition: 'knot-connect'
       }
     })
+    // Deny any popup the embedded third-party flow tries to spawn (mirror Arcadia/Nylas/SnapTrade).
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     let settled = false
     const finish = (result: { success: boolean; error?: string }): void => {
       if (settled) return
