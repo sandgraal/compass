@@ -1863,6 +1863,7 @@ function PropertyTab(): JSX.Element {
   const [land, setLand] = useState('')
   const [recovery, setRecovery] = useState('30')
   const [basisOverride, setBasisOverride] = useState('')
+  const [utilityAddress, setUtilityAddress] = useState('')
   const { toast: showToast } = useToast()
 
   const refresh = useCallback(async () => {
@@ -1875,6 +1876,7 @@ function PropertyTab(): JSX.Element {
       setLand(p.config.landValue ? String(p.config.landValue) : '')
       setRecovery(String(p.config.recoveryYears))
       setBasisOverride(p.config.basisOverride != null ? String(p.config.basisOverride) : '')
+      setUtilityAddress(p.config.utilityAddress ?? '')
     } catch (err) {
       console.error('[property] refresh failed', err)
       showToast('Failed to load property P&L.', 'error')
@@ -1895,7 +1897,8 @@ function PropertyTab(): JSX.Element {
         placedInService: placed || null,
         landValue: land === '' ? 0 : Number(land),
         recoveryYears: Number(recovery),
-        basisOverride: basisOverride === '' ? null : Number(basisOverride)
+        basisOverride: basisOverride === '' ? null : Number(basisOverride),
+        utilityAddress: utilityAddress.trim() || null
       })
       if (!res.success) {
         showToast(res.error ?? 'Failed to save.', 'error')
@@ -1956,6 +1959,7 @@ function PropertyTab(): JSX.Element {
                 <th className="text-left">Year</th>
                 <th className="text-right">Revenue</th>
                 <th className="text-right">Operating</th>
+                <th className="text-right">of which utilities</th>
                 <th className="text-right">Net operating</th>
                 <th className="text-right">Capex → basis</th>
               </tr>
@@ -1966,6 +1970,9 @@ function PropertyTab(): JSX.Element {
                   <td className="py-1.5">{y.year}</td>
                   <td className="text-right">{fmt(y.revenue)}</td>
                   <td className="text-right">{fmt(y.operating)}</td>
+                  <td className="text-right text-muted-foreground">
+                    {y.utilities ? fmt(y.utilities) : '—'}
+                  </td>
                   <td className="text-right">{fmt(y.netOperating)}</td>
                   <td className="text-right text-muted-foreground">{fmt(y.capex)}</td>
                 </tr>
@@ -2023,6 +2030,16 @@ function PropertyTab(): JSX.Element {
               value={basisOverride}
               onChange={(e) => setBasisOverride(e.target.value)}
               placeholder={`auto: ${fmt(pnl.basisToDate)}`}
+              className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
+            />
+          </label>
+          <label className="text-xs text-muted-foreground">
+            <span className="block mb-1">Utility service address (Arcadia match)</span>
+            <input
+              type="text"
+              value={utilityAddress}
+              onChange={(e) => setUtilityAddress(e.target.value)}
+              placeholder="e.g. 123 Rental Way — bills matching this count as utilities"
               className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
             />
           </label>

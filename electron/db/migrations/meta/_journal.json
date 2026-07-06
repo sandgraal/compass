@@ -218,6 +218,13 @@
       "when": 1783282665578,
       "tag": "0030_adorable_molten_man",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1783293601562,
+      "tag": "0031_right_orphan",
+      "breakpoints": true
     }
   ]
 }

@@ -808,6 +808,10 @@ declare global {
       argyle: {
         connect(): Promise<{ success: boolean; error?: string }>
       }
+      // Arcadia (Phase 10.9) — relay-fronted utility aggregator → property P&L.
+      arcadia: {
+        connect(): Promise<{ success: boolean; error?: string }>
+      }
       // SnapTrade (Phase 10.9) — BYO-direct brokerage aggregator → net worth.
       snaptrade: {
         connect(): Promise<{ success: boolean; error?: string }>
@@ -1598,10 +1602,17 @@ declare global {
             year: number
             revenue: number
             operating: number
+            utilities: number
             capex: number
             netOperating: number
           }>
-          totals: { revenue: number; operating: number; capex: number; netOperating: number }
+          totals: {
+            revenue: number
+            operating: number
+            utilities: number
+            capex: number
+            netOperating: number
+          }
           basisToDate: number
           depreciableBasis: number
           netYieldOnBasis: number | null
@@ -1617,6 +1628,7 @@ declare global {
             landValue: number
             recoveryYears: number
             basisOverride: number | null
+            utilityAddress: string | null
           }
         }>
         setPropertyConfig(input: {
@@ -1624,6 +1636,7 @@ declare global {
           landValue?: number
           recoveryYears?: number
           basisOverride?: number | null
+          utilityAddress?: string | null
         }): Promise<{
           success: boolean
           error?: string
@@ -1632,6 +1645,7 @@ declare global {
             landValue: number
             recoveryYears: number
             basisOverride: number | null
+            utilityAddress: string | null
           }
         }>
 

@@ -13,6 +13,7 @@ import {
   syncEvents
 } from '../db/schema'
 import { readAppleCalendars } from '../integrations/apple-calendar'
+import { syncArcadia } from '../integrations/arcadia'
 import { syncArgyle } from '../integrations/argyle'
 import { syncCanopy } from '../integrations/canopy'
 import { ContactsScopeError, buildGoogleContactInputs } from '../integrations/google-contacts'
@@ -75,7 +76,8 @@ const SUPPORTED_SYNC_SERVICES = new Set([
   'terra',
   'canopy',
   'argyle',
-  'snaptrade'
+  'snaptrade',
+  'arcadia'
 ])
 
 function normalizeSupportedSyncService(service: unknown): string | null {
@@ -840,6 +842,7 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     if (service === 'canopy') return syncCanopy(win)
     if (service === 'argyle') return syncArgyle(win)
     if (service === 'snaptrade') return syncSnaptrade(win)
+    if (service === 'arcadia') return syncArcadia(win)
     if (service === 'things') {
       // Things is local + tokenless: Connect (and manual refresh) come through
       // here, so flip the opt-in flag on before syncing. Disconnect sets the

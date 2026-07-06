@@ -5,6 +5,7 @@ import { schedulePlaidDailySync, stopPlaidDailySync } from './cron-plaid'
 import { scheduleSimplefinDailySync, stopSimplefinDailySync } from './cron-simplefin'
 import { getDb, getRawSqlite } from './db/client'
 import { appSettings, integrations } from './db/schema'
+import { syncArcadia } from './integrations/arcadia'
 import { syncArgyle } from './integrations/argyle'
 import { syncCanopy } from './integrations/canopy'
 import { syncFxRates } from './integrations/finance-fx-fetch'
@@ -165,6 +166,8 @@ function runSyncForService(service: string): void {
     void syncArgyle(win)
   } else if (service === 'snaptrade') {
     void syncSnaptrade(win)
+  } else if (service === 'arcadia') {
+    void syncArcadia(win)
   }
 }
 

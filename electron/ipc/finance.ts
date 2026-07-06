@@ -992,6 +992,13 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
           patch.basisOverride = v
         }
       }
+      if ('utilityAddress' in input) {
+        const v = input.utilityAddress
+        if (v != null && typeof v !== 'string') {
+          return { success: false, error: 'Invalid utility service address.' }
+        }
+        patch.utilityAddress = v ? v.slice(0, 200) : null
+      }
 
       setPropertyConfig(getRawSqlite(), patch)
       return { success: true, config: getPropertyConfig(getRawSqlite()) }

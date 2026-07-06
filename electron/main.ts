@@ -5,6 +5,7 @@ import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { BrowserWindow, app, ipcMain, nativeTheme, shell } from 'electron'
 import { startCronJobs } from './cron'
 import { getDb, initDb } from './db/client'
+import { registerArcadiaHandlers } from './ipc/arcadia'
 import { registerArgyleHandlers } from './ipc/argyle'
 import { registerAssetsHandlers } from './ipc/assets'
 import { registerAssistantHandlers } from './ipc/assistant'
@@ -174,6 +175,7 @@ app.whenReady().then(async () => {
   registerCanopyHandlers(ipcMain)
   registerArgyleHandlers(ipcMain)
   registerSnaptradeHandlers(ipcMain)
+  registerArcadiaHandlers(ipcMain)
   registerContactsHandlers(ipcMain)
   registerExportHandlers(ipcMain)
   registerSubscriptionsHandlers(ipcMain)

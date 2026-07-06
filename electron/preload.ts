@@ -153,6 +153,11 @@ const api = {
     connect: () => ipcRenderer.invoke('argyle:connect')
   },
 
+  // --- Arcadia (Phase 10.9 — relay-fronted utility aggregator → property P&L) ---
+  arcadia: {
+    connect: () => ipcRenderer.invoke('arcadia:connect')
+  },
+
   // --- SnapTrade (Phase 10.9 — BYO-direct brokerage aggregator → net worth) ---
   snaptrade: {
     connect: () => ipcRenderer.invoke('snaptrade:connect'),

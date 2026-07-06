@@ -358,6 +358,26 @@ export default function Integrations(): JSX.Element {
       await runSnaptradeConnect()
       return
     }
+    // Arcadia: opens the utility Connect widget (managed via the relay); on success,
+    // pull utility bills into the property P&L.
+    if (service === 'arcadia') {
+      setConnecting('arcadia')
+      try {
+        const r = await window.api.arcadia.connect()
+        if (!r.success) {
+          toast(`Arcadia connection failed: ${r.error ?? 'unknown error'}`, 'error')
+          return
+        }
+        toast('Arcadia connected — importing your utility bills…', 'success')
+        await loadStatuses()
+        triggerSync('arcadia')
+      } catch (err) {
+        toast(`Couldn't connect: ${err instanceof Error ? err.message : String(err)}`, 'error')
+      } finally {
+        setConnecting(null)
+      }
+      return
+    }
     setConnecting(service)
     try {
       // Apple Calendar and Things are local-file based — no OAuth, just kick

@@ -223,6 +223,23 @@ function ensureNewTables(sqlite: Database.Database): void {
       ingested_at INTEGER
     );
     CREATE UNIQUE INDEX IF NOT EXISTS argyle_paystubs_external_id_unique ON argyle_paystubs (external_id);
+    -- Utility bills (Phase 10.9). Here (always-run fallback) as well as the migration
+    -- because packaged builds skip migrations. OFF the records/finance_transactions spine
+    -- (no double-count; aggregates-only); feeds the property P&L utilities line.
+    CREATE TABLE IF NOT EXISTS utility_bills (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      external_id TEXT NOT NULL,
+      provider TEXT,
+      service_address TEXT,
+      statement_date TEXT,
+      period_start TEXT,
+      period_end TEXT,
+      amount REAL,
+      currency TEXT NOT NULL DEFAULT 'USD',
+      usage_kwh REAL,
+      ingested_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS utility_bills_external_id_unique ON utility_bills (external_id);
     -- FX-rate snapshots (Phase 11.1). Lives here (the always-run fallback) as
     -- well as migration 0019 because the packaged app doesn't bundle migrations.
     CREATE TABLE IF NOT EXISTS fx_rates (
