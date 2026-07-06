@@ -837,6 +837,10 @@ declare global {
       nylas: {
         connect(): Promise<{ success: boolean; error?: string }>
       }
+      // Knot (Phase 10.9) — relay-fronted merchant aggregator → purchase timeline.
+      knot: {
+        connect(): Promise<{ success: boolean; error?: string }>
+      }
       // SnapTrade (Phase 10.9) — BYO-direct brokerage aggregator → net worth.
       snaptrade: {
         connect(): Promise<{ success: boolean; error?: string }>

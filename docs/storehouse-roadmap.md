@@ -298,11 +298,11 @@ Builds on Phase 9's shipped spine; **does not renumber 9.x**. Each wave is its o
   (`source='location'`) so the Phase 11.5 residency engine (days-in-country / US substantial-presence / CR-183)
   goes from **manual** to **automatic**. Raw coordinates stay OFF the `records`/FTS/MCP spine (§5 aggregates-only);
   only the coarse country/date segments surface. *Next: a live self-hosted GPS endpoint (Overland/OwnTracks push).*
-- [~] **10.9 The metered aggregator relay + first paid aggregators** 🟡 *relay + Terra/Canopy/Argyle/Arcadia/Nylas/Metriport
+- [~] **10.9 The metered aggregator relay + first paid aggregators** 🟡 *relay + Terra/Canopy/Argyle/Arcadia/Nylas/Metriport/Knot
   + BYO-direct SnapTrade clients shipped (need a deployed relay + real keys to run live)* — primitive **G** (§3):
   the thin stateless **relay** (a new zero-dependency `relay/` workspace — metering/quota/anomaly engine +
-  deny-by-default adapter allowlist + OAuth `tokenAuth`/`TokenCache` + proxy server, deploy-ready). Six relay
-  aggregators fronted so far, each **completing an engine**: **Terra**
+  deny-by-default adapter allowlist + OAuth `tokenAuth`/`TokenCache` + proxy server, deploy-ready). Seven relay
+  aggregators fronted, each **completing an engine**: **Terra**
   (`terra.ts` → health `records` `source:'terra'` → the Health hub), **Canopy** (`canopy.ts` → `assets`
   insurance rows → the `finance-estate` adequacy/gap engine, replacing hand-entered policies), and **Argyle**
   (`argyle.ts` → `argyle_paystubs` → `finance-income.ts` → the cash-flow forecast prefers real paystubs over
@@ -321,7 +321,14 @@ Builds on Phase 9's shipped spine; **does not renumber 9.x**. Each wave is its o
   clinical records arrive as FHIR R4, and `normalizeMetriportBundle` maps them into the dedicated
   `medical_records` table (OFF the AI spine — medical is the strictest privacy boundary), surfaced as a Medical
   card on `/health` + an aggregates-only `compass_medical_summary` (counts + dates, never a diagnosis/lab value).
-  Next: Knot. See §4f.
+  Plus **Knot** — merchant purchases (HTTP Basic, like Argyle): its **TransactionLink** SKU-level order history
+  (`knot.ts` → `normalizeKnotTransactions`) writes one `records` row per line item through the SAME
+  `upsertLiveRecords` writer Terra uses (`source:'knot'`, `type:'order'`), completing the commerce timeline the
+  static Amazon recognizer opened — now LIVE and multi-merchant, zero records-engine change. It's the FIRST relay
+  aggregator whose data lands **ON** the `records`/AI spine (merchant purchases are low-sensitivity =
+  records-readable, so they ride the existing timeline search rather than a dedicated aggregates-only tool —
+  contrast the sensitive aggregators above). **All roadmap aggregators shipped** (Terra/Canopy/Argyle/Arcadia/
+  Nylas/Metriport/Knot relay-fronted + SnapTrade BYO-direct). See §4f.
 
 > **Build order:** 10.1 (spine) → 10.2 / 10.3 / 10.4 (independent, parallelizable, each reuses the spine) →
 > 10.5 → 10.6 (cross-cutting, gated) → 10.7 (leverage, but delivered incrementally throughout) →

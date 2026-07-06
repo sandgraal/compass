@@ -173,6 +173,11 @@ const api = {
     connect: () => ipcRenderer.invoke('nylas:connect')
   },
 
+  // --- Knot (Phase 10.9 — relay-fronted merchant aggregator → purchase timeline) ---
+  knot: {
+    connect: () => ipcRenderer.invoke('knot:connect')
+  },
+
   // --- SnapTrade (Phase 10.9 — BYO-direct brokerage aggregator → net worth) ---
   snaptrade: {
     connect: () => ipcRenderer.invoke('snaptrade:connect'),
