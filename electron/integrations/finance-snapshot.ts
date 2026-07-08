@@ -23,6 +23,7 @@
  */
 
 import { getBaseCurrency, loadFxRates, pickRate } from './finance-fx'
+import { NET_WORTH_HOLDINGS_SOURCES, getHoldingsValueAsOf } from './finance-holdings'
 
 export type SnapshotSource = 'manual' | 'inferred' | 'live'
 
@@ -420,7 +421,39 @@ export type NetWorthSnapshot = {
   // on file). Excluded from the totals above so they stay honest; surfaced so
   // the UI can prompt the user to add a rate.
   unconverted: Array<{ accountId: number; name: string; currency: string; balance: number }>
+  // Brokerage/investment holdings (Phase 10.2 records snapshots). When
+  // `marketValue` is non-null it is ALREADY INCLUDED in `assets`/`net` above;
+  // null means no holdings data (or holdings deliberately excluded — see the
+  // double-count guard in getNetWorthSnapshot).
+  holdings: { marketValue: number | null; asOf: string | null; positions: number }
   deltas: { d30: number | null; d90: number | null; d365: number | null }
+}
+
+/**
+ * Double-count guard for holdings: if the user has a LIVE-linked investment
+ * account (SimpleFIN/Plaid), that account's balance already lands in
+ * `finance_accounts` and is counted in the account totals — adding a holdings
+ * snapshot of (potentially) the same positions on top would double count. In
+ * that case holdings are kept out of the totals entirely (the standalone
+ * Holdings card still shows them). This is deliberately coarse: it can't tell
+ * whether the linked account and the imported CSV are the same brokerage, so
+ * it errs on the side of never over-reporting net worth.
+ */
+function hasLiveInvestmentAccount(sqlite: SqliteForSnapshot): boolean {
+  try {
+    const row = sqlite
+      .prepare(
+        `SELECT 1 FROM finance_accounts
+          WHERE type = 'investment'
+            AND (plaid_account_id IS NOT NULL OR simplefin_account_id IS NOT NULL)
+          LIMIT 1`
+      )
+      .get()
+    return row != null
+  } catch {
+    // Older DB without the linkage columns — no live accounts, no guard.
+    return false
+  }
 }
 
 /**
@@ -489,6 +522,18 @@ export function getNetWorthSnapshot(
     else assets += baseBalance
   }
 
+  // ── Brokerage/investment holdings (Phase 10.2) ──────────────────────────
+  // The latest positions snapshot (records sources in
+  // NET_WORTH_HOLDINGS_SOURCES) rolls into the assets total. Holdings payloads
+  // store plain numbers with NO currency (see ParsedHolding in
+  // finance-holdings.ts), so they are treated as base-currency values —
+  // no FX conversion applies. With zero holdings records this whole block is
+  // a no-op and the totals are byte-identical to the accounts-only math.
+  const holdingsNow = hasLiveInvestmentAccount(sqlite)
+    ? null
+    : getHoldingsValueAsOf(sqlite, NET_WORTH_HOLDINGS_SOURCES, now)
+  if (holdingsNow != null) assets += holdingsNow.marketValue
+
   const net = assets - liabilities
 
   return {
@@ -498,10 +543,11 @@ export function getNetWorthSnapshot(
     net: round2(net),
     byAccount,
     unconverted,
+    holdings: holdingsNow ?? { marketValue: null, asOf: null, positions: 0 },
     deltas: {
-      d30: deltaSince(sqlite, 30, now, net),
-      d90: deltaSince(sqlite, 90, now, net),
-      d365: deltaSince(sqlite, 365, now, net)
+      d30: deltaSince(sqlite, 30, now, net, holdingsNow?.marketValue ?? null),
+      d90: deltaSince(sqlite, 90, now, net, holdingsNow?.marketValue ?? null),
+      d365: deltaSince(sqlite, 365, now, net, holdingsNow?.marketValue ?? null)
     }
   }
 }
@@ -511,12 +557,22 @@ export function getNetWorthSnapshot(
  * are converted at the LATEST rate (constant FX) so the delta reflects real
  * balance movement, not currency swings — FX gain/loss is tracked separately.
  * Foreign accounts with no rate are skipped (same policy as the live totals).
+ *
+ * Holdings delta rule: `currentHoldings` is the holdings market value that is
+ * already inside `currentNet` (null when holdings aren't in the totals).
+ * Holdings only participate in a delta when BOTH sides have a value — i.e. a
+ * dated holdings snapshot exists at/before the cutoff. If none exists back
+ * then (e.g. the first positions CSV was imported last week), including
+ * current holdings on only one side would register the entire portfolio as a
+ * fake 30/90/365-day "gain" — so holdings are excluded from BOTH sides and
+ * the delta reflects account movement only.
  */
 function deltaSince(
   sqlite: SqliteForSnapshot,
   days: number,
   now: number,
-  currentNet: number
+  currentNet: number,
+  currentHoldings: number | null
 ): number | null {
   const cutoff = now - days * 24 * 60 * 60 * 1000
   const accounts = sqlite
@@ -531,6 +587,7 @@ function deltaSince(
   let assets = 0
   let liabilities = 0
   let foundAny = false
+  let foundAnyAccount = false
 
   for (const a of accounts) {
     const past = sqlite
@@ -542,13 +599,35 @@ function deltaSince(
     const baseBalance = toBase(past.balance, a.currency)
     if (baseBalance == null) continue
     foundAny = true
+    foundAnyAccount = true
     if (a.is_debt === 1) liabilities += baseBalance
     else assets += baseBalance
   }
 
+  // Apply the holdings delta rule documented above: match the past holdings
+  // snapshot at the cutoff against the current one, or drop holdings from
+  // both sides when no snapshot existed back then.
+  let effectiveNet = currentNet
+  if (currentHoldings != null) {
+    const past = getHoldingsValueAsOf(sqlite, NET_WORTH_HOLDINGS_SOURCES, cutoff)
+    if (past != null) {
+      assets += past.marketValue
+      foundAny = true
+      // No account balance snapshot existed at the cutoff, so current account
+      // balances have no past counterpart. Exclude them from effectiveNet so
+      // the delta reflects only holdings movement and doesn't inflate by
+      // treating current account balances as a fake gain.
+      if (!foundAnyAccount) {
+        effectiveNet = currentHoldings
+      }
+    } else {
+      effectiveNet -= currentHoldings
+    }
+  }
+
   if (!foundAny) return null
   const pastNet = assets - liabilities
-  return round2(currentNet - pastNet)
+  return round2(effectiveNet - pastNet)
 }
 
 export type TrajectoryPoint = {

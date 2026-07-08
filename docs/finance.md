@@ -120,6 +120,17 @@ daily history by walking the txn ledger backwards from the live balance
 deltas; `getNetWorthTrajectory({ sinceMs, untilMs })` returns every snapshot
 in window for chart rendering.
 
+**Brokerage holdings are included in the totals**: the latest holdings
+snapshot across `NET_WORTH_HOLDINGS_SOURCES` (CSV import, Plaid Investments,
+SnapTrade — dated `records` rows, see `finance-holdings.ts`) rolls into
+`assets`/`net`, surfaced as `snapshot.holdings` (treated as base-currency —
+the payloads carry no currency). **Delta rule**: a delta only counts holdings
+when a holdings snapshot exists at/before that cutoff (past vs current
+snapshot); if none existed back then, holdings drop out of BOTH sides so a
+first-ever import doesn't register as a fake 30/90/365-day gain. If a
+live-linked (SimpleFIN/Plaid) `investment` account exists, holdings are kept
+out of the totals entirely to avoid double counting its balance.
+
 ## Cash-flow forecast (Phase 4.5)
 
 `buildForecast()` produces a 90-day per-account daily trajectory from four
