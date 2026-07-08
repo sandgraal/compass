@@ -35,9 +35,14 @@ export type PropertyConfig = {
   landValue: number // base currency; excluded from the depreciable basis
   recoveryYears: number // 30 (foreign ADS) | 27.5 (US GDS) | 40 (pre-2018 ADS)
   basisOverride: number | null // base currency; overrides accumulated-capex basis when set
-  // Service-address substring that attributes Arcadia utility bills (Phase 10.9) to this
-  // property → they become the utilities operating-expense line. null = none counted.
+  // Service-address substring that narrows which Arcadia utility bills (Phase 10.9)
+  // attribute to this property. null = every ingested bill is a candidate.
   utilityAddress: string | null
+  // OPT-IN: Arcadia bills carry no geo/purpose scoping — they may be PERSONAL home
+  // utilities, and this P&L is a rental-property Schedule E. Bills are therefore only
+  // ADDED to the operating-expense math when this is true; they always surface
+  // informationally in `PropertyPnl.utilityBills` regardless.
+  includeUtilityBillsInPnl: boolean
 }
 
 export const DEFAULT_PROPERTY_CONFIG: PropertyConfig = {
@@ -45,7 +50,8 @@ export const DEFAULT_PROPERTY_CONFIG: PropertyConfig = {
   landValue: 0,
   recoveryYears: PROPERTY_RECOVERY_YEARS_DEFAULT,
   basisOverride: null,
-  utilityAddress: null
+  utilityAddress: null,
+  includeUtilityBillsInPnl: false
 }
 
 export type PropertyPnlYear = {
@@ -64,6 +70,21 @@ export type DepreciationYear = {
   remainingBasis: number
 }
 
+// Informational Arcadia utility-bill rollup — ALWAYS present on the P&L output,
+// whether or not the bills are included in the operating-expense math.
+export type UtilityBillsSummary = {
+  byYear: Array<{ year: number; total: number; count: number }> // base currency
+  total: number // base currency, all years
+  count: number // bills summarized (convertible amount + valid statement date)
+  providers: string[] // distinct utility companies, sorted
+  // Bills SKIPPED from the operating-expense math because an already-counted
+  // operating transaction matched (same currency + absolute amount to the cent,
+  // within ±4 days) — the bank payment is already on the P&L. Only non-zero when
+  // `includeUtilityBillsInPnl` is on; skipped bills still count informationally.
+  deduped: number
+  includedInOperating: boolean // echo of config.includeUtilityBillsInPnl
+}
+
 export type PropertyPnl = {
   baseCurrency: string
   byYear: PropertyPnlYear[]
@@ -79,6 +100,7 @@ export type PropertyPnl = {
   netYieldOnBasis: number | null // total netOperating / depreciableBasis (null if no basis)
   depreciation: DepreciationYear[]
   unconvertedCount: number // property rows with no usable FX rate (left out of totals)
+  utilityBills: UtilityBillsSummary
   config: PropertyConfig
 }
 
@@ -190,31 +212,62 @@ function convertAsOf(
 }
 
 type UtilityBillPnlRow = {
+  provider: string | null
   statementDate: string | null
   amount: number | null
   currency: string | null
 }
 
 /**
- * Read Arcadia utility bills whose service address matches `addressFilter` (case-insensitive
- * substring) — these attribute to the property. Empty on older installs (table-less).
+ * Read Arcadia utility bills that attribute to the property: all of them when no
+ * service-address filter is configured (Arcadia bills carry no other scoping), or the
+ * case-insensitive-substring matches when one is. Empty on older installs (table-less).
  */
-function readUtilityBills(sqlite: SqliteForFx, addressFilter: string): UtilityBillPnlRow[] {
+function readUtilityBills(sqlite: SqliteForFx, addressFilter: string | null): UtilityBillPnlRow[] {
   // INSTR gives a TRUE substring match — LIKE would treat `%`/`_` in a user-entered
   // address as wildcards and mis-attribute bills.
-  const needle = addressFilter.trim().toLowerCase()
+  const needle = addressFilter?.trim().toLowerCase() ?? ''
   try {
     return sqlite
       .prepare(
-        `SELECT statement_date AS statementDate, amount, currency
+        `SELECT provider, statement_date AS statementDate, amount, currency
            FROM utility_bills
           WHERE amount IS NOT NULL AND statement_date IS NOT NULL
-            AND INSTR(LOWER(COALESCE(service_address, '')), ?) > 0`
+            AND (? = '' OR INSTR(LOWER(COALESCE(service_address, '')), ?) > 0)`
       )
-      .all(needle) as UtilityBillPnlRow[]
+      .all(needle, needle) as UtilityBillPnlRow[]
   } catch {
     return []
   }
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+const DEDUP_WINDOW_DAYS = 4
+
+/** A counted operating transaction, kept for the utility-bill dedup check. */
+type OperatingTxnKey = {
+  timeMs: number // Date.parse of the local-day 'YYYY-MM-DD' (UTC midnight — consistent)
+  currency: string // upper-cased original currency
+  absCents: number // absolute original amount, rounded to cents
+}
+
+/**
+ * Dedup heuristic (deliberately simple): a bill is considered already-on-the-P&L when
+ * some counted operating transaction has the SAME currency, the SAME absolute amount
+ * rounded to cents, and a date within ±4 days of the statement date — i.e. the bank
+ * payment of that bill was tagged and counted, so adding the statement too would
+ * double-count the expense.
+ */
+function matchesCountedOperatingTxn(
+  bill: { timeMs: number; currency: string; absCents: number },
+  counted: OperatingTxnKey[]
+): boolean {
+  return counted.some(
+    (t) =>
+      t.currency === bill.currency &&
+      t.absCents === bill.absCents &&
+      Math.abs(t.timeMs - bill.timeMs) <= DEDUP_WINDOW_DAYS * DAY_MS
+  )
 }
 
 /**
@@ -248,53 +301,89 @@ export function buildPropertyPnl(
   }
 
   let unconvertedCount = 0
+  const countedOperatingTxns: OperatingTxnKey[] = []
   for (const row of rows) {
     const bucket = bucketFor(row)
     if (!bucket) continue
     const year = Number.parseInt(row.date.slice(0, 4), 10)
     if (!Number.isFinite(year)) continue
-    const converted = convertAsOf(
-      row.amount,
-      (row.currency || base).toUpperCase(),
-      base,
-      rates,
-      row.date
-    )
+    const currency = (row.currency || base).toUpperCase()
+    const converted = convertAsOf(row.amount, currency, base, rates, row.date)
     if (converted == null) {
       unconvertedCount++
       continue
     }
     const y = ensureYear(year)
-    if (bucket === 'revenue')
+    if (bucket === 'revenue') {
       y.revenue += converted // signed: deposits add, chargebacks subtract
-    else if (bucket === 'operating')
+    } else if (bucket === 'operating') {
       y.operating += -converted // expense magnitude
-    else y.capex += -converted
+      const timeMs = Date.parse(row.date)
+      if (Number.isFinite(timeMs)) {
+        countedOperatingTxns.push({
+          timeMs,
+          currency,
+          absCents: Math.round(Math.abs(row.amount) * 100)
+        })
+      }
+    } else y.capex += -converted
   }
 
-  // Utility bills (Arcadia, Phase 10.9) → the utilities operating line, when a service
-  // address is configured to attribute them to this property. They add to `operating`
-  // (and a visible `utilities` sub-total) alongside the tagged transaction expenses.
-  if (config.utilityAddress?.trim()) {
-    for (const b of readUtilityBills(sqlite, config.utilityAddress)) {
-      if (b.amount == null || !b.statementDate) continue
-      const year = Number.parseInt(b.statementDate.slice(0, 4), 10)
-      if (!Number.isFinite(year)) continue
-      const converted = convertAsOf(
-        b.amount,
-        (b.currency || base).toUpperCase(),
-        base,
-        rates,
-        b.statementDate
-      )
-      if (converted == null) {
-        unconvertedCount++
-        continue
-      }
-      const y = ensureYear(year)
-      y.operating += converted // positive = expense magnitude
-      y.utilities += converted
+  // Utility bills (Arcadia, Phase 10.9) — ALWAYS summarized informationally (per-year
+  // totals + counts + providers), narrowed to the configured service address when one is
+  // set. They are only ADDED to `operating` (and the visible `utilities` sub-total) when
+  // the user opted in via `includeUtilityBillsInPnl` — bills carry no geo/purpose scoping,
+  // so auto-adding possibly-personal utilities would corrupt the Schedule E. When included,
+  // bills matching an already-counted operating transaction are skipped (see
+  // `matchesCountedOperatingTxn`) and reported as `deduped`.
+  const include = config.includeUtilityBillsInPnl
+  const utilityByYear = new Map<number, { year: number; total: number; count: number }>()
+  const providerSet = new Set<string>()
+  let utilityDeduped = 0
+  for (const b of readUtilityBills(sqlite, config.utilityAddress)) {
+    if (b.amount == null || !b.statementDate) continue
+    const year = Number.parseInt(b.statementDate.slice(0, 4), 10)
+    if (!Number.isFinite(year)) continue
+    const currency = (b.currency || base).toUpperCase()
+    const converted = convertAsOf(b.amount, currency, base, rates, b.statementDate)
+    if (converted == null) {
+      if (include) unconvertedCount++ // only surfaces as excluded-from-P&L when opted in
+      continue
     }
+    let u = utilityByYear.get(year)
+    if (!u) {
+      u = { year, total: 0, count: 0 }
+      utilityByYear.set(year, u)
+    }
+    u.total += converted
+    u.count++
+    if (b.provider?.trim()) providerSet.add(b.provider.trim())
+    if (!include) continue
+    const timeMs = Date.parse(b.statementDate)
+    if (
+      Number.isFinite(timeMs) &&
+      matchesCountedOperatingTxn(
+        { timeMs, currency, absCents: Math.round(Math.abs(b.amount) * 100) },
+        countedOperatingTxns
+      )
+    ) {
+      utilityDeduped++
+      continue
+    }
+    const y = ensureYear(year)
+    y.operating += converted // positive = expense magnitude
+    y.utilities += converted
+  }
+
+  const utilityYears = [...utilityByYear.values()].sort((a, b) => a.year - b.year)
+  for (const u of utilityYears) u.total = round2(u.total)
+  const utilityBills: UtilityBillsSummary = {
+    byYear: utilityYears,
+    total: round2(utilityYears.reduce((s, u) => s + u.total, 0)),
+    count: utilityYears.reduce((s, u) => s + u.count, 0),
+    providers: [...providerSet].sort((a, b) => a.localeCompare(b)),
+    deduped: utilityDeduped,
+    includedInOperating: include
   }
 
   const years = [...byYear.values()].sort((a, b) => a.year - b.year)
@@ -348,6 +437,7 @@ export function buildPropertyPnl(
     netYieldOnBasis,
     depreciation,
     unconvertedCount,
+    utilityBills,
     config
   }
 }
@@ -359,7 +449,8 @@ export const PROPERTY_CONFIG_KEYS = {
   landValue: 'propertyLandValue',
   recoveryYears: 'propertyRecoveryYears',
   basisOverride: 'propertyBasisOverride',
-  utilityAddress: 'propertyUtilityAddress'
+  utilityAddress: 'propertyUtilityAddress',
+  includeUtilityBillsInPnl: 'propertyIncludeUtilityBills'
 } as const
 
 /** Read the property config from `app_settings`, falling back to the defaults. */
@@ -392,7 +483,9 @@ export function getPropertyConfig(sqlite: SqliteForFx): PropertyConfig {
       basisOverride != null && Number.isFinite(basisOverride) && basisOverride >= 0
         ? basisOverride
         : null,
-    utilityAddress: utilityAddress?.trim() ? utilityAddress.trim() : null
+    utilityAddress: utilityAddress?.trim() ? utilityAddress.trim() : null,
+    // opt-in, so anything but an explicit 'true' (incl. missing) means false
+    includeUtilityBillsInPnl: read(PROPERTY_CONFIG_KEYS.includeUtilityBillsInPnl) === 'true'
   }
 }
 
@@ -431,5 +524,11 @@ export function setPropertyConfig(
   }
   if ('utilityAddress' in patch) {
     write(PROPERTY_CONFIG_KEYS.utilityAddress, patch.utilityAddress ?? '')
+  }
+  if ('includeUtilityBillsInPnl' in patch) {
+    write(
+      PROPERTY_CONFIG_KEYS.includeUtilityBillsInPnl,
+      patch.includeUtilityBillsInPnl ? 'true' : 'false'
+    )
   }
 }

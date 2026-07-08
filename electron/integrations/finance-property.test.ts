@@ -143,7 +143,8 @@ const CFG: PropertyConfig = {
   landValue: 0,
   recoveryYears: 30,
   basisOverride: null,
-  utilityAddress: null
+  utilityAddress: null,
+  includeUtilityBillsInPnl: false
 }
 
 let sqlite: Database.Database
@@ -255,24 +256,103 @@ describe('buildPropertyPnl — Arcadia utility bills → utilities operating lin
     ins.run('arcadia:c', 'Home Electric', '999 Primary St, Austin', '2024-05-01', 300, 'USD') // no match
   }
 
-  it('adds only bills matching the configured service address, into operating + utilities', () => {
+  it('surfaces bills informationally with the flag OFF — and keeps them OUT of opex', () => {
     const sqlite = makeDb()
     seedUtilityBills(sqlite)
-    // an existing tagged operating expense, so we can see utilities add on top of it
+    // an existing tagged operating expense, so we can see nothing adds on top of it
     addTxn(sqlite, { date: '2024-04-01', amount: -200, taxTag: 'tax:schedule-e-expense' })
 
-    const pnl = buildPropertyPnl(sqlite, { ...CFG, utilityAddress: 'Rental Way' })
+    const pnl = buildPropertyPnl(sqlite, CFG) // includeUtilityBillsInPnl: false (default)
+    // informational section covers ALL bills (no address filter configured)
+    expect(pnl.utilityBills.includedInOperating).toBe(false)
+    expect(pnl.utilityBills.count).toBe(3)
+    expect(pnl.utilityBills.total).toBe(450) // 100 + 50 + 300
+    expect(pnl.utilityBills.byYear).toEqual([{ year: 2024, total: 450, count: 3 }])
+    expect(pnl.utilityBills.providers).toEqual(['City Water', 'Home Electric', 'PG&E'])
+    expect(pnl.utilityBills.deduped).toBe(0)
+    // …but NONE of it entered the Schedule E math
+    const y2024 = pnl.byYear.find((y) => y.year === 2024)
+    expect(y2024?.operating).toBe(200) // tagged expense only
+    expect(y2024?.utilities).toBe(0)
+    expect(pnl.totals.utilities).toBe(0)
+  })
+
+  it('adds bills into operating + utilities when the flag is ON (address-filtered)', () => {
+    const sqlite = makeDb()
+    seedUtilityBills(sqlite)
+    addTxn(sqlite, { date: '2024-04-01', amount: -200, taxTag: 'tax:schedule-e-expense' })
+
+    const pnl = buildPropertyPnl(sqlite, {
+      ...CFG,
+      utilityAddress: 'Rental Way',
+      includeUtilityBillsInPnl: true
+    })
     const y2024 = pnl.byYear.find((y) => y.year === 2024)
     expect(y2024?.utilities).toBe(150) // 100 + 50 — the two matching bills
     expect(y2024?.operating).toBe(350) // 200 tagged expense + 150 utilities
     expect(pnl.totals.utilities).toBe(150) // the Austin bill (non-matching address) is excluded
+    expect(pnl.utilityBills.includedInOperating).toBe(true)
+    expect(pnl.utilityBills.count).toBe(2) // informational section is address-filtered too
+    expect(pnl.utilityBills.deduped).toBe(0)
   })
 
-  it('counts no utilities when no service address is configured', () => {
+  it('dedups a bill whose amount matches a counted operating txn within ±4 days', () => {
     const sqlite = makeDb()
     seedUtilityBills(sqlite)
-    const pnl = buildPropertyPnl(sqlite, CFG) // utilityAddress: null
-    expect(pnl.totals.utilities).toBe(0)
+    // the bank payment of the $100 PG&E bill (2024-03-15), tagged + counted 2 days later
+    addTxn(sqlite, { date: '2024-03-17', amount: -100, taxTag: 'tax:schedule-e-expense' })
+
+    const pnl = buildPropertyPnl(sqlite, {
+      ...CFG,
+      utilityAddress: 'Rental Way',
+      includeUtilityBillsInPnl: true
+    })
+    const y2024 = pnl.byYear.find((y) => y.year === 2024)
+    expect(pnl.utilityBills.deduped).toBe(1) // the PG&E bill was skipped
+    expect(y2024?.utilities).toBe(50) // only the City Water bill entered opex
+    expect(y2024?.operating).toBe(150) // 100 bank payment + 50 remaining bill
+    expect(pnl.utilityBills.count).toBe(2) // informationally the skipped bill still counts
+    expect(pnl.utilityBills.total).toBe(150)
+  })
+
+  it('does NOT dedup when the matching txn is outside the ±4-day window', () => {
+    const sqlite = makeDb()
+    seedUtilityBills(sqlite)
+    addTxn(sqlite, { date: '2024-03-25', amount: -100, taxTag: 'tax:schedule-e-expense' }) // 10 days out
+
+    const pnl = buildPropertyPnl(sqlite, {
+      ...CFG,
+      utilityAddress: 'Rental Way',
+      includeUtilityBillsInPnl: true
+    })
+    expect(pnl.utilityBills.deduped).toBe(0)
+    expect(pnl.totals.utilities).toBe(150) // both matching bills entered opex
+  })
+
+  it('leaves the P&L unchanged when utility_bills is empty', () => {
+    const sqlite = makeDb()
+    sqlite.exec(`
+      CREATE TABLE utility_bills (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE,
+        provider TEXT, service_address TEXT, statement_date TEXT, period_start TEXT,
+        period_end TEXT, amount REAL, currency TEXT NOT NULL DEFAULT 'USD',
+        usage_kwh REAL, ingested_at INTEGER
+      );
+    `)
+    addTxn(sqlite, { date: '2024-05-01', amount: 3000, taxTag: 'tax:schedule-e-income' })
+    addTxn(sqlite, { date: '2024-05-02', amount: -500, taxTag: 'tax:schedule-e-expense' })
+
+    const pnl = buildPropertyPnl(sqlite, { ...CFG, includeUtilityBillsInPnl: true })
+    const y2024 = pnl.byYear.find((y) => y.year === 2024)
+    expect(y2024).toMatchObject({ revenue: 3000, operating: 500, utilities: 0, netOperating: 2500 })
+    expect(pnl.utilityBills).toEqual({
+      byYear: [],
+      total: 0,
+      count: 0,
+      providers: [],
+      deduped: 0,
+      includedInOperating: true
+    })
   })
 
   it('matches the service address literally — a "_"/"%" is not a wildcard (INSTR, not LIKE)', () => {
@@ -291,7 +371,11 @@ describe('buildPropertyPnl — Arcadia utility bills → utilities operating lin
     ins.run('u1', 'A_C Street', '2024-02-01', 40, 'USD') // literal underscore
     ins.run('u2', 'ABC Street', '2024-02-02', 99, 'USD') // would match 'A_C' if "_" were a wildcard
 
-    const pnl = buildPropertyPnl(sqlite, { ...CFG, utilityAddress: 'A_C' })
+    const pnl = buildPropertyPnl(sqlite, {
+      ...CFG,
+      utilityAddress: 'A_C',
+      includeUtilityBillsInPnl: true
+    })
     expect(pnl.totals.utilities).toBe(40) // only literal 'A_C Street' — 'ABC Street' excluded
   })
 })

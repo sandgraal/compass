@@ -999,6 +999,13 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
         }
         patch.utilityAddress = v ? v.slice(0, 200) : null
       }
+      if ('includeUtilityBillsInPnl' in input) {
+        const v = input.includeUtilityBillsInPnl
+        if (typeof v !== 'boolean') {
+          return { success: false, error: 'Invalid includeUtilityBillsInPnl: expected a boolean.' }
+        }
+        patch.includeUtilityBillsInPnl = v
+      }
 
       setPropertyConfig(getRawSqlite(), patch)
       return { success: true, config: getPropertyConfig(getRawSqlite()) }

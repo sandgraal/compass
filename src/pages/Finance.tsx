@@ -1859,6 +1859,7 @@ function PropertyTab(): JSX.Element {
   const [pnl, setPnl] = useState<PropertyPnl | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [savingUtilityInclude, setSavingUtilityInclude] = useState(false)
   const [placed, setPlaced] = useState('')
   const [land, setLand] = useState('')
   const [recovery, setRecovery] = useState('30')
@@ -1888,6 +1889,26 @@ function PropertyTab(): JSX.Element {
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  const saveUtilityInclude = async (checked: boolean) => {
+    if (!window.api?.finance) return
+    setSavingUtilityInclude(true)
+    try {
+      const res = await window.api.finance.setPropertyConfig({
+        includeUtilityBillsInPnl: checked
+      })
+      if (!res.success) {
+        showToast(res.error ?? 'Failed to save.', 'error')
+        return
+      }
+      await refresh()
+    } catch (err) {
+      console.error('[property] utility-include save failed', err)
+      showToast('Failed to save.', 'error')
+    } finally {
+      setSavingUtilityInclude(false)
+    }
+  }
 
   const saveConfig = async () => {
     if (!window.api?.finance) return
@@ -1983,6 +2004,62 @@ function PropertyTab(): JSX.Element {
       </div>
 
       <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="text-sm font-semibold mb-1">Utility bills (Arcadia)</h3>
+        <p className="text-xs text-amber-700 dark:text-amber-400 mb-3">
+          Caution: synced bills aren't property-scoped — they may be your personal home utilities,
+          so they only enter Schedule E when you opt in below.
+        </p>
+        {pnl.utilityBills.count === 0 ? (
+          <p className="text-xs text-muted-foreground mb-3">
+            No utility bills synced yet. Connect Arcadia on the Integrations page to pull
+            statements.
+          </p>
+        ) : (
+          <div className="mb-3">
+            <table className="w-full max-w-md text-sm">
+              <thead className="text-xs text-muted-foreground">
+                <tr>
+                  <th className="text-left">Year</th>
+                  <th className="text-right">Total</th>
+                  <th className="text-right">Bills</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pnl.utilityBills.byYear.map((u) => (
+                  <tr key={u.year} className="border-t border-border tabular-nums">
+                    <td className="py-1.5">{u.year}</td>
+                    <td className="text-right">{fmt(u.total)}</td>
+                    <td className="text-right text-muted-foreground">{u.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {pnl.utilityBills.providers.length > 0 && (
+              <p className="text-xs text-muted-foreground mt-2">
+                Providers: {pnl.utilityBills.providers.join(', ')}
+              </p>
+            )}
+            {pnl.utilityBills.deduped > 0 && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {pnl.utilityBills.deduped} bill{pnl.utilityBills.deduped === 1 ? '' : 's'} skipped —
+                a matching operating transaction is already counted.
+              </p>
+            )}
+          </div>
+        )}
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={pnl.config.includeUtilityBillsInPnl}
+            disabled={savingUtilityInclude}
+            onChange={(e) => void saveUtilityInclude(e.target.checked)}
+            className="accent-primary"
+          />
+          <span>Include in Schedule E operating expenses</span>
+        </label>
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-5">
         <h3 className="text-sm font-semibold mb-1">Depreciation basis</h3>
         <p className="text-xs text-muted-foreground mb-4">
           A US taxpayer's foreign rental depreciates straight-line over 30 years (ADS) — verify your
@@ -2039,7 +2116,7 @@ function PropertyTab(): JSX.Element {
               type="text"
               value={utilityAddress}
               onChange={(e) => setUtilityAddress(e.target.value)}
-              placeholder="e.g. 123 Rental Way — bills matching this count as utilities"
+              placeholder="e.g. 123 Rental Way — narrows which Arcadia bills attribute here"
               className="w-full bg-background border border-border rounded px-2 py-1 text-sm"
             />
           </label>

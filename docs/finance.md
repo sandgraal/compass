@@ -85,6 +85,17 @@ Rule order (first match wins):
 
 Add new business accounts to `SCHEDULE_C_ACCOUNT_HINTS` in `finance-tax.ts`.
 
+### Property P&L — Arcadia utility bills (opt-in)
+
+Arcadia-synced `utility_bills` surface on the Finance → Property tab as an always-present
+informational rollup (per-year totals, bill counts, providers), narrowed by the service-address
+filter when one is configured. Because bills carry **no geo/purpose scoping** — they may be
+personal home utilities, not the rental's — they are only added into the Schedule E
+operating-expense math when the `includeUtilityBillsInPnl` config flag is enabled (default
+**off**, checkbox on the Property tab). When included, any bill matching an already-counted
+operating transaction (same currency + absolute amount to the cent, within ±4 days) is skipped
+and reported as `deduped`, so a bank-paid bill isn't double-counted.
+
 ## Net-worth snapshots (Phase 4.4)
 
 Per-(account, day) balance row in `finance_balance_snapshots`. Cron at 00:05
