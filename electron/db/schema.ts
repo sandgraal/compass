@@ -697,8 +697,9 @@ export const argylePaystubs = sqliteTable('argyle_paystubs', {
 })
 
 // ---- Utility bills (Phase 10.9 — "Arcadia → property P&L") ----
-// Utility statements from the Arcadia aggregator, feeding the Schedule-E property P&L
-// (`finance-property.ts`) as the utilities operating-expense line. DELIBERATELY OFF the
+// Utility statements from the Arcadia aggregator, surfaced on the Schedule-E property P&L
+// (`finance-property.ts`) — always informationally, and as the utilities operating-expense
+// line only when the user opts in (`propertyIncludeUtilityBills`). DELIBERATELY OFF the
 // `records`/finance_transactions spine: keeps utility STATEMENTS out of the cash ledger
 // (no double-count vs the bank payment) and the service address off the AI timeline
 // (aggregates-only). Holds `usage_kwh` for future carbon leverage. Amounts are positive

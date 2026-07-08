@@ -1696,12 +1696,21 @@ declare global {
             remainingBasis: number
           }>
           unconvertedCount: number
+          utilityBills: {
+            byYear: Array<{ year: number; total: number; count: number }>
+            total: number
+            count: number
+            providers: string[]
+            deduped: number
+            includedInOperating: boolean
+          }
           config: {
             placedInService: string | null
             landValue: number
             recoveryYears: number
             basisOverride: number | null
             utilityAddress: string | null
+            includeUtilityBillsInPnl: boolean
           }
         }>
         setPropertyConfig(input: {
@@ -1710,6 +1719,7 @@ declare global {
           recoveryYears?: number
           basisOverride?: number | null
           utilityAddress?: string | null
+          includeUtilityBillsInPnl?: boolean
         }): Promise<{
           success: boolean
           error?: string
@@ -1719,6 +1729,7 @@ declare global {
             recoveryYears: number
             basisOverride: number | null
             utilityAddress: string | null
+            includeUtilityBillsInPnl: boolean
           }
         }>
 

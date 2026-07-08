@@ -594,6 +594,21 @@ describe('finance:property (Phase 11.3)', () => {
     cfg = (await invoke(setCfg, {})) as { config?: { basisOverride: number | null } }
     expect(cfg.config?.basisOverride).toBeNull()
   })
+
+  it('persists the utility-bill opt-in flag (defaults off, boolean-only)', async () => {
+    const setCfg = await registerAndGet('finance:set-property-config')
+    type Out = { success: boolean; config?: { includeUtilityBillsInPnl: boolean } }
+    let out = (await invoke(setCfg, {})) as Out
+    expect(out.config?.includeUtilityBillsInPnl).toBe(false) // opt-in default
+    out = (await invoke(setCfg, { includeUtilityBillsInPnl: true })) as Out
+    expect(out.success).toBe(true)
+    expect(out.config?.includeUtilityBillsInPnl).toBe(true)
+    // non-boolean payloads are rejected at the IPC boundary
+    out = (await invoke(setCfg, { includeUtilityBillsInPnl: 'yes' })) as Out
+    expect(out.success).toBe(false)
+    out = (await invoke(setCfg, {})) as Out
+    expect(out.config?.includeUtilityBillsInPnl).toBe(true) // rejected write didn't flip it
+  })
 })
 
 describe('finance:expat-tax (Phase 11.2)', () => {

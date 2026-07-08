@@ -561,6 +561,8 @@ const api = {
       landValue?: number
       recoveryYears?: number
       basisOverride?: number | null
+      utilityAddress?: string | null
+      includeUtilityBillsInPnl?: boolean
     }) => ipcRenderer.invoke('finance:set-property-config', input),
 
     // Foreign-account & expat-tax surface (Phase 11.2)
