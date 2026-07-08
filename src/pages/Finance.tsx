@@ -3091,6 +3091,108 @@ function CreditTab(): JSX.Element {
         </div>
       )}
 
+      {/* Report ↔ live-account reconciliation (display-only — tradelines
+          duplicate synced card accounts, so they are never summed into
+          net-worth liabilities) */}
+      {(s.reconciliation.matched.length > 0 ||
+        s.reconciliation.unmatchedTradelines.length > 0 ||
+        s.reconciliation.unmatchedAccounts.length > 0) && (
+        <div>
+          <div className="text-sm font-medium mb-2">Report vs live accounts</div>
+          <div className="bg-card border border-border rounded-xl p-4 space-y-4">
+            {s.reconciliation.matched.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-xs text-muted-foreground">
+                    <tr className="text-left">
+                      <th className="pb-2">Account</th>
+                      <th className="pb-2 text-right">
+                        Report{s.reportDate ? ` (${s.reportDate})` : ''}
+                      </th>
+                      <th className="pb-2 text-right">Live (synced)</th>
+                      <th className="pb-2 text-right">Drift</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {s.reconciliation.matched.map((m) => (
+                      <tr key={m.accountId} className="border-t border-border">
+                        <td className="py-1.5">
+                          {m.accountName}
+                          {m.accountLast4 ? (
+                            <span className="text-muted-foreground"> ••{m.accountLast4}</span>
+                          ) : null}
+                        </td>
+                        <td className="py-1.5 text-right tabular-nums">
+                          {m.reportBalance != null ? fmtUsd(m.reportBalance) : '—'}
+                        </td>
+                        <td className="py-1.5 text-right tabular-nums">
+                          {m.liveBalance != null ? fmtUsd(m.liveBalance) : '—'}
+                        </td>
+                        <td
+                          className={cn(
+                            'py-1.5 text-right tabular-nums',
+                            m.drift != null && m.drift > 0 && 'text-red-400',
+                            m.drift != null && m.drift < 0 && 'text-emerald-400'
+                          )}
+                        >
+                          {m.drift != null ? `${m.drift > 0 ? '+' : ''}${fmtUsd(m.drift)}` : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {s.reconciliation.unmatchedTradelines.length > 0 && (
+              <div>
+                <div className="text-xs font-medium text-amber-400 mb-1">
+                  On the report but not tracked in Compass
+                </div>
+                <div className="space-y-1 text-sm">
+                  {s.reconciliation.unmatchedTradelines.map((t, i) => (
+                    <div
+                      key={`${t.creditor}-${t.accountLast4 ?? ''}-${i}`}
+                      className="flex justify-between"
+                    >
+                      <span className="text-muted-foreground">
+                        {t.creditor}
+                        {t.accountLast4 ? ` ••${t.accountLast4}` : ''}
+                        {t.accountType ? ` · ${t.accountType}` : ''}
+                      </span>
+                      <span className="tabular-nums">
+                        {t.balance != null ? fmtUsd(t.balance) : '—'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {s.reconciliation.unmatchedAccounts.length > 0 && (
+              <div>
+                <div className="text-xs font-medium text-muted-foreground mb-1">
+                  Tracked in Compass but not on this report
+                </div>
+                <div className="space-y-1 text-sm">
+                  {s.reconciliation.unmatchedAccounts.map((a) => (
+                    <div key={a.accountId} className="flex justify-between">
+                      <span className="text-muted-foreground">{a.name}</span>
+                      <span className="tabular-nums">
+                        {a.balance != null ? fmtUsd(a.balance) : '—'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Report balances are a point-in-time snapshot from the bureau; live balances come from
+              bank sync. Drift is live minus report — informational only, never double-counted in
+              net worth.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Account mix + inquiries */}
       <div className="grid md:grid-cols-2 gap-4">
         <div className="bg-card border border-border rounded-xl p-4">

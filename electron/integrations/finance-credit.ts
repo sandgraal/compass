@@ -67,6 +67,47 @@ export type CreditRecommendation = {
   detail: string
 }
 
+/** A live finance_accounts row, as much of it as reconciliation needs. */
+export type CreditAccountLike = {
+  id: number
+  name: string
+  institution: string
+  mask: string | null
+  isDebt: boolean
+  balance: number | null
+}
+
+export type CreditReconciliationMatch = {
+  creditor: string
+  accountLast4: string | null
+  reportBalance: number | null
+  accountId: number
+  accountName: string
+  liveBalance: number | null
+  /** live − report; positive = you owe more now than the report showed. */
+  drift: number | null
+}
+
+export type CreditReconciliation = {
+  /** Open tradelines paired with a live debt account. */
+  matched: CreditReconciliationMatch[]
+  /** Open tradelines with no live account — candidate untracked liabilities. */
+  unmatchedTradelines: Array<{
+    creditor: string
+    accountLast4: string | null
+    accountType: string | null
+    balance: number | null
+  }>
+  /** Live debt accounts absent from the shown report. */
+  unmatchedAccounts: Array<{ accountId: number; name: string; balance: number | null }>
+}
+
+const EMPTY_RECONCILIATION: CreditReconciliation = {
+  matched: [],
+  unmatchedTradelines: [],
+  unmatchedAccounts: []
+}
+
 export type CreditSummary = {
   hasData: boolean
   bureau: string | null
@@ -91,6 +132,7 @@ export type CreditSummary = {
   hardInquiries24mo: number
   softInquiries24mo: number
   recommendations: CreditRecommendation[]
+  reconciliation: CreditReconciliation
 }
 
 const EMPTY: CreditSummary = {
@@ -116,7 +158,8 @@ const EMPTY: CreditSummary = {
   softInquiries12mo: 0,
   hardInquiries24mo: 0,
   softInquiries24mo: 0,
-  recommendations: []
+  recommendations: [],
+  reconciliation: EMPTY_RECONCILIATION
 }
 
 function round2(n: number): number {
@@ -160,6 +203,7 @@ export function summarizeCredit(
     reportAvgAgeMonths?: number | null
     bureausAvailable?: string[]
     todayMs: number
+    reconciliation?: CreditReconciliation
   }
 ): CreditSummary {
   if (tradelines.length === 0 && inquiries.length === 0 && opts.scoreTrend.length === 0) {
@@ -252,10 +296,108 @@ export function summarizeCredit(
     softInquiries12mo: soft.filter((q) => within(q.inquiryDate, 365)).length,
     hardInquiries24mo: hard.filter((q) => within(q.inquiryDate, 730)).length,
     softInquiries24mo: soft.filter((q) => within(q.inquiryDate, 730)).length,
-    recommendations: []
+    recommendations: [],
+    reconciliation: opts.reconciliation ?? EMPTY_RECONCILIATION
   }
   summary.recommendations = creditRecommendations(summary)
   return summary
+}
+
+// ─── Report ↔ live-account reconciliation ────────────────────────────────────
+
+const normName = (s: string): string =>
+  s
+    .toUpperCase()
+    .replace(/[^A-Z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+/** An account's last-4: the `mask` column, else `(1234)` parsed from its name. */
+function accountLast4(a: CreditAccountLike): string | null {
+  if (a.mask?.trim()) return a.mask.trim()
+  const m = a.name.match(/\((\d{2,4})\)/)
+  return m ? m[1] : null
+}
+
+function nameMatches(creditor: string, a: CreditAccountLike): boolean {
+  const c = normName(creditor)
+  const acct = normName(`${a.name} ${a.institution}`)
+  if (c.length < 4 || acct.length < 4) return false
+  return acct.includes(c) || c.includes(acct)
+}
+
+/**
+ * Pair the report's OPEN tradelines with live debt accounts so the Credit tab
+ * can show report-balance vs live-balance drift, flag tradelines Compass isn't
+ * tracking (candidate missing liabilities), and flag tracked debts absent from
+ * the report. DISPLAY-ONLY: tradelines duplicate already-synced card accounts,
+ * so their balances are never summed into net-worth liabilities.
+ *
+ * Matching: (1) exact last-4 (tradeline.accountLast4 vs the account's mask or
+ * a `(1234)` suffix in its name); (2) a name/institution containment match,
+ * but only when exactly ONE unmatched account matches — an ambiguous creditor
+ * (three AmEx cards, no last-4 on the tradeline) stays unmatched rather than
+ * guessing wrong. Closed tradelines are excluded entirely.
+ */
+export function reconcileTradelines(
+  tradelines: CreditTradeline[],
+  accounts: CreditAccountLike[]
+): CreditReconciliation {
+  const open = tradelines.filter((t) => !t.closed)
+  const debts = accounts.filter((a) => a.isDebt)
+  if (open.length === 0 && debts.length === 0) return { ...EMPTY_RECONCILIATION }
+
+  const matchedAccountIds = new Set<number>()
+  const pair = new Map<CreditTradeline, CreditAccountLike>()
+
+  // Pass 1: exact last-4.
+  for (const t of open) {
+    if (!t.accountLast4) continue
+    const hit = debts.find(
+      (a) => !matchedAccountIds.has(a.id) && accountLast4(a) === t.accountLast4
+    )
+    if (hit) {
+      pair.set(t, hit)
+      matchedAccountIds.add(hit.id)
+    }
+  }
+  // Pass 2: unambiguous name match among the remainder.
+  for (const t of open) {
+    if (pair.has(t)) continue
+    const hits = debts.filter((a) => !matchedAccountIds.has(a.id) && nameMatches(t.creditor, a))
+    if (hits.length === 1) {
+      pair.set(t, hits[0])
+      matchedAccountIds.add(hits[0].id)
+    }
+  }
+
+  const matched: CreditReconciliationMatch[] = [...pair.entries()].map(([t, a]) => ({
+    creditor: t.creditor,
+    accountLast4: t.accountLast4,
+    reportBalance: t.balance,
+    accountId: a.id,
+    accountName: a.name,
+    liveBalance: a.balance,
+    drift: t.balance != null && a.balance != null ? round2(a.balance - t.balance) : null
+  }))
+  matched.sort((x, y) => Math.abs(y.drift ?? 0) - Math.abs(x.drift ?? 0))
+
+  const unmatchedTradelines = open
+    .filter((t) => !pair.has(t))
+    .map((t) => ({
+      creditor: t.creditor,
+      accountLast4: t.accountLast4,
+      accountType: t.accountType,
+      balance: t.balance
+    }))
+    .sort((x, y) => (y.balance ?? 0) - (x.balance ?? 0))
+
+  const unmatchedAccounts = debts
+    .filter((a) => !matchedAccountIds.has(a.id))
+    .map((a) => ({ accountId: a.id, name: a.name, balance: a.balance }))
+    .sort((x, y) => (y.balance ?? 0) - (x.balance ?? 0))
+
+  return { matched, unmatchedTradelines, unmatchedAccounts }
 }
 
 /** Pure improvement-recommendation rules engine over a computed summary. */
@@ -469,6 +611,33 @@ export function getCreditSummary(sqlite: SqliteForCredit, today: string): Credit
       : null
   const score = scoreTrend.length ? scoreTrend[scoreTrend.length - 1].score : null
 
+  // Live debt accounts for the report↔accounts reconciliation. Degrades to
+  // empty when finance_accounts is absent (records-only DBs, older schemas).
+  let accounts: CreditAccountLike[] = []
+  try {
+    accounts = (
+      sqlite
+        .prepare('SELECT id, name, institution, mask, is_debt, balance FROM finance_accounts')
+        .all() as Array<{
+        id: number
+        name: string
+        institution: string | null
+        mask: string | null
+        is_debt: number
+        balance: number | null
+      }>
+    ).map((r) => ({
+      id: r.id,
+      name: r.name,
+      institution: r.institution ?? '',
+      mask: r.mask,
+      isDebt: r.is_debt === 1,
+      balance: r.balance
+    }))
+  } catch {
+    /* reconciliation is optional garnish — never break the summary */
+  }
+
   return summarizeCredit(tradelines, inquiries, {
     bureau,
     reportDate,
@@ -476,6 +645,7 @@ export function getCreditSummary(sqlite: SqliteForCredit, today: string): Credit
     scoreTrend,
     reportAvgAgeMonths,
     bureausAvailable,
-    todayMs
+    todayMs,
+    reconciliation: reconcileTradelines(tradelines, accounts)
   })
 }
