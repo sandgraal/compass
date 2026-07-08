@@ -1926,7 +1926,9 @@ function PropertyTab(): JSX.Element {
         showToast(res.error ?? 'Failed to save.', 'error')
         return
       }
-      await refresh()
+      // Re-fetch only the P&L numbers — a full refresh() would re-hydrate the
+      // depreciation form fields from persisted config and wipe unsaved edits.
+      setPnl(await window.api.finance.getPropertyPnl())
     } catch (err) {
       console.error('[property] utility-include save failed', err)
       showToast('Failed to save.', 'error')
@@ -2030,9 +2032,10 @@ function PropertyTab(): JSX.Element {
 
       <div className="bg-card border border-border rounded-xl p-5">
         <h3 className="text-sm font-semibold mb-1">Utility bills (Arcadia)</h3>
-        <p className="text-xs text-amber-700 dark:text-amber-400 mb-3">
-          Caution: synced bills aren't property-scoped — they may be your personal home utilities,
-          so they only enter Schedule E when you opt in below.
+        <p className="text-xs text-muted-foreground border border-border bg-secondary/40 rounded-lg px-3 py-2 mb-3">
+          <span className="font-medium text-foreground">Caution:</span> synced bills aren't
+          property-scoped — they may be your personal home utilities, so they only enter Schedule E
+          when you opt in below.
         </p>
         {pnl.utilityBills.count === 0 ? (
           <p className="text-xs text-muted-foreground mb-3">
