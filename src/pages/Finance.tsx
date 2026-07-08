@@ -1379,7 +1379,15 @@ function NetWorthTab(): JSX.Element {
 
       {/* 4-tile summary */}
       <div className="grid grid-cols-4 gap-4">
-        <NetWorthTile label="Assets" value={fmtBase(snapshot.assets)} />
+        <NetWorthTile
+          label="Assets"
+          value={fmtBase(snapshot.assets)}
+          sub={
+            snapshot.holdings.marketValue != null && snapshot.holdings.marketValue > 0
+              ? `incl. holdings ${fmtBase(snapshot.holdings.marketValue)}`
+              : undefined
+          }
+        />
         <NetWorthTile label="Liabilities" value={fmtBase(snapshot.liabilities)} />
         <NetWorthTile label="Net worth" value={fmtBase(snapshot.net)} emphasize />
         <NetWorthTile

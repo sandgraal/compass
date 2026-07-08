@@ -1491,6 +1491,9 @@ declare global {
             currency: string
             balance: number
           }>
+          // Brokerage/investment holdings rolled into `assets` (non-null
+          // marketValue = already included; null = none or excluded).
+          holdings: { marketValue: number | null; asOf: string | null; positions: number }
           deltas: { d30: number | null; d90: number | null; d365: number | null }
         }>
         getNetWorthTrajectory(opts?: { sinceDays?: number; untilMs?: number }): Promise<

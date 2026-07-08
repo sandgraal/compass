@@ -27,7 +27,8 @@ function makeDb(): Database.Database {
       balance REAL DEFAULT 0,
       currency TEXT NOT NULL DEFAULT 'USD',
       asset_class TEXT NOT NULL DEFAULT 'spending',
-      simplefin_account_id TEXT
+      simplefin_account_id TEXT,
+      plaid_account_id TEXT
     , is_foreign INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE finance_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,6 +61,18 @@ function makeDb(): Database.Database {
       fetched_at INTEGER
     );
     CREATE UNIQUE INDEX uq_fx_rates_date_base_quote ON fx_rates (date, base, quote);
+    CREATE TABLE records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL,
+      type TEXT NOT NULL,
+      occurred_at INTEGER,
+      title TEXT NOT NULL,
+      body TEXT,
+      payload TEXT,
+      dedup_hash TEXT NOT NULL UNIQUE,
+      provenance TEXT,
+      ingested_at INTEGER
+    );
   `)
   return sqlite
 }
@@ -774,6 +787,149 @@ describe('getNetWorthSnapshot — multi-currency (Phase 11.1)', () => {
     expect(snap.baseCurrency).toBe('EUR')
     expect(snap.byAccount[0].baseBalance).toBe(900)
     expect(snap.assets).toBe(900)
+  })
+})
+
+describe('getNetWorthSnapshot — brokerage holdings (Phase 10.2)', () => {
+  /** Insert one `holding` record row, mirroring `importHoldings`' shape. */
+  function addHoldingRecord(
+    asOf: string,
+    symbol: string,
+    marketValue: number,
+    source = 'brokerage-holdings'
+  ): void {
+    const occurredAt = new Date(`${asOf}T00:00:00`).getTime()
+    sqlite
+      .prepare(
+        "INSERT INTO records (source, type, occurred_at, title, payload, dedup_hash) VALUES (?, 'holding', ?, ?, ?, ?)"
+      )
+      .run(
+        source,
+        occurredAt,
+        symbol,
+        JSON.stringify({ symbol, marketValue, asOf }),
+        `${source}|${asOf}|${symbol}`
+      )
+  }
+
+  it('includes the latest holdings market value in assets and net', () => {
+    sqlite.prepare("INSERT INTO finance_accounts (id, name) VALUES (1, 'Chase')").run()
+    const now = Date.now()
+    setAccountBalance(sqlite, 1, 5000, now)
+    const today = localDateString(now)
+    addHoldingRecord(today, 'AAPL', 19000)
+    addHoldingRecord(today, 'VTI', 13000)
+
+    const snap = getNetWorthSnapshot(sqlite, now)
+    expect(snap.holdings).toEqual({ marketValue: 32000, asOf: today, positions: 2 })
+    expect(snap.assets).toBe(37000)
+    expect(snap.net).toBe(37000)
+  })
+
+  it('leaves totals byte-identical when there are zero holdings records', () => {
+    sqlite.prepare("INSERT INTO finance_accounts (id, name, is_debt) VALUES (1, 'Chase', 0)").run()
+    const now = Date.now()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (1, ?, 1000, 'manual')"
+      )
+      .run(now - 31 * DAY_MS)
+    sqlite
+      .prepare(
+        "INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (1, ?, 1500, 'manual')"
+      )
+      .run(now)
+
+    // Same fixture as the pre-holdings 30-day-delta test above: every total
+    // and delta must come out exactly the same with the (empty) records table
+    // present, and the holdings field must read as "none".
+    const snap = getNetWorthSnapshot(sqlite, now)
+    expect(snap.assets).toBe(1500)
+    expect(snap.liabilities).toBe(0)
+    expect(snap.net).toBe(1500)
+    expect(snap.deltas).toEqual({ d30: 500, d90: null, d365: null })
+    expect(snap.holdings).toEqual({ marketValue: null, asOf: null, positions: 0 })
+  })
+
+  it('computes deltas from the holdings snapshot at the cutoff when one exists', () => {
+    sqlite.prepare("INSERT INTO finance_accounts (id, name, is_debt) VALUES (1, 'Chase', 0)").run()
+    const now = Date.now()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (1, ?, 1000, 'manual')"
+      )
+      .run(now - 31 * DAY_MS)
+    sqlite
+      .prepare(
+        "INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (1, ?, 1500, 'manual')"
+      )
+      .run(now)
+    // Holdings snapshot 31 days ago at $10,000; today at $12,000.
+    addHoldingRecord(localDateString(now - 31 * DAY_MS), 'AAPL', 10000)
+    addHoldingRecord(localDateString(now), 'AAPL', 12000)
+
+    const snap = getNetWorthSnapshot(sqlite, now)
+    expect(snap.net).toBe(13500) // 1500 accounts + 12000 holdings
+    // Δ30 = (1500 + 12000) − (1000 + 10000): accounts +500, holdings +2000.
+    expect(snap.deltas.d30).toBe(2500)
+    // No holdings snapshot AND no account snapshot at the 365-day cutoff.
+    expect(snap.deltas.d365).toBeNull()
+  })
+
+  it('excludes holdings from BOTH delta sides when no snapshot exists at the cutoff', () => {
+    sqlite.prepare("INSERT INTO finance_accounts (id, name, is_debt) VALUES (1, 'Chase', 0)").run()
+    const now = Date.now()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (1, ?, 1000, 'manual')"
+      )
+      .run(now - 31 * DAY_MS)
+    sqlite
+      .prepare(
+        "INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (1, ?, 1500, 'manual')"
+      )
+      .run(now)
+    // First-ever holdings import happened today — no snapshot 30 days ago.
+    addHoldingRecord(localDateString(now), 'AAPL', 12000)
+
+    const snap = getNetWorthSnapshot(sqlite, now)
+    expect(snap.net).toBe(13500) // current total still includes holdings
+    // Δ30 must NOT register the portfolio as a fake +12,000 jump — holdings
+    // drop out of both sides, leaving account movement only.
+    expect(snap.deltas.d30).toBe(500)
+  })
+
+  it('excludes current account balances from delta when a past holdings snapshot exists but no account snapshots do', () => {
+    sqlite.prepare("INSERT INTO finance_accounts (id, name, is_debt) VALUES (1, 'Chase', 0)").run()
+    const now = Date.now()
+    // Current account balance: $5,000 — but NO historical snapshots at/before the cutoff.
+    setAccountBalance(sqlite, 1, 5000, now)
+    // Holdings snapshot 31 days ago at $10,000; today at $12,000.
+    addHoldingRecord(localDateString(now - 31 * DAY_MS), 'AAPL', 10000)
+    addHoldingRecord(localDateString(now), 'AAPL', 12000)
+
+    const snap = getNetWorthSnapshot(sqlite, now)
+    expect(snap.net).toBe(17000) // 5000 accounts + 12000 holdings
+    // Δ30 must reflect only holdings movement (12000 − 10000 = 2000).
+    // The current account balance must NOT inflate it as a fake gain.
+    expect(snap.deltas.d30).toBe(2000)
+  })
+
+  it('skips holdings entirely when a live-linked investment account exists (double-count guard)', () => {
+    sqlite
+      .prepare(
+        "INSERT INTO finance_accounts (id, name, type, simplefin_account_id) VALUES (1, 'Fidelity (live)', 'investment', 'sf-123')"
+      )
+      .run()
+    const now = Date.now()
+    setAccountBalance(sqlite, 1, 20000, now)
+    addHoldingRecord(localDateString(now), 'AAPL', 19000)
+
+    const snap = getNetWorthSnapshot(sqlite, now)
+    // The live account balance already covers the positions — only it counts.
+    expect(snap.assets).toBe(20000)
+    expect(snap.net).toBe(20000)
+    expect(snap.holdings).toEqual({ marketValue: null, asOf: null, positions: 0 })
   })
 })
 
