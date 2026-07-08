@@ -1,11 +1,15 @@
 import Database from 'better-sqlite3'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  SNAPSHOT_REPAIR_KEY,
   captureSnapshots,
   getNetWorthSnapshot,
   getNetWorthTrajectory,
+  hasLiveBalanceAuthority,
   inferBalance,
   localDateString,
+  rebuildLiveSnapshotHistory,
+  runSnapshotRepairIfNeeded,
   setAccountBalance,
   startOfDayMs
 } from './finance-snapshot'
@@ -22,7 +26,8 @@ function makeDb(): Database.Database {
       is_debt INTEGER DEFAULT 0,
       balance REAL DEFAULT 0,
       currency TEXT NOT NULL DEFAULT 'USD',
-      asset_class TEXT NOT NULL DEFAULT 'spending'
+      asset_class TEXT NOT NULL DEFAULT 'spending',
+      simplefin_account_id TEXT
     , is_foreign INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE finance_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -193,6 +198,39 @@ describe('inferBalance', () => {
       .run()
     expect(inferBalance(sqlite, 1, new Date('2026-05-01').getTime())).toBe(800)
   })
+
+  it('clamps a debt at 0 when payments exceed the known ledger (partial-history case)', () => {
+    // The production Loan failure mode: no baseline snapshot, only payments
+    // in the (partial) ledger — inference must not claim the bank owes you.
+    sqlite
+      .prepare(
+        "INSERT INTO finance_accounts (id, name, is_debt, asset_class) VALUES (1, 'Loan', 1, 'liability')"
+      )
+      .run()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_transactions (account_id, date, amount) VALUES (1, '2026-04-10', 1594.74)"
+      )
+      .run()
+    expect(inferBalance(sqlite, 1, new Date('2026-05-01').getTime())).toBe(0)
+  })
+
+  it('does not clamp asset accounts (overdrafts stay negative)', () => {
+    sqlite.prepare("INSERT INTO finance_accounts (id, name) VALUES (1, 'Chase')").run()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_transactions (account_id, date, amount) VALUES (1, '2026-04-10', -75)"
+      )
+      .run()
+    expect(inferBalance(sqlite, 1, new Date('2026-05-01').getTime())).toBe(-75)
+  })
+})
+
+describe('hasLiveBalanceAuthority', () => {
+  it('is true only for SimpleFIN-linked accounts', () => {
+    expect(hasLiveBalanceAuthority({ simplefin_account_id: 'sf-1' })).toBe(true)
+    expect(hasLiveBalanceAuthority({ simplefin_account_id: null })).toBe(false)
+  })
 })
 
 describe('captureSnapshots', () => {
@@ -286,6 +324,285 @@ describe('captureSnapshots', () => {
       )
       .get() as { balance: number }
     expect(latest.balance).toBe(1050)
+  })
+})
+
+describe('captureSnapshots — live-authority accounts', () => {
+  const seedLiveAccount = (balance: number, isDebt = 0): void => {
+    sqlite
+      .prepare(
+        "INSERT INTO finance_accounts (id, name, is_debt, asset_class, balance, simplefin_account_id) VALUES (1, 'Chris Savings', ?, ?, ?, 'sf-1')"
+      )
+      .run(isDebt, isDebt ? 'liability' : 'savings', balance)
+  }
+
+  it('snapshots the synced live balance, not the txn inference', () => {
+    seedLiveAccount(3058.85)
+    // Contradicting ledger — inference would say 500, live says 3058.85.
+    sqlite
+      .prepare(
+        "INSERT INTO finance_transactions (account_id, date, amount) VALUES (1, '2026-05-01', 500)"
+      )
+      .run()
+    const result = captureSnapshots(sqlite, new Date('2026-05-11T08:00:00').getTime())
+    expect(result).toEqual({ written: 1, updated: 0, skipped: 0 })
+    const row = sqlite.prepare('SELECT balance, source FROM finance_balance_snapshots').get() as {
+      balance: number
+      source: string
+    }
+    expect(row.balance).toBe(3058.85)
+    expect(row.source).toBe('live')
+  })
+
+  it("updates today's row in place when a later sync moves the balance", () => {
+    seedLiveAccount(100)
+    const morning = new Date('2026-05-11T00:05:00').getTime()
+    const afternoon = new Date('2026-05-11T14:00:00').getTime()
+    expect(captureSnapshots(sqlite, morning).written).toBe(1)
+
+    sqlite.prepare('UPDATE finance_accounts SET balance = 250 WHERE id = 1').run()
+    const second = captureSnapshots(sqlite, afternoon)
+    expect(second).toEqual({ written: 0, updated: 1, skipped: 0 })
+
+    const rows = sqlite
+      .prepare('SELECT balance, source, captured_at FROM finance_balance_snapshots')
+      .all() as Array<{ balance: number; source: string; captured_at: number }>
+    expect(rows).toHaveLength(1) // still one row per day
+    expect(rows[0].balance).toBe(250)
+    expect(rows[0].source).toBe('live')
+    expect(rows[0].captured_at).toBe(afternoon)
+  })
+
+  it('skips (no row churn) when the live balance is unchanged same-day', () => {
+    seedLiveAccount(100)
+    captureSnapshots(sqlite, new Date('2026-05-11T00:05:00').getTime())
+    const second = captureSnapshots(sqlite, new Date('2026-05-11T14:00:00').getTime())
+    expect(second).toEqual({ written: 0, updated: 0, skipped: 1 })
+    expect(
+      (sqlite.prepare('SELECT COUNT(*) AS n FROM finance_balance_snapshots').get() as { n: number })
+        .n
+    ).toBe(1)
+  })
+
+  it('a same-day manual override wins over the live capture', () => {
+    seedLiveAccount(100)
+    const noon = new Date('2026-05-11T12:00:00').getTime()
+    setAccountBalance(sqlite, 1, 999, noon)
+    // setAccountBalance also wrote 999 into finance_accounts.balance; simulate
+    // a sync bringing back a different provider value the same day.
+    sqlite.prepare('UPDATE finance_accounts SET balance = 100 WHERE id = 1').run()
+    const result = captureSnapshots(sqlite, new Date('2026-05-11T14:00:00').getTime())
+    expect(result).toEqual({ written: 0, updated: 0, skipped: 1 })
+    const row = sqlite.prepare('SELECT balance, source FROM finance_balance_snapshots').get() as {
+      balance: number
+      source: string
+    }
+    expect(row.balance).toBe(999)
+    expect(row.source).toBe('manual')
+  })
+
+  it('writes a fresh live row on the next day', () => {
+    seedLiveAccount(100)
+    captureSnapshots(sqlite, new Date('2026-05-11T08:00:00').getTime())
+    sqlite.prepare('UPDATE finance_accounts SET balance = 120 WHERE id = 1').run()
+    const dayTwo = captureSnapshots(sqlite, new Date('2026-05-12T08:00:00').getTime())
+    expect(dayTwo.written).toBe(1)
+    expect(
+      (sqlite.prepare('SELECT COUNT(*) AS n FROM finance_balance_snapshots').get() as { n: number })
+        .n
+    ).toBe(2)
+  })
+
+  it("stores a debt's live balance as-is (positive amount owed)", () => {
+    seedLiveAccount(9807.24, 1)
+    // Payments-only ledger that used to drive inference negative.
+    sqlite
+      .prepare(
+        "INSERT INTO finance_transactions (account_id, date, amount) VALUES (1, '2026-05-01', 1594.74)"
+      )
+      .run()
+    captureSnapshots(sqlite, new Date('2026-05-11T08:00:00').getTime())
+    const row = sqlite.prepare('SELECT balance, source FROM finance_balance_snapshots').get() as {
+      balance: number
+      source: string
+    }
+    expect(row.balance).toBe(9807.24)
+    expect(row.source).toBe('live')
+  })
+})
+
+describe('rebuildLiveSnapshotHistory', () => {
+  it('deletes inferred garbage and reverse-walks daily history from the live balance', () => {
+    const now = new Date('2026-05-11T08:00:00').getTime()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_accounts (id, name, asset_class, balance, simplefin_account_id) VALUES (1, 'Chase', 'spending', 1000, 'sf-1')"
+      )
+      .run()
+    // Garbage inferred rows from the old capture path.
+    sqlite
+      .prepare(
+        "INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (1, ?, 42, 'inferred'), (1, ?, 43, 'inferred')"
+      )
+      .run(now - 3 * DAY_MS, now - 2 * DAY_MS)
+    // Ledger: +100 on 05-10, -50 on 05-09.
+    sqlite
+      .prepare(
+        "INSERT INTO finance_transactions (account_id, date, amount) VALUES (1, '2026-05-10', 100), (1, '2026-05-09', -50)"
+      )
+      .run()
+
+    const result = rebuildLiveSnapshotHistory(sqlite, now)
+    expect(result.accounts).toBe(1)
+    expect(result.deleted).toBe(2)
+    expect(result.written).toBe(2)
+
+    const rows = sqlite
+      .prepare(
+        'SELECT captured_at, balance, source FROM finance_balance_snapshots ORDER BY captured_at ASC'
+      )
+      .all() as Array<{ captured_at: number; balance: number; source: string }>
+    expect(rows).toHaveLength(2)
+    // End of 05-09 = 1000 (today) - 0 (05-11 txns) - 100 (05-10) = 900.
+    expect(localDateString(rows[0].captured_at)).toBe('2026-05-09')
+    expect(rows[0].balance).toBe(900)
+    // End of 05-10 = 1000 - 0 = 1000.
+    expect(localDateString(rows[1].captured_at)).toBe('2026-05-10')
+    expect(rows[1].balance).toBe(1000)
+    expect(rows.every((r) => r.source === 'inferred')).toBe(true)
+  })
+
+  it('inverts the walk for debts and stops when history becomes unreconstructable', () => {
+    const now = new Date('2026-05-11T08:00:00').getTime()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_accounts (id, name, is_debt, asset_class, balance, simplefin_account_id) VALUES (1, 'Loan', 1, 'liability', 500, 'sf-2')"
+      )
+      .run()
+    // A charge (-800) on 05-10 means owed was 500-800 < 0 before it — walk must
+    // stop rather than write negative owed. 05-09 txn defines the window.
+    sqlite
+      .prepare(
+        "INSERT INTO finance_transactions (account_id, date, amount) VALUES (1, '2026-05-10', -800), (1, '2026-05-09', 100)"
+      )
+      .run()
+
+    const result = rebuildLiveSnapshotHistory(sqlite, now)
+    expect(result.written).toBe(1)
+    const rows = sqlite
+      .prepare('SELECT captured_at, balance FROM finance_balance_snapshots')
+      .all() as Array<{ captured_at: number; balance: number }>
+    expect(rows).toHaveLength(1)
+    expect(localDateString(rows[0].captured_at)).toBe('2026-05-10')
+    expect(rows[0].balance).toBe(500) // end of 05-10 owed = today's owed
+  })
+
+  it('preserves manual rows and never overwrites their day', () => {
+    const now = new Date('2026-05-11T08:00:00').getTime()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_accounts (id, name, asset_class, balance, simplefin_account_id) VALUES (1, 'Chase', 'spending', 1000, 'sf-1')"
+      )
+      .run()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_transactions (account_id, date, amount) VALUES (1, '2026-05-10', 100), (1, '2026-05-09', -50)"
+      )
+      .run()
+    // User-set manual row on 05-10.
+    const manualTs = new Date('2026-05-10T09:00:00').getTime()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (1, ?, 990, 'manual')"
+      )
+      .run(manualTs)
+
+    rebuildLiveSnapshotHistory(sqlite, now)
+    const rows = sqlite
+      .prepare(
+        'SELECT captured_at, balance, source FROM finance_balance_snapshots ORDER BY captured_at ASC'
+      )
+      .all() as Array<{ captured_at: number; balance: number; source: string }>
+    // 05-09 inferred + 05-10 manual (untouched, not duplicated).
+    expect(rows).toHaveLength(2)
+    expect(rows.filter((r) => r.source === 'manual')).toHaveLength(1)
+    expect(rows.find((r) => r.source === 'manual')?.balance).toBe(990)
+    expect(localDateString(rows[0].captured_at)).toBe('2026-05-09')
+    expect(rows[0].balance).toBe(900)
+  })
+
+  it('leaves unlinked and manual_asset accounts untouched', () => {
+    const now = new Date('2026-05-11T08:00:00').getTime()
+    sqlite
+      .prepare("INSERT INTO finance_accounts (id, name, balance) VALUES (1, 'CSV import', 700)")
+      .run()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_accounts (id, name, asset_class, balance, simplefin_account_id) VALUES (2, 'CR Property', 'manual_asset', 250000, 'sf-9')"
+      )
+      .run()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (1, ?, 650, 'inferred')"
+      )
+      .run(now - 2 * DAY_MS)
+
+    const result = rebuildLiveSnapshotHistory(sqlite, now)
+    expect(result.accounts).toBe(0)
+    expect(result.deleted).toBe(0)
+    const kept = sqlite.prepare('SELECT COUNT(*) AS n FROM finance_balance_snapshots').get() as {
+      n: number
+    }
+    expect(kept.n).toBe(1) // the CSV account's inferred history is its best data
+  })
+})
+
+describe('runSnapshotRepairIfNeeded', () => {
+  it('rebuilds once, captures today, sets the gate, then no-ops forever', () => {
+    const now = new Date('2026-05-11T08:00:00').getTime()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_accounts (id, name, asset_class, balance, simplefin_account_id) VALUES (1, 'Chase', 'spending', 1000, 'sf-1')"
+      )
+      .run()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_transactions (account_id, date, amount) VALUES (1, '2026-05-10', 100)"
+      )
+      .run()
+    sqlite
+      .prepare(
+        "INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (1, ?, 42, 'inferred')"
+      )
+      .run(now - 2 * DAY_MS)
+
+    expect(runSnapshotRepairIfNeeded(sqlite, now)).toEqual({ ran: true })
+
+    const rows = sqlite
+      .prepare(
+        'SELECT captured_at, balance, source FROM finance_balance_snapshots ORDER BY captured_at ASC'
+      )
+      .all() as Array<{ captured_at: number; balance: number; source: string }>
+    // Rebuilt 05-10 (end-of-day 1000) + today's fresh 'live' row.
+    expect(rows).toHaveLength(2)
+    expect(rows[0].balance).toBe(1000)
+    expect(rows[0].source).toBe('inferred')
+    expect(localDateString(rows[1].captured_at)).toBe('2026-05-11')
+    expect(rows[1].balance).toBe(1000)
+    expect(rows[1].source).toBe('live')
+
+    const gate = sqlite
+      .prepare('SELECT value FROM app_settings WHERE key = ?')
+      .get(SNAPSHOT_REPAIR_KEY) as { value: string } | undefined
+    expect(gate).toBeDefined()
+
+    // Second run must be a no-op even if data changed.
+    sqlite.prepare('UPDATE finance_accounts SET balance = 5555 WHERE id = 1').run()
+    expect(runSnapshotRepairIfNeeded(sqlite, now)).toEqual({ ran: false })
+    expect(
+      (sqlite.prepare('SELECT COUNT(*) AS n FROM finance_balance_snapshots').get() as { n: number })
+        .n
+    ).toBe(2)
   })
 })
 
