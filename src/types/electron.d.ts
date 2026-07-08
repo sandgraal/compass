@@ -1505,7 +1505,7 @@ declare global {
             baseBalance: number | null
           }>
         >
-        captureSnapshot(): Promise<{ written: number; skipped: number }>
+        captureSnapshot(): Promise<{ written: number; updated: number; skipped: number }>
         setAccountBalance(
           accountId: number,
           balance: number

@@ -3,6 +3,7 @@ import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { backfillGeoFromNotes } from '../integrations/finance-geo'
+import { runSnapshotRepairIfNeeded } from '../integrations/finance-snapshot'
 import { backfillTaxTags } from '../integrations/finance-tax'
 import { DATA_DIR } from '../paths'
 import { reconcileMigrationState } from './reconcile'
@@ -50,6 +51,14 @@ export async function initDb(): Promise<void> {
   }
   // Always ensure new tables exist for existing DBs that pre-date migrations
   ensureNewTables(sqlite)
+  // One-shot 2026-07 repair: snapshots for SimpleFIN-linked accounts were
+  // inferred from bad baselines instead of the synced balance. Rebuild their
+  // history anchored at the live balance, then capture today ('live' rows).
+  try {
+    runSnapshotRepairIfNeeded(sqlite)
+  } catch {
+    /* non-fatal — retried next launch while the gate key is unset */
+  }
 }
 
 /**

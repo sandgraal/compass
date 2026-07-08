@@ -1144,9 +1144,10 @@ function NetWorthTab(): JSX.Element {
     setCapturing(true)
     try {
       const result = await window.api.finance.captureSnapshot()
+      const changed = result.written + result.updated
       showToast(
-        `Captured ${result.written} snapshot${result.written === 1 ? '' : 's'}.`,
-        result.written > 0 ? 'success' : 'info'
+        `Captured ${result.written}, updated ${result.updated} snapshot${changed === 1 ? '' : 's'}.`,
+        changed > 0 ? 'success' : 'info'
       )
       await refresh()
     } catch (err) {
@@ -1384,6 +1385,11 @@ function NetWorthTab(): JSX.Element {
         <NetWorthTile
           label="Δ 30d"
           value={snapshot.deltas.d30 == null ? '—' : fmtBaseSigned(snapshot.deltas.d30)}
+          hint={
+            snapshot.deltas.d30 == null
+              ? 'Needs a snapshot at least 30 days old — deltas unlock as history accrues.'
+              : undefined
+          }
           sub={
             snapshot.deltas.d90 == null
               ? undefined
@@ -1493,7 +1499,14 @@ function NetWorthTab(): JSX.Element {
               const editing = editingId === a.accountId
               return (
                 <tr key={a.accountId} className="border-t border-border">
-                  <td className="py-1.5">{a.name}</td>
+                  <td className="py-1.5">
+                    {a.name}
+                    {a.isDebt ? (
+                      <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-destructive/15 text-destructive">
+                        debt
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="text-muted-foreground">
                     {ASSET_CLASS_LABEL[a.assetClass] ?? a.assetClass}
                   </td>
@@ -1770,18 +1783,22 @@ function NetWorthTile({
   label,
   value,
   sub,
+  hint,
   emphasize
 }: {
   label: string
   value: string
   sub?: string
+  hint?: string
   emphasize?: boolean
 }): JSX.Element {
   return (
     <div
+      title={hint}
       className={cn(
         'bg-card border border-border rounded-xl p-4',
-        emphasize && 'border-primary/50'
+        emphasize && 'border-primary/50',
+        hint && 'cursor-help'
       )}
     >
       <div className="text-xs text-muted-foreground mb-1">{label}</div>
@@ -5115,7 +5132,7 @@ function AccountsTab({
                     <td className="py-2">
                       {a.name}
                       {a.isDebt ? (
-                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">
+                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-destructive/15 text-destructive">
                           debt
                         </span>
                       ) : null}
