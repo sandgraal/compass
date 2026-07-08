@@ -1502,7 +1502,7 @@ function NetWorthTab(): JSX.Element {
                   <td className="py-1.5">
                     {a.name}
                     {a.isDebt ? (
-                      <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">
+                      <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-destructive/15 text-destructive">
                         debt
                       </span>
                     ) : null}
@@ -5132,7 +5132,7 @@ function AccountsTab({
                     <td className="py-2">
                       {a.name}
                       {a.isDebt ? (
-                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">
+                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-destructive/15 text-destructive">
                           debt
                         </span>
                       ) : null}

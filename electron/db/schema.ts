@@ -231,7 +231,7 @@ export const financeBalanceSnapshots = sqliteTable('finance_balance_snapshots', 
     .references(() => financeAccounts.id),
   capturedAt: integer('captured_at', { mode: 'timestamp_ms' }).notNull(),
   balance: real('balance').notNull(),
-  source: text('source').notNull() // 'manual' | 'inferred' | 'plaid'
+  source: text('source').notNull() // 'manual' | 'inferred' | 'live' — see SnapshotSource in finance-snapshot.ts
 })
 
 // ---- FX-rate snapshots (Phase 11.1 — multi-currency foundation) ----
