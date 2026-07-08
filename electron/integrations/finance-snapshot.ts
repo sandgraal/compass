@@ -439,8 +439,9 @@ function deltaSince(
       assets += past.marketValue
       foundAny = true
       // No account balance snapshot existed at the cutoff, so current account
-      // balances have no past counterpart.  Exclude them from effectiveNet so
-      // the delta reflects only holdings movement and doesn't inflate.
+      // balances have no past counterpart. Exclude them from effectiveNet so
+      // the delta reflects only holdings movement and doesn't inflate by
+      // treating current account balances as a fake gain.
       if (!foundAnyAccount) {
         effectiveNet = currentHoldings
       }
