@@ -383,6 +383,21 @@ describe('reconcileTradelines', () => {
     expect(r.matched[0].accountId).toBe(3)
   })
 
+  it('ignores non-4-digit or mid-name parentheticals — no false last-4 pairing', () => {
+    const r = reconcileTradelines(
+      [
+        tl({ creditor: 'ZZZ LENDER', accountLast4: '12', balance: 100 }),
+        tl({ creditor: 'CARD CO', accountLast4: '3456', balance: 50 })
+      ],
+      [
+        acct({ id: 1, name: 'Loan (12) restructured', balance: 500 }),
+        acct({ id: 2, name: 'Card (3456) legacy note', balance: 200 }) // (3456) not at end
+      ]
+    )
+    expect(r.matched).toEqual([])
+    expect(r.unmatchedTradelines).toHaveLength(2)
+  })
+
   it('pairs by name when exactly one unmatched account matches', () => {
     const r = reconcileTradelines(
       [tl({ creditor: 'HILTON HONORS SURPASS', accountLast4: null, balance: 300 })],
