@@ -216,10 +216,14 @@ export type SqliteForHoldings = {
   prepare(sql: string): { all(...params: unknown[]): unknown[] }
 }
 
-/** Read one source's most-recent snapshot rows. Empty on any error/none. */
+/**
+ * Read one source's most-recent snapshot rows at/before `asOfMs` (defaults to
+ * "ever", i.e. the current latest snapshot). Empty on any error/none.
+ */
 function latestSnapshotRows(
   sqlite: SqliteForHoldings,
-  source: string
+  source: string,
+  asOfMs: number = Number.MAX_SAFE_INTEGER
 ): Array<{ occurred_at: number | null; payload: string | null }> {
   try {
     // Scope to the latest snapshot only — don't pull every historical snapshot
@@ -227,9 +231,10 @@ function latestSnapshotRows(
     return sqlite
       .prepare(
         `SELECT occurred_at, payload FROM records
-           WHERE source = ? AND occurred_at = (SELECT MAX(occurred_at) FROM records WHERE source = ?)`
+           WHERE source = ?
+             AND occurred_at = (SELECT MAX(occurred_at) FROM records WHERE source = ? AND occurred_at <= ?)`
       )
-      .all(source, source) as Array<{ occurred_at: number | null; payload: string | null }>
+      .all(source, source, asOfMs) as Array<{ occurred_at: number | null; payload: string | null }>
   } catch {
     // `records` may not exist on a very old DB — degrade to empty.
     return []
@@ -274,4 +279,43 @@ export function getLatestHoldings(
     }
   }
   return { asOf, holdings, summary: summarizeHoldings(holdings) }
+}
+
+/**
+ * Lean rollup for the net-worth snapshot: total market value of the most
+ * recent holdings snapshot at/before `asOfMs`, summed across `sources` (each
+ * source contributes its own latest snapshot at or before the cutoff, same
+ * per-source rule as `getLatestHoldings`). Returns null when NO source has a
+ * snapshot by then — the caller uses that to tell "no holdings data at this
+ * point in time" apart from "holdings worth $0".
+ *
+ * Values are the plain numbers stored in the snapshot payloads (see
+ * `ParsedHolding` — no currency is captured), so the caller treats them as
+ * base-currency amounts.
+ */
+export function getHoldingsValueAsOf(
+  sqlite: SqliteForHoldings,
+  sources: string[],
+  asOfMs: number = Number.MAX_SAFE_INTEGER
+): { marketValue: number; asOf: string | null; positions: number } | null {
+  let marketValue = 0
+  let positions = 0
+  let asOf: string | null = null
+  let found = false
+  for (const source of sources) {
+    for (const r of latestSnapshotRows(sqlite, source, asOfMs)) {
+      if (!r.payload) continue
+      try {
+        const p = JSON.parse(r.payload) as { marketValue?: number | null; asOf?: string }
+        found = true
+        positions++
+        if (typeof p.marketValue === 'number') marketValue += p.marketValue
+        if (p.asOf && (asOf == null || p.asOf > asOf)) asOf = p.asOf
+      } catch {
+        // skip a corrupt payload
+      }
+    }
+  }
+  if (!found) return null
+  return { marketValue: round2(marketValue), asOf, positions }
 }
