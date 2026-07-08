@@ -611,9 +611,9 @@ export function getCreditSummary(sqlite: SqliteForCredit, today: string): Credit
       : null
   const score = scoreTrend.length ? scoreTrend[scoreTrend.length - 1].score : null
 
-  // Live debt accounts for the report↔accounts reconciliation. Degrades to
-  // empty when finance_accounts is absent (records-only DBs, older schemas).
-  let accounts: CreditAccountLike[] = []
+  // Live debt accounts for the report↔accounts reconciliation. If finance_accounts
+  // is absent (records-only DBs, older schemas), we fall back to "no accounts",
+  // which makes OPEN tradelines surface as "untracked" in the reconciliation UI.
   try {
     accounts = (
       sqlite
