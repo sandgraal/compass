@@ -312,7 +312,11 @@ const normName = (s: string): string =>
     .replace(/\s+/g, ' ')
     .trim()
 
-/** An account's last-4: the `mask` column, else `(1234)` parsed from its name. */
+/**
+ * An account's last-4: the `mask` column, else a `(1234)` suffix at the END of
+ * its name. Exactly 4 digits, anchored — a stray "(12)" mid-name must not
+ * create a false pairing.
+ */
 function accountLast4(a: CreditAccountLike): string | null {
   if (a.mask?.trim()) return a.mask.trim()
   const m = a.name.match(/\((\d{4})\)\s*$/)
