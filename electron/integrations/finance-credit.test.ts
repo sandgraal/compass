@@ -285,7 +285,7 @@ describe('getCreditSummary', () => {
     expect(getCreditSummary(makeDb(), '2026-07-03').hasData).toBe(false)
   })
 
-  it('degrades to an empty reconciliation when finance_accounts is absent', () => {
+  it('surfaces open tradelines as untracked when finance_accounts is absent', () => {
     const sqlite = makeDb() // records only — no finance_accounts table
     insert(sqlite, 'credit-tradeline', Date.parse('2015-01-01'), {
       creditor: 'A',
