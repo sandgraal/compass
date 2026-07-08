@@ -412,6 +412,7 @@ function deltaSince(
   let assets = 0
   let liabilities = 0
   let foundAny = false
+  let foundAnyAccount = false
 
   for (const a of accounts) {
     const past = sqlite
@@ -423,6 +424,7 @@ function deltaSince(
     const baseBalance = toBase(past.balance, a.currency)
     if (baseBalance == null) continue
     foundAny = true
+    foundAnyAccount = true
     if (a.is_debt === 1) liabilities += baseBalance
     else assets += baseBalance
   }
@@ -436,6 +438,12 @@ function deltaSince(
     if (past != null) {
       assets += past.marketValue
       foundAny = true
+      // No account balance snapshot existed at the cutoff, so current account
+      // balances have no past counterpart.  Exclude them from effectiveNet so
+      // the delta reflects only holdings movement and doesn't inflate.
+      if (!foundAnyAccount) {
+        effectiveNet = currentHoldings
+      }
     } else {
       effectiveNet -= currentHoldings
     }

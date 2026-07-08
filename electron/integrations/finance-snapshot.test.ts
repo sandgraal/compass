@@ -583,6 +583,22 @@ describe('getNetWorthSnapshot — brokerage holdings (Phase 10.2)', () => {
     expect(snap.deltas.d30).toBe(500)
   })
 
+  it('excludes current account balances from delta when a past holdings snapshot exists but no account snapshots do', () => {
+    sqlite.prepare("INSERT INTO finance_accounts (id, name, is_debt) VALUES (1, 'Chase', 0)").run()
+    const now = Date.now()
+    // Current account balance: $5,000 — but NO historical snapshots at/before the cutoff.
+    setAccountBalance(sqlite, 1, 5000, now)
+    // Holdings snapshot 31 days ago at $10,000; today at $12,000.
+    addHoldingRecord(localDateString(now - 31 * DAY_MS), 'AAPL', 10000)
+    addHoldingRecord(localDateString(now), 'AAPL', 12000)
+
+    const snap = getNetWorthSnapshot(sqlite, now)
+    expect(snap.net).toBe(17000) // 5000 accounts + 12000 holdings
+    // Δ30 must reflect only holdings movement (12000 − 10000 = 2000).
+    // The current account balance must NOT inflate it as a fake gain.
+    expect(snap.deltas.d30).toBe(2000)
+  })
+
   it('skips holdings entirely when a live-linked investment account exists (double-count guard)', () => {
     sqlite
       .prepare(
