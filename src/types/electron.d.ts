@@ -1508,7 +1508,7 @@ declare global {
             baseBalance: number | null
           }>
         >
-        captureSnapshot(): Promise<{ written: number; skipped: number }>
+        captureSnapshot(): Promise<{ written: number; updated: number; skipped: number }>
         setAccountBalance(
           accountId: number,
           balance: number
@@ -1627,6 +1627,28 @@ declare global {
             title: string
             detail: string
           }>
+          reconciliation: {
+            matched: Array<{
+              creditor: string
+              accountLast4: string | null
+              reportBalance: number | null
+              accountId: number
+              accountName: string
+              liveBalance: number | null
+              drift: number | null
+            }>
+            unmatchedTradelines: Array<{
+              creditor: string
+              accountLast4: string | null
+              accountType: string | null
+              balance: number | null
+            }>
+            unmatchedAccounts: Array<{
+              accountId: number
+              name: string
+              balance: number | null
+            }>
+          }
         }>
         addCreditScore(input: {
           score: number

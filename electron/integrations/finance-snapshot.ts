@@ -1,14 +1,22 @@
 /**
- * Net-worth balance snapshots (Phase 4.4).
+ * Net-worth balance snapshots (Phase 4.4; live-capture rework 2026-07).
  *
- * For accounts with a transaction stream we infer today's balance as
- *   `previous_snapshot.balance + Σ(txns where date > previous_snapshot.capturedAt)`
- * For `manual_asset` accounts (CR property, collectibles) the balance is only
- * updated when the user calls `setAccountBalance()` — they have no txns.
+ * Balance source per account, in order of authority:
+ *   1. 'live'     — accounts linked to a provider that refreshes
+ *                   `finance_accounts.balance` on every sync (SimpleFIN today;
+ *                   see hasLiveBalanceAuthority). The synced balance IS the
+ *                   truth, so the snapshot records it verbatim.
+ *   2. 'manual'   — `manual_asset` accounts (CR property, collectibles) carry
+ *                   the user-set balance forward; they have no txns.
+ *   3. 'inferred' — unlinked transaction-backed accounts (CSV/statement
+ *                   imports) fall back to
+ *                   `previous_snapshot.balance + Σ(txns since)`.
  *
- * The capture is idempotent within a calendar day: if a snapshot for an
- * account already exists for today, captureSnapshots() skips it. This makes
- * the cron safe to run from multiple entry points without dupes.
+ * The capture keeps one row per account per LOCAL calendar day. Live-authority
+ * accounts UPDATE today's row in place when the synced balance moves (so a
+ * later sync corrects the 00:05 cron row); a same-day 'manual' row always wins
+ * until tomorrow. Everything else skips when today's row exists, so the cron
+ * is safe to run from multiple entry points without dupes.
  *
  * Pure SQLite — accepts a thin interface so it can run in tests against
  * `better-sqlite3` directly without going through Drizzle.
@@ -17,7 +25,7 @@
 import { getBaseCurrency, loadFxRates, pickRate } from './finance-fx'
 import { NET_WORTH_HOLDINGS_SOURCES, getHoldingsValueAsOf } from './finance-holdings'
 
-export type SnapshotSource = 'manual' | 'inferred' | 'plaid'
+export type SnapshotSource = 'manual' | 'inferred' | 'live'
 
 export type SqliteForSnapshot = {
   prepare(sql: string): {
@@ -62,6 +70,21 @@ type AccountRow = {
   asset_class: string
   is_debt: number
   balance: number | null
+  simplefin_account_id: string | null
+}
+
+export type LiveLinkFields = {
+  simplefin_account_id: string | null
+}
+
+/**
+ * True when a provider sync refreshes `finance_accounts.balance` on every run,
+ * making the live column authoritative over transaction inference. SimpleFIN
+ * only today — the Plaid sync loop does not write balances (extend this to
+ * `plaid_account_id` once it does).
+ */
+export function hasLiveBalanceAuthority(a: LiveLinkFields): boolean {
+  return a.simplefin_account_id != null
 }
 
 type SnapshotRow = {
@@ -100,39 +123,46 @@ export function localDateString(ts: number): string {
 }
 
 /**
- * Capture today's snapshot for every account. Returns count of rows written.
- * Skips accounts that already have a snapshot for today (idempotent).
+ * Capture today's snapshot for every account. Returns counts of rows written,
+ * updated in place, and skipped. Keeps one row per account per local day.
  *
  * `now` is injected for testability.
  */
 export function captureSnapshots(
   sqlite: SqliteForSnapshot,
   now: number = Date.now()
-): { written: number; skipped: number } {
+): { written: number; updated: number; skipped: number } {
   const accounts = sqlite
-    .prepare('SELECT id, asset_class, is_debt, balance FROM finance_accounts')
+    .prepare('SELECT id, asset_class, is_debt, balance, simplefin_account_id FROM finance_accounts')
     .all() as AccountRow[]
 
   const today = startOfDayMs(now)
   const tomorrow = today + 24 * 60 * 60 * 1000
 
   let written = 0
+  let updated = 0
   let skipped = 0
 
-  const existsToday = sqlite.prepare(
-    'SELECT 1 FROM finance_balance_snapshots WHERE account_id = ? AND captured_at >= ? AND captured_at < ? LIMIT 1'
+  const latestToday = sqlite.prepare(
+    'SELECT id, balance, source FROM finance_balance_snapshots WHERE account_id = ? AND captured_at >= ? AND captured_at < ? ORDER BY captured_at DESC LIMIT 1'
   )
   const insert = sqlite.prepare(
     'INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (?, ?, ?, ?)'
   )
+  const update = sqlite.prepare(
+    'UPDATE finance_balance_snapshots SET balance = ?, captured_at = ?, source = ? WHERE id = ?'
+  )
 
   for (const acct of accounts) {
-    if (existsToday.get(acct.id, today, tomorrow)) {
-      skipped++
-      continue
-    }
+    const todayRow = latestToday.get(acct.id, today, tomorrow) as
+      | { id: number; balance: number; source: string }
+      | undefined
 
     if (acct.asset_class === 'manual_asset') {
+      if (todayRow) {
+        skipped++
+        continue
+      }
       // No transactions to infer from. The stored `balance` IS the current
       // value; only carry it forward if explicitly set (non-null, non-zero).
       // Zero is treated as "not set yet" — captures of zero would clutter
@@ -146,18 +176,49 @@ export function captureSnapshots(
       continue
     }
 
+    if (hasLiveBalanceAuthority(acct)) {
+      const live = round2(acct.balance ?? 0)
+      if (!todayRow) {
+        insert.run(acct.id, now, live, 'live')
+        written++
+        continue
+      }
+      if (todayRow.source === 'manual') {
+        // A same-day user override wins until tomorrow.
+        skipped++
+        continue
+      }
+      if (Math.abs(live - todayRow.balance) >= 0.005) {
+        // A later sync corrects the earlier same-day row (e.g. the 00:05
+        // cron's) in place — still one row per account per day.
+        update.run(live, now, 'live', todayRow.id)
+        updated++
+      } else {
+        skipped++
+      }
+      continue
+    }
+
+    if (todayRow) {
+      skipped++
+      continue
+    }
     const inferred = inferBalance(sqlite, acct.id, now)
     insert.run(acct.id, now, inferred, 'inferred')
     written++
   }
 
-  return { written, skipped }
+  return { written, updated, skipped }
 }
 
 /**
  * Infer the current balance of a transaction-backed account from its last
- * snapshot plus all txns since then. Falls back to summing every txn (with
- * `account.balance` as a baseline of 0) when there's no prior snapshot.
+ * snapshot plus all txns since then. Falls back to summing every txn (with a
+ * baseline of 0) when there's no prior snapshot.
+ *
+ * FALLBACK PATH ONLY: used for accounts with no live-balance authority
+ * (CSV/statement imports). Live-linked accounts snapshot the synced balance
+ * directly — inference over a partial ledger drifts and cannot self-correct.
  *
  * Sign convention: transaction `amount` follows the codebase rule of
  * `negative = expense / charge, positive = income / payment`. For ASSET
@@ -165,6 +226,8 @@ export function captureSnapshots(
  * inverts — a $50 charge (`amount = -50`) INCREASES the amount owed by 50,
  * and a $200 payment (`amount = +200`) DECREASES the amount owed by 200 —
  * because the stored snapshot.balance for a debt is the positive amount owed.
+ * A debt is clamped at 0: a partial ledger (payments recorded without the
+ * original charges) must never infer "the bank owes you".
  */
 export function inferBalance(sqlite: SqliteForSnapshot, accountId: number, asOfMs: number): number {
   const acct = sqlite
@@ -201,7 +264,8 @@ export function inferBalance(sqlite: SqliteForSnapshot, accountId: number, asOfM
   // For debt accounts the txn sign convention is opposite of the stored
   // balance: charges (-) raise what's owed, payments (+) reduce it.
   const delta = isDebt ? -sum : sum
-  return Math.round((baseline + delta) * 100) / 100
+  const value = Math.round((baseline + delta) * 100) / 100
+  return isDebt ? Math.max(0, value) : value
 }
 
 /**
@@ -223,6 +287,117 @@ export function setAccountBalance(
   // Keep the legacy `balance` column on finance_accounts in sync so other
   // views that haven't migrated to snapshots still see the latest value.
   sqlite.prepare('UPDATE finance_accounts SET balance = ? WHERE id = ?').run(balance, accountId)
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * One-shot repair: for every account with live-balance authority, delete its
+ * 'inferred' snapshots (which drifted from bad baselines — they were never
+ * anchored to a synced balance) and rebuild daily history by walking the txn
+ * ledger BACKWARDS from the live balance: end-of-day(d−1) = end-of-day(d) −
+ * that day's net change. 'manual' rows are never touched, and days that carry
+ * one are not overwritten.
+ *
+ * The window is clipped to the account's txn coverage and to 365 days. For a
+ * debt the walk stops at the first day it would go below 0 — earlier values
+ * are unreconstructable from a partial ledger.
+ */
+export function rebuildLiveSnapshotHistory(
+  sqlite: SqliteForSnapshot,
+  now: number = Date.now()
+): { accounts: number; deleted: number; written: number } {
+  const accounts = sqlite
+    .prepare(
+      "SELECT id, asset_class, is_debt, balance, simplefin_account_id FROM finance_accounts WHERE asset_class != 'manual_asset'"
+    )
+    .all() as AccountRow[]
+
+  const deleteInferred = sqlite.prepare(
+    "DELETE FROM finance_balance_snapshots WHERE account_id = ? AND source = 'inferred'"
+  )
+  const insert = sqlite.prepare(
+    'INSERT INTO finance_balance_snapshots (account_id, captured_at, balance, source) VALUES (?, ?, ?, ?)'
+  )
+
+  let touched = 0
+  let deleted = 0
+  let written = 0
+
+  for (const acct of accounts) {
+    if (!hasLiveBalanceAuthority(acct)) continue
+    touched++
+    deleted += deleteInferred.run(acct.id).changes
+
+    const sums = sqlite
+      .prepare(
+        'SELECT date, COALESCE(SUM(amount), 0) AS s FROM finance_transactions WHERE account_id = ? GROUP BY date'
+      )
+      .all(acct.id) as Array<{ date: string; s: number }>
+    if (sums.length === 0) continue
+    const sumByDay = new Map(sums.map((r) => [r.date, r.s]))
+    const earliest = sums.reduce((min, r) => (r.date < min ? r.date : min), sums[0].date)
+
+    const manualDays = new Set(
+      (
+        sqlite
+          .prepare(
+            "SELECT captured_at FROM finance_balance_snapshots WHERE account_id = ? AND source = 'manual'"
+          )
+          .all(acct.id) as Array<{ captured_at: number }>
+      ).map((r) => localDateString(r.captured_at))
+    )
+
+    const isDebt = acct.is_debt === 1
+    const floorDay = localDateString(startOfDayMs(now) - 365 * DAY_MS)
+    const startDay = earliest > floorDay ? earliest : floorDay
+
+    // Walk backwards from today's live balance. Rows are written at local noon
+    // so they sort inside their calendar-day bucket; today itself is left to
+    // captureSnapshots(), which writes the authoritative 'live' row.
+    let balance = round2(acct.balance ?? 0)
+    const cursor = new Date(startOfDayMs(now))
+    for (;;) {
+      const sum = sumByDay.get(localDateString(cursor.getTime())) ?? 0
+      balance = round2(balance - (isDebt ? -sum : sum))
+      cursor.setDate(cursor.getDate() - 1) // now at the previous day
+      const dayStr = localDateString(cursor.getTime())
+      if (dayStr < startDay) break
+      if (isDebt && balance < 0) break
+      if (!manualDays.has(dayStr)) {
+        insert.run(acct.id, cursor.getTime() + DAY_MS / 2, balance, 'inferred')
+        written++
+      }
+    }
+  }
+
+  return { accounts: touched, deleted, written }
+}
+
+export const SNAPSHOT_REPAIR_KEY = 'financeSnapshotRepairV1'
+
+/**
+ * App-launch wrapper for the one-shot repair: runs the history rebuild plus a
+ * fresh capture exactly once per install, gated on an app_settings key. The
+ * gate is written only AFTER success so a crash mid-repair retries next
+ * launch (the rebuild is delete-then-rewrite, so a retry is safe).
+ */
+export function runSnapshotRepairIfNeeded(
+  sqlite: SqliteForSnapshot,
+  now: number = Date.now()
+): { ran: boolean } {
+  const existing = sqlite
+    .prepare('SELECT value FROM app_settings WHERE key = ?')
+    .get(SNAPSHOT_REPAIR_KEY) as { value: string } | undefined
+  if (existing) return { ran: false }
+
+  rebuildLiveSnapshotHistory(sqlite, now)
+  captureSnapshots(sqlite, now)
+
+  sqlite
+    .prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)')
+    .run(SNAPSHOT_REPAIR_KEY, new Date(now).toISOString(), now)
+  return { ran: true }
 }
 
 export type NetWorthSnapshot = {
