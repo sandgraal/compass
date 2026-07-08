@@ -1,5 +1,13 @@
 # Net worth
 
+> **Update (2026-07, live-capture rework):** the inference-first capture below
+> shipped in Phase 4.4 but drifted badly for synced accounts (inference over a
+> partial ledger never self-corrects). Snapshots for SimpleFIN-linked accounts
+> now record the synced live balance verbatim (`source: 'live'`), with a
+> one-shot history rebuild for pre-rework installs. Inference remains only as
+> the fallback for unlinked CSV/statement accounts. See
+> [`docs/finance.md`](../finance.md) § Net-worth snapshots for current behavior.
+
 ## Goal
 
 True net-worth view: liabilities (already tracked) plus assets (currently
@@ -50,7 +58,7 @@ export const financeBalanceSnapshots = sqliteTable('finance_balance_snapshots', 
   accountId: integer('account_id').references(() => financeAccounts.id).notNull(),
   capturedAt: integer('captured_at', { mode: 'timestamp_ms' }).notNull(),
   balance: real('balance').notNull(),
-  source: text('source').notNull()  // 'manual' | 'inferred' | 'plaid'
+  source: text('source').notNull()  // 'manual' | 'inferred' | 'live' (2026-07)
 })
 ```
 

@@ -88,17 +88,33 @@ Add new business accounts to `SCHEDULE_C_ACCOUNT_HINTS` in `finance-tax.ts`.
 ## Net-worth snapshots (Phase 4.4)
 
 Per-(account, day) balance row in `finance_balance_snapshots`. Cron at 00:05
-local time captures one snapshot per non-`manual_asset` account, **idempotent
-within a calendar day**. `manual_asset` accounts (CR property, collectibles)
-only capture when the user sets a non-zero balance via
-`finance:set-account-balance`.
+local time captures one snapshot per account, **one row per local calendar
+day**. Balance source in order of authority (2026-07 live-capture rework):
 
-Inference math: `previous_snapshot.balance + Σ(txns since previous_snapshot
-date, up to today)`. **Sign convention for debts**: txn `amount` follows the
-codebase rule (negative = charge / expense), but stored debt balances are
-positive amounts owed — so `inferBalance` flips the txn-sum sign for
-`isDebt=true` accounts. A $50 charge raises owed by 50; a $200 payment
-reduces it by 200.
+1. **`live`** — accounts with live-balance authority (`simplefin_account_id`
+   set; see `hasLiveBalanceAuthority`) record the synced
+   `finance_accounts.balance` verbatim. A later same-day sync UPDATEs today's
+   row in place when the balance moved (a same-day `manual` row wins until
+   tomorrow), so the 00:05 cron row self-corrects on every sync.
+2. **`manual`** — `manual_asset` accounts (CR property, collectibles) only
+   capture when the user sets a non-zero balance via
+   `finance:set-account-balance`.
+3. **`inferred`** — unlinked transaction-backed accounts (CSV/statement
+   imports) fall back to inference: `previous_snapshot.balance + Σ(txns since
+   previous_snapshot date, up to today)`.
+
+**Sign convention for debts**: txn `amount` follows the codebase rule
+(negative = charge / expense), but stored debt balances are positive amounts
+owed — so `inferBalance` flips the txn-sum sign for `isDebt=true` accounts
+and clamps at 0 (a partial ledger must never infer negative owed). A $50
+charge raises owed by 50; a $200 payment reduces it by 200.
+
+One-shot repair (`runSnapshotRepairIfNeeded`, gated on the
+`financeSnapshotRepairV1` app_settings key, run from `initDb`): pre-rework
+installs had inferred snapshots for synced accounts that drifted from bad
+baselines. The repair deletes those accounts' `inferred` rows and rebuilds
+daily history by walking the txn ledger backwards from the live balance
+(`rebuildLiveSnapshotHistory`), never touching `manual` rows.
 
 `getNetWorthSnapshot()` returns assets / liabilities / net + 30/90/365-day
 deltas; `getNetWorthTrajectory({ sinceMs, untilMs })` returns every snapshot
