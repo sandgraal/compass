@@ -26,23 +26,52 @@ export function localYm(date: Date = new Date()): string {
 }
 
 /**
+ * The window Compass accepts as a real event time: [1970-01-01, now + 5 years].
+ * Export cells that aren't dates at all (IDs, quantities, truncated fragments)
+ * otherwise slip through `Date.parse` as years like 104 or 10801 and poison
+ * every year-over-year view ("on this day", histograms, the timeline span).
+ * The 5-year future allowance covers legitimate forward dates in exports
+ * (renewal dates, pre-orders, calendar events).
+ */
+const MAX_FUTURE_MS = 5 * 365.25 * 24 * 60 * 60 * 1000
+
+/** Largest epoch-ms value accepted as a record timestamp (now + 5 years). */
+export function maxPlausibleEpochMs(now: number = Date.now()): number {
+  return now + MAX_FUTURE_MS
+}
+
+/** Whether an epoch-ms value is a plausible record timestamp (see above). */
+export function isPlausibleEpochMs(ms: number, now: number = Date.now()): boolean {
+  return Number.isFinite(ms) && ms >= 0 && ms <= maxPlausibleEpochMs(now)
+}
+
+/**
  * Parse a free-text date/time string to epoch ms, or null. Accepts ISO 8601,
  * 'YYYY-MM-DD HH:mm' (local), 'YYYY/MM/DD', and the M/D/YY(YY) US format that
  * Netflix / Amazon / other exports use. Shared by the Drop Zone recognizers.
+ *
+ * Results outside [1970, now + 5y] return null (see `isPlausibleEpochMs`) —
+ * ambiguous cells must become UNDATED records, never absurd-year ones.
  */
-export function parseWhen(raw: string | undefined | null): number | null {
+export function parseWhen(raw: string | undefined | null, now: number = Date.now()): number | null {
   if (!raw) return null
   const s = String(raw).trim()
   if (!s) return null
-  // Native parse handles ISO 8601, 'YYYY-MM-DD HH:mm' (local), and 'YYYY/MM/DD'.
+  // A bare number is an ID / quantity / year cell, not an event time —
+  // `Date.parse('104')` happily reads it as the year 104 AD.
+  if (/^[+-]?\d+(\.\d+)?$/.test(s)) return null
+  // Native parse handles ISO 8601, 'YYYY-MM-DD HH:mm' (local), 'YYYY/MM/DD',
+  // and the 'Mon, 01 Jan 2024…' shapes mail exports use.
   const native = Date.parse(s)
-  if (!Number.isNaN(native)) return native
-  // Fall back to M/D/YY or M/D/YYYY (Netflix etc.).
+  if (!Number.isNaN(native)) return isPlausibleEpochMs(native, now) ? native : null
+  // Fall back to M/D/YY or M/D/YYYY (Netflix etc.). Two-digit years pivot at
+  // 70 ('99 → 1999, '26 → 2026) — the convention those exports follow.
   const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/)
   if (m) {
-    const year = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3])
+    const y = Number(m[3])
+    const year = m[3].length === 2 ? (y >= 70 ? 1900 + y : 2000 + y) : y
     const ms = new Date(year, Number(m[1]) - 1, Number(m[2])).getTime()
-    if (!Number.isNaN(ms)) return ms
+    if (!Number.isNaN(ms) && isPlausibleEpochMs(ms, now)) return ms
   }
   return null
 }
