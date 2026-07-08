@@ -9,9 +9,11 @@
 import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 import {
+  type CreditAccountLike,
   type CreditInquiry,
   type CreditTradeline,
   getCreditSummary,
+  reconcileTradelines,
   summarizeCredit
 } from './finance-credit'
 
@@ -281,5 +283,157 @@ describe('getCreditSummary', () => {
 
   it('is empty when no credit records exist', () => {
     expect(getCreditSummary(makeDb(), '2026-07-03').hasData).toBe(false)
+  })
+
+  it('surfaces open tradelines as untracked when finance_accounts is absent', () => {
+    const sqlite = makeDb() // records only — no finance_accounts table
+    insert(sqlite, 'credit-tradeline', Date.parse('2015-01-01'), {
+      creditor: 'A',
+      accountLast4: '1',
+      accountType: 'Credit Card',
+      closed: false,
+      balance: 100,
+      creditLimit: 1000,
+      dateOpened: '01/01/2015',
+      paymentHistory: NO_LATES,
+      reportDate: '2026-07-01'
+    })
+    const s = getCreditSummary(sqlite, '2026-07-03')
+    expect(s.hasData).toBe(true)
+    expect(s.reconciliation.matched).toEqual([])
+    // The tradeline still surfaces as untracked — accounts list is just empty.
+    expect(s.reconciliation.unmatchedTradelines).toHaveLength(1)
+    expect(s.reconciliation.unmatchedAccounts).toEqual([])
+  })
+
+  it('reconciles the latest snapshot against live debt accounts', () => {
+    const sqlite = makeDb()
+    sqlite.exec(`
+      CREATE TABLE finance_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        institution TEXT NOT NULL DEFAULT '',
+        mask TEXT,
+        is_debt INTEGER DEFAULT 0,
+        balance REAL DEFAULT 0
+      );
+    `)
+    sqlite
+      .prepare(
+        "INSERT INTO finance_accounts (name, mask, is_debt, balance) VALUES ('American Express Card (5647)', '5647', 1, 188.53)"
+      )
+      .run()
+    insert(sqlite, 'credit-tradeline', Date.parse('2015-01-01'), {
+      creditor: 'AMERICAN EXPRESS',
+      accountLast4: '5647',
+      accountType: 'Credit Card',
+      closed: false,
+      balance: 150,
+      creditLimit: 1000,
+      dateOpened: '01/01/2015',
+      paymentHistory: NO_LATES,
+      reportDate: '2026-07-01'
+    })
+    const s = getCreditSummary(sqlite, '2026-07-03')
+    expect(s.reconciliation.matched).toHaveLength(1)
+    expect(s.reconciliation.matched[0]).toMatchObject({
+      creditor: 'AMERICAN EXPRESS',
+      accountName: 'American Express Card (5647)',
+      reportBalance: 150,
+      liveBalance: 188.53,
+      drift: 38.53
+    })
+    expect(s.reconciliation.unmatchedTradelines).toEqual([])
+    expect(s.reconciliation.unmatchedAccounts).toEqual([])
+  })
+})
+
+// ─── Report ↔ live-account reconciliation (pure) ─────────────────────────────
+
+function acct(over: Partial<CreditAccountLike> = {}): CreditAccountLike {
+  return {
+    id: 1,
+    name: 'Card',
+    institution: '',
+    mask: null,
+    isDebt: true,
+    balance: 0,
+    ...over
+  }
+}
+
+describe('reconcileTradelines', () => {
+  it('pairs by exact last-4 and computes drift as live minus report', () => {
+    const r = reconcileTradelines(
+      [tl({ creditor: 'AMERICAN EXPRESS', accountLast4: '5647', balance: 150 })],
+      [acct({ id: 1, name: 'American Express Card (5647)', mask: '5647', balance: 188.53 })]
+    )
+    expect(r.matched).toHaveLength(1)
+    expect(r.matched[0].drift).toBe(38.53)
+    expect(r.unmatchedTradelines).toEqual([])
+    expect(r.unmatchedAccounts).toEqual([])
+  })
+
+  it('falls back to the (1234) suffix in the account name when mask is null', () => {
+    const r = reconcileTradelines(
+      [tl({ creditor: 'USAA SB', accountLast4: '3615', balance: 9800 })],
+      [acct({ id: 3, name: 'UNSECURED FIXED RATE LOAN (3615)', balance: 9807.24 })]
+    )
+    expect(r.matched).toHaveLength(1)
+    expect(r.matched[0].accountId).toBe(3)
+  })
+
+  it('pairs by name when exactly one unmatched account matches', () => {
+    const r = reconcileTradelines(
+      [tl({ creditor: 'HILTON HONORS SURPASS', accountLast4: null, balance: 300 })],
+      [
+        acct({ id: 1, name: 'Hilton Honors Surpass® Card (3002)', balance: 301.81 }),
+        acct({ id: 2, name: 'Chris Checking (0991)', isDebt: false, balance: 337 })
+      ]
+    )
+    expect(r.matched).toHaveLength(1)
+    expect(r.matched[0].accountId).toBe(1)
+  })
+
+  it('leaves an ambiguous name match unmatched instead of guessing', () => {
+    const r = reconcileTradelines(
+      [tl({ creditor: 'AMERICAN EXPRESS', accountLast4: null, balance: 500 })],
+      [
+        acct({ id: 1, name: 'American Express Card (5647)', balance: 188 }),
+        acct({ id: 2, name: 'American Express Platinum (2001)', balance: 7089 })
+      ]
+    )
+    expect(r.matched).toEqual([])
+    expect(r.unmatchedTradelines).toHaveLength(1)
+    expect(r.unmatchedAccounts).toHaveLength(2)
+  })
+
+  it('excludes closed tradelines from both matched and unmatched lists', () => {
+    const r = reconcileTradelines(
+      [tl({ creditor: 'OLD LOAN', accountLast4: '9999', balance: 0, closed: true })],
+      [acct({ id: 1, name: 'Something Else', balance: 50 })]
+    )
+    expect(r.matched).toEqual([])
+    expect(r.unmatchedTradelines).toEqual([])
+    expect(r.unmatchedAccounts).toHaveLength(1) // the live debt is still flagged
+  })
+
+  it('ignores non-debt accounts entirely', () => {
+    const r = reconcileTradelines(
+      [tl({ creditor: 'CHRIS SAVINGS', accountLast4: '0983', balance: 100 })],
+      [acct({ id: 1, name: 'Chris Savings (0983)', isDebt: false, balance: 3058 })]
+    )
+    expect(r.matched).toEqual([])
+    expect(r.unmatchedTradelines).toHaveLength(1)
+    expect(r.unmatchedAccounts).toEqual([]) // asset accounts are never flagged
+  })
+
+  it('null balances yield a null drift, not NaN', () => {
+    const r = reconcileTradelines(
+      [tl({ creditor: 'TU CARD', accountLast4: '1111', balance: null })],
+      [acct({ id: 1, name: 'TU Card (1111)', mask: '1111', balance: 42 })]
+    )
+    expect(r.matched).toHaveLength(1)
+    expect(r.matched[0].drift).toBeNull()
   })
 })
