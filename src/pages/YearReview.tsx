@@ -16,6 +16,8 @@ import { useToast } from '../components/ui/Toast'
 const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+// Matches the records:year-review handler's accepted window (lower bound).
+const MIN_YEAR = 1970
 
 function Tile({ label, value, sub }: { label: string; value: string; sub?: string }): JSX.Element {
   return (
@@ -30,9 +32,11 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: strin
 export default function YearReview(): JSX.Element {
   const [searchParams] = useSearchParams()
   const currentYear = new Date().getUTCFullYear()
+  // Clamp the seeded ?year= to the same window the IPC handler accepts, so a
+  // crafted deep link can't strand the page on a year that returns null.
   const seeded = Number(searchParams.get('year'))
   const [year, setYear] = useState(
-    Number.isInteger(seeded) && seeded > 1970
+    Number.isInteger(seeded) && seeded >= MIN_YEAR && seeded <= currentYear
       ? seeded
       : currentYear - (new Date().getUTCMonth() < 6 ? 1 : 0)
   )
@@ -41,7 +45,11 @@ export default function YearReview(): JSX.Element {
   const { toast } = useToast()
 
   useEffect(() => {
-    if (!isElectron()) return
+    if (!isElectron()) {
+      setReview(null)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     let stale = false
     void window.api.records
@@ -65,7 +73,7 @@ export default function YearReview(): JSX.Element {
       return
     }
     const res = await window.api.knowledge.writeFile(`timeline/year-review-${year}.md`, md)
-    if ((res as { success?: boolean })?.success !== false) {
+    if (res.success) {
       toast(`Saved to Knowledge · timeline/year-review-${year}.md`, 'success')
     } else {
       toast('Could not save to the knowledge base', 'error')
@@ -91,10 +99,11 @@ export default function YearReview(): JSX.Element {
         <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => setYear((y) => y - 1)}
+            onClick={() => setYear((y) => Math.max(MIN_YEAR, y - 1))}
+            disabled={year <= MIN_YEAR}
             aria-label="Previous year"
             title="Previous year"
-            className="p-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+            className="p-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-40"
           >
             <ChevronLeft size={14} />
           </button>
@@ -119,12 +128,17 @@ export default function YearReview(): JSX.Element {
         </div>
       </div>
 
-      {loading || !review ? (
+      {loading ? (
         <div className="space-y-3">
           {[0, 1, 2].map((i) => (
             <div key={i} className="rounded-xl border border-border bg-card h-24 animate-pulse" />
           ))}
         </div>
+      ) : !review ? (
+        <p className="text-sm text-muted-foreground py-12 text-center">
+          Year in Review isn't available here — open it inside Compass and pick a year between{' '}
+          {MIN_YEAR} and {currentYear}.
+        </p>
       ) : review.totalRecords === 0 ? (
         <p className="text-sm text-muted-foreground py-12 text-center">
           No dated records for {year} yet — import more history, or step to another year.
@@ -155,8 +169,8 @@ export default function YearReview(): JSX.Element {
             />
             <Tile
               label="Countries"
-              value={String(review.countries.length || 1)}
-              sub={review.countries.join(', ') || undefined}
+              value={String(review.countries.length)}
+              sub={review.countries.join(', ') || 'No travel logged'}
             />
           </div>
 
@@ -191,7 +205,10 @@ export default function YearReview(): JSX.Element {
               <h2 className="text-sm font-semibold text-foreground mb-3">On repeat</h2>
               <div className="space-y-1.5">
                 {review.topTitles.map((t) => (
-                  <div key={`${t.source}|${t.title}`} className="flex items-center gap-2.5 text-sm">
+                  <div
+                    key={`${t.source}|${t.type}|${t.title}`}
+                    className="flex items-center gap-2.5 text-sm"
+                  >
                     <span
                       className="text-muted-foreground shrink-0"
                       title={sourceMeta(t.source).label}
