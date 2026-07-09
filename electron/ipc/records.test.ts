@@ -364,6 +364,81 @@ describe('firehose curation (Curate)', () => {
   })
 })
 
+// Timeline 2.0 aggregate endpoints — IPC-level coverage (validation + firehose
+// behavior); the query logic itself is covered in records-aggregates.test.ts.
+describe('Timeline 2.0 aggregate IPC', () => {
+  let seq = 0
+  function seed(source: string, type: string, title: string, iso: string): void {
+    sqlite
+      .prepare(
+        'INSERT INTO records (source, type, occurred_at, title, dedup_hash) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run(source, type, Date.parse(iso), title, `agg|${seq++}`)
+  }
+  beforeEach(() => {
+    seq = 0
+    seed('netflix', 'watch', 'The Matrix', '2020-03-15T20:00:00Z')
+    seed('netflix', 'watch', 'Inception', '2021-03-15T20:00:00Z')
+    seed('amazon', 'order', 'USB Cable', '2021-03-15T12:00:00Z')
+    seed('amazon', 'order', 'Desk Lamp', '2021-08-01T12:00:00Z')
+    seed('browser', 'visit', 'news site', '2021-03-15T13:00:00Z') // firehose
+  })
+
+  it('records:histogram buckets by year, tolerates junk opts, honors includeFirehose', async () => {
+    const years = (await invoke('records:histogram')) as Array<{ bucket: string; count: number }>
+    expect(years).toEqual([
+      { bucket: '2020', count: 1 },
+      { bucket: '2021', count: 3 }
+    ])
+    const withFirehose = (await invoke('records:histogram', {
+      bucket: 'month',
+      includeFirehose: true,
+      from: 'junk', // non-numbers are ignored, not crashed on
+      to: Number.NaN
+    })) as Array<{ bucket: string; count: number }>
+    expect(withFirehose.find((b) => b.bucket === '2021-03')?.count).toBe(3)
+  })
+
+  it('records:day returns one UTC day (validation: missing/junk day → [])', async () => {
+    expect(await invoke('records:day')).toEqual([])
+    expect(await invoke('records:day', { day: 'not-a-day' })).toEqual([])
+    const day = (await invoke('records:day', { day: '2021-03-15' })) as Rec[]
+    expect(day.map((r) => r.title).sort()).toEqual(['Inception', 'USB Cable'])
+    const withFirehose = (await invoke('records:day', {
+      day: '2021-03-15',
+      includeFirehose: true
+    })) as Rec[]
+    expect(withFirehose).toHaveLength(3)
+  })
+
+  it('records:day-summary rolls up per source+type with samples (junk day → [])', async () => {
+    expect(await invoke('records:day-summary')).toEqual([])
+    expect(await invoke('records:day-summary', { day: '9999-99-99' })).toEqual([])
+    const groups = (await invoke('records:day-summary', { day: '2021-03-15' })) as Array<{
+      source: string
+      count: number
+      sampleTitles: string[]
+    }>
+    // Firehose is INCLUDED in the rollup (one digest line is how noise surfaces).
+    expect(groups.map((g) => g.source).sort()).toEqual(['amazon', 'browser', 'netflix'])
+    expect(groups.find((g) => g.source === 'netflix')?.sampleTitles).toEqual(['Inception'])
+  })
+
+  it('records:on-this-day-v2 groups all years, excludes firehose, rejects bad month/day', async () => {
+    expect(await invoke('records:on-this-day-v2', { month: 13, day: 1 })).toEqual([])
+    expect(await invoke('records:on-this-day-v2', { month: 2, day: 32 })).toEqual([])
+    const years = (await invoke('records:on-this-day-v2', { month: 3, day: 15 })) as Array<{
+      year: number
+      count: number
+      records: Rec[]
+    }>
+    expect(years.map((y) => y.year)).toEqual([2021, 2020])
+    const y2021 = years[0]
+    expect(y2021.count).toBe(2) // firehose visit excluded from the TRUE count too
+    expect(y2021.records.map((r) => r.title).sort()).toEqual(['Inception', 'USB Cable'])
+  })
+})
+
 describe('records:facets', () => {
   it('returns the sorted, distinct sources and kinds across the whole table', async () => {
     await invoke('records:import-paths', [
