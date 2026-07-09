@@ -6,7 +6,7 @@
  * search) and copy. Closes on backdrop click or Escape.
  */
 
-import { Copy, Search, X } from 'lucide-react'
+import { Copy, EyeOff, Search, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useToast } from '../ui/Toast'
 import { fmtDay, fmtTime, sourceMeta, typeLabel } from './timeline-meta'
@@ -14,11 +14,14 @@ import { fmtDay, fmtTime, sourceMeta, typeLabel } from './timeline-meta'
 export function RecordDetailDrawer({
   record,
   onClose,
-  onFindSimilar
+  onFindSimilar,
+  onMute
 }: {
   record: TimelineRecord
   onClose: () => void
   onFindSimilar: (query: string) => void
+  /** "Never resurface" (memory mutes) — omit to hide the mute actions. */
+  onMute?: (kind: 'record' | 'source-type', target: string) => void
 }): JSX.Element {
   const [showRaw, setShowRaw] = useState(false)
   const { toast } = useToast()
@@ -127,6 +130,32 @@ export function RecordDetailDrawer({
               <Copy size={13} /> Copy
             </button>
           </div>
+
+          {onMute && (
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+                Memories
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => onMute('record', String(record.id))}
+                  title="This record stays on the timeline but never resurfaces in On this day"
+                  className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <EyeOff size={13} /> Never resurface this
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onMute('source-type', `${record.source}|${record.type}`)}
+                  title={`No ${meta.label} · ${typeLabel(record.type)} records will resurface in On this day`}
+                  className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <EyeOff size={13} /> Mute {meta.label} · {typeLabel(record.type)}
+                </button>
+              </div>
+            </div>
+          )}
 
           {payloadPretty && (
             <div>

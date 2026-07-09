@@ -64,6 +64,7 @@ export default function Timeline(): JSX.Element {
     count: number
   } | null>(null)
   const [detail, setDetail] = useState<TimelineRecord | null>(null)
+  const [memoryTick, setMemoryTick] = useState(0) // bumps hero refetch after mutes
   const [busy, setBusy] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const { toast } = useToast()
@@ -277,6 +278,18 @@ export default function Timeline(): JSX.Element {
     setQuery(title)
   }
 
+  async function muteMemory(kind: 'record' | 'source-type', target: string): Promise<void> {
+    if (!isElectron()) return
+    const res = await window.api.records.mute({ kind, target })
+    if (res.success) {
+      toast('Muted from On this day — restore anytime from the hero', 'success')
+      setDetail(null)
+      setMemoryTick((t) => t + 1)
+    } else {
+      toast(res.error ?? 'Could not mute', 'error')
+    }
+  }
+
   // Chips come from whole-timeline facets, unioned with active selections so a
   // chip stays clearable even if a concurrent import narrows the table.
   const sources = [...new Set([...facets.sources, ...sourcesSel])].sort()
@@ -458,7 +471,7 @@ export default function Timeline(): JSX.Element {
 
           {/* THIS DAY — the all-years memory lens. */}
           {!searching && view === 'day' && (
-            <OnThisDayHero onOpenRecord={setDetail} onOpenDay={openDay} />
+            <OnThisDayHero onOpenRecord={setDetail} onOpenDay={openDay} refreshKey={memoryTick} />
           )}
 
           {/* DENSITY — the whole archive as a year × month heatmap. */}
@@ -583,6 +596,7 @@ export default function Timeline(): JSX.Element {
           record={detail}
           onClose={() => setDetail(null)}
           onFindSimilar={findSimilar}
+          onMute={(kind, target) => void muteMemory(kind, target)}
         />
       )}
     </div>
