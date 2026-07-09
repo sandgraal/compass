@@ -340,6 +340,15 @@ function ensureNewTables(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_records_type_occurred ON records (type, occurred_at);
     CREATE INDEX IF NOT EXISTS idx_records_mmdd ON records (strftime('%m-%d', occurred_at / 1000, 'unixepoch'));
     CREATE INDEX IF NOT EXISTS idx_records_year ON records (CAST(strftime('%Y', occurred_at / 1000, 'unixepoch') AS INTEGER));
+    -- Timeline memory mutes (migration 0034, mirrored here — the fallback path).
+    -- "Never resurface this": reversible resurfacing filters, never deletion.
+    CREATE TABLE IF NOT EXISTS timeline_mutes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      target TEXT NOT NULL,
+      created_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS timeline_mutes_kind_target ON timeline_mutes (kind, target);
     CREATE TABLE IF NOT EXISTS snapshot_facts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       source TEXT NOT NULL, category TEXT NOT NULL, label TEXT, value TEXT NOT NULL,

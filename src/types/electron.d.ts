@@ -1115,6 +1115,20 @@ declare global {
           day?: number
           perYearCap?: number
         }): Promise<Array<{ year: number; count: number; records: TimelineRecord[] }>>
+        moments(opts?: { month?: number; day?: number }): Promise<
+          Array<{
+            kind: 'birthday' | 'first-met' | 'first-merchant' | 'purchase-anniversary' | 'renewal'
+            title: string
+            detail?: string
+            yearsAgo?: number
+          }>
+        >
+        mute(opts: {
+          kind: 'record' | 'source-type'
+          target: string | number
+        }): Promise<{ success: boolean; error?: string }>
+        mutes(): Promise<Array<{ id: number; kind: string; target: string }>>
+        clearMutes(): Promise<{ success: boolean }>
         search(opts: {
           q: string
           source?: string
