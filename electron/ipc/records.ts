@@ -55,6 +55,11 @@ import {
 } from '../lib/records-aggregates'
 import { planReclassify } from '../lib/records-reclassify'
 import { type RecordSearchOpts, type TimelineSearchHit, searchRecords } from '../lib/records-search'
+import {
+  buildYearReview,
+  yearReviewMarkdown,
+  yearReviewNarrative
+} from '../lib/records-year-review'
 import { FIREHOSE_SOURCE_LIST } from '../lib/source-tiers'
 import { type MuteSet, rankMemories } from '../lib/timeline-memories'
 import { momentsForDay } from '../lib/timeline-moments'
@@ -978,6 +983,20 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
       currentYear: now.getUTCFullYear(),
       isToday: month === now.getUTCMonth() + 1 && day === now.getUTCDate()
     })
+  })
+
+  // Year in Review (PR 7): one year distilled — pure records-year-review.ts.
+  ipcMain.handle('records:year-review', (_event, opts?: { year?: number }) => {
+    const year = Math.trunc(opts?.year ?? new Date().getUTCFullYear())
+    if (!Number.isInteger(year) || year < 1970 || year > 2100) return null
+    const review = buildYearReview(getRawSqlite(), year)
+    return { ...review, narrative: yearReviewNarrative(review) }
+  })
+
+  ipcMain.handle('records:year-review-markdown', (_event, opts?: { year?: number }) => {
+    const year = Math.trunc(opts?.year ?? new Date().getUTCFullYear())
+    if (!Number.isInteger(year) || year < 1970 || year > 2100) return null
+    return yearReviewMarkdown(buildYearReview(getRawSqlite(), year))
   })
 
   // ── Memory mutes (PR 6): "never resurface this" — reversible, never deletion.

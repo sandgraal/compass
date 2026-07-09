@@ -31,6 +31,7 @@ import Subscriptions from './pages/Subscriptions'
 import Timeline from './pages/Timeline'
 import Vault from './pages/Vault'
 import Weekly from './pages/Weekly'
+import YearReview from './pages/YearReview'
 import { useAppStore } from './store/appStore'
 
 export default function App(): JSX.Element {
@@ -100,6 +101,7 @@ export default function App(): JSX.Element {
           <Route path="assets" element={<Assets />} />
           <Route path="storehouse" element={<Storehouse />} />
           <Route path="timeline" element={<Timeline />} />
+          <Route path="year-review" element={<YearReview />} />
           <Route path="ad-profile" element={<AdProfile />} />
           <Route path="profile" element={<Profile />} />
           <Route path="apps" element={<Apps />} />

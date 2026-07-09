@@ -20,6 +20,7 @@ import {
   LayoutGrid,
   LineChart,
   Network,
+  PartyPopper,
   PiggyBank,
   Plug,
   Plus,
@@ -153,6 +154,14 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       icon: <Clock size={15} />,
       action: () => nav('/timeline'),
       keywords: ['timeline', 'import', 'records', 'history', 'drop', 'netflix', 'spotify']
+    },
+    {
+      id: 'year-review',
+      label: 'Year in Review',
+      description: 'One year of your archive, distilled',
+      icon: <PartyPopper size={15} />,
+      action: () => nav('/year-review'),
+      keywords: ['year', 'review', 'recap', 'wrapped', 'annual']
     },
     {
       id: 'daily',
