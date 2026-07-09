@@ -117,16 +117,23 @@ export function insertRecords(inputs: RecordInput[], provenance: string): { impo
   const db = getDb()
   let imported = 0
   for (const inp of inputs) {
+    // Hash the CLAMPED timestamp so a row's identity always matches what's
+    // stored: if a writer hands in an implausible occurredAt (stored UNDATED),
+    // hashing the raw value would let the same event re-arrive later with a
+    // corrected-to-null date and duplicate instead of deduping. Identical for
+    // every plausible timestamp (clamp is a no-op there).
+    const occurredAt = plausibleOccurredAt(inp.occurredAt)
+    const occurredAtMs = occurredAt ? occurredAt.getTime() : null
     const res = db
       .insert(records)
       .values({
         source: inp.source,
         type: inp.type,
-        occurredAt: plausibleOccurredAt(inp.occurredAt),
+        occurredAt,
         title: inp.title.slice(0, 2000),
         body: inp.body ? inp.body.slice(0, 2000) : null,
         payload: inp.payload !== undefined ? JSON.stringify(inp.payload).slice(0, 100_000) : null,
-        dedupHash: hashRecord(inp.source, inp.type, inp.occurredAt, inp.naturalKey),
+        dedupHash: hashRecord(inp.source, inp.type, occurredAtMs, inp.naturalKey),
         provenance
       })
       .onConflictDoNothing()
