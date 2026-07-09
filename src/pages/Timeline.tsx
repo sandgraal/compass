@@ -423,7 +423,7 @@ export default function Timeline(): JSX.Element {
 
           {/* Lens switch — hidden while a search narrows everything anyway. */}
           {!searching && (
-            <div className="flex items-center gap-1 mb-4" role="tablist" aria-label="Timeline view">
+            <div className="flex items-center gap-1 mb-4" aria-label="Timeline view">
               {(
                 [
                   ['day', 'This day'],
@@ -433,8 +433,7 @@ export default function Timeline(): JSX.Element {
                 <button
                   key={v}
                   type="button"
-                  role="tab"
-                  aria-selected={view === v}
+                  aria-pressed={view === v}
                   onClick={() => switchView(v)}
                   className={cn(
                     'text-xs px-3 py-1.5 rounded-lg border transition-colors',
