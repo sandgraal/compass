@@ -175,6 +175,31 @@ describe('records:list', () => {
     const none = (await invoke('records:list', { q: 'zzz-nope' })) as Rec[]
     expect(none).toHaveLength(0)
   })
+
+  it('filters by multi-select sources/types and an epoch-ms date range (Timeline 2.0)', async () => {
+    await invoke('records:import-paths', [
+      fixture('NetflixViewingHistory.csv', 'Title,Date\nThe Matrix,1/2/26\nInception,12/25/25\n'),
+      fixture(
+        'Download.csv',
+        'Date,Name,Type,Status,Currency,Gross,Transaction ID\n01/15/2026,Jane Doe,Money Sent,Completed,USD,-25.00,TX-Q1\n'
+      )
+    ])
+    const multi = (await invoke('records:list', { sources: ['netflix', 'paypal'] })) as Rec[]
+    expect(multi).toHaveLength(3)
+    const paypalOnly = (await invoke('records:list', { sources: ['paypal'] })) as Rec[]
+    expect(paypalOnly).toHaveLength(1)
+    const types = (await invoke('records:list', { types: ['watch'] })) as Rec[]
+    expect(types).toHaveLength(2)
+    // Range: only the Jan 2026 records (Netflix "The Matrix" + PayPal "Jane Doe").
+    const jan2026 = (await invoke('records:list', {
+      from: new Date(2026, 0, 1).getTime(),
+      to: new Date(2026, 0, 31).getTime()
+    })) as Rec[]
+    expect(jan2026.map((r) => r.title).sort()).toEqual(['Jane Doe', 'The Matrix'])
+    // Junk array entries are ignored, not crashed on.
+    const junk = (await invoke('records:list', { sources: [1, null, ''] })) as Rec[]
+    expect(junk).toHaveLength(3)
+  })
 })
 
 describe('records:search (FTS5)', () => {
@@ -336,6 +361,81 @@ describe('firehose curation (Curate)', () => {
     const stats = (await invoke('records:stats')) as { total: number; firehose: number }
     expect(stats.total).toBe(3)
     expect(stats.firehose).toBe(2)
+  })
+})
+
+// Timeline 2.0 aggregate endpoints — IPC-level coverage (validation + firehose
+// behavior); the query logic itself is covered in records-aggregates.test.ts.
+describe('Timeline 2.0 aggregate IPC', () => {
+  let seq = 0
+  function seed(source: string, type: string, title: string, iso: string): void {
+    sqlite
+      .prepare(
+        'INSERT INTO records (source, type, occurred_at, title, dedup_hash) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run(source, type, Date.parse(iso), title, `agg|${seq++}`)
+  }
+  beforeEach(() => {
+    seq = 0
+    seed('netflix', 'watch', 'The Matrix', '2020-03-15T20:00:00Z')
+    seed('netflix', 'watch', 'Inception', '2021-03-15T20:00:00Z')
+    seed('amazon', 'order', 'USB Cable', '2021-03-15T12:00:00Z')
+    seed('amazon', 'order', 'Desk Lamp', '2021-08-01T12:00:00Z')
+    seed('browser', 'visit', 'news site', '2021-03-15T13:00:00Z') // firehose
+  })
+
+  it('records:histogram buckets by year, tolerates junk opts, honors includeFirehose', async () => {
+    const years = (await invoke('records:histogram')) as Array<{ bucket: string; count: number }>
+    expect(years).toEqual([
+      { bucket: '2020', count: 1 },
+      { bucket: '2021', count: 3 }
+    ])
+    const withFirehose = (await invoke('records:histogram', {
+      bucket: 'month',
+      includeFirehose: true,
+      from: 'junk', // non-numbers are ignored, not crashed on
+      to: Number.NaN
+    })) as Array<{ bucket: string; count: number }>
+    expect(withFirehose.find((b) => b.bucket === '2021-03')?.count).toBe(3)
+  })
+
+  it('records:day returns one UTC day (validation: missing/junk day → [])', async () => {
+    expect(await invoke('records:day')).toEqual([])
+    expect(await invoke('records:day', { day: 'not-a-day' })).toEqual([])
+    const day = (await invoke('records:day', { day: '2021-03-15' })) as Rec[]
+    expect(day.map((r) => r.title).sort()).toEqual(['Inception', 'USB Cable'])
+    const withFirehose = (await invoke('records:day', {
+      day: '2021-03-15',
+      includeFirehose: true
+    })) as Rec[]
+    expect(withFirehose).toHaveLength(3)
+  })
+
+  it('records:day-summary rolls up per source+type with samples (junk day → [])', async () => {
+    expect(await invoke('records:day-summary')).toEqual([])
+    expect(await invoke('records:day-summary', { day: '9999-99-99' })).toEqual([])
+    const groups = (await invoke('records:day-summary', { day: '2021-03-15' })) as Array<{
+      source: string
+      count: number
+      sampleTitles: string[]
+    }>
+    // Firehose is INCLUDED in the rollup (one digest line is how noise surfaces).
+    expect(groups.map((g) => g.source).sort()).toEqual(['amazon', 'browser', 'netflix'])
+    expect(groups.find((g) => g.source === 'netflix')?.sampleTitles).toEqual(['Inception'])
+  })
+
+  it('records:on-this-day-v2 groups all years, excludes firehose, rejects bad month/day', async () => {
+    expect(await invoke('records:on-this-day-v2', { month: 13, day: 1 })).toEqual([])
+    expect(await invoke('records:on-this-day-v2', { month: 2, day: 32 })).toEqual([])
+    const years = (await invoke('records:on-this-day-v2', { month: 3, day: 15 })) as Array<{
+      year: number
+      count: number
+      records: Rec[]
+    }>
+    expect(years.map((y) => y.year)).toEqual([2021, 2020])
+    const y2021 = years[0]
+    expect(y2021.count).toBe(2) // firehose visit excluded from the TRUE count too
+    expect(y2021.records.map((r) => r.title).sort()).toEqual(['Inception', 'USB Cable'])
   })
 })
 

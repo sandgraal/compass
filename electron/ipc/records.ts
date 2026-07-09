@@ -47,6 +47,12 @@ import {
   recognizeSqlite,
   recognizeStream
 } from '../lib/recognizers'
+import {
+  daySummary,
+  onThisDayAllYears,
+  recordsForDay,
+  recordsHistogram
+} from '../lib/records-aggregates'
 import { planReclassify } from '../lib/records-reclassify'
 import { type RecordSearchOpts, type TimelineSearchHit, searchRecords } from '../lib/records-search'
 import { FIREHOSE_SOURCE_LIST } from '../lib/source-tiers'
@@ -693,8 +699,12 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
       _event,
       opts?: {
         source?: string
+        sources?: string[] // multi-select chips (Timeline 2.0); wins over `source`
         type?: string
+        types?: string[]
         q?: string
+        from?: number // epoch ms, inclusive
+        to?: number // epoch ms, inclusive
         limit?: number
         offset?: number
         includeFirehose?: boolean
@@ -703,8 +713,14 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
       const db = getDb()
       const limit = Math.min(Math.max(Math.trunc(opts?.limit ?? 200), 1), 1000)
       const offset = Math.max(Math.trunc(opts?.offset ?? 0), 0)
+      const strings = (v: unknown): string[] =>
+        Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string' && s !== '') : []
+      const sources = strings(opts?.sources)
+      const types = strings(opts?.types)
       const conds: SQL[] = []
-      if (opts?.source) {
+      if (sources.length > 0) {
+        conds.push(inArray(records.source, sources))
+      } else if (opts?.source) {
         conds.push(eq(records.source, opts.source))
       } else if (opts?.includeFirehose === false && FIREHOSE_SOURCE_LIST.length > 0) {
         // Curate (Phase 10.7): collapse firehose sources (browser history, …) from
@@ -712,7 +728,14 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
         // the rows stay on disk, and selecting the source's chip overrides this.
         conds.push(notInArray(records.source, FIREHOSE_SOURCE_LIST))
       }
-      if (opts?.type) conds.push(eq(records.type, opts.type))
+      if (types.length > 0) conds.push(inArray(records.type, types))
+      else if (opts?.type) conds.push(eq(records.type, opts.type))
+      const finiteMs = (v: unknown): number | undefined =>
+        typeof v === 'number' && Number.isFinite(v) ? v : undefined
+      const from = finiteMs(opts?.from)
+      const to = finiteMs(opts?.to)
+      if (from != null) conds.push(sql`${records.occurredAt} >= ${from}`)
+      if (to != null) conds.push(sql`${records.occurredAt} <= ${to}`)
       const q = opts?.q?.trim()
       if (q) {
         // Case-insensitive substring search over title + body, server-side so it
@@ -832,15 +855,101 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
     const year = String(now.getUTCFullYear())
     const monthDay = sql`strftime('%m-%d', ${records.occurredAt} / 1000, 'unixepoch')`
     const yr = sql`strftime('%Y', ${records.occurredAt} / 1000, 'unixepoch')`
+    const conds: SQL[] = [sql`${monthDay} = ${mmdd} AND ${yr} <> ${year}`]
+    // Telemetry is not a memory: keep firehose sources out of the recap (they'd
+    // otherwise dominate it now that 'generic' is tiered as firehose).
+    if (FIREHOSE_SOURCE_LIST.length > 0) {
+      conds.push(notInArray(records.source, FIREHOSE_SOURCE_LIST))
+    }
     const rows = db
       .select()
       .from(records)
-      .where(sql`${monthDay} = ${mmdd} AND ${yr} <> ${year}`)
+      .where(and(...conds))
       .orderBy(desc(records.occurredAt), desc(records.id))
       .limit(limit)
       .all()
     return rows.map(rowToRecord)
   })
+
+  // ── Timeline 2.0 aggregates (PR 3) — the year scrubber / heatmap / day
+  // drill-down / all-years hero backend. Pure query logic lives in
+  // electron/lib/records-aggregates.ts (raw SQL whose strftime expressions
+  // match the 0033 expression indexes); these handlers just validate inputs.
+
+  ipcMain.handle(
+    'records:histogram',
+    (
+      _event,
+      opts?: {
+        bucket?: 'year' | 'month'
+        source?: string
+        type?: string
+        from?: number
+        to?: number
+        includeFirehose?: boolean
+      }
+    ) => {
+      const finite = (v: unknown): number | undefined =>
+        typeof v === 'number' && Number.isFinite(v) ? v : undefined
+      return recordsHistogram(getRawSqlite(), {
+        bucket: opts?.bucket === 'month' ? 'month' : 'year',
+        source: typeof opts?.source === 'string' ? opts.source : undefined,
+        type: typeof opts?.type === 'string' ? opts.type : undefined,
+        from: finite(opts?.from),
+        to: finite(opts?.to),
+        includeFirehose: opts?.includeFirehose === true
+      })
+    }
+  )
+
+  ipcMain.handle(
+    'records:day',
+    (
+      _event,
+      opts?: {
+        day?: string
+        source?: string
+        type?: string
+        limit?: number
+        offset?: number
+        includeFirehose?: boolean
+      }
+    ) => {
+      if (typeof opts?.day !== 'string') return []
+      return recordsForDay(getRawSqlite(), {
+        day: opts.day,
+        source: typeof opts.source === 'string' ? opts.source : undefined,
+        type: typeof opts.type === 'string' ? opts.type : undefined,
+        limit: typeof opts.limit === 'number' ? opts.limit : undefined,
+        offset: typeof opts.offset === 'number' ? opts.offset : undefined,
+        includeFirehose: opts.includeFirehose === true
+      })
+    }
+  )
+
+  ipcMain.handle('records:day-summary', (_event, opts?: { day?: string }) => {
+    if (typeof opts?.day !== 'string') return []
+    return daySummary(getRawSqlite(), { day: opts.day })
+  })
+
+  ipcMain.handle(
+    'records:on-this-day-v2',
+    (_event, opts?: { month?: number; day?: number; perYearCap?: number }) => {
+      // Default to TODAY (UTC — matches v1's date-only-import rationale) and
+      // exclude the current year only when showing today: any other requested
+      // month-day is deliberate browsing, where every year is fair game.
+      const now = new Date()
+      const month = typeof opts?.month === 'number' ? opts.month : now.getUTCMonth() + 1
+      const day = typeof opts?.day === 'number' ? opts.day : now.getUTCDate()
+      const isToday = month === now.getUTCMonth() + 1 && day === now.getUTCDate()
+      return onThisDayAllYears(getRawSqlite(), {
+        month,
+        day,
+        perYearCap: typeof opts?.perYearCap === 'number' ? opts.perYearCap : undefined,
+        excludeYear: isToday ? now.getUTCFullYear() : undefined
+      })
+    }
+  )
 
   // At-a-glance totals for the Timeline header — the TRUE total (the Timeline UI
   // only loads a 500-row page via records:list), distinct source count, and the
