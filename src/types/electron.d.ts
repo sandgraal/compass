@@ -1118,6 +1118,13 @@ declare global {
         facets(): Promise<{ sources: string[]; types: string[] }>
         importFiles(): Promise<RecordsImportResult>
         importPaths(paths: string[]): Promise<RecordsImportResult>
+        reclassifyGeneric(): Promise<{
+          success: boolean
+          error?: string
+          moved?: number
+          located?: number
+          deleted?: number
+        }>
         pathsForFiles(files: File[]): string[]
       }
       dataRights: {

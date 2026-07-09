@@ -145,8 +145,13 @@ describe('Google Location History streaming recognizer', () => {
 // ─── Registry contract ────────────────────────────────────────────────────────
 
 describe('location recognizer registry', () => {
-  it('exposes the three ids that records.ts diverts to location_points', () => {
-    expect([...LOCATION_RECOGNIZER_IDS].sort()).toEqual(['google-location', 'gpx', 'owntracks'])
+  it('exposes the four ids that records.ts diverts to location_points', () => {
+    expect([...LOCATION_RECOGNIZER_IDS].sort()).toEqual([
+      'amazon-location',
+      'google-location',
+      'gpx',
+      'owntracks'
+    ])
   })
 
   it('a plain dated JSON is NOT claimed as a location file', () => {

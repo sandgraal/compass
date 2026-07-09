@@ -47,6 +47,7 @@ import {
   recognizeSqlite,
   recognizeStream
 } from '../lib/recognizers'
+import { planReclassify } from '../lib/records-reclassify'
 import { type RecordSearchOpts, type TimelineSearchHit, searchRecords } from '../lib/records-search'
 import { FIREHOSE_SOURCE_LIST } from '../lib/source-tiers'
 import { forEachZipEntry } from '../lib/zip'
@@ -116,16 +117,23 @@ export function insertRecords(inputs: RecordInput[], provenance: string): { impo
   const db = getDb()
   let imported = 0
   for (const inp of inputs) {
+    // Hash the CLAMPED timestamp so a row's identity always matches what's
+    // stored: if a writer hands in an implausible occurredAt (stored UNDATED),
+    // hashing the raw value would let the same event re-arrive later with a
+    // corrected-to-null date and duplicate instead of deduping. Identical for
+    // every plausible timestamp (clamp is a no-op there).
+    const occurredAt = plausibleOccurredAt(inp.occurredAt)
+    const occurredAtMs = occurredAt ? occurredAt.getTime() : null
     const res = db
       .insert(records)
       .values({
         source: inp.source,
         type: inp.type,
-        occurredAt: plausibleOccurredAt(inp.occurredAt),
+        occurredAt,
         title: inp.title.slice(0, 2000),
         body: inp.body ? inp.body.slice(0, 2000) : null,
         payload: inp.payload !== undefined ? JSON.stringify(inp.payload).slice(0, 100_000) : null,
-        dedupHash: hashRecord(inp.source, inp.type, inp.occurredAt, inp.naturalKey),
+        dedupHash: hashRecord(inp.source, inp.type, occurredAtMs, inp.naturalKey),
         provenance
       })
       .onConflictDoNothing()
@@ -538,6 +546,115 @@ export function buildRecordsCsv(): string {
   )
 }
 
+export const RECORDS_RECLASSIFY_KEY = 'recordsReclassifyV1'
+
+export type ReclassifyResult = {
+  moved: number // generic rows re-inserted as properly-sourced records
+  located: number // generic rows moved to location_points
+  deleted: number // generic rows removed (= moved + located)
+}
+
+/**
+ * Re-derive already-imported 'generic' rows whose export family now has a real
+ * recognizer (`amazon-export.ts`). Lossless: each row's original CSV row lives
+ * in `payload`, so the mapper re-reads it, the row is re-inserted through the
+ * production `insertRecords` / `insertLocationPoints` paths (hashing,
+ * truncation, FTS triggers, date guardrail), and only then is the generic row
+ * deleted — all in one transaction. A future re-import of the same file
+ * dedupes against the reclassified rows instead of duplicating them. Rows no
+ * family claims are left untouched (source-tiers collapses them as firehose).
+ */
+export function reclassifyGenericRecords(): ReclassifyResult {
+  const sqlite = getRawSqlite()
+  const result: ReclassifyResult = { moved: 0, located: 0, deleted: 0 }
+  const selectChunk = sqlite.prepare(
+    "SELECT id, provenance, payload FROM records WHERE source = 'generic' AND id > ? ORDER BY id LIMIT 5000"
+  )
+  const deleteById = sqlite.prepare('DELETE FROM records WHERE id = ?')
+
+  const processChunk = sqlite.transaction(
+    (
+      chunk: Array<{
+        id: number
+        provenance: string | null
+        payload: string | null
+      }>
+    ) => {
+      const plan = planReclassify(chunk)
+      // Preserve each row's original import filename on the re-inserted record.
+      const byProvenance = new Map<string, RecordInput[]>()
+      for (const move of plan.records) {
+        const list = byProvenance.get(move.provenance)
+        if (list) list.push(move.input)
+        else byProvenance.set(move.provenance, [move.input])
+      }
+      for (const [provenance, inputs] of byProvenance) insertRecords(inputs, provenance)
+      if (plan.locations.length > 0) {
+        insertLocationPoints(
+          plan.locations.map((m) => m.input),
+          'reclassify'
+        )
+      }
+      for (const move of plan.records) deleteById.run(move.deleteId)
+      for (const move of plan.locations) deleteById.run(move.deleteId)
+      return plan
+    }
+  )
+
+  let lastId = 0
+  for (;;) {
+    const chunk = selectChunk.all(lastId) as Array<{
+      id: number
+      provenance: string | null
+      payload: string | null
+    }>
+    if (chunk.length === 0) break
+    lastId = chunk[chunk.length - 1].id
+    const plan = processChunk(chunk)
+    result.moved += plan.records.length
+    result.located += plan.locations.length
+    result.deleted += plan.records.length + plan.locations.length
+  }
+
+  if (result.deleted > 0) {
+    try {
+      refreshDerivedEntities(getDb())
+    } catch {
+      /* derived-entity projection is best-effort */
+    }
+    void refreshRecordsSemanticIndex()
+    if (result.located > 0) {
+      try {
+        afterLocationImport()
+      } catch {
+        /* location derivation is best-effort */
+      }
+    }
+  }
+  return result
+}
+
+/**
+ * App-launch wrapper: run the reclassification exactly once per install, gated
+ * on an app_settings key written only AFTER success (crash → retried next
+ * launch; the reclassify is dedup-safe so retries are safe). Same pattern as
+ * `recordsDateRepairV1` / `financeSnapshotRepairV1`.
+ */
+export function runRecordsReclassifyIfNeeded(): { ran: boolean } & Partial<ReclassifyResult> {
+  const db = getDb()
+  const existing = db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, RECORDS_RECLASSIFY_KEY))
+    .get()
+  if (existing) return { ran: false }
+  const res = reclassifyGenericRecords()
+  db.insert(appSettings)
+    .values({ key: RECORDS_RECLASSIFY_KEY, value: new Date().toISOString() })
+    .run()
+  return { ran: true, ...res }
+}
+
 const EMPTY: Omit<RecordsImportResult, 'success'> = {
   imported: 0,
   duplicates: 0,
@@ -775,6 +892,17 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
     const sources = [...new Set(rows.map((r) => r.source))].sort()
     const types = [...new Set(rows.map((r) => r.type))].sort()
     return { sources, types }
+  })
+
+  // Re-derive already-imported 'generic' rows through the real recognizers
+  // (amazon-export families). Idempotent + dedup-safe, so a manual re-run after
+  // a future family is added just converts the newly-covered rows.
+  ipcMain.handle('records:reclassify-generic', () => {
+    try {
+      return { success: true, ...reclassifyGenericRecords() }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   ipcMain.handle('records:import', async (): Promise<RecordsImportResult> => {

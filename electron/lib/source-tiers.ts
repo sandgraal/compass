@@ -14,8 +14,14 @@
 
 export type SourceTier = 'firehose' | 'signal'
 
-/** High-volume, low-signal sources collapsed by default on the timeline. */
-export const FIREHOSE_SOURCES: ReadonlySet<string> = new Set(['browser'])
+/**
+ * High-volume, low-signal sources collapsed by default on the timeline.
+ * 'generic' joined in Timeline 2.0 PR 2: after the Amazon-export signal
+ * families were promoted to real sources, what remains under 'generic' is
+ * device telemetry / impressions / notification metadata — kept on disk,
+ * hidden by default.
+ */
+export const FIREHOSE_SOURCES: ReadonlySet<string> = new Set(['browser', 'generic'])
 
 export function sourceTier(source: string): SourceTier {
   return FIREHOSE_SOURCES.has(source) ? 'firehose' : 'signal'

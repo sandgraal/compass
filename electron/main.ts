@@ -34,7 +34,7 @@ import { registerPeopleHandlers } from './ipc/people'
 import { registerPlacesHandlers } from './ipc/places'
 import { registerPlaidHandlers } from './ipc/plaid'
 import { registerQuickCaptureHandlers } from './ipc/quick-capture'
-import { registerRecordsHandlers } from './ipc/records'
+import { registerRecordsHandlers, runRecordsReclassifyIfNeeded } from './ipc/records'
 import { registerRelayHandlers } from './ipc/relay'
 import { registerSearchHandlers } from './ipc/search'
 import { registerSettingsHandlers } from './ipc/settings'
@@ -153,6 +153,20 @@ app.whenReady().then(async () => {
     // Backfill the derived-entity cross-reference cache once for DBs whose
     // records predate it (deferred + best-effort so it never blocks startup).
     setImmediate(() => {
+      // One-shot: re-derive 'generic' rows whose export family now has a real
+      // recognizer (Amazon full export — Prime Video / Kindle / Music / Alexa;
+      // device geolocation moves OFF the records spine). Before the entity
+      // backfill so the cache is built over the corrected sources.
+      try {
+        const res = runRecordsReclassifyIfNeeded()
+        if (res.ran) {
+          console.log(
+            `[main] generic records reclassified (${res.moved ?? 0} re-sourced, ${res.located ?? 0} → location_points)`
+          )
+        }
+      } catch (err) {
+        console.error('[main] generic reclassify failed:', err)
+      }
       try {
         const { built, count } = ensureDerivedEntities(getDb())
         if (built) console.log(`[main] derived-entity cache built (${count} entities)`)

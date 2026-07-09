@@ -28,7 +28,8 @@ export type LocationPayload = { lat: number; lng: number; acc?: number; src: str
 export const LOCATION_RECOGNIZER_IDS: ReadonlySet<string> = new Set([
   'owntracks',
   'gpx',
-  'google-location'
+  'google-location',
+  'amazon-location'
 ])
 
 /** Build one normalized location record. Title is deliberately COARSE (never surfaced). */
