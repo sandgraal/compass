@@ -84,6 +84,32 @@ async function loadModule() {
   return await import('./records')
 }
 
+describe('insertRecords occurred_at guardrail', () => {
+  it('hashes the CLAMPED timestamp so identity matches storage', async () => {
+    const mod = await loadModule()
+    const base = {
+      source: 'youtube',
+      type: 'watch',
+      title: 'A Video',
+      naturalKey: 'video-1'
+    }
+    // Implausible timestamp (year ~2242) → stored UNDATED…
+    const first = mod.insertRecords([{ ...base, occurredAt: 8583494400000 }], 'seed.json')
+    expect(first.imported).toBe(1)
+    const row = sqlite
+      .prepare("SELECT occurred_at AS ms FROM records WHERE source = 'youtube'")
+      .get() as { ms: number | null }
+    expect(row.ms).toBeNull()
+    // …and the same event re-arriving with a corrected/null date DEDUPES
+    // instead of creating a second row (the hash encodes the clamped value).
+    const again = mod.insertRecords([{ ...base, occurredAt: null }], 'seed.json')
+    expect(again.imported).toBe(0)
+    expect(
+      sqlite.prepare("SELECT count(*) AS n FROM records WHERE source = 'youtube'").get()
+    ).toEqual({ n: 1 })
+  })
+})
+
 describe('reclassifyGenericRecords', () => {
   it('moves signal families to real sources, geolocation to location_points, keeps telemetry', async () => {
     // Stored with the WRONG date the old generic import produced (year 2036).
