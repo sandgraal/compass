@@ -30,20 +30,37 @@ export function DensityHeatmap({
   onPickMonth: (year: number, month0: number) => void
 }): JSX.Element {
   const [cells, setCells] = useState<Map<string, number> | null>(null)
+  const [loadError, setLoadError] = useState(false)
 
   useEffect(() => {
     if (!isElectron()) {
       setCells(new Map())
+      setLoadError(false)
       return
     }
+
+    setLoadError(false)
     void window.api.records
       .histogram({ bucket: 'month' })
-      .then((buckets) => setCells(new Map(buckets.map((b) => [b.bucket, b.count]))))
-      .catch(() => setCells(new Map()))
+      .then((buckets) => {
+        setCells(new Map(buckets.map((b) => [b.bucket, b.count])))
+        setLoadError(false)
+      })
+      .catch(() => {
+        setLoadError(true)
+        setCells(new Map())
+      })
   }, [])
 
   if (cells === null) {
     return <div className="rounded-xl border border-border bg-card h-64 animate-pulse" />
+  }
+  if (loadError) {
+    return (
+      <p className="text-sm text-muted-foreground py-8 text-center">
+        Couldn’t load the density heatmap.
+      </p>
+    )
   }
   if (cells.size === 0) {
     return (
