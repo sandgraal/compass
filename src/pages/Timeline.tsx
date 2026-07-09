@@ -152,19 +152,22 @@ export default function Timeline(): JSX.Element {
   async function loadEarlier(): Promise<void> {
     if (!isElectron() || loadingMore) return
     setLoadingMore(true)
+    const nextOffset = offsetRef.current + PAGE_SIZE
     try {
-      offsetRef.current += PAGE_SIZE
       const rows = await window.api.records.list({
         sources: sourcesSel.length > 0 ? sourcesSel : undefined,
         types: typesSel.length > 0 ? typesSel : undefined,
         from: range?.from ?? undefined,
         to: range?.to ?? undefined,
         limit: PAGE_SIZE,
-        offset: offsetRef.current,
+        offset: nextOffset,
         includeFirehose: showFirehose || typesSel.length > 0
       })
+      offsetRef.current = nextOffset
       setItems((prev) => [...prev, ...rows])
       setHasMore(rows.length === PAGE_SIZE)
+    } catch {
+      toast('Could not load earlier records', 'error')
     } finally {
       setLoadingMore(false)
     }
