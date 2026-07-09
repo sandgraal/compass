@@ -403,6 +403,9 @@ const api = {
       ipcRenderer.invoke('records:on-this-day-v2', opts),
     moments: (opts?: { month?: number; day?: number }) =>
       ipcRenderer.invoke('records:moments', opts),
+    yearReview: (opts?: { year?: number }) => ipcRenderer.invoke('records:year-review', opts),
+    yearReviewMarkdown: (opts?: { year?: number }) =>
+      ipcRenderer.invoke('records:year-review-markdown', opts),
     mute: (opts: { kind: 'record' | 'source-type'; target: string | number }) =>
       ipcRenderer.invoke('records:mute', opts),
     mutes: () => ipcRenderer.invoke('records:mutes'),

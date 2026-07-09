@@ -472,6 +472,22 @@ declare global {
     ingestedAt: number | null
   }
 
+  // --- Year in Review (Timeline 2.0 PR 7) ---
+  interface YearReviewSummary {
+    year: number
+    totalRecords: number
+    monthCounts: number[]
+    topSources: Array<{ source: string; count: number }>
+    topTitles: Array<{ source: string; type: string; title: string; count: number }>
+    firsts: Array<{ kind: string; name: string }>
+    newPeople: number
+    countries: string[]
+    spend: { total: number; biggest: { description: string; amount: number } | null } | null
+    netWorth: { start: number | null; end: number | null } | null
+    habits: Array<{ name: string; completions: number }>
+    narrative: string
+  }
+
   interface Person {
     name: string
     key: string
@@ -1123,6 +1139,8 @@ declare global {
             yearsAgo?: number
           }>
         >
+        yearReview(opts?: { year?: number }): Promise<YearReviewSummary | null>
+        yearReviewMarkdown(opts?: { year?: number }): Promise<string | null>
         mute(opts: {
           kind: 'record' | 'source-type'
           target: string | number

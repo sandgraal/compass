@@ -13,7 +13,7 @@
 
 import { Clock, Globe, Search, Sparkles, Upload } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { DensityHeatmap } from '../components/timeline/DensityHeatmap'
 import { OnThisDayHero } from '../components/timeline/OnThisDayHero'
 import { RecordDetailDrawer } from '../components/timeline/RecordDetailDrawer'
@@ -468,14 +468,24 @@ export default function Timeline(): JSX.Element {
                 </button>
               ))}
               {view === 'browse' && range && (
-                <button
-                  type="button"
-                  onClick={() => setRange(null)}
-                  className="ml-2 text-xs text-primary hover:underline"
-                  title="Clear the selected period"
-                >
-                  {range.label} ✕
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setRange(null)}
+                    className="ml-2 text-xs text-primary hover:underline"
+                    title="Clear the selected period"
+                  >
+                    {range.label} ✕
+                  </button>
+                  {/^\d{4}$/.test(range.label) && (
+                    <Link
+                      to={`/year-review?year=${range.label}`}
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Year in review →
+                    </Link>
+                  )}
+                </>
               )}
             </div>
           )}
