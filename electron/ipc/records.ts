@@ -149,16 +149,23 @@ export function insertRecords(inputs: RecordInput[], provenance: string): { impo
   const db = getDb()
   let imported = 0
   for (const inp of inputs) {
+    // Hash the CLAMPED timestamp so a row's identity always matches what's
+    // stored: if a writer hands in an implausible occurredAt (stored UNDATED),
+    // hashing the raw value would let the same event re-arrive later with a
+    // corrected-to-null date and duplicate instead of deduping. Identical for
+    // every plausible timestamp (clamp is a no-op there).
+    const occurredAt = plausibleOccurredAt(inp.occurredAt)
+    const occurredAtMs = occurredAt ? occurredAt.getTime() : null
     const res = db
       .insert(records)
       .values({
         source: inp.source,
         type: inp.type,
-        occurredAt: plausibleOccurredAt(inp.occurredAt),
+        occurredAt,
         title: inp.title.slice(0, 2000),
         body: inp.body ? inp.body.slice(0, 2000) : null,
         payload: inp.payload !== undefined ? JSON.stringify(inp.payload).slice(0, 100_000) : null,
-        dedupHash: hashRecord(inp.source, inp.type, inp.occurredAt, inp.naturalKey),
+        dedupHash: hashRecord(inp.source, inp.type, occurredAtMs, inp.naturalKey),
         provenance
       })
       .onConflictDoNothing()
@@ -597,16 +604,14 @@ export function reclassifyGenericRecords(): ReclassifyResult {
   )
   const deleteById = sqlite.prepare('DELETE FROM records WHERE id = ?')
 
-  const run = sqlite.transaction(() => {
-    let lastId = 0
-    for (;;) {
-      const chunk = selectChunk.all(lastId) as Array<{
+  const processChunk = sqlite.transaction(
+    (
+      chunk: Array<{
         id: number
         provenance: string | null
         payload: string | null
       }>
-      if (chunk.length === 0) break
-      lastId = chunk[chunk.length - 1].id
+    ) => {
       const plan = planReclassify(chunk)
       // Preserve each row's original import filename on the re-inserted record.
       const byProvenance = new Map<string, RecordInput[]>()
@@ -624,12 +629,24 @@ export function reclassifyGenericRecords(): ReclassifyResult {
       }
       for (const move of plan.records) deleteById.run(move.deleteId)
       for (const move of plan.locations) deleteById.run(move.deleteId)
-      result.moved += plan.records.length
-      result.located += plan.locations.length
-      result.deleted += plan.records.length + plan.locations.length
+      return plan
     }
-  })
-  run()
+  )
+
+  let lastId = 0
+  for (;;) {
+    const chunk = selectChunk.all(lastId) as Array<{
+      id: number
+      provenance: string | null
+      payload: string | null
+    }>
+    if (chunk.length === 0) break
+    lastId = chunk[chunk.length - 1].id
+    const plan = processChunk(chunk)
+    result.moved += plan.records.length
+    result.located += plan.locations.length
+    result.deleted += plan.records.length + plan.locations.length
+  }
 
   if (result.deleted > 0) {
     try {
