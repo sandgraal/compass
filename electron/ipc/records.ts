@@ -32,6 +32,7 @@ import {
 } from '../knowledge/records-embeddings'
 import { updateRecordsKnowledge } from '../knowledge/records-extractor'
 import { serializeCsv } from '../lib/csv'
+import { isPlausibleEpochMs } from '../lib/dates'
 import { refreshDerivedEntities } from '../lib/entities-projection'
 import { LOCATION_RECOGNIZER_IDS, type LocationPayload } from '../lib/location'
 import { extractPdfText } from '../lib/pdf'
@@ -79,6 +80,18 @@ export interface RecordsImportResult {
 
 type RecordRow = typeof records.$inferSelect
 
+/**
+ * Last line of defense for `occurred_at`: recognizers already route ambiguous
+ * cells through `parseWhen` (which range-checks), but live projectors and
+ * future writers hand epoch ms straight in — clamp implausible values (before
+ * 1970 / more than 5 years out) to UNDATED here so no writer can reintroduce
+ * absurd-year rows.
+ */
+function plausibleOccurredAt(ms: number | null | undefined): Date | null {
+  if (ms == null || !isPlausibleEpochMs(ms)) return null
+  return new Date(ms)
+}
+
 function rowToRecord(row: RecordRow) {
   return {
     id: row.id,
@@ -108,7 +121,7 @@ export function insertRecords(inputs: RecordInput[], provenance: string): { impo
       .values({
         source: inp.source,
         type: inp.type,
-        occurredAt: inp.occurredAt != null ? new Date(inp.occurredAt) : null,
+        occurredAt: plausibleOccurredAt(inp.occurredAt),
         title: inp.title.slice(0, 2000),
         body: inp.body ? inp.body.slice(0, 2000) : null,
         payload: inp.payload !== undefined ? JSON.stringify(inp.payload).slice(0, 100_000) : null,
@@ -198,7 +211,7 @@ export function upsertLiveRecords(
   let updated = 0
   for (const { inp, dedupHash } of withHash) {
     const values = {
-      occurredAt: inp.occurredAt != null ? new Date(inp.occurredAt) : null,
+      occurredAt: plausibleOccurredAt(inp.occurredAt),
       title: inp.title.slice(0, 2000),
       body: inp.body ? inp.body.slice(0, 2000) : null,
       payload: inp.payload !== undefined ? JSON.stringify(inp.payload).slice(0, 100_000) : null

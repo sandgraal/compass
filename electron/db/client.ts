@@ -5,6 +5,7 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { backfillGeoFromNotes } from '../integrations/finance-geo'
 import { runSnapshotRepairIfNeeded } from '../integrations/finance-snapshot'
 import { backfillTaxTags } from '../integrations/finance-tax'
+import { runRecordsDateRepairIfNeeded } from '../lib/records-repair'
 import { DATA_DIR } from '../paths'
 import { reconcileMigrationState } from './reconcile'
 import * as schema from './schema'
@@ -56,6 +57,14 @@ export async function initDb(): Promise<void> {
   // history anchored at the live balance, then capture today ('live' rows).
   try {
     runSnapshotRepairIfNeeded(sqlite)
+  } catch {
+    /* non-fatal — retried next launch while the gate key is unset */
+  }
+  // One-shot 2026-07 repair: pre-fix `parseWhen` let ambiguous export cells
+  // through as absurd-year timestamps (year 0…10801). Null them out (payload
+  // keeps the original cell) so year-over-year views are trustworthy.
+  try {
+    runRecordsDateRepairIfNeeded(sqlite)
   } catch {
     /* non-fatal — retried next launch while the gate key is unset */
   }
@@ -322,6 +331,15 @@ function ensureNewTables(sqlite: Database.Database): void {
     CREATE UNIQUE INDEX IF NOT EXISTS records_dedup_hash_unique ON records (dedup_hash);
     CREATE INDEX IF NOT EXISTS idx_records_occurred_at ON records (occurred_at);
     CREATE INDEX IF NOT EXISTS idx_records_source_type ON records (source, type);
+    -- Timeline navigation indexes (migration 0033, mirrored here — the fallback
+    -- path). (source|type, occurred_at) serve filtered newest-first browse;
+    -- the strftime expression indexes turn "on this day" month-day matching and
+    -- per-year histograms from full-table scans into index seeks. Queries must
+    -- use these exact expressions to hit them.
+    CREATE INDEX IF NOT EXISTS idx_records_source_occurred ON records (source, occurred_at);
+    CREATE INDEX IF NOT EXISTS idx_records_type_occurred ON records (type, occurred_at);
+    CREATE INDEX IF NOT EXISTS idx_records_mmdd ON records (strftime('%m-%d', occurred_at / 1000, 'unixepoch'));
+    CREATE INDEX IF NOT EXISTS idx_records_year ON records (CAST(strftime('%Y', occurred_at / 1000, 'unixepoch') AS INTEGER));
     CREATE TABLE IF NOT EXISTS snapshot_facts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       source TEXT NOT NULL, category TEXT NOT NULL, label TEXT, value TEXT NOT NULL,
