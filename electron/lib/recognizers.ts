@@ -229,11 +229,13 @@ function genericRows(f: RecognizerFile): {
   const keys = Object.keys(rows[0])
   // Consider EVERY date-looking column and take the first whose values actually
   // parse — taking just the first name-match once picked `SecondsWatched`
-  // (matches /watched/) over `MostRecentWatchDate` and mis-dated 2k rows.
   const dateKey = keys
     .filter((k) => DATE_KEY.test(k))
-    .find((k) => rows.some((r) => parseWhen(String(r[k] ?? '')) != null))
-  const titleKey = keys.find((k) => TITLE_KEY.test(k)) ?? keys.find((k) => k !== dateKey)
+    .find((k) =>
+      rows
+        .slice(0, 200)
+        .some((r) => parseWhen(String(r[k] ?? '')) != null)
+    )
   if (dateKey) return { rows, dateKey, titleKey }
   return { rows, titleKey }
 }
