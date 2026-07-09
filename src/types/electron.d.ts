@@ -472,6 +472,22 @@ declare global {
     ingestedAt: number | null
   }
 
+  // --- Year in Review (Timeline 2.0 PR 7) ---
+  interface YearReviewSummary {
+    year: number
+    totalRecords: number
+    monthCounts: number[]
+    topSources: Array<{ source: string; count: number }>
+    topTitles: Array<{ source: string; type: string; title: string; count: number }>
+    firsts: Array<{ kind: string; name: string }>
+    newPeople: number
+    countries: string[]
+    spend: { total: number; biggest: { description: string; amount: number } | null } | null
+    netWorth: { start: number | null; end: number | null } | null
+    habits: Array<{ name: string; completions: number }>
+    narrative: string
+  }
+
   interface Person {
     name: string
     key: string
@@ -1115,6 +1131,22 @@ declare global {
           day?: number
           perYearCap?: number
         }): Promise<Array<{ year: number; count: number; records: TimelineRecord[] }>>
+        moments(opts?: { month?: number; day?: number }): Promise<
+          Array<{
+            kind: 'birthday' | 'first-met' | 'first-merchant' | 'purchase-anniversary' | 'renewal'
+            title: string
+            detail?: string
+            yearsAgo?: number
+          }>
+        >
+        yearReview(opts?: { year?: number }): Promise<YearReviewSummary | null>
+        yearReviewMarkdown(opts?: { year?: number }): Promise<string | null>
+        mute(opts: {
+          kind: 'record' | 'source-type'
+          target: string | number
+        }): Promise<{ success: boolean; error?: string }>
+        mutes(): Promise<Array<{ id: number; kind: string; target: string }>>
+        clearMutes(): Promise<{ success: boolean }>
         search(opts: {
           q: string
           source?: string

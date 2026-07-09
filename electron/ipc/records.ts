@@ -20,7 +20,7 @@ import Database from 'better-sqlite3'
 import { type SQL, and, desc, eq, inArray, like, notInArray, or, sql } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
-import { appSettings, locationPoints, records, snapshotFacts } from '../db/schema'
+import { appSettings, locationPoints, records, snapshotFacts, timelineMutes } from '../db/schema'
 import { afterLocationImport } from '../integrations/location-residency'
 import { DEFAULT_EMBED_MODEL } from '../knowledge/embeddings'
 import {
@@ -55,7 +55,14 @@ import {
 } from '../lib/records-aggregates'
 import { planReclassify } from '../lib/records-reclassify'
 import { type RecordSearchOpts, type TimelineSearchHit, searchRecords } from '../lib/records-search'
+import {
+  buildYearReview,
+  yearReviewMarkdown,
+  yearReviewNarrative
+} from '../lib/records-year-review'
 import { FIREHOSE_SOURCE_LIST } from '../lib/source-tiers'
+import { type MuteSet, rankMemories } from '../lib/timeline-memories'
+import { momentsForDay } from '../lib/timeline-moments'
 import { forEachZipEntry } from '../lib/zip'
 
 const MAX_IMPORT_BYTES = 50 * 1024 * 1024 // 50 MB — matches the contacts/finance guard
@@ -86,6 +93,25 @@ export interface RecordsImportResult {
 }
 
 type RecordRow = typeof records.$inferSelect
+
+/** The user's "never resurface" vetoes, shaped for rankMemories. */
+function loadMuteSet(): MuteSet {
+  const recordIds = new Set<number>()
+  const sourceTypes = new Set<string>()
+  try {
+    for (const m of getDb().select().from(timelineMutes).all()) {
+      if (m.kind === 'record') {
+        const id = Number(m.target)
+        if (Number.isFinite(id)) recordIds.add(id)
+      } else if (m.kind === 'source-type') {
+        sourceTypes.add(m.target)
+      }
+    }
+  } catch {
+    /* table absent on an odd/old DB — no mutes */
+  }
+  return { recordIds, sourceTypes }
+}
 
 /**
  * Last line of defense for `occurred_at`: recognizers already route ambiguous
@@ -866,9 +892,11 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
       .from(records)
       .where(and(...conds))
       .orderBy(desc(records.occurredAt), desc(records.id))
-      .limit(limit)
+      .limit(200) // fetch wide, then rank down to the requested limit
       .all()
-    return rows.map(rowToRecord)
+    // Memory ranking (PR 6): mutes + sensitivity + score-ordering, so the
+    // Dashboard card and the Timeline hero agree on what a memory is.
+    return rankMemories(rows.map(rowToRecord), { mutes: loadMuteSet(), cap: limit })
   })
 
   // ── Timeline 2.0 aggregates (PR 3) — the year scrubber / heatmap / day
@@ -942,14 +970,89 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
       const month = typeof opts?.month === 'number' ? opts.month : now.getUTCMonth() + 1
       const day = typeof opts?.day === 'number' ? opts.day : now.getUTCDate()
       const isToday = month === now.getUTCMonth() + 1 && day === now.getUTCDate()
-      return onThisDayAllYears(getRawSqlite(), {
+      const cap = Math.min(Math.max(Math.trunc(opts?.perYearCap ?? 6), 1), 50)
+      // Fetch each year WIDE (lib max), then memory-rank down to the cap —
+      // mutes + sensitivity out, distinctive records above burst noise.
+      const years = onThisDayAllYears(getRawSqlite(), {
         month,
         day,
-        perYearCap: typeof opts?.perYearCap === 'number' ? opts.perYearCap : undefined,
+        perYearCap: 50,
         excludeYear: isToday ? now.getUTCFullYear() : undefined
       })
+      const mutes = loadMuteSet()
+      return years
+        .map((y) => ({ ...y, records: rankMemories(y.records, { mutes, cap }) }))
+        .filter((y) => y.records.length > 0)
     }
   )
+
+  // Anniversary "moments" for a month-day: birthdays, entity firsts,
+  // big-purchase anniversaries, today's renewals (timeline-moments.ts).
+  ipcMain.handle('records:moments', (_event, opts?: { month?: number; day?: number }) => {
+    const now = new Date()
+    const month = typeof opts?.month === 'number' ? opts.month : now.getUTCMonth() + 1
+    const day = typeof opts?.day === 'number' ? opts.day : now.getUTCDate()
+    if (!Number.isInteger(month) || month < 1 || month > 12) return []
+    if (!Number.isInteger(day) || day < 1 || day > 31) return []
+    return momentsForDay(getRawSqlite(), {
+      month,
+      day,
+      currentYear: now.getUTCFullYear(),
+      isToday: month === now.getUTCMonth() + 1 && day === now.getUTCDate()
+    })
+  })
+
+  // Year in Review (PR 7): one year distilled — pure records-year-review.ts.
+  ipcMain.handle('records:year-review', (_event, opts?: { year?: number }) => {
+    const year = Math.trunc(opts?.year ?? new Date().getUTCFullYear())
+    if (!Number.isInteger(year) || year < 1970 || year > 2100) return null
+    const review = buildYearReview(getRawSqlite(), year)
+    return { ...review, narrative: yearReviewNarrative(review) }
+  })
+
+  ipcMain.handle('records:year-review-markdown', (_event, opts?: { year?: number }) => {
+    const year = Math.trunc(opts?.year ?? new Date().getUTCFullYear())
+    if (!Number.isInteger(year) || year < 1970 || year > 2100) return null
+    return yearReviewMarkdown(buildYearReview(getRawSqlite(), year))
+  })
+
+  // ── Memory mutes (PR 6): "never resurface this" — reversible, never deletion.
+  ipcMain.handle('records:mute', (_event, opts?: { kind?: string; target?: string | number }) => {
+    const kind = opts?.kind
+    if (kind !== 'record' && kind !== 'source-type') {
+      return { success: false, error: 'Unknown mute kind' }
+    }
+
+    const target = String(opts?.target ?? '').slice(0, 500)
+    if (!target) return { success: false, error: 'Missing mute target' }
+
+    if (kind === 'record') {
+      const id = Number(target)
+      if (!Number.isInteger(id) || id <= 0) {
+        return { success: false, error: 'Invalid record id' }
+      }
+    }
+
+    getDb().insert(timelineMutes).values({ kind, target }).onConflictDoNothing().run()
+    return { success: true }
+  })
+
+  ipcMain.handle('records:mutes', () => {
+    return getDb()
+      .select()
+      .from(timelineMutes)
+      .all()
+      .map((m) => ({
+        id: m.id,
+        kind: m.kind,
+        target: m.target
+      }))
+  })
+
+  ipcMain.handle('records:clear-mutes', () => {
+    getDb().delete(timelineMutes).run()
+    return { success: true }
+  })
 
   // At-a-glance totals for the Timeline header — the TRUE total (the Timeline UI
   // only loads a 500-row page via records:list), distinct source count, and the

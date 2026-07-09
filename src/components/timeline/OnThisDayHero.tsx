@@ -7,13 +7,35 @@
  * excluded server-side).
  */
 
-import { ChevronLeft, ChevronRight, Sparkles } from 'lucide-react'
+import {
+  Banknote,
+  Cake,
+  ChevronLeft,
+  ChevronRight,
+  RefreshCw,
+  Sparkles,
+  Store,
+  UserPlus
+} from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { RecordRow, sourceMeta } from './timeline-meta'
 
 const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
 
 type YearGroup = { year: number; count: number; records: TimelineRecord[] }
+type Moment = {
+  kind: 'birthday' | 'first-met' | 'first-merchant' | 'purchase-anniversary' | 'renewal'
+  title: string
+  detail?: string
+}
+
+const MOMENT_ICON: Record<Moment['kind'], JSX.Element> = {
+  birthday: <Cake size={13} />,
+  'first-met': <UserPlus size={13} />,
+  'first-merchant': <Store size={13} />,
+  'purchase-anniversary': <Banknote size={13} />,
+  renewal: <RefreshCw size={13} />
+}
 
 const MONTH_NAMES = [
   'January',
@@ -37,20 +59,26 @@ function yearsAgoLabel(yearsAgo: number): string {
 
 export function OnThisDayHero({
   onOpenRecord,
-  onOpenDay
+  onOpenDay,
+  refreshKey = 0
 }: {
   onOpenRecord: (record: TimelineRecord) => void
   /** Drill into one specific UTC day ('YYYY-MM-DD') in Browse mode. */
   onOpenDay: (day: string) => void
+  /** Bump to refetch (e.g. after a mute) without changing the browsed day. */
+  refreshKey?: number
 }): JSX.Element {
   // The browsed month-day (defaults to today, UTC — the archive's day convention).
   const now = new Date()
   const [month, setMonth] = useState(now.getUTCMonth() + 1)
   const [day, setDay] = useState(now.getUTCDate())
   const [years, setYears] = useState<YearGroup[] | null>(null)
+  const [moments, setMoments] = useState<Moment[]>([])
+  const [mutedCount, setMutedCount] = useState(0)
 
   const isToday = month === now.getUTCMonth() + 1 && day === now.getUTCDate()
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey isn't read in the body — it deliberately re-triggers the fetch after a mute changes what should resurface
   useEffect(() => {
     if (!isElectron()) {
       setYears([])
@@ -65,10 +93,46 @@ export function OnThisDayHero({
       .catch(() => {
         if (!stale) setYears([])
       })
+    void window.api.records
+      .moments({ month, day })
+      .then((m) => {
+        if (!stale) setMoments(m)
+      })
+      .catch(() => {
+        if (!stale) setMoments([])
+      })
+    void window.api.records
+      .mutes()
+      .then((m) => {
+        if (!stale) setMutedCount(m.length)
+      })
+      .catch(() => {})
     return () => {
       stale = true
     }
-  }, [month, day])
+  }, [month, day, refreshKey])
+
+  async function restoreMuted(): Promise<void> {
+    if (!isElectron()) return
+    const snapMonth = month
+    const snapDay = day
+    const res = await window.api.records.clearMutes()
+    if (!res?.success) return
+
+    setYears(null)
+    const [groups, mutes, nextMoments] = await Promise.all([
+      window.api.records
+        .onThisDayAllYears({ month: snapMonth, day: snapDay, perYearCap: 6 })
+        .catch(() => []),
+      window.api.records.mutes().catch(() => []),
+      window.api.records.moments({ month: snapMonth, day: snapDay }).catch(() => [])
+    ])
+
+    if (month !== snapMonth || day !== snapDay) return
+    setYears(groups)
+    setMutedCount(mutes.length)
+    setMoments(nextMoments)
+  }
 
   // Step the month-day through the calendar (year-agnostic; leap-safe via a
   // fixed leap reference year so Feb 29 is reachable).
@@ -127,6 +191,25 @@ export function OnThisDayHero({
           </button>
         </div>
       </div>
+
+      {/* Anniversary moments — birthdays, firsts, big-purchase anniversaries,
+          today's renewals. Synthetic memories the spine implies. */}
+      {moments.length > 0 && (
+        <div className="mb-3 space-y-1.5">
+          {moments.map((m, i) => (
+            <div
+              key={`${m.kind}|${m.title}|${m.detail ?? ''}|${i}`}
+              className="flex items-center gap-2.5 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2.5"
+            >
+              <span className="text-primary shrink-0">{MOMENT_ICON[m.kind]}</span>
+              <p className="text-sm text-foreground flex-1 min-w-0 truncate">{m.title}</p>
+              {m.detail && (
+                <span className="text-xs text-muted-foreground shrink-0">{m.detail}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {years === null ? (
         <div className="space-y-3">
@@ -190,6 +273,16 @@ export function OnThisDayHero({
             </div>
           ))}
         </div>
+      )}
+
+      {/* Mutes are reversible — surface the escape hatch wherever they apply. */}
+      {mutedCount > 0 && (
+        <p className="mt-3 text-xs text-muted-foreground">
+          {mutedCount} memor{mutedCount === 1 ? 'y is' : 'ies are'} muted from resurfacing.{' '}
+          <button type="button" onClick={restoreMuted} className="text-primary hover:underline">
+            Restore all
+          </button>
+        </p>
       )}
     </section>
   )

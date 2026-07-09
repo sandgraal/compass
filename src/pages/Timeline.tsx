@@ -13,7 +13,8 @@
 
 import { Clock, Globe, Search, Sparkles, Upload } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
+import { DensityHeatmap } from '../components/timeline/DensityHeatmap'
 import { OnThisDayHero } from '../components/timeline/OnThisDayHero'
 import { RecordDetailDrawer } from '../components/timeline/RecordDetailDrawer'
 import { RecordList } from '../components/timeline/RecordList'
@@ -26,7 +27,7 @@ const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
 
 const PAGE_SIZE = 500
 const VIEW_SETTING_KEY = 'timelineView'
-type View = 'day' | 'browse'
+type View = 'day' | 'browse' | 'density'
 
 export default function Timeline(): JSX.Element {
   const [view, setView] = useState<View>('day')
@@ -63,6 +64,7 @@ export default function Timeline(): JSX.Element {
     count: number
   } | null>(null)
   const [detail, setDetail] = useState<TimelineRecord | null>(null)
+  const [memoryTick, setMemoryTick] = useState(0) // bumps hero refetch after mutes
   const [busy, setBusy] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const { toast } = useToast()
@@ -75,7 +77,11 @@ export default function Timeline(): JSX.Element {
     let canceled = false
     void window.api.settings.get(VIEW_SETTING_KEY).then((v) => {
       if (canceled) return
-      if (v === 'browse' || v === 'day') setView((prev) => (prev === 'day' ? v : prev))
+      // 'density' joined the lens set in PR 5; only apply the persisted lens if
+      // the user hasn't already switched away from the default (main's guard).
+      if (v === 'browse' || v === 'day' || v === 'density') {
+        setView((prev) => (prev === 'day' ? v : prev))
+      }
     })
     return () => {
       canceled = true
@@ -284,6 +290,18 @@ export default function Timeline(): JSX.Element {
     setQuery(title)
   }
 
+  async function muteMemory(kind: 'record' | 'source-type', target: string): Promise<void> {
+    if (!isElectron()) return
+    const res = await window.api.records.mute({ kind, target })
+    if (res.success) {
+      toast('Muted from On this day — restore anytime from the hero', 'success')
+      setDetail(null)
+      setMemoryTick((t) => t + 1)
+    } else {
+      toast(res.error ?? 'Could not mute', 'error')
+    }
+  }
+
   // Chips come from whole-timeline facets, unioned with active selections so a
   // chip stays clearable even if a concurrent import narrows the table.
   const sources = [...new Set([...facets.sources, ...sourcesSel])].sort()
@@ -430,7 +448,8 @@ export default function Timeline(): JSX.Element {
               {(
                 [
                   ['day', 'This day'],
-                  ['browse', 'Browse']
+                  ['browse', 'Browse'],
+                  ['density', 'Density']
                 ] as Array<[View, string]>
               ).map(([v, label]) => (
                 <button
@@ -449,21 +468,45 @@ export default function Timeline(): JSX.Element {
                 </button>
               ))}
               {view === 'browse' && range && (
-                <button
-                  type="button"
-                  onClick={() => setRange(null)}
-                  className="ml-2 text-xs text-primary hover:underline"
-                  title="Clear the selected period"
-                >
-                  {range.label} ✕
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setRange(null)}
+                    className="ml-2 text-xs text-primary hover:underline"
+                    title="Clear the selected period"
+                  >
+                    {range.label} ✕
+                  </button>
+                  {/^\d{4}$/.test(range.label) && (
+                    <Link
+                      to={`/year-review?year=${range.label}`}
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Year in review →
+                    </Link>
+                  )}
+                </>
               )}
             </div>
           )}
 
           {/* THIS DAY — the all-years memory lens. */}
           {!searching && view === 'day' && (
-            <OnThisDayHero onOpenRecord={setDetail} onOpenDay={openDay} />
+            <OnThisDayHero onOpenRecord={setDetail} onOpenDay={openDay} refreshKey={memoryTick} />
+          )}
+
+          {/* DENSITY — the whole archive as a year × month heatmap. */}
+          {!searching && view === 'density' && (
+            <DensityHeatmap
+              onPickMonth={(year, month0) => {
+                setRange({
+                  from: Date.UTC(year, month0, 1),
+                  to: Date.UTC(year, month0 + 1, 1) - 1,
+                  label: `${new Date(Date.UTC(year, month0, 1)).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' })} ${year}`
+                })
+                switchView('browse')
+              }}
+            />
           )}
 
           {/* BROWSE + search results share the filters and the list. */}
@@ -574,6 +617,7 @@ export default function Timeline(): JSX.Element {
           record={detail}
           onClose={() => setDetail(null)}
           onFindSimilar={findSimilar}
+          onMute={(kind, target) => void muteMemory(kind, target)}
         />
       )}
     </div>

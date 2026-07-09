@@ -28,7 +28,9 @@
     "test:run": "vitest --run --passWithNoTests",
     "test:coverage": "vitest --run --coverage --passWithNoTests",
     "test:e2e": "playwright test --pass-with-no-tests",
-    "screenshots": "npm rebuild better-sqlite3 && DEMO_HOME=\"$(mktemp -d)\" && COMPASS_SEED_DEMO=1 COMPASS_HOME=\"$DEMO_HOME\" tsx scripts/seed-demo.ts && npm run build && electron-builder install-app-deps && COMPASS_DEMO_HOME=\"$DEMO_HOME\" playwright test e2e/screenshots.e2e.ts; CODE=$?; npm rebuild better-sqlite3; exit $CODE",
+    "rebuild:electron": "node -e \"const fs=require('fs'); const paths=['node_modules/better-sqlite3/build/Release/better_sqlite3.node','node_modules/better-sqlite3/.forge-meta','node_modules/better-sqlite3/build/Release/.forge-meta']; for (const p of paths) { try { fs.rmSync(p,{force:true,recursive:true}); } catch {} }\" && electron-builder install-app-deps",
+    "rebuild:node": "node -e \"const fs=require('fs'); const paths=['node_modules/better-sqlite3/build/Release/better_sqlite3.node','node_modules/better-sqlite3/.forge-meta','node_modules/better-sqlite3/build/Release/.forge-meta']; for (const p of paths) { try { fs.rmSync(p,{force:true,recursive:true}); } catch {} }\" && npm rebuild better-sqlite3",
+    "screenshots": "npm run rebuild:node && DEMO_HOME=\"$(mktemp -d)\" && COMPASS_SEED_DEMO=1 COMPASS_HOME=\"$DEMO_HOME\" tsx scripts/seed-demo.ts && npm run build && npm run rebuild:electron && COMPASS_DEMO_HOME=\"$DEMO_HOME\" playwright test e2e/screenshots.e2e.ts; CODE=$?; npm run rebuild:node; exit $CODE",
     "knip": "knip",
     "status": "tsx scripts/project-status.ts",
     "prepare": "lefthook install"
