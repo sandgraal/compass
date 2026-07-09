@@ -196,9 +196,9 @@ export function OnThisDayHero({
           today's renewals. Synthetic memories the spine implies. */}
       {moments.length > 0 && (
         <div className="mb-3 space-y-1.5">
-          {moments.map((m) => (
+          {moments.map((m, i) => (
             <div
-              key={`${m.kind}|${m.title}`}
+              key={`${m.kind}|${m.title}|${m.detail ?? ''}|${i}`}
               className="flex items-center gap-2.5 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2.5"
             >
               <span className="text-primary shrink-0">{MOMENT_ICON[m.kind]}</span>
