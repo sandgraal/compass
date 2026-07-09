@@ -70,7 +70,10 @@ export function RecordDetailDrawer({
         onClick={onClose}
         className="absolute inset-0 bg-black/30 backdrop-blur-[2px]"
       />
+      {/* biome-ignore lint/a11y/useSemanticElements: a native <dialog> needs showModal() plumbing; role="dialog" + aria-modal on the drawer is the intended semantics here */}
       <aside
+        role="dialog"
+        aria-modal="true"
         aria-label="Record details"
         className="absolute right-0 top-0 h-full w-full max-w-md bg-background border-l border-border shadow-2xl overflow-y-auto animate-fade-in"
       >
