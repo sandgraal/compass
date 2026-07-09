@@ -114,11 +114,24 @@ export function OnThisDayHero({
 
   async function restoreMuted(): Promise<void> {
     if (!isElectron()) return
-    await window.api.records.clearMutes()
-    setMutedCount(0)
-    // Refetch through the same effect by nudging state (day unchanged).
+    const snapMonth = month
+    const snapDay = day
+    const res = await window.api.records.clearMutes()
+    if (!res?.success) return
+
     setYears(null)
-    void window.api.records.onThisDayAllYears({ month, day, perYearCap: 6 }).then(setYears)
+    const [groups, mutes, nextMoments] = await Promise.all([
+      window.api.records
+        .onThisDayAllYears({ month: snapMonth, day: snapDay, perYearCap: 6 })
+        .catch(() => []),
+      window.api.records.mutes().catch(() => []),
+      window.api.records.moments({ month: snapMonth, day: snapDay }).catch(() => [])
+    ])
+
+    if (month !== snapMonth || day !== snapDay) return
+    setYears(groups)
+    setMutedCount(mutes.length)
+    setMoments(nextMoments)
   }
 
   // Step the month-day through the calendar (year-agnostic; leap-safe via a
@@ -183,9 +196,9 @@ export function OnThisDayHero({
           today's renewals. Synthetic memories the spine implies. */}
       {moments.length > 0 && (
         <div className="mb-3 space-y-1.5">
-          {moments.map((m) => (
+          {moments.map((m, i) => (
             <div
-              key={`${m.kind}|${m.title}`}
+              key={`${m.kind}|${m.title}|${m.detail ?? ''}|${i}`}
               className="flex items-center gap-2.5 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2.5"
             >
               <span className="text-primary shrink-0">{MOMENT_ICON[m.kind]}</span>
