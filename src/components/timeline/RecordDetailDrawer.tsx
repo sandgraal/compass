@@ -67,6 +67,7 @@ export function RecordDetailDrawer({
         onClick={onClose}
         className="absolute inset-0 bg-black/30 backdrop-blur-[2px]"
       />
+      {/* biome-ignore lint/a11y/useSemanticElements: native <dialog> requires imperative showModal(); declarative pattern kept (same as Daily.tsx) */}
       <aside
         role="dialog"
         aria-modal="true"
