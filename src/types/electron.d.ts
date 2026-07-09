@@ -327,6 +327,51 @@ declare global {
     country?: string
     pref?: boolean
   }
+  // Contact enrichment — mirrors electron/lib/contact-enrichment.ts. Two
+  // namespaces so the Google sync (`google`) and the cross-source pass
+  // (`crossSource`) never clobber each other.
+  interface GoogleEnrichment {
+    nicknames?: string[]
+    biography?: string | null
+    urls?: { type?: string; value: string }[]
+    imHandles?: { protocol?: string; username: string }[]
+    relations?: { person: string; type?: string }[]
+    importantDates?: { type?: string; date: string }[]
+    occupations?: string[]
+    organizations?: { name?: string; title?: string }[]
+    googleLabels?: string[]
+    userDefined?: { key: string; value: string }[]
+    phoneticName?: string | null
+    updatedAt?: number | null
+    photoUrl?: string | null
+  }
+  interface CrossSourceActivity {
+    source: string
+    type: string
+    title: string
+    occurredAt: number | null
+    recordId: number
+  }
+  interface CrossSourceSummary {
+    sources: string[]
+    touchpointCount: number
+    firstSeen: number | null
+    lastSeen: number | null
+    lastActivity: CrossSourceActivity | null
+    matchedBy: ('name' | 'email' | 'phone')[]
+    refreshedAt: number
+  }
+  interface ContactEnrichment {
+    google?: GoogleEnrichment
+    crossSource?: CrossSourceSummary
+  }
+  interface ContactActivityHit {
+    recordId: number
+    source: string
+    type: string
+    title: string
+    occurredAt: number | null
+  }
   interface ContactRecord {
     id: number
     externalId: string
@@ -347,6 +392,7 @@ declare global {
     notes: string | null
     photo: string | null
     source: string
+    enrichment: ContactEnrichment | null
     createdAt: number | null
     updatedAt: number | null
   }
@@ -369,6 +415,7 @@ declare global {
     notes?: string | null
     photo?: string | null
     source?: string
+    enrichment?: ContactEnrichment | null
   }
   type ImportResult = {
     success: boolean
@@ -1084,6 +1131,13 @@ declare global {
         importGvoice(): Promise<ImportResult>
         exportVcard(ids?: number[]): Promise<ExportResult>
         exportCsv(ids?: number[]): Promise<ExportResult>
+        enrichAll(): Promise<{
+          success: boolean
+          enriched: number
+          photos: number
+          error?: string
+        }>
+        activity(id: number): Promise<ContactActivityHit[]>
       }
       storehouse: {
         summary(): Promise<StorehouseSummary>

@@ -24,6 +24,12 @@ import {
   parseGoogleVoice,
   parseLinkedInConnections
 } from '../lib/archive-importers'
+import {
+  type ContactEnrichment,
+  type CrossSourceSummary,
+  mergeEnrichment,
+  parseEnrichment
+} from '../lib/contact-enrichment'
 import { parseCSV, serializeCsv } from '../lib/csv'
 import {
   type ContactAddress,
@@ -64,6 +70,7 @@ export interface ContactInput {
   notes?: string | null
   photo?: string | null
   source?: string
+  enrichment?: ContactEnrichment | null
 }
 
 /** What the renderer receives. Arrays are parsed back from JSON. */
@@ -87,6 +94,7 @@ export interface ContactRecord {
   notes: string | null
   photo: string | null
   source: string
+  enrichment: ContactEnrichment | null
   createdAt: number | null
   updatedAt: number | null
 }
@@ -115,17 +123,27 @@ function computeSearchBlob(input: {
   org?: string | null
   emails?: ContactEmail[]
   phones?: ContactPhone[]
+  nicknames?: string[]
 }): string {
   const parts: string[] = []
   if (input.displayName) parts.push(input.displayName)
   if (input.org) parts.push(input.org)
   for (const e of input.emails ?? []) if (e.value) parts.push(e.value)
   for (const p of input.phones ?? []) if (p.value) parts.push(p.value)
+  for (const n of input.nicknames ?? []) if (n) parts.push(n)
   return parts.join(' ').toLowerCase()
 }
 
-/** DB row → renderer record (parse JSON arrays). `includePhoto=false` for list payloads. */
-function rowToRecord(row: ContactRow, includePhoto: boolean): ContactRecord {
+/**
+ * DB row → renderer record (parse JSON arrays). `includePhoto=false` for list
+ * payloads (keeps them light); `includeEnrichment=false` likewise — the
+ * enrichment blob only rides on `contacts:get`.
+ */
+function rowToRecord(
+  row: ContactRow,
+  includePhoto: boolean,
+  includeEnrichment: boolean
+): ContactRecord {
   return {
     id: row.id,
     externalId: row.externalId,
@@ -146,6 +164,7 @@ function rowToRecord(row: ContactRow, includePhoto: boolean): ContactRecord {
     notes: row.notes,
     photo: includePhoto ? row.photo : null,
     source: row.source,
+    enrichment: includeEnrichment ? parseEnrichment(row.enrichment) : null,
     createdAt: row.createdAt ? row.createdAt.getTime() : null,
     updatedAt: row.updatedAt ? row.updatedAt.getTime() : null
   }
@@ -203,7 +222,16 @@ function toStorage(input: ContactInput) {
     relationship: clamp(input.relationship, MAX_TEXT),
     notes: clamp(input.notes, MAX_NOTES),
     photo,
-    searchBlob: computeSearchBlob({ displayName, org, emails, phones })
+    // Enrichment nicknames make the list search match "Bob" for a Robert. We
+    // only READ enrichment here for the blob — `toStorage` never EMITS the
+    // enrichment column, so a manual create/update can't clobber it.
+    searchBlob: computeSearchBlob({
+      displayName,
+      org,
+      emails,
+      phones,
+      nicknames: input.enrichment?.google?.nicknames
+    })
   }
 }
 
@@ -247,13 +275,27 @@ export function upsertContacts(inputs: ContactInput[]): { imported: number; upda
     const externalId = input.externalId?.trim() || `urn:uuid:${randomUUID()}`
     const storage = toStorage(input)
     const existing = db
-      .select({ id: contacts.id })
+      .select({ id: contacts.id, enrichment: contacts.enrichment })
       .from(contacts)
       .where(eq(contacts.externalId, externalId))
       .all()
+    // Only touch the enrichment column when this input carries enrichment, and
+    // merge BY NAMESPACE against what's stored so a Google-sync write (which
+    // supplies `google`) preserves any `crossSource` block, and vice-versa.
+    const enrichmentValue =
+      input.enrichment != null
+        ? JSON.stringify(
+            mergeEnrichment(parseEnrichment(existing[0]?.enrichment ?? null), input.enrichment)
+          )
+        : undefined
     if (existing.length > 0) {
       db.update(contacts)
-        .set({ ...storage, source: input.source ?? 'vcard', updatedAt: new Date() })
+        .set({
+          ...storage,
+          source: input.source ?? 'vcard',
+          updatedAt: new Date(),
+          ...(enrichmentValue !== undefined ? { enrichment: enrichmentValue } : {})
+        })
         .where(eq(contacts.externalId, externalId))
         .run()
       updated++
@@ -264,13 +306,52 @@ export function upsertContacts(inputs: ContactInput[]): { imported: number; upda
           externalId,
           source: input.source ?? 'vcard',
           createdAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: new Date(),
+          ...(enrichmentValue !== undefined ? { enrichment: enrichmentValue } : {})
         })
         .run()
       imported++
     }
   }
   return { imported, updated }
+}
+
+/**
+ * Merge-write ONLY the `crossSource` half of a contact's enrichment, preserving
+ * any `google` block. Skips the write (returns false) when the summary is
+ * unchanged — ignoring `refreshedAt` — so the auto pass after every sync doesn't
+ * churn `updatedAt` on contacts whose activity hasn't actually moved. Does not
+ * touch `profile/relationships.md`.
+ */
+export function writeContactEnrichment(
+  contactId: number,
+  crossSource: CrossSourceSummary
+): boolean {
+  const db = getDb()
+  const row = db
+    .select({ enrichment: contacts.enrichment })
+    .from(contacts)
+    .where(eq(contacts.id, contactId))
+    .all()[0]
+  if (!row) return false
+  const existing = parseEnrichment(row.enrichment)
+  if (crossSourceEqual(existing.crossSource, crossSource)) return false
+  const merged = mergeEnrichment(existing, { crossSource })
+  db.update(contacts)
+    .set({ enrichment: JSON.stringify(merged), updatedAt: new Date() })
+    .where(eq(contacts.id, contactId))
+    .run()
+  return true
+}
+
+/** Structural equality of two summaries, ignoring the ever-changing `refreshedAt`. */
+function crossSourceEqual(a: CrossSourceSummary | undefined, b: CrossSourceSummary): boolean {
+  if (!a) return false
+  const strip = (s: CrossSourceSummary): Omit<CrossSourceSummary, 'refreshedAt'> => {
+    const { refreshedAt: _drop, ...rest } = s
+    return rest
+  }
+  return JSON.stringify(strip(a)) === JSON.stringify(strip(b))
 }
 
 /**
@@ -503,7 +584,7 @@ export function registerContactsHandlers(ipcMain: IpcMain): void {
           .all()
       : db.select().from(contacts).all()
     return rows
-      .map((r) => rowToRecord(r, false))
+      .map((r) => rowToRecord(r, false, false))
       .sort((a, b) => a.displayName.localeCompare(b.displayName))
   })
 
@@ -511,7 +592,7 @@ export function registerContactsHandlers(ipcMain: IpcMain): void {
     if (!Number.isInteger(id)) throw new Error('contacts:get requires an integer id')
     const db = getDb()
     const row = db.select().from(contacts).where(eq(contacts.id, id)).all()[0]
-    return row ? rowToRecord(row, true) : null
+    return row ? rowToRecord(row, true, true) : null
   })
 
   ipcMain.handle('contacts:create', (_event, input: ContactInput) => {

@@ -357,7 +357,10 @@ const api = {
     importFacebook: () => ipcRenderer.invoke('contacts:import-facebook'),
     importGvoice: () => ipcRenderer.invoke('contacts:import-gvoice'),
     exportVcard: (ids?: number[]) => ipcRenderer.invoke('contacts:export-vcard', { ids }),
-    exportCsv: (ids?: number[]) => ipcRenderer.invoke('contacts:export-csv', { ids })
+    exportCsv: (ids?: number[]) => ipcRenderer.invoke('contacts:export-csv', { ids }),
+    // Go out and enrich every contact from Google + your connected sources.
+    enrichAll: () => ipcRenderer.invoke('contacts:enrich-all'),
+    activity: (id: number) => ipcRenderer.invoke('contacts:activity', id)
   },
 
   // --- Storehouse overview (Phase 9.6 — "see ALL my info in one place") ---

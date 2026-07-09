@@ -1,12 +1,19 @@
 import {
+  Activity,
+  Briefcase,
   Building2,
   Cake,
+  CalendarClock,
   Download,
+  Globe,
   Mail,
   MapPin,
+  MessageCircle,
   Pencil,
   Phone,
   Plus,
+  Sparkles,
+  Tag,
   Trash2,
   Upload,
   UserPlus,
@@ -14,6 +21,7 @@ import {
   X
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
 import { cn } from '../lib/utils'
@@ -53,8 +61,14 @@ export default function Contacts(): JSX.Element {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<ContactInput>(EMPTY_DRAFT)
   const [busy, setBusy] = useState(false)
+  const [enriching, setEnriching] = useState(false)
+  const [activity, setActivity] = useState<ContactActivityHit[]>([])
+  const [activityLoading, setActivityLoading] = useState(false)
   const { toast } = useToast()
   const confirm = useConfirm()
+  const navigate = useNavigate()
+
+  const openTimeline = (query: string): void => navigate(`/timeline?q=${encodeURIComponent(query)}`)
 
   useEffect(() => {
     void load(search)
@@ -81,9 +95,40 @@ export default function Contacts(): JSX.Element {
   async function openContact(id: number): Promise<void> {
     setSelectedId(id)
     setEditing(false)
+    setActivity([])
     if (!isElectron()) return
     const rec = await window.api.contacts.get(id)
     setSelected(rec)
+    // Lazily load the live "recent activity" feed for this contact.
+    setActivityLoading(true)
+    try {
+      setActivity(await window.api.contacts.activity(id))
+    } catch (err) {
+      console.error('[contacts] activity failed', err)
+      setActivity([])
+    } finally {
+      setActivityLoading(false)
+    }
+  }
+
+  async function enrichAll(): Promise<void> {
+    if (!isElectron()) return
+    setEnriching(true)
+    try {
+      const r = await window.api.contacts.enrichAll()
+      if (r.success) {
+        toast(`Enriched ${r.enriched} contact(s) from your connected sources.`, 'success')
+        await load(search)
+        if (selectedId != null) await openContact(selectedId)
+      } else {
+        toast(`Enrich failed: ${r.error ?? 'unknown error'}`, 'error')
+      }
+    } catch (err) {
+      console.error('[contacts] enrich-all failed', err)
+      toast('Enrich failed.', 'error')
+    } finally {
+      setEnriching(false)
+    }
   }
 
   function startAdd(): void {
@@ -336,6 +381,18 @@ export default function Contacts(): JSX.Element {
               : (selected?.displayName ?? 'Contacts')}
           </h1>
           <div className="flex items-center gap-2">
+            {!editing && (
+              <button
+                type="button"
+                onClick={enrichAll}
+                disabled={enriching}
+                title="Pull everything Google knows + cross-reference your connected sources"
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-primary/40 hover:border-primary text-primary rounded-lg transition-colors disabled:opacity-50"
+              >
+                <Sparkles size={12} className={cn(enriching && 'animate-pulse')} />
+                {enriching ? 'Enriching…' : 'Enrich all'}
+              </button>
+            )}
             {!editing && selected && (
               <>
                 <button
@@ -376,7 +433,12 @@ export default function Contacts(): JSX.Element {
               busy={busy}
             />
           ) : selected ? (
-            <ContactDetail contact={selected} />
+            <ContactDetail
+              contact={selected}
+              activity={activity}
+              activityLoading={activityLoading}
+              onOpenTimeline={openTimeline}
+            />
           ) : (
             <EmptyState onAdd={startAdd} onImport={() => importFrom('vcard')} />
           )}
@@ -445,23 +507,76 @@ function EmptyState({ onAdd, onImport }: { onAdd: () => void; onImport: () => vo
   )
 }
 
-function ContactDetail({ contact }: { contact: ContactRecord }): JSX.Element {
+function ContactDetail({
+  contact,
+  activity,
+  activityLoading,
+  onOpenTimeline
+}: {
+  contact: ContactRecord
+  activity: ContactActivityHit[]
+  activityLoading: boolean
+  onOpenTimeline: (query: string) => void
+}): JSX.Element {
+  const g = contact.enrichment?.google
+  const cs = contact.enrichment?.crossSource
+  const links = [
+    ...(contact.url ? [{ type: undefined as string | undefined, value: contact.url }] : []),
+    ...(g?.urls ?? []).filter((u) => u.value !== contact.url)
+  ]
   return (
     <div className="max-w-2xl space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold text-foreground">{contact.displayName}</h2>
-        {(contact.jobTitle || contact.org) && (
-          <p className="text-sm text-muted-foreground flex items-center gap-1.5 mt-1">
-            <Building2 size={13} />
-            {[contact.jobTitle, contact.org].filter(Boolean).join(' · ')}
-          </p>
+      <div className="flex items-start gap-4">
+        {contact.photo && (
+          // Photo is a locally-stored data URI (see contact-enrich.ts) — no network at render.
+          <img
+            src={contact.photo}
+            alt=""
+            className="w-16 h-16 rounded-full object-cover border border-border shrink-0"
+          />
         )}
-        {contact.relationship && (
-          <span className="inline-block mt-2 text-xs px-2 py-0.5 rounded-full bg-secondary text-muted-foreground capitalize">
-            {contact.relationship}
-          </span>
-        )}
+        <div className="min-w-0">
+          <h2 className="text-2xl font-semibold text-foreground">{contact.displayName}</h2>
+          {g?.nicknames && g.nicknames.length > 0 && (
+            <p className="text-sm text-muted-foreground mt-0.5">“{g.nicknames.join('”, “')}”</p>
+          )}
+          {(contact.jobTitle || contact.org) && (
+            <p className="text-sm text-muted-foreground flex items-center gap-1.5 mt-1">
+              <Building2 size={13} />
+              {[contact.jobTitle, contact.org].filter(Boolean).join(' · ')}
+            </p>
+          )}
+          {contact.relationship && (
+            <span className="inline-block mt-2 text-xs px-2 py-0.5 rounded-full bg-secondary text-muted-foreground capitalize">
+              {contact.relationship}
+            </span>
+          )}
+        </div>
       </div>
+
+      {cs && cs.sources.length > 0 && (
+        <button
+          type="button"
+          onClick={() => onOpenTimeline(contact.displayName)}
+          className="w-full text-left rounded-lg border border-border hover:border-primary/50 bg-secondary/40 px-3 py-2.5 transition-colors"
+        >
+          <p className="text-sm text-foreground flex items-center gap-1.5">
+            <Activity size={13} className="text-primary" />
+            Seen across {cs.sources.length} source{cs.sources.length === 1 ? '' : 's'}
+            <span className="text-muted-foreground">· {cs.touchpointCount} touchpoints</span>
+          </p>
+          <p className="text-xs text-muted-foreground mt-1 capitalize">{cs.sources.join(', ')}</p>
+        </button>
+      )}
+
+      {g?.biography && (
+        <div>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
+            About
+          </p>
+          <p className="text-sm text-foreground whitespace-pre-wrap">{g.biography}</p>
+        </div>
+      )}
 
       {contact.phones.length > 0 && (
         <DetailGroup icon={<Phone size={14} />} title="Phone">
@@ -502,6 +617,63 @@ function ContactDetail({ contact }: { contact: ContactRecord }): JSX.Element {
           <DetailRow value={contact.birthday} />
         </DetailGroup>
       )}
+      {links.length > 0 && (
+        <DetailGroup icon={<Globe size={14} />} title="Links">
+          {links.map((u, i) => (
+            <DetailRow key={`${u.value}-${i}`} label={u.type} value={u.value} href={u.value} />
+          ))}
+        </DetailGroup>
+      )}
+      {g?.imHandles && g.imHandles.length > 0 && (
+        <DetailGroup icon={<MessageCircle size={14} />} title="Messaging">
+          {g.imHandles.map((im, i) => (
+            <DetailRow key={`${im.username}-${i}`} label={im.protocol} value={im.username} />
+          ))}
+        </DetailGroup>
+      )}
+      {g?.relations && g.relations.length > 0 && (
+        <DetailGroup icon={<Users size={14} />} title="Relationships">
+          {g.relations.map((r, i) => (
+            <DetailRow key={`${r.person}-${i}`} label={r.type} value={r.person} />
+          ))}
+        </DetailGroup>
+      )}
+      {g?.importantDates && g.importantDates.length > 0 && (
+        <DetailGroup icon={<CalendarClock size={14} />} title="Dates">
+          {g.importantDates.map((d, i) => (
+            <DetailRow key={`${d.date}-${i}`} label={d.type} value={d.date} />
+          ))}
+        </DetailGroup>
+      )}
+      {((g?.occupations && g.occupations.length > 0) ||
+        (g?.organizations && g.organizations.length > 0)) && (
+        <DetailGroup icon={<Briefcase size={14} />} title="Work">
+          {(g?.occupations ?? []).map((o) => (
+            <DetailRow key={`occ-${o}`} value={o} />
+          ))}
+          {(g?.organizations ?? []).map((o) => (
+            <DetailRow
+              key={`org-${o.name ?? o.title}`}
+              label={o.title}
+              value={o.name ?? o.title ?? ''}
+            />
+          ))}
+        </DetailGroup>
+      )}
+      {g?.googleLabels && g.googleLabels.length > 0 && (
+        <DetailGroup icon={<Tag size={14} />} title="Labels">
+          <div className="flex flex-wrap gap-1.5">
+            {g.googleLabels.map((label) => (
+              <span
+                key={label}
+                className="text-xs px-2 py-0.5 rounded-full bg-secondary text-muted-foreground"
+              >
+                {label}
+              </span>
+            ))}
+          </div>
+        </DetailGroup>
+      )}
       {contact.notes && (
         <div>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
@@ -509,6 +681,28 @@ function ContactDetail({ contact }: { contact: ContactRecord }): JSX.Element {
           </p>
           <p className="text-sm text-foreground whitespace-pre-wrap">{contact.notes}</p>
         </div>
+      )}
+      {(activityLoading || activity.length > 0) && (
+        <DetailGroup icon={<Activity size={14} />} title="Recent activity">
+          {activityLoading ? (
+            <p className="text-xs text-muted-foreground">Looking across your timeline…</p>
+          ) : (
+            activity.map((a) => (
+              <button
+                type="button"
+                key={a.recordId}
+                onClick={() => onOpenTimeline(contact.displayName)}
+                className="w-full flex items-baseline justify-between gap-3 text-left rounded-md px-2 py-1 -mx-2 hover:bg-secondary/60 transition-colors"
+              >
+                <span className="text-sm text-foreground truncate">{a.title}</span>
+                <span className="text-xs text-muted-foreground shrink-0 capitalize">
+                  {a.source}
+                  {a.occurredAt ? ` · ${new Date(a.occurredAt).toLocaleDateString()}` : ''}
+                </span>
+              </button>
+            ))
+          )}
+        </DetailGroup>
       )}
     </div>
   )

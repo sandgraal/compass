@@ -527,9 +527,15 @@ export const contacts = sqliteTable('contacts', {
   photo: text('photo'),
   // 'manual' | 'vcard' | 'csv' | 'macos' | 'google' | 'linkedin' | 'facebook' | 'gvoice'
   source: text('source').notNull().default('manual'),
-  // Lowercased name + org + emails + phones, recomputed on every write. Powers
-  // the LIKE search in contacts:list without a join or a full-text index.
+  // Lowercased name + org + emails + phones (+ enrichment nicknames), recomputed
+  // on every write. Powers the LIKE search in contacts:list without a join.
   searchBlob: text('search_blob'),
+  // JSON `ContactEnrichment` (electron/lib/contact-enrichment.ts): two namespaces
+  // — `google` (rich People API fields with no dedicated column) + `crossSource`
+  // (how the user knows this person across every connected source). NEVER
+  // selected in list queries (only in contacts:get), like `photo`, so the list
+  // payload stays light.
+  enrichment: text('enrichment'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
