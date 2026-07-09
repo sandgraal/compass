@@ -21,7 +21,7 @@ beforeEach(() => {
       id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
       given_name TEXT, family_name TEXT, middle_name TEXT, prefix TEXT, suffix TEXT, org TEXT, job_title TEXT,
       phones TEXT, emails TEXT, addresses TEXT, birthday TEXT, url TEXT, relationship TEXT, notes TEXT, photo TEXT,
-      source TEXT NOT NULL DEFAULT 'manual', search_blob TEXT, created_at INTEGER, updated_at INTEGER
+      source TEXT NOT NULL DEFAULT 'manual', search_blob TEXT, enrichment TEXT, created_at INTEGER, updated_at INTEGER
     );
     CREATE TABLE subscriptions (
       id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, name TEXT NOT NULL,

@@ -63,6 +63,7 @@ beforeEach(async () => {
       birthday TEXT, url TEXT, relationship TEXT, notes TEXT, photo TEXT,
       source TEXT NOT NULL DEFAULT 'manual',
       search_blob TEXT,
+      enrichment TEXT,
       created_at INTEGER, updated_at INTEGER
     );
   `)
@@ -311,6 +312,108 @@ describe('contacts import / export', () => {
     expect(res).toMatchObject({ success: true, imported: 1 })
   })
 })
+
+describe('contacts enrichment', () => {
+  it('upsert stores google enrichment; get includes it, list omits it', async () => {
+    const { upsertContacts } = await import('./contacts')
+    upsertContacts([
+      {
+        externalId: 'people/c1',
+        displayName: 'Robert Roe',
+        source: 'google',
+        enrichment: { google: { nicknames: ['Bob'], biography: 'Old friend' } }
+      }
+    ])
+    const listed = (await invoke('contacts:list')) as Array<{ enrichment: unknown }>
+    expect(listed[0].enrichment).toBeNull() // list payload stays light
+    const id = (listed[0] as unknown as { id: number }).id
+    const got = (await invoke('contacts:get', id)) as {
+      enrichment: ContactEnrichmentShape
+    }
+    expect(got.enrichment?.google?.nicknames).toEqual(['Bob'])
+    expect(got.enrichment?.google?.biography).toBe('Old friend')
+  })
+
+  it('search matches an enrichment nickname', async () => {
+    const { upsertContacts } = await import('./contacts')
+    upsertContacts([
+      {
+        externalId: 'people/c2',
+        displayName: 'Margaret Smith',
+        source: 'google',
+        enrichment: { google: { nicknames: ['Peggy'] } }
+      }
+    ])
+    const hits = (await invoke('contacts:list', { search: 'peggy' })) as Array<{
+      displayName: string
+    }>
+    expect(hits.map((h) => h.displayName)).toContain('Margaret Smith')
+  })
+
+  it('writeContactEnrichment adds crossSource without clobbering google, and skips no-op writes', async () => {
+    const { upsertContacts, writeContactEnrichment } = await import('./contacts')
+    upsertContacts([
+      {
+        externalId: 'people/c3',
+        displayName: 'Carol Vane',
+        source: 'google',
+        enrichment: { google: { biography: 'Colleague' } }
+      }
+    ])
+    const listed = (await invoke('contacts:list')) as Array<{ id: number }>
+    const id = listed[0].id
+    const summary = {
+      sources: ['gmail', 'gcal'],
+      touchpointCount: 3,
+      firstSeen: 100,
+      lastSeen: 900,
+      lastActivity: {
+        source: 'gmail',
+        type: 'email',
+        title: 'Re: lunch',
+        occurredAt: 900,
+        recordId: 7
+      },
+      matchedBy: ['email'] as ('name' | 'email' | 'phone')[],
+      refreshedAt: 1
+    }
+    expect(writeContactEnrichment(id, summary)).toBe(true)
+    // Same content, different refreshedAt → no write.
+    expect(writeContactEnrichment(id, { ...summary, refreshedAt: 2 })).toBe(false)
+    const got = (await invoke('contacts:get', id)) as { enrichment: ContactEnrichmentShape }
+    expect(got.enrichment?.google?.biography).toBe('Colleague') // preserved
+    expect(got.enrichment?.crossSource?.sources).toEqual(['gmail', 'gcal'])
+  })
+
+  it('manual contacts:update does not clobber enrichment and keeps nickname search', async () => {
+    const { upsertContacts } = await import('./contacts')
+    upsertContacts([
+      {
+        externalId: 'people/c4',
+        displayName: 'Dan Ent',
+        source: 'google',
+        enrichment: { google: { nicknames: ['Danny'] } }
+      }
+    ])
+    const listed = (await invoke('contacts:list')) as Array<{ id: number }>
+    const id = listed[0].id
+    await invoke('contacts:update', id, { displayName: 'Daniel Ent' })
+    const got = (await invoke('contacts:get', id)) as {
+      displayName: string
+      enrichment: ContactEnrichmentShape
+    }
+    expect(got.displayName).toBe('Daniel Ent')
+    expect(got.enrichment?.google?.nicknames).toEqual(['Danny'])
+    // A partial edit must NOT drop the nickname from the search blob.
+    const hits = (await invoke('contacts:list', { search: 'danny' })) as Array<{ id: number }>
+    expect(hits.map((h) => h.id)).toContain(id)
+  })
+})
+
+type ContactEnrichmentShape = {
+  google?: { nicknames?: string[]; biography?: string | null }
+  crossSource?: { sources?: string[] }
+} | null
 
 type ContactGet = {
   id: number

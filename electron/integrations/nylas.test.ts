@@ -74,6 +74,7 @@ describe('Nylas → owned contacts (real DB)', () => {
         birthday TEXT, url TEXT, relationship TEXT, notes TEXT, photo TEXT,
         source TEXT NOT NULL DEFAULT 'manual',
         search_blob TEXT,
+        enrichment TEXT,
         created_at INTEGER, updated_at INTEGER
       );
     `)

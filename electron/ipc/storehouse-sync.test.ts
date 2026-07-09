@@ -89,7 +89,8 @@ beforeEach(() => {
       steps INTEGER, total_sleep_minutes INTEGER, synced_at INTEGER
     );
     CREATE TABLE contacts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL
+      id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
+      emails TEXT, phones TEXT, enrichment TEXT, updated_at INTEGER
     );
     CREATE TABLE subscriptions (id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, name TEXT);
     CREATE TABLE places (

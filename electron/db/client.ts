@@ -620,6 +620,15 @@ function ensureNewTables(sqlite: Database.Database): void {
   ensureColumn(sqlite, 'habits', 'auto_link_source', 'TEXT')
   ensureColumn(sqlite, 'habits', 'auto_link_threshold', 'REAL')
   ensureColumn(sqlite, 'habit_entries', 'source', 'TEXT')
+  // Contact enrichment (2026-07-09, migration 0035) — JSON blob holding the rich
+  // Google People fields + the cross-source "how you know this person" summary.
+  // `contacts` is created only by migration 0012 (not in the pure-ensure CREATE
+  // path), so guard in case the table doesn't exist on a pathological build.
+  try {
+    ensureColumn(sqlite, 'contacts', 'enrichment', 'TEXT')
+  } catch {
+    /* contacts table absent on a pristine pre-migrate DB — migrate() adds it */
+  }
 }
 
 function ensureColumn(

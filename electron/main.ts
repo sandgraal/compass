@@ -13,6 +13,7 @@ import { registerAuthHandlers } from './ipc/auth'
 import { registerBackupHandlers } from './ipc/backup'
 import { registerCanopyHandlers } from './ipc/canopy'
 import { registerClaudeHandlers } from './ipc/claude'
+import { registerContactEnrichHandlers } from './ipc/contact-enrich'
 import { registerContactsHandlers } from './ipc/contacts'
 import { registerCredHandlers } from './ipc/cred'
 import { registerDataRightsHandlers } from './ipc/data-rights'
@@ -199,6 +200,7 @@ app.whenReady().then(async () => {
   registerNylasHandlers(ipcMain)
   registerKnotHandlers(ipcMain)
   registerContactsHandlers(ipcMain)
+  registerContactEnrichHandlers(ipcMain)
   registerExportHandlers(ipcMain)
   registerSubscriptionsHandlers(ipcMain)
   registerAssetsHandlers(ipcMain)

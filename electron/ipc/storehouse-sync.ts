@@ -41,6 +41,7 @@ import {
   projectLinear,
   projectOuraMetrics
 } from '../lib/storehouse-projectors'
+import { enrichContactsFromCache } from './contact-enrich'
 import { insertRecords, upsertLiveRecords } from './records'
 
 /** Read every finance transaction as a projector input row. */
@@ -202,6 +203,11 @@ export function afterConnectorSync(): void {
   } catch (err) {
     console.warn('[storehouse-sync] connector projection failed (non-fatal):', err)
   }
+  // Cheap cross-source contact enrichment: a name-join over the derived-entity
+  // cache we just rebuilt (no FTS, no network) so every contact's "seen across N
+  // sources" summary stays fresh after each sync. Its own try/catch inside means
+  // this never throws.
+  enrichContactsFromCache()
 }
 
 export function registerStorehouseSyncHandlers(ipcMain: IpcMain): void {
