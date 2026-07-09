@@ -12,6 +12,7 @@ tokens (Google/GitHub), SimpleFIN/Plaid API credentials for bank sync, optional 
 - `npm run check` — Biome lint + format check
 - `npm run test:run` — Vitest unit tests, one-shot (`npm test` defaults to *watch* mode in an interactive terminal — won't exit)
 - `npm run test:e2e` — Playwright E2E
+- `npm run rebuild:electron` / `npm run rebuild:node` — flip better-sqlite3 between the app/E2E (Electron) ABI and the vitest/tsx (Node) ABI. ALWAYS use these, never raw `install-app-deps`/`npm rebuild`: those overwrite the `.node` in place, and if any process still maps the old binary, macOS SIGKILLs every later load mid-`new Database()` (see docs/conventions.md gotchas)
 
 ## Pointers (do not duplicate the content here — go read these)
 - Master plan + checklist → [`docs/implementation_plan.md`](docs/implementation_plan.md)
