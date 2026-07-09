@@ -236,6 +236,7 @@ function genericRows(f: RecognizerFile): {
         .slice(0, 200)
         .some((r) => parseWhen(String(r[k] ?? '')) != null)
     )
+  const titleKey = keys.find((k) => TITLE_KEY.test(k))
   if (dateKey) return { rows, dateKey, titleKey }
   return { rows, titleKey }
 }
