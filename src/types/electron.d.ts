@@ -1076,12 +1076,45 @@ declare global {
       records: {
         list(opts?: {
           source?: string
+          sources?: string[]
           type?: string
+          types?: string[]
           q?: string
+          from?: number
+          to?: number
           limit?: number
           offset?: number
           includeFirehose?: boolean
         }): Promise<TimelineRecord[]>
+        histogram(opts?: {
+          bucket?: 'year' | 'month'
+          source?: string
+          type?: string
+          from?: number
+          to?: number
+          includeFirehose?: boolean
+        }): Promise<Array<{ bucket: string; count: number }>>
+        day(opts: {
+          day: string
+          source?: string
+          type?: string
+          limit?: number
+          offset?: number
+          includeFirehose?: boolean
+        }): Promise<TimelineRecord[]>
+        daySummary(opts: { day: string }): Promise<
+          Array<{
+            source: string
+            type: string
+            count: number
+            sampleTitles: string[]
+          }>
+        >
+        onThisDayAllYears(opts?: {
+          month?: number
+          day?: number
+          perYearCap?: number
+        }): Promise<Array<{ year: number; count: number; records: TimelineRecord[] }>>
         search(opts: {
           q: string
           source?: string

@@ -175,6 +175,31 @@ describe('records:list', () => {
     const none = (await invoke('records:list', { q: 'zzz-nope' })) as Rec[]
     expect(none).toHaveLength(0)
   })
+
+  it('filters by multi-select sources/types and an epoch-ms date range (Timeline 2.0)', async () => {
+    await invoke('records:import-paths', [
+      fixture('NetflixViewingHistory.csv', 'Title,Date\nThe Matrix,1/2/26\nInception,12/25/25\n'),
+      fixture(
+        'Download.csv',
+        'Date,Name,Type,Status,Currency,Gross,Transaction ID\n01/15/2026,Jane Doe,Money Sent,Completed,USD,-25.00,TX-Q1\n'
+      )
+    ])
+    const multi = (await invoke('records:list', { sources: ['netflix', 'paypal'] })) as Rec[]
+    expect(multi).toHaveLength(3)
+    const paypalOnly = (await invoke('records:list', { sources: ['paypal'] })) as Rec[]
+    expect(paypalOnly).toHaveLength(1)
+    const types = (await invoke('records:list', { types: ['watch'] })) as Rec[]
+    expect(types).toHaveLength(2)
+    // Range: only the Jan 2026 records (Netflix "The Matrix" + PayPal "Jane Doe").
+    const jan2026 = (await invoke('records:list', {
+      from: new Date(2026, 0, 1).getTime(),
+      to: new Date(2026, 0, 31).getTime()
+    })) as Rec[]
+    expect(jan2026.map((r) => r.title).sort()).toEqual(['Jane Doe', 'The Matrix'])
+    // Junk array entries are ignored, not crashed on.
+    const junk = (await invoke('records:list', { sources: [1, null, ''] })) as Rec[]
+    expect(junk).toHaveLength(3)
+  })
 })
 
 describe('records:search (FTS5)', () => {

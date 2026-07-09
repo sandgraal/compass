@@ -372,12 +372,35 @@ const api = {
   records: {
     list: (opts?: {
       source?: string
+      sources?: string[]
       type?: string
+      types?: string[]
       q?: string
+      from?: number
+      to?: number
       limit?: number
       offset?: number
       includeFirehose?: boolean
     }) => ipcRenderer.invoke('records:list', opts),
+    histogram: (opts?: {
+      bucket?: 'year' | 'month'
+      source?: string
+      type?: string
+      from?: number
+      to?: number
+      includeFirehose?: boolean
+    }) => ipcRenderer.invoke('records:histogram', opts),
+    day: (opts: {
+      day: string
+      source?: string
+      type?: string
+      limit?: number
+      offset?: number
+      includeFirehose?: boolean
+    }) => ipcRenderer.invoke('records:day', opts),
+    daySummary: (opts: { day: string }) => ipcRenderer.invoke('records:day-summary', opts),
+    onThisDayAllYears: (opts?: { month?: number; day?: number; perYearCap?: number }) =>
+      ipcRenderer.invoke('records:on-this-day-v2', opts),
     search: (opts: {
       q: string
       source?: string
