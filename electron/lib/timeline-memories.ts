@@ -135,8 +135,17 @@ export function rankMemories<T extends MemoryCandidate>(
   opts: { mutes?: MuteSet; cap: number }
 ): T[] {
   const peers = new Map<string, number>()
+  const peerKey = (r: MemoryCandidate): string => {
+    const base = muteKey(r.source, r.type)
+    if (r.occurredAt == null) return `na|${base}`
+    const d = new Date(r.occurredAt)
+    const dayKey = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(
+      d.getUTCDate()
+    ).padStart(2, '0')}`
+    return `${dayKey}|${base}`
+  }
   for (const r of records) {
-    const key = muteKey(r.source, r.type)
+    const key = peerKey(r)
     peers.set(key, (peers.get(key) ?? 0) + 1)
   }
   return records
@@ -145,7 +154,7 @@ export function rankMemories<T extends MemoryCandidate>(
       if (opts.mutes?.sourceTypes.has(muteKey(r.source, r.type))) return false
       return !isSensitiveMemory(r)
     })
-    .map((r) => ({ r, score: memoryScore(r, peers.get(muteKey(r.source, r.type)) ?? 1) }))
+    .map((r) => ({ r, score: memoryScore(r, peers.get(peerKey(r)) ?? 1) }))
     .sort(
       (a, b) =>
         b.score - a.score ||
