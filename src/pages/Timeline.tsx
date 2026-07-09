@@ -14,6 +14,7 @@
 import { Clock, Globe, Search, Sparkles, Upload } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { DensityHeatmap } from '../components/timeline/DensityHeatmap'
 import { OnThisDayHero } from '../components/timeline/OnThisDayHero'
 import { RecordDetailDrawer } from '../components/timeline/RecordDetailDrawer'
 import { RecordList } from '../components/timeline/RecordList'
@@ -26,7 +27,7 @@ const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
 
 const PAGE_SIZE = 500
 const VIEW_SETTING_KEY = 'timelineView'
-type View = 'day' | 'browse'
+type View = 'day' | 'browse' | 'density'
 
 export default function Timeline(): JSX.Element {
   const [view, setView] = useState<View>('day')
@@ -73,7 +74,7 @@ export default function Timeline(): JSX.Element {
   useEffect(() => {
     if (!isElectron()) return
     void window.api.settings.get(VIEW_SETTING_KEY).then((v) => {
-      if (v === 'browse' || v === 'day') setView(v)
+      if (v === 'browse' || v === 'day' || v === 'density') setView(v)
     })
   }, [])
   function switchView(next: View): void {
@@ -422,7 +423,8 @@ export default function Timeline(): JSX.Element {
               {(
                 [
                   ['day', 'This day'],
-                  ['browse', 'Browse']
+                  ['browse', 'Browse'],
+                  ['density', 'Density']
                 ] as Array<[View, string]>
               ).map(([v, label]) => (
                 <button
@@ -457,6 +459,20 @@ export default function Timeline(): JSX.Element {
           {/* THIS DAY — the all-years memory lens. */}
           {!searching && view === 'day' && (
             <OnThisDayHero onOpenRecord={setDetail} onOpenDay={openDay} />
+          )}
+
+          {/* DENSITY — the whole archive as a year × month heatmap. */}
+          {!searching && view === 'density' && (
+            <DensityHeatmap
+              onPickMonth={(year, month0) => {
+                setRange({
+                  from: Date.UTC(year, month0, 1),
+                  to: Date.UTC(year, month0 + 1, 1) - 1,
+                  label: `${new Date(Date.UTC(year, month0, 1)).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' })} ${year}`
+                })
+                switchView('browse')
+              }}
+            />
           )}
 
           {/* BROWSE + search results share the filters and the list. */}
