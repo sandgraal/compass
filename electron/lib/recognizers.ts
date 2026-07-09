@@ -230,9 +230,12 @@ function genericRows(f: RecognizerFile): {
   // Consider EVERY date-looking column and take the first whose values actually
   // parse — taking just the first name-match once picked `SecondsWatched`
   // (matches /watched/) over `MostRecentWatchDate` and mis-dated 2k rows.
+  // Probing is bounded to the first 200 rows so detection stays O(1)-ish on
+  // huge exports; a column that only holds dates AFTER row 200 is missed, but
+  // real exports date every row or none.
   const dateKey = keys
     .filter((k) => DATE_KEY.test(k))
-    .find((k) => rows.some((r) => parseWhen(String(r[k] ?? '')) != null))
+    .find((k) => rows.slice(0, 200).some((r) => parseWhen(String(r[k] ?? '')) != null))
   const titleKey = keys.find((k) => TITLE_KEY.test(k)) ?? keys.find((k) => k !== dateKey)
   if (dateKey) return { rows, dateKey, titleKey }
   return { rows, titleKey }
