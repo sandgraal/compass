@@ -1003,8 +1003,17 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
     if (kind !== 'record' && kind !== 'source-type') {
       return { success: false, error: 'Unknown mute kind' }
     }
+
     const target = String(opts?.target ?? '').slice(0, 500)
     if (!target) return { success: false, error: 'Missing mute target' }
+
+    if (kind === 'record') {
+      const id = Number(target)
+      if (!Number.isInteger(id) || id <= 0) {
+        return { success: false, error: 'Invalid record id' }
+      }
+    }
+
     getDb().insert(timelineMutes).values({ kind, target }).onConflictDoNothing().run()
     return { success: true }
   })
