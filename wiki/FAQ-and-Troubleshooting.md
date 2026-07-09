@@ -45,9 +45,15 @@ These are the hard-won ones — see also [`docs/conventions.md` § Gotchas](http
 **`NODE_MODULE_VERSION` error from SQLite.**
 `better-sqlite3` has a native-ABI split: **Node-ABI** for `test:run` and `tsx` scripts,
 **Electron-ABI** for the built app and Playwright. One install can't serve both.
-- `npm run screenshots` handles the dance and leaves the repo Node-ABI (test-ready).
-- After `npx electron-builder install-app-deps` (Electron-ABI), run **`npm rebuild better-sqlite3`**
-  before tests/push. The `.db` file itself is ABI-independent.
+- Switch with **`npm run rebuild:electron`** / **`npm run rebuild:node`** — ALWAYS use these,
+  never raw `install-app-deps` / `npm rebuild better-sqlite3`. Those overwrite `better_sqlite3.node`
+  **in place** (same inode); if any live process (vitest watch, `npm run dev`, a stray Electron/tsx)
+  still maps the old binary, macOS SIGKILLs every later load mid-`new Database()` — and further
+  in-place rebuilds don't recover until the holder exits. The `rebuild:*` scripts delete first,
+  giving the new build a fresh inode immune to stale holders.
+- `npm run screenshots` handles the dance itself and leaves the repo Node-ABI (test-ready).
+- After `npm run rebuild:electron`, run **`npm run rebuild:node`** before tests/push. The `.db`
+  file itself is ABI-independent.
 
 **Isolating test/demo data.**
 Set **`COMPASS_HOME`** to a throwaway dir to redirect the *entire* store (DB, vault, knowledge) so
