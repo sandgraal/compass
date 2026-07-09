@@ -15,6 +15,14 @@
 import { createHash } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import { AMAZON_RECOGNIZER } from './amazon'
+import {
+  ALEXA_UTTERANCE_RECOGNIZER,
+  AMAZON_LOCATION_RECOGNIZER,
+  AMAZON_MUSIC_LIBRARY_RECOGNIZER,
+  AMAZON_MUSIC_LIKES_RECOGNIZER,
+  KINDLE_READING_RECOGNIZER,
+  PRIME_VIDEO_RECOGNIZER
+} from './amazon-export'
 import { parseAppleHealth } from './apple-health'
 import { BROWSER_RECOGNIZERS } from './browser-history'
 import { COINBASE_RECOGNIZER, KRAKEN_RECOGNIZER } from './crypto-exchange'
@@ -219,12 +227,14 @@ function genericRows(f: RecognizerFile): {
   }
   if (!rows.length) return { rows }
   const keys = Object.keys(rows[0])
-  const dateKey = keys.find((k) => DATE_KEY.test(k))
+  // Consider EVERY date-looking column and take the first whose values actually
+  // parse — taking just the first name-match once picked `SecondsWatched`
+  // (matches /watched/) over `MostRecentWatchDate` and mis-dated 2k rows.
+  const dateKey = keys
+    .filter((k) => DATE_KEY.test(k))
+    .find((k) => rows.some((r) => parseWhen(String(r[k] ?? '')) != null))
   const titleKey = keys.find((k) => TITLE_KEY.test(k)) ?? keys.find((k) => k !== dateKey)
-  // Only claim the file if the date column actually parses on some row.
-  if (dateKey && rows.some((r) => parseWhen(String(r[dateKey] ?? '')) != null)) {
-    return { rows, dateKey, titleKey }
-  }
+  if (dateKey) return { rows, dateKey, titleKey }
   return { rows, titleKey }
 }
 
@@ -298,6 +308,12 @@ export const RECOGNIZERS: Recognizer[] = [
   spotify,
   youtube,
   AMAZON_RECOGNIZER,
+  PRIME_VIDEO_RECOGNIZER,
+  KINDLE_READING_RECOGNIZER,
+  AMAZON_MUSIC_LIKES_RECOGNIZER,
+  AMAZON_MUSIC_LIBRARY_RECOGNIZER,
+  ALEXA_UTTERANCE_RECOGNIZER,
+  AMAZON_LOCATION_RECOGNIZER,
   PAYPAL_RECOGNIZER,
   GOODREADS_RECOGNIZER,
   VENMO_RECOGNIZER,

@@ -1,0 +1,175 @@
+/**
+ * Reclassify executor (Timeline 2.0, PR 2) — real in-memory SQLite through the
+ * production insert paths. Proves the full loop: mis-imported generic rows are
+ * re-inserted under their real source with CORRECT dates (provenance
+ * preserved), geolocation rows move OFF the records spine into
+ * location_points, unmatched telemetry stays, FTS stays consistent, a
+ * re-import of the same file dedupes against the reclassified rows, and the
+ * app_settings gate makes the launch hook one-shot.
+ */
+
+import Database from 'better-sqlite3'
+import { drizzle } from 'drizzle-orm/better-sqlite3'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as schema from '../db/schema'
+
+let sqlite: Database.Database
+vi.mock('../db/client', () => ({
+  getDb: () => drizzle(sqlite, { schema }),
+  getRawSqlite: () => sqlite
+}))
+vi.mock('electron', () => ({ dialog: { showOpenDialog: vi.fn() } }))
+vi.mock('../knowledge/records-extractor', () => ({ updateRecordsKnowledge: vi.fn() }))
+vi.mock('../knowledge/records-embeddings', () => ({
+  loadRecordsIndex: () => null,
+  saveRecordsIndex: vi.fn(),
+  buildRecordsEmbeddingsIndex: vi.fn(),
+  searchRecordsSemantic: vi.fn(async () => null)
+}))
+vi.mock('../integrations/location-residency', () => ({ afterLocationImport: vi.fn() }))
+
+beforeEach(() => {
+  sqlite = new Database(':memory:')
+  sqlite.exec(`
+    CREATE TABLE records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, type TEXT NOT NULL,
+      occurred_at INTEGER, title TEXT NOT NULL, body TEXT, payload TEXT,
+      dedup_hash TEXT NOT NULL UNIQUE, provenance TEXT, ingested_at INTEGER
+    );
+    CREATE TABLE location_points (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, occurred_at INTEGER NOT NULL,
+      lat REAL NOT NULL, lng REAL NOT NULL, accuracy REAL, src TEXT NOT NULL,
+      dedup_hash TEXT NOT NULL UNIQUE, ingested_at INTEGER
+    );
+    CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER);
+    CREATE TABLE derived_entities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, match_key TEXT NOT NULL,
+      name TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, sources TEXT NOT NULL DEFAULT '[]',
+      first_seen INTEGER, last_seen INTEGER, attrs TEXT, promoted_kind TEXT, promoted_id INTEGER,
+      refreshed_at INTEGER
+    );
+    CREATE VIRTUAL TABLE records_fts USING fts5(title, body, payload, content='records', content_rowid='id', tokenize='unicode61 remove_diacritics 2');
+    CREATE TRIGGER records_ai AFTER INSERT ON records BEGIN INSERT INTO records_fts(rowid,title,body,payload) VALUES (new.id,new.title,new.body,new.payload); END;
+    CREATE TRIGGER records_ad AFTER DELETE ON records BEGIN INSERT INTO records_fts(records_fts,rowid,title,body,payload) VALUES('delete',old.id,old.title,old.body,old.payload); END;
+    CREATE TRIGGER records_au AFTER UPDATE ON records BEGIN INSERT INTO records_fts(records_fts,rowid,title,body,payload) VALUES('delete',old.id,old.title,old.body,old.payload); INSERT INTO records_fts(rowid,title,body,payload) VALUES (new.id,new.title,new.body,new.payload); END;
+  `)
+})
+
+afterEach(() => {
+  sqlite.close()
+  vi.clearAllMocks()
+})
+
+function seedGeneric(
+  title: string,
+  provenance: string,
+  payload: Record<string, unknown>,
+  occurredAt: number | null = null
+): void {
+  sqlite
+    .prepare(
+      "INSERT INTO records (source, type, occurred_at, title, payload, dedup_hash, provenance) VALUES ('generic', 'event', ?, ?, ?, ?, ?)"
+    )
+    .run(occurredAt, title, JSON.stringify(payload), `seed|${title}`, provenance)
+}
+
+const PRIME_ROW = {
+  TitleName: 'Welcome to Republic City',
+  SecondsWatched: '36',
+  MostRecentWatchDate: '2017-06-18T13:42:42Z',
+  EntityType: 'TVEpisode'
+}
+
+async function loadModule() {
+  return await import('./records')
+}
+
+describe('reclassifyGenericRecords', () => {
+  it('moves signal families to real sources, geolocation to location_points, keeps telemetry', async () => {
+    // Stored with the WRONG date the old generic import produced (year 2036).
+    seedGeneric('Welcome to Republic City', 'PrimeVideo.WatchEvent.1.csv', PRIME_ROW, 2082780000000)
+    seedGeneric(
+      'alexa stop',
+      'Intent-1-1.csv',
+      { 'Utterance text': 'alexa stop', 'Utterance Creation Date': '2026-04-21T16:12:36.937Z' },
+      Date.parse('2026-04-21T16:12:36.937Z')
+    )
+    seedGeneric(
+      '2023-06-08T00:30:36.252Z',
+      'Geolocation-1-1.csv',
+      {
+        latitudeInDegrees: '9.936',
+        longitudeInDegrees: '-84.087',
+        coordinatesAccuracyInMeters: '17.5',
+        eventDate: '2023-06-08T00:30:36.252Z'
+      },
+      Date.parse('2023-06-08T00:30:36.252Z')
+    )
+    seedGeneric('telemetry blob', 'DeviceState-1-1.csv', { state: 'ON' }, 1686184236252)
+
+    const mod = await loadModule()
+    const res = mod.reclassifyGenericRecords()
+    expect(res).toEqual({ moved: 2, located: 1, deleted: 3 })
+
+    const prime = sqlite
+      .prepare("SELECT * FROM records WHERE source = 'prime-video'")
+      .get() as Record<string, unknown>
+    expect(prime.title).toBe('Welcome to Republic City')
+    expect(prime.occurred_at).toBe(Date.parse('2017-06-18T13:42:42Z')) // corrected
+    expect(prime.provenance).toBe('PrimeVideo.WatchEvent.1.csv') // preserved
+
+    expect(sqlite.prepare("SELECT count(*) AS n FROM records WHERE source='alexa'").get()).toEqual({
+      n: 1
+    })
+    expect(
+      sqlite.prepare("SELECT count(*) AS n FROM records WHERE source='generic'").get()
+    ).toEqual({ n: 1 }) // telemetry stays
+    expect(sqlite.prepare('SELECT lat, lng, src FROM location_points').get()).toEqual({
+      lat: 9.936,
+      lng: -84.087,
+      src: 'amazon-device'
+    })
+
+    // FTS stayed consistent through the insert+delete churn.
+    const base = sqlite.prepare('SELECT count(*) AS n FROM records').get() as { n: number }
+    const indexed = sqlite.prepare('SELECT count(*) AS n FROM records_fts_docsize').get() as {
+      n: number
+    }
+    expect(indexed.n).toBe(base.n)
+
+    // Second run: nothing left to convert.
+    expect(mod.reclassifyGenericRecords()).toEqual({ moved: 0, located: 0, deleted: 0 })
+  })
+
+  it('lets a future re-import of the same file dedupe against reclassified rows', async () => {
+    seedGeneric('Welcome to Republic City', 'PrimeVideo.WatchEvent.1.csv', PRIME_ROW, 2082780000000)
+    const mod = await loadModule()
+    mod.reclassifyGenericRecords()
+
+    // Fresh import of the same row through the real recognizer path.
+    const { PRIME_VIDEO_RECOGNIZER } = await import('../lib/amazon-export')
+    const inputs = PRIME_VIDEO_RECOGNIZER.parse({
+      name: 'PrimeVideo.WatchEvent.1.csv',
+      ext: 'csv',
+      text:
+        'TitleName,SecondsWatched,MostRecentWatchDate,EntityType\n' +
+        'Welcome to Republic City,36,2017-06-18T13:42:42Z,TVEpisode\n'
+    })
+    const { imported } = mod.insertRecords(inputs, 'PrimeVideo.WatchEvent.1.csv')
+    expect(imported).toBe(0) // deduped — no duplicate row
+  })
+})
+
+describe('runRecordsReclassifyIfNeeded', () => {
+  it('runs once and then gates', async () => {
+    seedGeneric('alexa stop', 'Intent-1-1.csv', {
+      'Utterance text': 'alexa stop',
+      'Utterance Creation Date': '2026-04-21T16:12:36.937Z'
+    })
+    const mod = await loadModule()
+    const first = mod.runRecordsReclassifyIfNeeded()
+    expect(first.ran).toBe(true)
+    expect(first.moved).toBe(1)
+    expect(mod.runRecordsReclassifyIfNeeded()).toEqual({ ran: false })
+  })
+})

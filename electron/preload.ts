@@ -395,6 +395,7 @@ const api = {
     facets: () => ipcRenderer.invoke('records:facets'),
     importFiles: () => ipcRenderer.invoke('records:import'),
     importPaths: (paths: string[]) => ipcRenderer.invoke('records:import-paths', paths),
+    reclassifyGeneric: () => ipcRenderer.invoke('records:reclassify-generic'),
     pathsForFiles: (files: File[]) => files.map((f) => webUtils.getPathForFile(f))
   },
   dataRights: {

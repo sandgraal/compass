@@ -1,8 +1,10 @@
 import {
   Activity,
   ArrowLeftRight,
+  Book,
   BookOpen,
   CalendarDays,
+  Clapperboard,
   Clock,
   CreditCard,
   Facebook,
@@ -14,6 +16,7 @@ import {
   Linkedin,
   Mail,
   MessageSquare,
+  Mic,
   Music,
   Package,
   Phone,
@@ -55,6 +58,10 @@ const SOURCE_META: Record<string, { label: string; icon: JSX.Element }> = {
   'google-fit': { label: 'Google Fit', icon: <Activity size={13} /> },
   'google-voice': { label: 'Google Voice', icon: <Phone size={13} /> },
   gcal: { label: 'Calendar', icon: <CalendarDays size={13} /> },
+  'prime-video': { label: 'Prime Video', icon: <Clapperboard size={13} /> },
+  kindle: { label: 'Kindle', icon: <Book size={13} /> },
+  'amazon-music': { label: 'Amazon Music', icon: <Music size={13} /> },
+  alexa: { label: 'Alexa', icon: <Mic size={13} /> },
   generic: { label: 'Imported', icon: <FileText size={13} /> }
 }
 function sourceMeta(s: string): { label: string; icon: JSX.Element } {
@@ -534,9 +541,10 @@ export default function Timeline(): JSX.Element {
         </div>
       )}
 
-      {/* Curate: firehose (browsing history) is collapsed from the default browse so
-          it doesn't bury the signal events — revealable, never deleted. Only shown
-          when there IS firehose data and no search/source filter is narrowing already. */}
+      {/* Curate: firehose sources (browsing history, background telemetry from data
+          exports) are collapsed from the default browse so they don't bury the signal
+          events — revealable, never deleted. Only shown when there IS firehose data
+          and no search/source filter is narrowing already. */}
       {!query && !source && !type && stats && stats.firehose > 0 && (
         <button
           type="button"
@@ -546,8 +554,8 @@ export default function Timeline(): JSX.Element {
         >
           <Globe size={13} />
           {showFirehose
-            ? 'Hide browsing history'
-            : `Show browsing history (${stats.firehose.toLocaleString()} hidden)`}
+            ? 'Hide background activity'
+            : `Show background activity (${stats.firehose.toLocaleString()} hidden)`}
         </button>
       )}
 
