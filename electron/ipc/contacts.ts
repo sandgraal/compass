@@ -619,7 +619,20 @@ export function registerContactsHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('contacts:update', (_event, id: number, updates: ContactInput) => {
     if (!Number.isInteger(id)) throw new Error('contacts:update requires an integer id')
     const db = getDb()
-    const storage = toStorage(updates)
+    // A partial edit (no enrichment in the payload) must still fold the STORED
+    // enrichment nicknames into the recomputed search_blob, or a manual edit would
+    // silently drop nickname search terms even though the enrichment column is kept.
+    let storageInput = updates
+    if (updates.enrichment == null) {
+      const existing = db
+        .select({ enrichment: contacts.enrichment })
+        .from(contacts)
+        .where(eq(contacts.id, id))
+        .all()[0]
+      const parsed = parseEnrichment(existing?.enrichment ?? null)
+      if (parsed.google?.nicknames?.length) storageInput = { ...updates, enrichment: parsed }
+    }
+    const storage = toStorage(storageInput)
     db.update(contacts)
       .set({ ...storage, updatedAt: new Date() })
       .where(eq(contacts.id, id))

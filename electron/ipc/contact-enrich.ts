@@ -39,6 +39,21 @@ const HITS_PER_QUERY = 25
 const MAX_PHOTO_FETCHES = 500 // photos materialized per deep run
 const MAX_PHOTO_BYTES = 1_000_000 // ~1MB image (well under the 1.4M-char photo cap)
 
+/**
+ * Only fetch photos from Google's own contact-photo CDN. `photoUrl` comes from the
+ * People API, but the enrichment blob is stored JSON — an allowlist here means a
+ * corrupted/tampered blob can't turn `materializeGooglePhotos` into a main-process
+ * SSRF primitive against arbitrary internal hosts.
+ */
+function isAllowedPhotoUrl(url: string): boolean {
+  try {
+    const u = new URL(url)
+    return u.protocol === 'https:' && /(^|\.)googleusercontent\.com$/i.test(u.hostname)
+  } catch {
+    return false
+  }
+}
+
 interface ContactActivityHit {
   recordId: number
   source: string
@@ -185,7 +200,7 @@ export async function materializeGooglePhotos(fetchImpl: typeof fetch = fetch): 
     if (done >= MAX_PHOTO_FETCHES) break
     if (r.photo) continue // already materialized
     const url = parseEnrichment(r.enrichment).google?.photoUrl
-    if (!url || !/^https:\/\//i.test(url)) continue // https-only (SSRF guard)
+    if (!url || !isAllowedPhotoUrl(url)) continue // https + googleusercontent only (SSRF guard)
     try {
       const resp = await fetchImpl(url)
       if (!resp.ok) continue

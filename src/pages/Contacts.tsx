@@ -20,7 +20,7 @@ import {
   Users,
   X
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
@@ -52,6 +52,11 @@ const EMPTY_DRAFT: ContactInput = {
 
 const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
 
+// Only render http(s) links as clickable — synced/imported urls are untrusted, so a
+// `javascript:`/`data:` value must degrade to plain text, never an active href.
+const safeHref = (value: string): string | undefined =>
+  /^https?:\/\//i.test(value) ? value : undefined
+
 export default function Contacts(): JSX.Element {
   const [contacts, setContacts] = useState<ContactRecord[]>([])
   const [search, setSearch] = useState('')
@@ -67,6 +72,9 @@ export default function Contacts(): JSX.Element {
   const { toast } = useToast()
   const confirm = useConfirm()
   const navigate = useNavigate()
+  // Monotonic token so a slow response from an earlier click can't overwrite the
+  // selection/activity of a newer one (openContact does async IPC).
+  const openSeq = useRef(0)
 
   const openTimeline = (query: string): void => navigate(`/timeline?q=${encodeURIComponent(query)}`)
 
@@ -93,21 +101,32 @@ export default function Contacts(): JSX.Element {
   }
 
   async function openContact(id: number): Promise<void> {
+    const seq = ++openSeq.current
     setSelectedId(id)
     setEditing(false)
     setActivity([])
     if (!isElectron()) return
-    const rec = await window.api.contacts.get(id)
-    setSelected(rec)
+    try {
+      const rec = await window.api.contacts.get(id)
+      if (openSeq.current !== seq) return // superseded by a newer selection
+      setSelected(rec)
+    } catch (err) {
+      if (openSeq.current === seq) console.error('[contacts] get failed', err)
+      return
+    }
     // Lazily load the live "recent activity" feed for this contact.
     setActivityLoading(true)
     try {
-      setActivity(await window.api.contacts.activity(id))
+      const hits = await window.api.contacts.activity(id)
+      if (openSeq.current !== seq) return
+      setActivity(hits)
     } catch (err) {
-      console.error('[contacts] activity failed', err)
-      setActivity([])
+      if (openSeq.current === seq) {
+        console.error('[contacts] activity failed', err)
+        setActivity([])
+      }
     } finally {
-      setActivityLoading(false)
+      if (openSeq.current === seq) setActivityLoading(false)
     }
   }
 
@@ -520,8 +539,8 @@ function ContactDetail({
 }): JSX.Element {
   const g = contact.enrichment?.google
   const cs = contact.enrichment?.crossSource
-  const links = [
-    ...(contact.url ? [{ type: undefined as string | undefined, value: contact.url }] : []),
+  const links: { type?: string; value: string }[] = [
+    ...(contact.url ? [{ value: contact.url }] : []),
     ...(g?.urls ?? []).filter((u) => u.value !== contact.url)
   ]
   return (
@@ -531,7 +550,7 @@ function ContactDetail({
           // Photo is a locally-stored data URI (see contact-enrich.ts) — no network at render.
           <img
             src={contact.photo}
-            alt=""
+            alt={contact.displayName}
             className="w-16 h-16 rounded-full object-cover border border-border shrink-0"
           />
         )}
@@ -620,7 +639,12 @@ function ContactDetail({
       {links.length > 0 && (
         <DetailGroup icon={<Globe size={14} />} title="Links">
           {links.map((u, i) => (
-            <DetailRow key={`${u.value}-${i}`} label={u.type} value={u.value} href={u.value} />
+            <DetailRow
+              key={`${u.value}-${i}`}
+              label={u.type}
+              value={u.value}
+              href={safeHref(u.value)}
+            />
           ))}
         </DetailGroup>
       )}

@@ -385,7 +385,7 @@ describe('contacts enrichment', () => {
     expect(got.enrichment?.crossSource?.sources).toEqual(['gmail', 'gcal'])
   })
 
-  it('manual contacts:update does not clobber enrichment', async () => {
+  it('manual contacts:update does not clobber enrichment and keeps nickname search', async () => {
     const { upsertContacts } = await import('./contacts')
     upsertContacts([
       {
@@ -404,6 +404,9 @@ describe('contacts enrichment', () => {
     }
     expect(got.displayName).toBe('Daniel Ent')
     expect(got.enrichment?.google?.nicknames).toEqual(['Danny'])
+    // A partial edit must NOT drop the nickname from the search blob.
+    const hits = (await invoke('contacts:list', { search: 'danny' })) as Array<{ id: number }>
+    expect(hits.map((h) => h.id)).toContain(id)
   })
 })
 

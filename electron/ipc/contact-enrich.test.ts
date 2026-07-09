@@ -156,3 +156,45 @@ describe('computeContactActivity', () => {
     expect(computeContactActivity(999)).toEqual([])
   })
 })
+
+describe('materializeGooglePhotos', () => {
+  function addContactWithPhotoUrl(externalId: string, name: string, photoUrl: string): number {
+    const info = sqlite
+      .prepare(
+        'INSERT INTO contacts (external_id, display_name, source, enrichment) VALUES (?,?,?,?)'
+      )
+      .run(externalId, name, 'google', JSON.stringify({ google: { photoUrl } }))
+    return Number(info.lastInsertRowid)
+  }
+
+  it('fetches googleusercontent photos into a data URI but SKIPS non-allowlisted hosts', async () => {
+    const ok = addContactWithPhotoUrl(
+      'people/p1',
+      'Ok Person',
+      'https://lh3.googleusercontent.com/abc'
+    )
+    const evil = addContactWithPhotoUrl(
+      'people/p2',
+      'Evil Person',
+      'https://internal.attacker.example/x'
+    )
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      headers: { get: () => 'image/png' },
+      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer
+    })) as unknown as typeof fetch
+    const { materializeGooglePhotos } = await import('./contact-enrich')
+
+    const done = await materializeGooglePhotos(fetchImpl)
+    expect(done).toBe(1) // only the allowlisted one
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    const okPhoto = sqlite.prepare('SELECT photo FROM contacts WHERE id = ?').get(ok) as {
+      photo: string | null
+    }
+    expect(okPhoto.photo?.startsWith('data:image/png;base64,')).toBe(true)
+    const evilPhoto = sqlite.prepare('SELECT photo FROM contacts WHERE id = ?').get(evil) as {
+      photo: string | null
+    }
+    expect(evilPhoto.photo).toBeNull()
+  })
+})
