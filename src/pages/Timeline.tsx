@@ -72,9 +72,14 @@ export default function Timeline(): JSX.Element {
   // Restore the last-used lens (fire-and-forget persistence via app_settings).
   useEffect(() => {
     if (!isElectron()) return
+    let canceled = false
     void window.api.settings.get(VIEW_SETTING_KEY).then((v) => {
-      if (v === 'browse' || v === 'day') setView(v)
+      if (canceled) return
+      if (v === 'browse' || v === 'day') setView((prev) => (prev === 'day' ? v : prev))
     })
+    return () => {
+      canceled = true
+    }
   }, [])
   function switchView(next: View): void {
     setView(next)
