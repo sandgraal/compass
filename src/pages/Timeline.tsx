@@ -1,152 +1,39 @@
-import {
-  Activity,
-  ArrowLeftRight,
-  Book,
-  BookOpen,
-  CalendarDays,
-  Clapperboard,
-  Clock,
-  CreditCard,
-  Facebook,
-  FileText,
-  Film,
-  Footprints,
-  Globe,
-  Landmark,
-  Linkedin,
-  Mail,
-  MessageSquare,
-  Mic,
-  Music,
-  Package,
-  Phone,
-  Receipt,
-  Search,
-  Sparkles,
-  Upload,
-  Wallet,
-  Youtube
-} from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+/**
+ * Timeline (Timeline 2.0, PR 4) — the "story of your life" surface.
+ *
+ * Two lenses over the records spine, plus search across both:
+ *  - THIS DAY (default): the all-years "On this day" hero — year-grouped
+ *    memories for any month-day, ◀ ▶ browsable (records:on-this-day-v2).
+ *  - BROWSE: year scrubber + month drill-down (records:histogram) over the
+ *    newest-first list, with multi-select source/kind chips, "Load earlier"
+ *    pagination, and same-day noise collapsed into digest rows.
+ * Every record opens the detail drawer (payload, provenance, find-similar).
+ * Import stays one drag-drop away: the whole page is a drop target.
+ */
+
+import { Clock, Globe, Search, Sparkles, Upload } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { OnThisDayHero } from '../components/timeline/OnThisDayHero'
+import { RecordDetailDrawer } from '../components/timeline/RecordDetailDrawer'
+import { RecordList } from '../components/timeline/RecordList'
+import { type TimelineRange, YearScrubber } from '../components/timeline/YearScrubber'
+import { Chip, fmtSpan, sourceMeta, typeLabel } from '../components/timeline/timeline-meta'
 import { useToast } from '../components/ui/Toast'
 import { cn } from '../lib/utils'
 
 const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
 
-const SOURCE_META: Record<string, { label: string; icon: JSX.Element }> = {
-  netflix: { label: 'Netflix', icon: <Film size={13} /> },
-  spotify: { label: 'Spotify', icon: <Music size={13} /> },
-  amazon: { label: 'Amazon', icon: <Package size={13} /> },
-  paypal: { label: 'PayPal', icon: <Wallet size={13} /> },
-  venmo: { label: 'Venmo', icon: <ArrowLeftRight size={13} /> },
-  'credit-report': { label: 'Credit', icon: <CreditCard size={13} /> },
-  'tax-document': { label: 'Tax', icon: <Receipt size={13} /> },
-  'social-security': { label: 'Social Security', icon: <Landmark size={13} /> },
-  document: { label: 'Document', icon: <FileText size={13} /> },
-  linkedin: { label: 'LinkedIn', icon: <Linkedin size={13} /> },
-  goodreads: { label: 'Goodreads', icon: <BookOpen size={13} /> },
-  'apple-health': { label: 'Apple Health', icon: <Activity size={13} /> },
-  email: { label: 'Email', icon: <Mail size={13} /> },
-  youtube: { label: 'YouTube', icon: <Youtube size={13} /> },
-  browser: { label: 'Browser', icon: <Globe size={13} /> },
-  imessage: { label: 'Messages', icon: <MessageSquare size={13} /> },
-  facebook: { label: 'Facebook', icon: <Facebook size={13} /> },
-  google: { label: 'Google', icon: <Footprints size={13} /> },
-  'google-play': { label: 'Play Store', icon: <Package size={13} /> },
-  'google-pay': { label: 'Google Pay', icon: <Wallet size={13} /> },
-  'google-fit': { label: 'Google Fit', icon: <Activity size={13} /> },
-  'google-voice': { label: 'Google Voice', icon: <Phone size={13} /> },
-  gcal: { label: 'Calendar', icon: <CalendarDays size={13} /> },
-  'prime-video': { label: 'Prime Video', icon: <Clapperboard size={13} /> },
-  kindle: { label: 'Kindle', icon: <Book size={13} /> },
-  'amazon-music': { label: 'Amazon Music', icon: <Music size={13} /> },
-  alexa: { label: 'Alexa', icon: <Mic size={13} /> },
-  generic: { label: 'Imported', icon: <FileText size={13} /> }
-}
-function sourceMeta(s: string): { label: string; icon: JSX.Element } {
-  return SOURCE_META[s] ?? { label: s, icon: <FileText size={13} /> }
-}
-
-// Friendly labels for record kinds (the `type` column); unknown kinds fall back
-// to a title-cased version of the raw value ("credit-report" → "Credit Report").
-const TYPE_LABEL: Record<string, string> = {
-  watch: 'Watched',
-  listen: 'Listened',
-  order: 'Orders',
-  payment: 'Payments',
-  purchase: 'Purchases',
-  post: 'Posts',
-  comment: 'Comments',
-  messages: 'Messages',
-  reaction: 'Reactions',
-  group: 'Groups',
-  event: 'Events',
-  marketplace: 'Marketplace',
-  saved: 'Saved',
-  search: 'Searches',
-  page: 'Pages',
-  'off-facebook': 'Off-Facebook',
-  security: 'Security',
-  location: 'Location',
-  activity: 'Activity',
-  maps: 'Maps',
-  app: 'Apps',
-  assistant: 'Assistant',
-  visit: 'Visits',
-  fitness: 'Fitness',
-  text: 'Texts',
-  call: 'Calls',
-  voicemail: 'Voicemail',
-  book: 'Books',
-  connection: 'Connections',
-  job: 'Jobs',
-  certification: 'Certifications',
-  endorsement: 'Endorsements',
-  invitation: 'Invitations',
-  follow: 'Follows',
-  learning: 'Learning',
-  'job-application': 'Job Applications',
-  recommendation: 'Recommendations',
-  email: 'Email',
-  browse: 'Browsing',
-  document: 'Documents',
-  'credit-report': 'Credit Report',
-  'credit-tradeline': 'Tradelines',
-  'credit-inquiry': 'Inquiries',
-  'credit-score': 'Credit Score'
-}
-function typeLabel(t: string): string {
-  return TYPE_LABEL[t] ?? t.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
-function fmtDay(ms: number | null): string {
-  if (ms == null) return 'Undated'
-  return new Date(ms).toLocaleDateString('en-US', {
-    weekday: 'short',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
-  })
-}
-function fmtTime(ms: number | null): string {
-  if (ms == null) return ''
-  const d = new Date(ms)
-  // Hide the time for date-only records (parsed as local midnight).
-  if (d.getHours() === 0 && d.getMinutes() === 0) return ''
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-}
-/** "2019–2026" (or a single year) for the dated-records span — UTC to match the overview. */
-function fmtSpan(earliest: number | null, latest: number | null): string {
-  if (earliest == null || latest == null) return ''
-  const a = new Date(earliest).getUTCFullYear()
-  const b = new Date(latest).getUTCFullYear()
-  return a === b ? `${a}` : `${a}–${b}`
-}
+const PAGE_SIZE = 500
+const VIEW_SETTING_KEY = 'timelineView'
+type View = 'day' | 'browse'
 
 export default function Timeline(): JSX.Element {
+  const [view, setView] = useState<View>('day')
   const [items, setItems] = useState<TimelineRecord[]>([])
-  const [onThisDay, setOnThisDay] = useState<TimelineRecord[]>([])
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const offsetRef = useRef(0)
   const [stats, setStats] = useState<{
     total: number
     sources: number
@@ -154,11 +41,13 @@ export default function Timeline(): JSX.Element {
     latest: number | null
     firehose: number
   } | null>(null)
-  const [source, setSource] = useState<string | null>(null)
-  // Curate: collapse firehose sources (browser history) from the default browse so
-  // they don't bury the signal events. Off by default; revealable, never deleted.
+  // Multi-select filters (Timeline 2.0): every selected chip is included.
+  const [sourcesSel, setSourcesSel] = useState<string[]>([])
+  const [typesSel, setTypesSel] = useState<string[]>([])
+  // Curate: collapse firehose sources (browser history, export telemetry) from
+  // the default browse. Off by default; revealable, never deleted.
   const [showFirehose, setShowFirehose] = useState(false)
-  const [type, setType] = useState<string | null>(null)
+  const [range, setRange] = useState<TimelineRange>(null)
   const [facets, setFacets] = useState<{ sources: string[]; types: string[] }>({
     sources: [],
     types: []
@@ -173,35 +62,48 @@ export default function Timeline(): JSX.Element {
     building: boolean
     count: number
   } | null>(null)
+  const [detail, setDetail] = useState<TimelineRecord | null>(null)
   const [busy, setBusy] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const { toast } = useToast()
 
-  // Search AND the source/kind filters all run server-side so they span the whole
-  // timeline, not just the loaded 500-row page — a "PayPal" chip shows every PayPal
-  // record, not only the ones near the top.
+  const searching = query.trim() !== ''
+
+  // Restore the last-used lens (fire-and-forget persistence via app_settings).
+  useEffect(() => {
+    if (!isElectron()) return
+    void window.api.settings.get(VIEW_SETTING_KEY).then((v) => {
+      if (v === 'browse' || v === 'day') setView(v)
+    })
+  }, [])
+  function switchView(next: View): void {
+    setView(next)
+    if (isElectron()) void window.api.settings.set(VIEW_SETTING_KEY, next)
+  }
+
+  // Search AND all filters run server-side so they span the whole timeline, not
+  // just the loaded page — a "PayPal" chip shows every PayPal record.
   const reload = useCallback((): void => {
     if (!isElectron()) return
     const q = query.trim()
+    offsetRef.current = 0
     if (q) {
-      // A real query goes through full-text search (bm25-ranked, prefix-matched,
-      // spans the whole timeline). Map the hits into the list shape and re-sort
-      // newest-first (undated last) so they read as a familiar timeline slice
-      // rather than raw relevance order — the day grouping assumes that order.
+      // Ranked FTS (or the opt-in semantic index) across the whole timeline; hits
+      // re-sorted newest-first so they read as a timeline slice. The search API
+      // takes ONE source/type — with one chip selected it pushes server-side,
+      // with several the (≤200) hits are narrowed client-side.
       void window.api.records
-        // 200 = the backend's search cap (records-search.ts); ranked hits, so the
-        // top 200 by relevance are plenty for the list (browse uses list() at 500).
-        // mode 'semantic' uses the local vector index, transparently falling back to
-        // keyword (FTS) when no index is built / Ollama is offline.
         .search({
           q,
-          source: source ?? undefined,
-          type: type ?? undefined,
+          source: sourcesSel.length === 1 ? sourcesSel[0] : undefined,
+          type: typesSel.length === 1 ? typesSel[0] : undefined,
+          from: range?.from ?? undefined,
+          to: range?.to ?? undefined,
           limit: 200,
           mode: semantic ? 'semantic' : undefined
         })
         .then((hits) => {
-          const rows: TimelineRecord[] = hits.map((h) => ({
+          let rows: TimelineRecord[] = hits.map((h) => ({
             id: h.id,
             source: h.source,
             type: h.type,
@@ -212,34 +114,56 @@ export default function Timeline(): JSX.Element {
             provenance: null,
             ingestedAt: null
           }))
+          if (sourcesSel.length > 1) rows = rows.filter((r) => sourcesSel.includes(r.source))
+          if (typesSel.length > 1) rows = rows.filter((r) => typesSel.includes(r.type))
           rows.sort(
             (a, b) =>
               (b.occurredAt ?? Number.NEGATIVE_INFINITY) -
               (a.occurredAt ?? Number.NEGATIVE_INFINITY)
           )
           setItems(rows)
+          setHasMore(false)
         })
       return
     }
-    // Empty query → plain browse (already newest-first, paginated server-side).
-    // Firehose is collapsed ONLY in the fully-unfiltered browse — an explicit source
-    // OR type chip (e.g. "Visits") is the user narrowing, so include it then (the
-    // server also overrides the collapse when a source is set).
+    // Empty query → browse (newest-first, server-paginated). Firehose stays
+    // collapsed only in the fully-unfiltered browse — explicit chips are the
+    // user narrowing, so include it then.
     void window.api.records
       .list({
-        source: source ?? undefined,
-        type: type ?? undefined,
-        limit: 500,
-        includeFirehose: showFirehose || type !== null
+        sources: sourcesSel.length > 0 ? sourcesSel : undefined,
+        types: typesSel.length > 0 ? typesSel : undefined,
+        from: range?.from ?? undefined,
+        to: range?.to ?? undefined,
+        limit: PAGE_SIZE,
+        includeFirehose: showFirehose || typesSel.length > 0
       })
-      .then(setItems)
-  }, [query, source, type, semantic, showFirehose])
+      .then((rows) => {
+        setItems(rows)
+        setHasMore(rows.length === PAGE_SIZE)
+      })
+  }, [query, sourcesSel, typesSel, range, semantic, showFirehose])
 
-  // "On this day" recap (prior years, today's month/day) — independent of search.
-  const loadOnThisDay = useCallback((): void => {
-    if (!isElectron()) return
-    void window.api.records.onThisDay({ limit: 8 }).then(setOnThisDay)
-  }, [])
+  async function loadEarlier(): Promise<void> {
+    if (!isElectron() || loadingMore) return
+    setLoadingMore(true)
+    try {
+      offsetRef.current += PAGE_SIZE
+      const rows = await window.api.records.list({
+        sources: sourcesSel.length > 0 ? sourcesSel : undefined,
+        types: typesSel.length > 0 ? typesSel : undefined,
+        from: range?.from ?? undefined,
+        to: range?.to ?? undefined,
+        limit: PAGE_SIZE,
+        offset: offsetRef.current,
+        includeFirehose: showFirehose || typesSel.length > 0
+      })
+      setItems((prev) => [...prev, ...rows])
+      setHasMore(rows.length === PAGE_SIZE)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   // Status of the opt-in local semantic index (whether "search by meaning" is ready).
   const loadSemStatus = useCallback((): void => {
@@ -268,9 +192,8 @@ export default function Timeline(): JSX.Element {
     }
   }
 
-  // True totals + the full set of filter facets (the list is capped at 500, so
-  // chips must come from the whole table, not the loaded page) — both independent
-  // of the active search/filter.
+  // True totals + whole-table facets (the list is capped, so chips must come
+  // from the full table) — independent of the active search/filter.
   const loadStats = useCallback((): void => {
     if (!isElectron()) return
     void window.api.records.stats().then(setStats)
@@ -284,10 +207,9 @@ export default function Timeline(): JSX.Element {
   }, [reload])
 
   useEffect(() => {
-    loadOnThisDay()
     loadStats()
     loadSemStatus()
-  }, [loadOnThisDay, loadStats, loadSemStatus])
+  }, [loadStats, loadSemStatus])
 
   function report(r: RecordsImportResult): void {
     if (r.canceled) return
@@ -298,15 +220,13 @@ export default function Timeline(): JSX.Element {
     const parts: string[] = []
     if (r.imported) parts.push(`${r.imported} imported`)
     // Snapshot facts (the Ad Profile / Profile / … themed pages) are a successful
-    // import too, even when nothing landed on the timeline — don't let a snapshot-only
-    // drop read as a failure. `snapshots` spans every category, so keep it generic.
+    // import too, even when nothing landed on the timeline.
     if (r.snapshots) parts.push(`${r.snapshots} snapshot ${r.snapshots === 1 ? 'fact' : 'facts'}`)
     if (r.duplicates) parts.push(`${r.duplicates} already on your timeline`)
     if (r.unrecognized.length) parts.push(`${r.unrecognized.length} unrecognized`)
     const ok = r.imported > 0 || r.snapshots > 0
     toast(parts.join(' · ') || 'Nothing to import', ok ? 'success' : 'error')
     reload()
-    loadOnThisDay()
     loadStats()
   }
 
@@ -339,29 +259,44 @@ export default function Timeline(): JSX.Element {
     }
   }
 
-  // Chips come from the whole-timeline facets (not the loaded page), unioned with
-  // the active filter so it stays clearable even if a concurrent search narrows the
-  // table. Filtering itself is server-side now, so the loaded page IS the result.
-  const sources = [...new Set([...facets.sources, ...(source ? [source] : [])])].sort()
-  const types = [...new Set([...facets.types, ...(type ? [type] : [])])].sort()
-  const shown = items
-  const span = stats ? fmtSpan(stats.earliest, stats.latest) : ''
-  // Active source/kind filter, joined for the empty-state message (e.g. "PayPal · Payments").
-  const filterLabel = [source ? sourceMeta(source).label : null, type ? typeLabel(type) : null]
-    .filter(Boolean)
-    .join(' · ')
-
-  // Records arrive newest-first, so consecutive same-day rows bucket cleanly.
-  const groups: { day: string; rows: TimelineRecord[] }[] = []
-  for (const r of shown) {
-    const day = fmtDay(r.occurredAt)
-    const last = groups[groups.length - 1]
-    if (last && last.day === day) last.rows.push(r)
-    else groups.push({ day, rows: [r] })
+  function toggleIn(list: string[], value: string): string[] {
+    return list.includes(value) ? list.filter((v) => v !== value) : [...list, value]
   }
 
+  // "See all N from this day" (hero) → Browse narrowed to that one UTC day.
+  function openDay(day: string): void {
+    const start = Date.parse(`${day}T00:00:00.000Z`)
+    if (Number.isNaN(start)) return
+    setRange({ from: start, to: start + 24 * 60 * 60 * 1000 - 1, label: day })
+    switchView('browse')
+  }
+
+  function findSimilar(title: string): void {
+    setDetail(null)
+    setQuery(title)
+  }
+
+  // Chips come from whole-timeline facets, unioned with active selections so a
+  // chip stays clearable even if a concurrent import narrows the table.
+  const sources = [...new Set([...facets.sources, ...sourcesSel])].sort()
+  const types = [...new Set([...facets.types, ...typesSel])].sort()
+  const span = stats ? fmtSpan(stats.earliest, stats.latest) : ''
+  const filterLabel = [
+    ...sourcesSel.map((s) => sourceMeta(s).label),
+    ...typesSel.map((t) => typeLabel(t))
+  ].join(' · ')
+  const empty = stats !== null && stats.total === 0
+
   return (
-    <div className="p-8 pt-14 max-w-3xl mx-auto animate-fade-in">
+    <div
+      className="p-8 pt-14 max-w-3xl mx-auto animate-fade-in"
+      onDragOver={(e) => {
+        e.preventDefault()
+        setDragOver(true)
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onDrop}
+    >
       <div className="flex items-start justify-between mb-6">
         <div>
           <div className="flex items-center gap-2.5 mb-1">
@@ -369,23 +304,19 @@ export default function Timeline(): JSX.Element {
             <h1 className="text-2xl font-semibold text-foreground">Timeline</h1>
           </div>
           <p className="text-sm text-muted-foreground">
-            {query ? (
+            {searching ? (
               <>
                 <span className="font-semibold text-foreground">{items.length}</span> record
                 {items.length === 1 ? '' : 's'} matching your search
-                {items.length === 500 ? ' (first 500 shown)' : ''}
               </>
             ) : stats && stats.total > 0 ? (
               <>
-                <span className="font-semibold text-foreground">{stats.total}</span> record
-                {stats.total === 1 ? '' : 's'} · {stats.sources} source
+                <span className="font-semibold text-foreground">
+                  {stats.total.toLocaleString()}
+                </span>{' '}
+                record{stats.total === 1 ? '' : 's'} · {stats.sources} source
                 {stats.sources === 1 ? '' : 's'}
                 {span && ` · ${span}`}
-              </>
-            ) : items.length > 0 ? (
-              <>
-                <span className="font-semibold text-foreground">{items.length}</span> record
-                {items.length === 1 ? '' : 's'} imported from your data exports
               </>
             ) : (
               'Bring your history home — drop a data export to begin'
@@ -402,240 +333,242 @@ export default function Timeline(): JSX.Element {
         </button>
       </div>
 
-      {/* Drop zone */}
-      <button
-        type="button"
-        onClick={pickFiles}
-        onDragOver={(e) => {
-          e.preventDefault()
-          setDragOver(true)
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={onDrop}
-        className={cn(
-          'w-full mb-6 rounded-xl border-2 border-dashed px-6 py-8 text-center transition-colors',
-          dragOver
-            ? 'border-primary bg-primary/5'
-            : 'border-border hover:border-primary/50 bg-card/40'
-        )}
-      >
-        <Upload size={22} className="mx-auto mb-2 text-muted-foreground" />
-        <span className="block text-sm text-foreground font-medium">Drop a data export here</span>
-        <span className="block text-xs text-muted-foreground mt-1">
-          Netflix viewing history, Spotify streaming history, or any dated CSV / JSON. Nothing
-          leaves your machine.
-        </span>
-      </button>
-
-      {/* On this day — a memory from prior years, shown only in the default view */}
-      {query === '' && source === null && type === null && onThisDay.length > 0 && (
-        <div className="mb-6 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
-          <div className="flex items-center gap-2 mb-2">
-            <Sparkles size={14} className="text-primary" />
-            <h2 className="text-sm font-semibold text-foreground">On this day</h2>
-          </div>
-          <div className="space-y-1">
-            {onThisDay.map((r) => (
-              <div key={r.id} className="flex items-center gap-2.5 text-sm">
-                <span className="text-muted-foreground shrink-0" title={sourceMeta(r.source).label}>
-                  {sourceMeta(r.source).icon}
-                </span>
-                <span className="text-foreground truncate">{r.title}</span>
-                <span className="ml-auto shrink-0 text-xs text-muted-foreground/70 tabular-nums">
-                  {r.occurredAt ? new Date(r.occurredAt).getUTCFullYear() : ''}
-                </span>
-              </div>
-            ))}
-          </div>
+      {/* Whole-page drop feedback (the entire Timeline is a drop target). */}
+      {dragOver && (
+        <div className="mb-4 rounded-xl border-2 border-dashed border-primary bg-primary/5 px-6 py-4 text-center text-sm text-primary">
+          Drop to import — nothing leaves your machine
         </div>
       )}
 
-      {/* Search */}
-      {(items.length > 0 || query) && (
-        <div className="mb-4">
-          <div className="relative">
-            <Search
-              size={15}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-            />
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={semantic ? 'Search by meaning…' : 'Search your timeline…'}
-              aria-label="Search your timeline"
-              className="w-full rounded-lg border border-border bg-card pl-9 pr-28 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 transition-colors"
-            />
-            <button
-              type="button"
-              onClick={() => setSemantic((v) => !v)}
-              aria-pressed={semantic}
-              title={
-                semantic
-                  ? 'Searching by meaning (semantic)'
-                  : 'Search by meaning instead of keywords'
-              }
-              className={cn(
-                'absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 text-xs px-2 py-1 rounded-md transition-colors',
-                semantic
-                  ? 'bg-primary/20 text-primary'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-              )}
-            >
-              <Sparkles size={13} /> Meaning
-            </button>
-          </div>
-          {semantic && semStatus && !semStatus.available && (
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              {semStatus.building ? (
-                'Building the semantic index on your machine…'
-              ) : (
-                <>
-                  Search-by-meaning needs a local index (uses Ollama, stays on your machine).{' '}
-                  <button
-                    type="button"
-                    onClick={buildSemanticIndex}
-                    className="text-primary hover:underline"
-                  >
-                    Build it
-                  </button>
-                  . Until then, results fall back to keyword search.
-                </>
-              )}
-            </p>
-          )}
-          {semantic && semStatus?.available && query && (
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              Searching by meaning across {semStatus.count.toLocaleString()} indexed records.
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Source filter chips */}
-      {(sources.length > 1 || source !== null) && (
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          <Chip active={source === null} onClick={() => setSource(null)}>
-            All sources
-          </Chip>
-          {sources.map((s) => (
-            <Chip key={s} active={source === s} onClick={() => setSource(s)}>
-              {sourceMeta(s).icon}
-              {sourceMeta(s).label}
-            </Chip>
-          ))}
-        </div>
-      )}
-
-      {/* Kind filter chips — slice the whole timeline by type of activity */}
-      {(types.length > 1 || type !== null) && (
-        <div className="flex flex-wrap gap-1.5 mb-4">
-          <Chip active={type === null} onClick={() => setType(null)}>
-            All kinds
-          </Chip>
-          {types.map((t) => (
-            <Chip key={t} active={type === t} onClick={() => setType(t)}>
-              {typeLabel(t)}
-            </Chip>
-          ))}
-        </div>
-      )}
-
-      {/* Curate: firehose sources (browsing history, background telemetry from data
-          exports) are collapsed from the default browse so they don't bury the signal
-          events — revealable, never deleted. Only shown when there IS firehose data
-          and no search/source filter is narrowing already. */}
-      {!query && !source && !type && stats && stats.firehose > 0 && (
+      {/* First run: the drop zone IS the page. */}
+      {empty ? (
         <button
           type="button"
-          onClick={() => setShowFirehose((v) => !v)}
-          aria-pressed={showFirehose}
-          className="flex items-center gap-1.5 mb-4 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          onClick={pickFiles}
+          className="w-full rounded-xl border-2 border-dashed border-border hover:border-primary/50 bg-card/40 px-6 py-12 text-center transition-colors"
         >
-          <Globe size={13} />
-          {showFirehose
-            ? 'Hide background activity'
-            : `Show background activity (${stats.firehose.toLocaleString()} hidden)`}
+          <Upload size={22} className="mx-auto mb-2 text-muted-foreground" />
+          <span className="block text-sm text-foreground font-medium">Drop a data export here</span>
+          <span className="block text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+            Netflix viewing history, a full Amazon archive, Spotify, LinkedIn — any dated CSV / JSON
+            / ZIP becomes a private, searchable timeline you own forever.
+          </span>
         </button>
+      ) : (
+        <>
+          {/* Search */}
+          <div className="mb-4">
+            <div className="relative">
+              <Search
+                size={15}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={semantic ? 'Search by meaning…' : 'Search your timeline…'}
+                aria-label="Search your timeline"
+                className="w-full rounded-lg border border-border bg-card pl-9 pr-28 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 transition-colors"
+              />
+              <button
+                type="button"
+                onClick={() => setSemantic((v) => !v)}
+                aria-pressed={semantic}
+                title={
+                  semantic
+                    ? 'Searching by meaning (semantic)'
+                    : 'Search by meaning instead of keywords'
+                }
+                className={cn(
+                  'absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 text-xs px-2 py-1 rounded-md transition-colors',
+                  semantic
+                    ? 'bg-primary/20 text-primary'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                )}
+              >
+                <Sparkles size={13} /> Meaning
+              </button>
+            </div>
+            {semantic && semStatus && !semStatus.available && (
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                {semStatus.building ? (
+                  'Building the semantic index on your machine…'
+                ) : (
+                  <>
+                    Search-by-meaning needs a local index (uses Ollama, stays on your machine).{' '}
+                    <button
+                      type="button"
+                      onClick={buildSemanticIndex}
+                      className="text-primary hover:underline"
+                    >
+                      Build it
+                    </button>
+                    . Until then, results fall back to keyword search.
+                  </>
+                )}
+              </p>
+            )}
+            {semantic && semStatus?.available && searching && (
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Searching by meaning across {semStatus.count.toLocaleString()} indexed records.
+              </p>
+            )}
+          </div>
+
+          {/* Lens switch — hidden while a search narrows everything anyway. */}
+          {!searching && (
+            <div className="flex items-center gap-1 mb-4" role="tablist" aria-label="Timeline view">
+              {(
+                [
+                  ['day', 'This day'],
+                  ['browse', 'Browse']
+                ] as Array<[View, string]>
+              ).map(([v, label]) => (
+                <button
+                  key={v}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === v}
+                  onClick={() => switchView(v)}
+                  className={cn(
+                    'text-xs px-3 py-1.5 rounded-lg border transition-colors',
+                    view === v
+                      ? 'border-primary/50 bg-primary/15 text-primary font-medium'
+                      : 'border-border text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+              {view === 'browse' && range && (
+                <button
+                  type="button"
+                  onClick={() => setRange(null)}
+                  className="ml-2 text-xs text-primary hover:underline"
+                  title="Clear the selected period"
+                >
+                  {range.label} ✕
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* THIS DAY — the all-years memory lens. */}
+          {!searching && view === 'day' && (
+            <OnThisDayHero onOpenRecord={setDetail} onOpenDay={openDay} />
+          )}
+
+          {/* BROWSE + search results share the filters and the list. */}
+          {(searching || view === 'browse') && (
+            <>
+              {!searching && (
+                <YearScrubber
+                  range={range}
+                  onRangeChange={setRange}
+                  includeFirehose={showFirehose}
+                />
+              )}
+
+              {(sources.length > 1 || sourcesSel.length > 0) && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  <Chip
+                    active={sourcesSel.length === 0}
+                    onClick={() => setSourcesSel([])}
+                    title="Show every source"
+                  >
+                    All sources
+                  </Chip>
+                  {sources.map((s) => (
+                    <Chip
+                      key={s}
+                      active={sourcesSel.includes(s)}
+                      onClick={() => setSourcesSel((prev) => toggleIn(prev, s))}
+                    >
+                      {sourceMeta(s).icon}
+                      {sourceMeta(s).label}
+                    </Chip>
+                  ))}
+                </div>
+              )}
+
+              {(types.length > 1 || typesSel.length > 0) && (
+                <div className="flex flex-wrap gap-1.5 mb-4">
+                  <Chip
+                    active={typesSel.length === 0}
+                    onClick={() => setTypesSel([])}
+                    title="Show every kind"
+                  >
+                    All kinds
+                  </Chip>
+                  {types.map((t) => (
+                    <Chip
+                      key={t}
+                      active={typesSel.includes(t)}
+                      onClick={() => setTypesSel((prev) => toggleIn(prev, t))}
+                    >
+                      {typeLabel(t)}
+                    </Chip>
+                  ))}
+                </div>
+              )}
+
+              {/* Curate: firehose (browsing history, export telemetry) stays
+                  collapsed until revealed — never deleted. */}
+              {!searching &&
+                sourcesSel.length === 0 &&
+                typesSel.length === 0 &&
+                stats &&
+                stats.firehose > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowFirehose((v) => !v)}
+                    aria-pressed={showFirehose}
+                    className="flex items-center gap-1.5 mb-4 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <Globe size={13} />
+                    {showFirehose
+                      ? 'Hide background activity'
+                      : `Show background activity (${stats.firehose.toLocaleString()} hidden)`}
+                  </button>
+                )}
+
+              {items.length === 0 ? (
+                searching || sourcesSel.length > 0 || typesSel.length > 0 || range ? (
+                  <p className="text-sm text-muted-foreground py-8 text-center">
+                    No {filterLabel ? `${filterLabel} ` : ''}records
+                    {searching ? ` match “${query.trim()}”` : range ? ` in ${range.label}` : ''}.
+                  </p>
+                ) : null /* still loading — don't flash an empty message */
+              ) : (
+                <>
+                  <RecordList records={items} onOpenRecord={setDetail} />
+                  {!searching && hasMore && (
+                    <div className="mt-6 text-center">
+                      <button
+                        type="button"
+                        onClick={loadEarlier}
+                        disabled={loadingMore}
+                        className="text-sm px-4 py-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
+                      >
+                        {loadingMore ? 'Loading…' : 'Load earlier records'}
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </>
       )}
 
-      {shown.length === 0 ? (
-        query || source || type ? (
-          // An active search/filter matched nothing (records exist; this slice is empty).
-          // `filterLabel` carries its own trailing space only when present, so a
-          // search-only miss reads "No records match …" without a double space.
-          <p className="text-sm text-muted-foreground py-8 text-center">
-            No {filterLabel ? `${filterLabel} ` : ''}records
-            {query ? ` match “${query}”` : ''}.
-          </p>
-        ) : stats && stats.total === 0 ? (
-          // The whole table is empty — first-run call to action.
-          <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
-            <p className="text-sm text-muted-foreground max-w-sm">
-              Your timeline is empty. Export your data from a service you use (Netflix, Spotify, …)
-              and drop the file above — it becomes a private, searchable, exportable timeline you
-              own forever.
-            </p>
-          </div>
-        ) : null /* still loading (stats not in yet) — don't flash an empty message */
-      ) : (
-        <div className="space-y-6">
-          {groups.map((g) => (
-            <div key={g.day}>
-              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                {g.day}
-              </h2>
-              <div className="space-y-1.5">
-                {g.rows.map((r) => (
-                  <div
-                    key={r.id}
-                    className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-2.5"
-                  >
-                    <span
-                      className="text-muted-foreground shrink-0"
-                      title={sourceMeta(r.source).label}
-                    >
-                      {sourceMeta(r.source).icon}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-foreground truncate">{r.title}</p>
-                      {r.body && <p className="text-xs text-muted-foreground">{r.body}</p>}
-                    </div>
-                    <span className="text-xs text-muted-foreground/70 shrink-0 tabular-nums">
-                      {fmtTime(r.occurredAt)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+      {detail && (
+        <RecordDetailDrawer
+          record={detail}
+          onClose={() => setDetail(null)}
+          onFindSimilar={findSimilar}
+        />
       )}
     </div>
-  )
-}
-
-function Chip({
-  active,
-  onClick,
-  children
-}: {
-  active: boolean
-  onClick: () => void
-  children: React.ReactNode
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors capitalize',
-        active
-          ? 'border-primary/50 bg-primary/15 text-primary'
-          : 'border-border text-muted-foreground hover:text-foreground'
-      )}
-    >
-      {children}
-    </button>
   )
 }
