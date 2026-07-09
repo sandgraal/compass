@@ -139,21 +139,37 @@ export type DaySummaryGroup = {
 export function daySummary(sqlite: Database.Database, opts: { day: string }): DaySummaryGroup[] {
   const bounds = utcDayBounds(opts.day)
   if (!bounds) return []
-  const range = { from: bounds.start, to: bounds.end - 1 }
-  const groups = sqlite
+  // One pass: window functions rank each group's newest 3 titles and carry the
+  // group count alongside — no N+1 per-(source, type) sample query on busy days.
+  const rows = sqlite
     .prepare(
-      'SELECT source, type, COUNT(*) AS count FROM records WHERE occurred_at >= @from AND occurred_at <= @to GROUP BY source, type ORDER BY count DESC, source'
+      `SELECT source, type, title, count FROM (
+         SELECT source, type, title,
+                ROW_NUMBER() OVER (PARTITION BY source, type ORDER BY occurred_at DESC, id DESC) AS rn,
+                COUNT(*) OVER (PARTITION BY source, type) AS count
+           FROM records WHERE occurred_at >= @from AND occurred_at <= @to
+       ) WHERE rn <= 3
+       ORDER BY count DESC, source, rn`
     )
-    .all(range) as Array<{ source: string; type: string; count: number }>
-  const sample = sqlite.prepare(
-    'SELECT title FROM records WHERE occurred_at >= @from AND occurred_at <= @to AND source = @source AND type = @type ORDER BY occurred_at DESC, id DESC LIMIT 3'
-  )
-  return groups.map((g) => ({
-    ...g,
-    sampleTitles: (
-      sample.all({ ...range, source: g.source, type: g.type }) as Array<{ title: string }>
-    ).map((r) => r.title)
-  }))
+    .all({ from: bounds.start, to: bounds.end - 1 }) as Array<{
+    source: string
+    type: string
+    title: string
+    count: number
+  }>
+  const groups: DaySummaryGroup[] = []
+  const byKey = new Map<string, DaySummaryGroup>()
+  for (const row of rows) {
+    const key = `${row.source}|${row.type}`
+    let group = byKey.get(key)
+    if (!group) {
+      group = { source: row.source, type: row.type, count: row.count, sampleTitles: [] }
+      byKey.set(key, group)
+      groups.push(group) // rows arrive count DESC, source ASC — group order preserved
+    }
+    group.sampleTitles.push(row.title)
+  }
+  return groups
 }
 
 export type OnThisDayYear = {
@@ -190,26 +206,33 @@ export function onThisDayAllYears(
       params[`firehose${i}`] = s
     })
   }
-  // A single month-day is ~1/365 of the table — small enough to fetch matching
-  // rows in one go and group/cap in JS (bounded regardless).
+  // Cap rows PER YEAR in SQL (window functions) while carrying each year's
+  // TRUE total in the same pass — output is bounded by cap × years with no
+  // arbitrary global row limit, so counts stay exact on any archive size.
+  params.cap = cap
   const rows = sqlite
     .prepare(
-      `SELECT ${RECORD_COLS}, ${YEAR_EXPR} AS year FROM records WHERE ${MMDD_EXPR} = @mmdd${firehose} ORDER BY occurred_at DESC, id DESC LIMIT 5000`
+      `SELECT * FROM (
+         SELECT ${RECORD_COLS}, ${YEAR_EXPR} AS year,
+                ROW_NUMBER() OVER (PARTITION BY ${YEAR_EXPR} ORDER BY occurred_at DESC, id DESC) AS rn,
+                COUNT(*) OVER (PARTITION BY ${YEAR_EXPR}) AS yearCount
+           FROM records WHERE ${MMDD_EXPR} = @mmdd${firehose}
+       ) WHERE rn <= @cap
+       ORDER BY year DESC, rn`
     )
-    .all(params) as Array<TimelineRecordRow & { year: number }>
+    .all(params) as Array<TimelineRecordRow & { year: number; rn: number; yearCount: number }>
+  const groups: OnThisDayYear[] = []
   const byYear = new Map<number, OnThisDayYear>()
   for (const row of rows) {
     if (opts.excludeYear != null && row.year === opts.excludeYear) continue
     let group = byYear.get(row.year)
     if (!group) {
-      group = { year: row.year, count: 0, records: [] }
+      group = { year: row.year, count: row.yearCount, records: [] }
       byYear.set(row.year, group)
+      groups.push(group) // rows arrive year DESC — group order preserved
     }
-    group.count++
-    if (group.records.length < cap) {
-      const { year: _year, ...record } = row
-      group.records.push(record)
-    }
+    const { year: _year, rn: _rn, yearCount: _yearCount, ...record } = row
+    group.records.push(record)
   }
-  return [...byYear.values()].sort((a, b) => b.year - a.year)
+  return groups
 }
