@@ -74,9 +74,18 @@ export default function Timeline(): JSX.Element {
   // Restore the last-used lens (fire-and-forget persistence via app_settings).
   useEffect(() => {
     if (!isElectron()) return
+    let canceled = false
     void window.api.settings.get(VIEW_SETTING_KEY).then((v) => {
-      if (v === 'browse' || v === 'day' || v === 'density') setView(v)
+      if (canceled) return
+      // 'density' joined the lens set in PR 5; only apply the persisted lens if
+      // the user hasn't already switched away from the default (main's guard).
+      if (v === 'browse' || v === 'day' || v === 'density') {
+        setView((prev) => (prev === 'day' ? v : prev))
+      }
     })
+    return () => {
+      canceled = true
+    }
   }, [])
   function switchView(next: View): void {
     setView(next)
@@ -149,19 +158,22 @@ export default function Timeline(): JSX.Element {
   async function loadEarlier(): Promise<void> {
     if (!isElectron() || loadingMore) return
     setLoadingMore(true)
+    const nextOffset = offsetRef.current + PAGE_SIZE
     try {
-      offsetRef.current += PAGE_SIZE
       const rows = await window.api.records.list({
         sources: sourcesSel.length > 0 ? sourcesSel : undefined,
         types: typesSel.length > 0 ? typesSel : undefined,
         from: range?.from ?? undefined,
         to: range?.to ?? undefined,
         limit: PAGE_SIZE,
-        offset: offsetRef.current,
+        offset: nextOffset,
         includeFirehose: showFirehose || typesSel.length > 0
       })
+      offsetRef.current = nextOffset
       setItems((prev) => [...prev, ...rows])
       setHasMore(rows.length === PAGE_SIZE)
+    } catch {
+      toast('Could not load earlier records', 'error')
     } finally {
       setLoadingMore(false)
     }
@@ -432,7 +444,7 @@ export default function Timeline(): JSX.Element {
 
           {/* Lens switch — hidden while a search narrows everything anyway. */}
           {!searching && (
-            <div className="flex items-center gap-1 mb-4" role="tablist" aria-label="Timeline view">
+            <div className="flex items-center gap-1 mb-4" aria-label="Timeline view">
               {(
                 [
                   ['day', 'This day'],
@@ -443,8 +455,7 @@ export default function Timeline(): JSX.Element {
                 <button
                   key={v}
                   type="button"
-                  role="tab"
-                  aria-selected={view === v}
+                  aria-pressed={view === v}
                   onClick={() => switchView(v)}
                   className={cn(
                     'text-xs px-3 py-1.5 rounded-lg border transition-colors',
