@@ -20,7 +20,7 @@ import Database from 'better-sqlite3'
 import { type SQL, and, desc, eq, inArray, like, notInArray, or, sql } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
-import { appSettings, locationPoints, records, snapshotFacts } from '../db/schema'
+import { appSettings, locationPoints, records, snapshotFacts, timelineMutes } from '../db/schema'
 import { afterLocationImport } from '../integrations/location-residency'
 import { DEFAULT_EMBED_MODEL } from '../knowledge/embeddings'
 import {
@@ -32,6 +32,7 @@ import {
 } from '../knowledge/records-embeddings'
 import { updateRecordsKnowledge } from '../knowledge/records-extractor'
 import { serializeCsv } from '../lib/csv'
+import { isPlausibleEpochMs } from '../lib/dates'
 import { refreshDerivedEntities } from '../lib/entities-projection'
 import { LOCATION_RECOGNIZER_IDS, type LocationPayload } from '../lib/location'
 import { extractPdfText } from '../lib/pdf'
@@ -46,8 +47,22 @@ import {
   recognizeSqlite,
   recognizeStream
 } from '../lib/recognizers'
+import {
+  daySummary,
+  onThisDayAllYears,
+  recordsForDay,
+  recordsHistogram
+} from '../lib/records-aggregates'
+import { planReclassify } from '../lib/records-reclassify'
 import { type RecordSearchOpts, type TimelineSearchHit, searchRecords } from '../lib/records-search'
+import {
+  buildYearReview,
+  yearReviewMarkdown,
+  yearReviewNarrative
+} from '../lib/records-year-review'
 import { FIREHOSE_SOURCE_LIST } from '../lib/source-tiers'
+import { type MuteSet, rankMemories } from '../lib/timeline-memories'
+import { momentsForDay } from '../lib/timeline-moments'
 import { forEachZipEntry } from '../lib/zip'
 
 const MAX_IMPORT_BYTES = 50 * 1024 * 1024 // 50 MB — matches the contacts/finance guard
@@ -79,6 +94,37 @@ export interface RecordsImportResult {
 
 type RecordRow = typeof records.$inferSelect
 
+/** The user's "never resurface" vetoes, shaped for rankMemories. */
+function loadMuteSet(): MuteSet {
+  const recordIds = new Set<number>()
+  const sourceTypes = new Set<string>()
+  try {
+    for (const m of getDb().select().from(timelineMutes).all()) {
+      if (m.kind === 'record') {
+        const id = Number(m.target)
+        if (Number.isFinite(id)) recordIds.add(id)
+      } else if (m.kind === 'source-type') {
+        sourceTypes.add(m.target)
+      }
+    }
+  } catch {
+    /* table absent on an odd/old DB — no mutes */
+  }
+  return { recordIds, sourceTypes }
+}
+
+/**
+ * Last line of defense for `occurred_at`: recognizers already route ambiguous
+ * cells through `parseWhen` (which range-checks), but live projectors and
+ * future writers hand epoch ms straight in — clamp implausible values (before
+ * 1970 / more than 5 years out) to UNDATED here so no writer can reintroduce
+ * absurd-year rows.
+ */
+function plausibleOccurredAt(ms: number | null | undefined): Date | null {
+  if (ms == null || !isPlausibleEpochMs(ms)) return null
+  return new Date(ms)
+}
+
 function rowToRecord(row: RecordRow) {
   return {
     id: row.id,
@@ -103,16 +149,23 @@ export function insertRecords(inputs: RecordInput[], provenance: string): { impo
   const db = getDb()
   let imported = 0
   for (const inp of inputs) {
+    // Hash the CLAMPED timestamp so a row's identity always matches what's
+    // stored: if a writer hands in an implausible occurredAt (stored UNDATED),
+    // hashing the raw value would let the same event re-arrive later with a
+    // corrected-to-null date and duplicate instead of deduping. Identical for
+    // every plausible timestamp (clamp is a no-op there).
+    const occurredAt = plausibleOccurredAt(inp.occurredAt)
+    const occurredAtMs = occurredAt ? occurredAt.getTime() : null
     const res = db
       .insert(records)
       .values({
         source: inp.source,
         type: inp.type,
-        occurredAt: inp.occurredAt != null ? new Date(inp.occurredAt) : null,
+        occurredAt,
         title: inp.title.slice(0, 2000),
         body: inp.body ? inp.body.slice(0, 2000) : null,
         payload: inp.payload !== undefined ? JSON.stringify(inp.payload).slice(0, 100_000) : null,
-        dedupHash: hashRecord(inp.source, inp.type, inp.occurredAt, inp.naturalKey),
+        dedupHash: hashRecord(inp.source, inp.type, occurredAtMs, inp.naturalKey),
         provenance
       })
       .onConflictDoNothing()
@@ -198,7 +251,7 @@ export function upsertLiveRecords(
   let updated = 0
   for (const { inp, dedupHash } of withHash) {
     const values = {
-      occurredAt: inp.occurredAt != null ? new Date(inp.occurredAt) : null,
+      occurredAt: plausibleOccurredAt(inp.occurredAt),
       title: inp.title.slice(0, 2000),
       body: inp.body ? inp.body.slice(0, 2000) : null,
       payload: inp.payload !== undefined ? JSON.stringify(inp.payload).slice(0, 100_000) : null
@@ -525,6 +578,115 @@ export function buildRecordsCsv(): string {
   )
 }
 
+export const RECORDS_RECLASSIFY_KEY = 'recordsReclassifyV1'
+
+export type ReclassifyResult = {
+  moved: number // generic rows re-inserted as properly-sourced records
+  located: number // generic rows moved to location_points
+  deleted: number // generic rows removed (= moved + located)
+}
+
+/**
+ * Re-derive already-imported 'generic' rows whose export family now has a real
+ * recognizer (`amazon-export.ts`). Lossless: each row's original CSV row lives
+ * in `payload`, so the mapper re-reads it, the row is re-inserted through the
+ * production `insertRecords` / `insertLocationPoints` paths (hashing,
+ * truncation, FTS triggers, date guardrail), and only then is the generic row
+ * deleted — all in one transaction. A future re-import of the same file
+ * dedupes against the reclassified rows instead of duplicating them. Rows no
+ * family claims are left untouched (source-tiers collapses them as firehose).
+ */
+export function reclassifyGenericRecords(): ReclassifyResult {
+  const sqlite = getRawSqlite()
+  const result: ReclassifyResult = { moved: 0, located: 0, deleted: 0 }
+  const selectChunk = sqlite.prepare(
+    "SELECT id, provenance, payload FROM records WHERE source = 'generic' AND id > ? ORDER BY id LIMIT 5000"
+  )
+  const deleteById = sqlite.prepare('DELETE FROM records WHERE id = ?')
+
+  const processChunk = sqlite.transaction(
+    (
+      chunk: Array<{
+        id: number
+        provenance: string | null
+        payload: string | null
+      }>
+    ) => {
+      const plan = planReclassify(chunk)
+      // Preserve each row's original import filename on the re-inserted record.
+      const byProvenance = new Map<string, RecordInput[]>()
+      for (const move of plan.records) {
+        const list = byProvenance.get(move.provenance)
+        if (list) list.push(move.input)
+        else byProvenance.set(move.provenance, [move.input])
+      }
+      for (const [provenance, inputs] of byProvenance) insertRecords(inputs, provenance)
+      if (plan.locations.length > 0) {
+        insertLocationPoints(
+          plan.locations.map((m) => m.input),
+          'reclassify'
+        )
+      }
+      for (const move of plan.records) deleteById.run(move.deleteId)
+      for (const move of plan.locations) deleteById.run(move.deleteId)
+      return plan
+    }
+  )
+
+  let lastId = 0
+  for (;;) {
+    const chunk = selectChunk.all(lastId) as Array<{
+      id: number
+      provenance: string | null
+      payload: string | null
+    }>
+    if (chunk.length === 0) break
+    lastId = chunk[chunk.length - 1].id
+    const plan = processChunk(chunk)
+    result.moved += plan.records.length
+    result.located += plan.locations.length
+    result.deleted += plan.records.length + plan.locations.length
+  }
+
+  if (result.deleted > 0) {
+    try {
+      refreshDerivedEntities(getDb())
+    } catch {
+      /* derived-entity projection is best-effort */
+    }
+    void refreshRecordsSemanticIndex()
+    if (result.located > 0) {
+      try {
+        afterLocationImport()
+      } catch {
+        /* location derivation is best-effort */
+      }
+    }
+  }
+  return result
+}
+
+/**
+ * App-launch wrapper: run the reclassification exactly once per install, gated
+ * on an app_settings key written only AFTER success (crash → retried next
+ * launch; the reclassify is dedup-safe so retries are safe). Same pattern as
+ * `recordsDateRepairV1` / `financeSnapshotRepairV1`.
+ */
+export function runRecordsReclassifyIfNeeded(): { ran: boolean } & Partial<ReclassifyResult> {
+  const db = getDb()
+  const existing = db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, RECORDS_RECLASSIFY_KEY))
+    .get()
+  if (existing) return { ran: false }
+  const res = reclassifyGenericRecords()
+  db.insert(appSettings)
+    .values({ key: RECORDS_RECLASSIFY_KEY, value: new Date().toISOString() })
+    .run()
+  return { ran: true, ...res }
+}
+
 const EMPTY: Omit<RecordsImportResult, 'success'> = {
   imported: 0,
   duplicates: 0,
@@ -563,8 +725,12 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
       _event,
       opts?: {
         source?: string
+        sources?: string[] // multi-select chips (Timeline 2.0); wins over `source`
         type?: string
+        types?: string[]
         q?: string
+        from?: number // epoch ms, inclusive
+        to?: number // epoch ms, inclusive
         limit?: number
         offset?: number
         includeFirehose?: boolean
@@ -573,8 +739,14 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
       const db = getDb()
       const limit = Math.min(Math.max(Math.trunc(opts?.limit ?? 200), 1), 1000)
       const offset = Math.max(Math.trunc(opts?.offset ?? 0), 0)
+      const strings = (v: unknown): string[] =>
+        Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string' && s !== '') : []
+      const sources = strings(opts?.sources)
+      const types = strings(opts?.types)
       const conds: SQL[] = []
-      if (opts?.source) {
+      if (sources.length > 0) {
+        conds.push(inArray(records.source, sources))
+      } else if (opts?.source) {
         conds.push(eq(records.source, opts.source))
       } else if (opts?.includeFirehose === false && FIREHOSE_SOURCE_LIST.length > 0) {
         // Curate (Phase 10.7): collapse firehose sources (browser history, …) from
@@ -582,7 +754,14 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
         // the rows stay on disk, and selecting the source's chip overrides this.
         conds.push(notInArray(records.source, FIREHOSE_SOURCE_LIST))
       }
-      if (opts?.type) conds.push(eq(records.type, opts.type))
+      if (types.length > 0) conds.push(inArray(records.type, types))
+      else if (opts?.type) conds.push(eq(records.type, opts.type))
+      const finiteMs = (v: unknown): number | undefined =>
+        typeof v === 'number' && Number.isFinite(v) ? v : undefined
+      const from = finiteMs(opts?.from)
+      const to = finiteMs(opts?.to)
+      if (from != null) conds.push(sql`${records.occurredAt} >= ${from}`)
+      if (to != null) conds.push(sql`${records.occurredAt} <= ${to}`)
       const q = opts?.q?.trim()
       if (q) {
         // Case-insensitive substring search over title + body, server-side so it
@@ -702,14 +881,177 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
     const year = String(now.getUTCFullYear())
     const monthDay = sql`strftime('%m-%d', ${records.occurredAt} / 1000, 'unixepoch')`
     const yr = sql`strftime('%Y', ${records.occurredAt} / 1000, 'unixepoch')`
+    const conds: SQL[] = [sql`${monthDay} = ${mmdd} AND ${yr} <> ${year}`]
+    // Telemetry is not a memory: keep firehose sources out of the recap (they'd
+    // otherwise dominate it now that 'generic' is tiered as firehose).
+    if (FIREHOSE_SOURCE_LIST.length > 0) {
+      conds.push(notInArray(records.source, FIREHOSE_SOURCE_LIST))
+    }
     const rows = db
       .select()
       .from(records)
-      .where(sql`${monthDay} = ${mmdd} AND ${yr} <> ${year}`)
+      .where(and(...conds))
       .orderBy(desc(records.occurredAt), desc(records.id))
-      .limit(limit)
+      .limit(200) // fetch wide, then rank down to the requested limit
       .all()
-    return rows.map(rowToRecord)
+    // Memory ranking (PR 6): mutes + sensitivity + score-ordering, so the
+    // Dashboard card and the Timeline hero agree on what a memory is.
+    return rankMemories(rows.map(rowToRecord), { mutes: loadMuteSet(), cap: limit })
+  })
+
+  // ── Timeline 2.0 aggregates (PR 3) — the year scrubber / heatmap / day
+  // drill-down / all-years hero backend. Pure query logic lives in
+  // electron/lib/records-aggregates.ts (raw SQL whose strftime expressions
+  // match the 0033 expression indexes); these handlers just validate inputs.
+
+  ipcMain.handle(
+    'records:histogram',
+    (
+      _event,
+      opts?: {
+        bucket?: 'year' | 'month'
+        source?: string
+        type?: string
+        from?: number
+        to?: number
+        includeFirehose?: boolean
+      }
+    ) => {
+      const finite = (v: unknown): number | undefined =>
+        typeof v === 'number' && Number.isFinite(v) ? v : undefined
+      return recordsHistogram(getRawSqlite(), {
+        bucket: opts?.bucket === 'month' ? 'month' : 'year',
+        source: typeof opts?.source === 'string' ? opts.source : undefined,
+        type: typeof opts?.type === 'string' ? opts.type : undefined,
+        from: finite(opts?.from),
+        to: finite(opts?.to),
+        includeFirehose: opts?.includeFirehose === true
+      })
+    }
+  )
+
+  ipcMain.handle(
+    'records:day',
+    (
+      _event,
+      opts?: {
+        day?: string
+        source?: string
+        type?: string
+        limit?: number
+        offset?: number
+        includeFirehose?: boolean
+      }
+    ) => {
+      if (typeof opts?.day !== 'string') return []
+      return recordsForDay(getRawSqlite(), {
+        day: opts.day,
+        source: typeof opts.source === 'string' ? opts.source : undefined,
+        type: typeof opts.type === 'string' ? opts.type : undefined,
+        limit: typeof opts.limit === 'number' ? opts.limit : undefined,
+        offset: typeof opts.offset === 'number' ? opts.offset : undefined,
+        includeFirehose: opts.includeFirehose === true
+      })
+    }
+  )
+
+  ipcMain.handle('records:day-summary', (_event, opts?: { day?: string }) => {
+    if (typeof opts?.day !== 'string') return []
+    return daySummary(getRawSqlite(), { day: opts.day })
+  })
+
+  ipcMain.handle(
+    'records:on-this-day-v2',
+    (_event, opts?: { month?: number; day?: number; perYearCap?: number }) => {
+      // Default to TODAY (UTC — matches v1's date-only-import rationale) and
+      // exclude the current year only when showing today: any other requested
+      // month-day is deliberate browsing, where every year is fair game.
+      const now = new Date()
+      const month = typeof opts?.month === 'number' ? opts.month : now.getUTCMonth() + 1
+      const day = typeof opts?.day === 'number' ? opts.day : now.getUTCDate()
+      const isToday = month === now.getUTCMonth() + 1 && day === now.getUTCDate()
+      const cap = Math.min(Math.max(Math.trunc(opts?.perYearCap ?? 6), 1), 50)
+      // Fetch each year WIDE (lib max), then memory-rank down to the cap —
+      // mutes + sensitivity out, distinctive records above burst noise.
+      const years = onThisDayAllYears(getRawSqlite(), {
+        month,
+        day,
+        perYearCap: 50,
+        excludeYear: isToday ? now.getUTCFullYear() : undefined
+      })
+      const mutes = loadMuteSet()
+      return years
+        .map((y) => ({ ...y, records: rankMemories(y.records, { mutes, cap }) }))
+        .filter((y) => y.records.length > 0)
+    }
+  )
+
+  // Anniversary "moments" for a month-day: birthdays, entity firsts,
+  // big-purchase anniversaries, today's renewals (timeline-moments.ts).
+  ipcMain.handle('records:moments', (_event, opts?: { month?: number; day?: number }) => {
+    const now = new Date()
+    const month = typeof opts?.month === 'number' ? opts.month : now.getUTCMonth() + 1
+    const day = typeof opts?.day === 'number' ? opts.day : now.getUTCDate()
+    if (!Number.isInteger(month) || month < 1 || month > 12) return []
+    if (!Number.isInteger(day) || day < 1 || day > 31) return []
+    return momentsForDay(getRawSqlite(), {
+      month,
+      day,
+      currentYear: now.getUTCFullYear(),
+      isToday: month === now.getUTCMonth() + 1 && day === now.getUTCDate()
+    })
+  })
+
+  // Year in Review (PR 7): one year distilled — pure records-year-review.ts.
+  ipcMain.handle('records:year-review', (_event, opts?: { year?: number }) => {
+    const year = Math.trunc(opts?.year ?? new Date().getUTCFullYear())
+    if (!Number.isInteger(year) || year < 1970 || year > 2100) return null
+    const review = buildYearReview(getRawSqlite(), year)
+    return { ...review, narrative: yearReviewNarrative(review) }
+  })
+
+  ipcMain.handle('records:year-review-markdown', (_event, opts?: { year?: number }) => {
+    const year = Math.trunc(opts?.year ?? new Date().getUTCFullYear())
+    if (!Number.isInteger(year) || year < 1970 || year > 2100) return null
+    return yearReviewMarkdown(buildYearReview(getRawSqlite(), year))
+  })
+
+  // ── Memory mutes (PR 6): "never resurface this" — reversible, never deletion.
+  ipcMain.handle('records:mute', (_event, opts?: { kind?: string; target?: string | number }) => {
+    const kind = opts?.kind
+    if (kind !== 'record' && kind !== 'source-type') {
+      return { success: false, error: 'Unknown mute kind' }
+    }
+
+    const target = String(opts?.target ?? '').slice(0, 500)
+    if (!target) return { success: false, error: 'Missing mute target' }
+
+    if (kind === 'record') {
+      const id = Number(target)
+      if (!Number.isInteger(id) || id <= 0) {
+        return { success: false, error: 'Invalid record id' }
+      }
+    }
+
+    getDb().insert(timelineMutes).values({ kind, target }).onConflictDoNothing().run()
+    return { success: true }
+  })
+
+  ipcMain.handle('records:mutes', () => {
+    return getDb()
+      .select()
+      .from(timelineMutes)
+      .all()
+      .map((m) => ({
+        id: m.id,
+        kind: m.kind,
+        target: m.target
+      }))
+  })
+
+  ipcMain.handle('records:clear-mutes', () => {
+    getDb().delete(timelineMutes).run()
+    return { success: true }
   })
 
   // At-a-glance totals for the Timeline header — the TRUE total (the Timeline UI
@@ -762,6 +1104,17 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
     const sources = [...new Set(rows.map((r) => r.source))].sort()
     const types = [...new Set(rows.map((r) => r.type))].sort()
     return { sources, types }
+  })
+
+  // Re-derive already-imported 'generic' rows through the real recognizers
+  // (amazon-export families). Idempotent + dedup-safe, so a manual re-run after
+  // a future family is added just converts the newly-covered rows.
+  ipcMain.handle('records:reclassify-generic', () => {
+    try {
+      return { success: true, ...reclassifyGenericRecords() }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   ipcMain.handle('records:import', async (): Promise<RecordsImportResult> => {

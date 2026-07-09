@@ -472,6 +472,22 @@ declare global {
     ingestedAt: number | null
   }
 
+  // --- Year in Review (Timeline 2.0 PR 7) ---
+  interface YearReviewSummary {
+    year: number
+    totalRecords: number
+    monthCounts: number[]
+    topSources: Array<{ source: string; count: number }>
+    topTitles: Array<{ source: string; type: string; title: string; count: number }>
+    firsts: Array<{ kind: string; name: string }>
+    newPeople: number
+    countries: string[]
+    spend: { total: number; biggest: { description: string; amount: number } | null } | null
+    netWorth: { start: number | null; end: number | null } | null
+    habits: Array<{ name: string; completions: number }>
+    narrative: string
+  }
+
   interface Person {
     name: string
     key: string
@@ -1076,12 +1092,61 @@ declare global {
       records: {
         list(opts?: {
           source?: string
+          sources?: string[]
           type?: string
+          types?: string[]
           q?: string
+          from?: number
+          to?: number
           limit?: number
           offset?: number
           includeFirehose?: boolean
         }): Promise<TimelineRecord[]>
+        histogram(opts?: {
+          bucket?: 'year' | 'month'
+          source?: string
+          type?: string
+          from?: number
+          to?: number
+          includeFirehose?: boolean
+        }): Promise<Array<{ bucket: string; count: number }>>
+        day(opts: {
+          day: string
+          source?: string
+          type?: string
+          limit?: number
+          offset?: number
+          includeFirehose?: boolean
+        }): Promise<TimelineRecord[]>
+        daySummary(opts: { day: string }): Promise<
+          Array<{
+            source: string
+            type: string
+            count: number
+            sampleTitles: string[]
+          }>
+        >
+        onThisDayAllYears(opts?: {
+          month?: number
+          day?: number
+          perYearCap?: number
+        }): Promise<Array<{ year: number; count: number; records: TimelineRecord[] }>>
+        moments(opts?: { month?: number; day?: number }): Promise<
+          Array<{
+            kind: 'birthday' | 'first-met' | 'first-merchant' | 'purchase-anniversary' | 'renewal'
+            title: string
+            detail?: string
+            yearsAgo?: number
+          }>
+        >
+        yearReview(opts?: { year?: number }): Promise<YearReviewSummary | null>
+        yearReviewMarkdown(opts?: { year?: number }): Promise<string | null>
+        mute(opts: {
+          kind: 'record' | 'source-type'
+          target: string | number
+        }): Promise<{ success: boolean; error?: string }>
+        mutes(): Promise<Array<{ id: number; kind: string; target: string }>>
+        clearMutes(): Promise<{ success: boolean }>
         search(opts: {
           q: string
           source?: string
@@ -1118,6 +1183,13 @@ declare global {
         facets(): Promise<{ sources: string[]; types: string[] }>
         importFiles(): Promise<RecordsImportResult>
         importPaths(paths: string[]): Promise<RecordsImportResult>
+        reclassifyGeneric(): Promise<{
+          success: boolean
+          error?: string
+          moved?: number
+          located?: number
+          deleted?: number
+        }>
         pathsForFiles(files: File[]): string[]
       }
       dataRights: {

@@ -737,6 +737,25 @@ export const medicalRecords = sqliteTable('medical_records', {
   ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
+// ---- Timeline memory mutes (Timeline 2.0 PR 6) ----
+// "Never resurface this" — the memory layer's safety valve (breakups, losses,
+// anything the user doesn't want the On-this-day hero echoing back). Reversible
+// tags, not deletion: the records stay on disk and in browse/search; mutes only
+// filter RESURFACING (on-this-day / anniversaries). `kind` scopes the target:
+// 'record' (target = record id), 'source-type' (target = 'source|type').
+export const timelineMutes = sqliteTable(
+  'timeline_mutes',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    kind: text('kind').notNull(), // 'record' | 'source-type'
+    target: text('target').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+  },
+  (t) => ({
+    kindTargetUnique: uniqueIndex('timeline_mutes_kind_target').on(t.kind, t.target)
+  })
+)
+
 // ---- Financial goals (Phase 11.6 — "Goals & milestones") ----
 // Target-date savings goals that tie the cross-border picture together: a tax
 // reserve, the next CR capex draw, the retirement number, an emergency fund.

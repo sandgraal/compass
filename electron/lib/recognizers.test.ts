@@ -41,6 +41,25 @@ describe('parseWhen', () => {
     expect(parseWhen(null)).toBeNull()
     expect(parseWhen('not a date')).toBeNull()
   })
+  it('rejects absurd-year garbage that Date.parse would otherwise accept', () => {
+    // Bare numbers are ID/quantity cells — Date.parse('104') reads year 104 AD.
+    expect(parseWhen('104')).toBeNull()
+    expect(parseWhen('0104')).toBeNull()
+    expect(parseWhen('10801')).toBeNull()
+    expect(parseWhen('0000-01-01')).toBeNull() // year 0 → negative epoch
+    expect(parseWhen('1/2/104')).toBeNull() // 3-digit year in the M/D fallback
+  })
+  it('rejects dates before 1970 and more than 5 years in the future', () => {
+    const now = Date.parse('2026-07-08T00:00:00Z')
+    expect(parseWhen('1969-12-31', now)).toBeNull()
+    expect(parseWhen('2030-01-01', now)).not.toBeNull() // renewals/pre-orders OK
+    expect(parseWhen('2040-01-01', now)).toBeNull()
+  })
+  it('pivots two-digit years at 70 instead of mapping 99 to 2099', () => {
+    expect(parseWhen('1/2/99', Date.parse('2026-07-08T00:00:00Z'))).toBe(
+      new Date(1999, 0, 2).getTime()
+    )
+  })
 })
 
 describe('hashRecord', () => {
