@@ -565,16 +565,14 @@ export function reclassifyGenericRecords(): ReclassifyResult {
   )
   const deleteById = sqlite.prepare('DELETE FROM records WHERE id = ?')
 
-  const run = sqlite.transaction(() => {
-    let lastId = 0
-    for (;;) {
-      const chunk = selectChunk.all(lastId) as Array<{
+  const processChunk = sqlite.transaction(
+    (
+      chunk: Array<{
         id: number
         provenance: string | null
         payload: string | null
       }>
-      if (chunk.length === 0) break
-      lastId = chunk[chunk.length - 1].id
+    ) => {
       const plan = planReclassify(chunk)
       // Preserve each row's original import filename on the re-inserted record.
       const byProvenance = new Map<string, RecordInput[]>()
@@ -592,12 +590,24 @@ export function reclassifyGenericRecords(): ReclassifyResult {
       }
       for (const move of plan.records) deleteById.run(move.deleteId)
       for (const move of plan.locations) deleteById.run(move.deleteId)
-      result.moved += plan.records.length
-      result.located += plan.locations.length
-      result.deleted += plan.records.length + plan.locations.length
+      return plan
     }
-  })
-  run()
+  )
+
+  let lastId = 0
+  for (;;) {
+    const chunk = selectChunk.all(lastId) as Array<{
+      id: number
+      provenance: string | null
+      payload: string | null
+    }>
+    if (chunk.length === 0) break
+    lastId = chunk[chunk.length - 1].id
+    const plan = processChunk(chunk)
+    result.moved += plan.records.length
+    result.located += plan.locations.length
+    result.deleted += plan.records.length + plan.locations.length
+  }
 
   if (result.deleted > 0) {
     try {
