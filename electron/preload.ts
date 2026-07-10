@@ -465,6 +465,11 @@ const api = {
     exclude: (items: Array<{ kind: EntityKind; key: string }>) =>
       ipcRenderer.invoke('entities:exclude', { items })
   },
+  // Offline map data for the Places page — clustered cells only, renderer-only
+  // (raw location_points stay behind the AI/MCP aggregates boundary).
+  location: {
+    mapData: () => ipcRenderer.invoke('location:map-data')
+  },
   places: {
     list: () => ipcRenderer.invoke('places:list'),
     delete: (id: number) => ipcRenderer.invoke('places:delete', id)
