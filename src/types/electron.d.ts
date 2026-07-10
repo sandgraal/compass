@@ -1143,6 +1143,10 @@ declare global {
         enrichStatus(): Promise<{ needsReconnect: boolean }>
         activity(id: number): Promise<ContactActivityHit[]>
       }
+      curation: {
+        counts(): Promise<Record<string, number>>
+        clear(kind: string): Promise<{ success: boolean; cleared: number }>
+      }
       storehouse: {
         summary(): Promise<StorehouseSummary>
         backfill(): Promise<{ imported: number; entities: number }>

@@ -253,6 +253,13 @@
       "when": 1783600000000,
       "tag": "0035_contact_enrichment",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1783700000000,
+      "tag": "0036_curation_exclusions",
+      "breakpoints": true
     }
   ]
 }

@@ -14,10 +14,10 @@
 import { randomUUID } from 'node:crypto'
 import { lstatSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { eq, like } from 'drizzle-orm'
+import { and, eq, like } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
-import { contacts } from '../db/schema'
+import { contacts, derivedEntities } from '../db/schema'
 import { writeRelationships } from '../knowledge/contacts-extractor'
 import {
   parseFacebookFriends,
@@ -31,6 +31,7 @@ import {
   parseEnrichment
 } from '../lib/contact-enrichment'
 import { parseCSV, serializeCsv } from '../lib/csv'
+import { addExclusions, loadExclusionSet, removeExclusion } from '../lib/curation'
 import {
   type ContactAddress,
   type ContactEmail,
@@ -267,12 +268,25 @@ function parsedToInput(p: ParsedContact, source: string): ContactInput {
  * as file imports (dedupe by external id, search-blob recompute) instead of a
  * parallel one.
  */
-export function upsertContacts(inputs: ContactInput[]): { imported: number; updated: number } {
+export function upsertContacts(inputs: ContactInput[]): {
+  imported: number
+  updated: number
+  skipped: number
+} {
   const db = getDb()
   let imported = 0
   let updated = 0
+  let skipped = 0
+  // The durable "no" list, loaded ONCE per batch: user-deleted contacts
+  // (tombstones) and dedupe merge losers must never be re-created by any sync
+  // or import — this loop is the single choke point every source funnels through.
+  const suppressed = loadExclusionSet(db, ['contact-tombstone', 'contact-merged'])
   for (const input of inputs) {
     const externalId = input.externalId?.trim() || `urn:uuid:${randomUUID()}`
+    if (suppressed.has(externalId)) {
+      skipped++
+      continue
+    }
     const storage = toStorage(input)
     const existing = db
       .select({ id: contacts.id, enrichment: contacts.enrichment })
@@ -313,7 +327,7 @@ export function upsertContacts(inputs: ContactInput[]): { imported: number; upda
       imported++
     }
   }
-  return { imported, updated }
+  return { imported, updated, skipped }
 }
 
 /**
@@ -419,6 +433,9 @@ export function promoteDerivedContact(
 ): { id: number; alreadyExisted: boolean } {
   const db = getDb()
   const externalId = `derived:person:${matchKey}`
+  // Promote is EXPLICIT user intent — it overrides a prior delete of this same
+  // derived person, so clear any tombstone before the insert-if-missing.
+  removeExclusion(db, 'contact-tombstone', externalId)
   const existing = db
     .select({ id: contacts.id })
     .from(contacts)
@@ -695,7 +712,26 @@ export function registerContactsHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('contacts:delete', (_event, id: number) => {
     if (!Number.isInteger(id)) throw new Error('contacts:delete requires an integer id')
     const db = getDb()
+    // Delete means GONE: tombstone the external id first so no future sync or
+    // import can re-create this contact (upsertContacts skips tombstoned ids).
+    // Settings → Curation can clear tombstones if the user changes their mind.
+    const row = db
+      .select({ externalId: contacts.externalId })
+      .from(contacts)
+      .where(eq(contacts.id, id))
+      .all()[0]
+    if (row?.externalId) addExclusions(db, 'contact-tombstone', [row.externalId])
     db.delete(contacts).where(eq(contacts.id, id)).run()
+    // Un-link any derived-entity row that pointed at this contact so the People
+    // page is consistent immediately (the next rebuild recomputes this anyway).
+    try {
+      db.update(derivedEntities)
+        .set({ promotedKind: null, promotedId: null })
+        .where(and(eq(derivedEntities.promotedKind, 'contact'), eq(derivedEntities.promotedId, id)))
+        .run()
+    } catch {
+      /* derived_entities absent on a pristine DB — ignore */
+    }
     syncRelationships()
     return { success: true }
   })

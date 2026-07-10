@@ -346,6 +346,8 @@ export default function Settings(): JSX.Element {
 
         {/* Spotlight mirror (Phase 5.14) */}
         <SpotlightMirrorSettings />
+        {/* Curation exclusions — blocked contacts / hidden entities */}
+        <CurationSettings />
         <SettingsRow
           label="Export data"
           description="Save all your data (tasks, habits, finance, knowledge index) as a JSON file"
@@ -596,6 +598,88 @@ function SettingsRow({
       </div>
       <div className="ml-4 shrink-0">{children}</div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Curation exclusions — the durable "no" list (blocked contacts, hidden
+// people/merchants/places). Deleting a contact or marking an entity "Not
+// interested" writes here so syncs can't resurrect them; these rows let the
+// user change their mind.
+// ---------------------------------------------------------------------------
+
+const CURATION_ROWS: Array<{ kind: string; label: string; description: string }> = [
+  {
+    kind: 'contact-tombstone',
+    label: 'Blocked contacts',
+    description: 'Deleted contacts that syncs and imports are not allowed to re-create'
+  },
+  {
+    kind: 'entity:person',
+    label: 'Hidden people',
+    description: 'People you marked "Not interested" on the People page'
+  },
+  {
+    kind: 'entity:merchant',
+    label: 'Hidden merchants',
+    description: 'Merchants you marked "Not interested"'
+  },
+  {
+    kind: 'entity:place',
+    label: 'Hidden places',
+    description: 'Places you marked "Not interested"'
+  }
+]
+
+function CurationSettings(): JSX.Element | null {
+  const { toast } = useToast()
+  const [counts, setCounts] = useState<Record<string, number>>({})
+  const [clearing, setClearing] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!window.api?.curation) return
+    window.api.curation
+      .counts()
+      .then(setCounts)
+      .catch(() => {})
+  }, [])
+
+  async function clear(kind: string, label: string): Promise<void> {
+    if (!window.api?.curation) return
+    setClearing(kind)
+    try {
+      const r = await window.api.curation.clear(kind)
+      setCounts((prev) => ({ ...prev, [kind]: 0 }))
+      toast(`Cleared ${r.cleared} ${label.toLowerCase()}.`, 'success')
+    } catch (err) {
+      console.error('[settings] curation clear failed', err)
+      toast('Clear failed.', 'error')
+    } finally {
+      setClearing(null)
+    }
+  }
+
+  const visible = CURATION_ROWS.filter((r) => (counts[r.kind] ?? 0) > 0)
+  if (visible.length === 0) return null
+  return (
+    <>
+      {visible.map((r) => (
+        <SettingsRow
+          key={r.kind}
+          label={`${r.label} (${counts[r.kind]})`}
+          description={r.description}
+        >
+          <button
+            type="button"
+            onClick={() => clear(r.kind, r.label)}
+            disabled={clearing === r.kind}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {clearing === r.kind ? 'Clearing…' : 'Clear'}
+          </button>
+        </SettingsRow>
+      ))}
+    </>
   )
 }
 

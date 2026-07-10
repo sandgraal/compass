@@ -66,6 +66,15 @@ beforeEach(async () => {
       enrichment TEXT,
       created_at INTEGER, updated_at INTEGER
     );
+    CREATE TABLE curation_exclusions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, target TEXT NOT NULL, created_at INTEGER
+    );
+    CREATE UNIQUE INDEX curation_exclusions_kind_target ON curation_exclusions (kind, target);
+    CREATE TABLE derived_entities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, match_key TEXT NOT NULL, name TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0, sources TEXT NOT NULL DEFAULT '[]', first_seen INTEGER, last_seen INTEGER,
+      attrs TEXT, promoted_kind TEXT, promoted_id INTEGER, refreshed_at INTEGER
+    );
   `)
   for (const k of Object.keys(handlers)) delete handlers[k]
   mockDialog.showOpenDialog.mockReset()
@@ -407,6 +416,78 @@ describe('contacts enrichment', () => {
     // A partial edit must NOT drop the nickname from the search blob.
     const hits = (await invoke('contacts:list', { search: 'danny' })) as Array<{ id: number }>
     expect(hits.map((h) => h.id)).toContain(id)
+  })
+})
+
+describe('contact tombstones (delete = gone forever)', () => {
+  it('delete writes a tombstone and upsert skips it (no resurrection)', async () => {
+    const { upsertContacts } = await import('./contacts')
+    const first = upsertContacts([
+      { externalId: 'people/g1', displayName: 'Ghost Person', source: 'google' }
+    ])
+    expect(first.imported).toBe(1)
+    const listed = (await invoke('contacts:list')) as Array<{ id: number }>
+    await invoke('contacts:delete', listed[0].id)
+    expect((await invoke('contacts:list')) as unknown[]).toHaveLength(0)
+
+    // The next "sync" re-sends the same external id → must be skipped, not re-created.
+    const again = upsertContacts([
+      { externalId: 'people/g1', displayName: 'Ghost Person', source: 'google' }
+    ])
+    expect(again).toMatchObject({ imported: 0, updated: 0, skipped: 1 })
+    expect((await invoke('contacts:list')) as unknown[]).toHaveLength(0)
+  })
+
+  it('delete un-links the derived-entity row pointing at the contact', async () => {
+    const { upsertContacts } = await import('./contacts')
+    upsertContacts([{ externalId: 'people/g2', displayName: 'Linked Person', source: 'google' }])
+    const listed = (await invoke('contacts:list')) as Array<{ id: number }>
+    const id = listed[0].id
+    sqlite
+      .prepare(
+        "INSERT INTO derived_entities (kind, match_key, name, promoted_kind, promoted_id) VALUES ('person','linked person','Linked Person','contact',?)"
+      )
+      .run(id)
+    await invoke('contacts:delete', id)
+    const row = sqlite
+      .prepare(
+        "SELECT promoted_kind AS pk, promoted_id AS pid FROM derived_entities WHERE match_key='linked person'"
+      )
+      .get() as { pk: string | null; pid: number | null }
+    expect(row.pk).toBeNull()
+    expect(row.pid).toBeNull()
+  })
+
+  it('promoteDerivedContact clears its own tombstone (explicit user intent wins)', async () => {
+    const { promoteDerivedContact, upsertContacts } = await import('./contacts')
+    // Promote, delete (tombstones derived:person:jane doe), promote again.
+    const first = promoteDerivedContact('Jane Doe', 'jane doe')
+    await invoke('contacts:delete', first.id)
+    // Sanity: a plain upsert of the same external id is blocked...
+    const blocked = upsertContacts([
+      { externalId: 'derived:person:jane doe', displayName: 'Jane Doe', source: 'derived' }
+    ])
+    expect(blocked.skipped).toBe(1)
+    // ...but an explicit re-promote clears the tombstone and re-creates.
+    const second = promoteDerivedContact('Jane Doe', 'jane doe')
+    expect(second.alreadyExisted).toBe(false)
+    expect((await invoke('contacts:list')) as unknown[]).toHaveLength(1)
+  })
+
+  it('clearing tombstones restores importability', async () => {
+    const { upsertContacts } = await import('./contacts')
+    const { clearExclusions } = await import('../lib/curation')
+    const { getDb } = await import('../db/client')
+    upsertContacts([{ externalId: 'people/g3', displayName: 'Blocked Person', source: 'google' }])
+    const listed = (await invoke('contacts:list')) as Array<{ id: number }>
+    await invoke('contacts:delete', listed[0].id)
+    expect(
+      upsertContacts([{ externalId: 'people/g3', displayName: 'Blocked Person' }]).skipped
+    ).toBe(1)
+
+    clearExclusions(getDb(), 'contact-tombstone')
+    const after = upsertContacts([{ externalId: 'people/g3', displayName: 'Blocked Person' }])
+    expect(after.imported).toBe(1)
   })
 })
 
