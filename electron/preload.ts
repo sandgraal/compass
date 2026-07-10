@@ -358,8 +358,9 @@ const api = {
     importGvoice: () => ipcRenderer.invoke('contacts:import-gvoice'),
     exportVcard: (ids?: number[]) => ipcRenderer.invoke('contacts:export-vcard', { ids }),
     exportCsv: (ids?: number[]) => ipcRenderer.invoke('contacts:export-csv', { ids }),
-    // Go out and enrich every contact from Google + your connected sources.
+    // Go out and pull + enrich every contact from Google + your connected sources.
     enrichAll: () => ipcRenderer.invoke('contacts:enrich-all'),
+    enrichStatus: () => ipcRenderer.invoke('contacts:enrich-status'),
     activity: (id: number) => ipcRenderer.invoke('contacts:activity', id)
   },
 

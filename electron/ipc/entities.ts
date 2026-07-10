@@ -19,6 +19,7 @@ import { getDb } from '../db/client'
 import { derivedEntities, subscriptions } from '../db/schema'
 import type { EntityAttrs, EntityKind } from '../lib/entities'
 import { refreshDerivedEntities } from '../lib/entities-projection'
+import { enrichOneContactDeep } from './contact-enrich'
 import { promoteDerivedContact } from './contacts'
 import { promoteDerivedPlace } from './places'
 import { trackDetectedSubscription } from './subscriptions'
@@ -114,6 +115,10 @@ export function registerEntitiesHandlers(ipcMain: IpcMain): void {
       const res = promoteDerivedContact(row.name, row.matchKey)
       promotedKind = 'contact'
       promotedId = res.id
+      // Pull everything we know about them into the new contact record immediately:
+      // backfill any email from their timeline + compute the cross-source summary,
+      // so a freshly promoted contact isn't a bare name. Never throws.
+      enrichOneContactDeep(res.id)
     } else if (kind === 'subscription-candidate') {
       // Dedupe BY MERCHANT: if a subscription for this merchant is already tracked
       // (from the finance audit under a bank-account name, or a prior promote),

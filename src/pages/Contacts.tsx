@@ -67,6 +67,8 @@ export default function Contacts(): JSX.Element {
   const [draft, setDraft] = useState<ContactInput>(EMPTY_DRAFT)
   const [busy, setBusy] = useState(false)
   const [enriching, setEnriching] = useState(false)
+  const [needsReconnect, setNeedsReconnect] = useState(false)
+  const [reconnecting, setReconnecting] = useState(false)
   const [activity, setActivity] = useState<ContactActivityHit[]>([])
   const [activityLoading, setActivityLoading] = useState(false)
   const { toast } = useToast()
@@ -82,6 +84,15 @@ export default function Contacts(): JSX.Element {
     void load(search)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search])
+
+  // Proactively surface the reconnect prompt on load if a contacts scope is missing.
+  useEffect(() => {
+    if (!isElectron()) return
+    window.api.contacts
+      .enrichStatus()
+      .then((s) => setNeedsReconnect(s.needsReconnect))
+      .catch(() => {})
+  }, [])
 
   async function load(q = ''): Promise<void> {
     setLoading(true)
@@ -136,17 +147,49 @@ export default function Contacts(): JSX.Element {
     try {
       const r = await window.api.contacts.enrichAll()
       if (r.success) {
-        toast(`Enriched ${r.enriched} contact(s) from your connected sources.`, 'success')
+        setNeedsReconnect(r.needsReconnect)
+        const parts: string[] = []
+        if (r.imported > 0) parts.push(`imported ${r.imported} new`)
+        if (r.enriched > 0) parts.push(`enriched ${r.enriched}`)
+        toast(
+          parts.length > 0
+            ? `Contacts: ${parts.join(', ')}.`
+            : r.needsReconnect
+              ? 'No new contacts — reconnect Google to pull your full address book.'
+              : 'Contacts are already up to date.',
+          'success'
+        )
         await load(search)
         if (selectedId != null) await openContact(selectedId)
       } else {
-        toast(`Enrich failed: ${r.error ?? 'unknown error'}`, 'error')
+        toast(`Pull failed: ${r.error ?? 'unknown error'}`, 'error')
       }
     } catch (err) {
       console.error('[contacts] enrich-all failed', err)
-      toast('Enrich failed.', 'error')
+      toast('Pull failed.', 'error')
     } finally {
       setEnriching(false)
+    }
+  }
+
+  // Re-run the Google OAuth consent to grant the contacts scopes (a token refresh
+  // never widens scopes), then immediately pull everything.
+  async function reconnectGoogle(): Promise<void> {
+    if (!isElectron()) return
+    setReconnecting(true)
+    try {
+      const res = await window.api.auth.connectGoogle()
+      if (res.error) {
+        toast(`Google reconnect failed: ${res.error}`, 'error')
+        return
+      }
+      setNeedsReconnect(false)
+      await enrichAll()
+    } catch (err) {
+      console.error('[contacts] google reconnect failed', err)
+      toast('Google reconnect failed.', 'error')
+    } finally {
+      setReconnecting(false)
     }
   }
 
@@ -404,12 +447,12 @@ export default function Contacts(): JSX.Element {
               <button
                 type="button"
                 onClick={enrichAll}
-                disabled={enriching}
-                title="Pull everything Google knows + cross-reference your connected sources"
+                disabled={enriching || reconnecting}
+                title="Pull your whole Google address book + cross-reference every connected source"
                 className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-primary/40 hover:border-primary text-primary rounded-lg transition-colors disabled:opacity-50"
               >
                 <Sparkles size={12} className={cn(enriching && 'animate-pulse')} />
-                {enriching ? 'Enriching…' : 'Enrich all'}
+                {enriching ? 'Pulling…' : 'Pull everything'}
               </button>
             )}
             {!editing && selected && (
@@ -441,6 +484,29 @@ export default function Contacts(): JSX.Element {
             </button>
           </div>
         </div>
+
+        {needsReconnect && !editing && (
+          <div className="mx-6 mt-4 flex items-center gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+            <Sparkles size={16} className="text-amber-500 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-foreground">
+                Reconnect Google to import your full address book
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Compass needs updated permission to pull in your Google "Other contacts" — everyone
+                you've emailed, not just your saved contacts.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={reconnectGoogle}
+              disabled={reconnecting || enriching}
+              className="shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-600 dark:text-amber-400 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {reconnecting ? 'Reconnecting…' : 'Reconnect Google'}
+            </button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-6">
           {editing ? (

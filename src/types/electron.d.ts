@@ -1133,10 +1133,13 @@ declare global {
         exportCsv(ids?: number[]): Promise<ExportResult>
         enrichAll(): Promise<{
           success: boolean
+          imported: number
           enriched: number
           photos: number
+          needsReconnect: boolean
           error?: string
         }>
+        enrichStatus(): Promise<{ needsReconnect: boolean }>
         activity(id: number): Promise<ContactActivityHit[]>
       }
       storehouse: {

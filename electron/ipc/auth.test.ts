@@ -151,6 +151,25 @@ describe('token persistence', () => {
     expect(loadToken('google')).toBeNull()
     expect(() => deleteToken('google')).not.toThrow()
   })
+
+  it('googleGrantedScopes reads the stored token scope; hasGoogleScope checks membership', async () => {
+    const { saveToken, googleGrantedScopes, hasGoogleScope } = await authModule()
+    saveToken('google', {
+      access_token: 'abc',
+      scope:
+        'https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/contacts.other.readonly'
+    })
+    expect(googleGrantedScopes()).toEqual(['contacts.readonly', 'contacts.other.readonly'])
+    expect(hasGoogleScope('contacts.other.readonly')).toBe(true)
+    expect(hasGoogleScope('directory.readonly')).toBe(false)
+  })
+
+  it('googleGrantedScopes is empty when disconnected or the token has no scope', async () => {
+    const { saveToken, googleGrantedScopes } = await authModule()
+    expect(googleGrantedScopes()).toEqual([]) // no token
+    saveToken('google', { access_token: 'abc' }) // legacy token, no scope field
+    expect(googleGrantedScopes()).toEqual([])
+  })
 })
 
 // ── OAuth credential store ───────────────────────────────────────────────────

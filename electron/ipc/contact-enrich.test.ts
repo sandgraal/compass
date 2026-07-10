@@ -157,6 +157,45 @@ describe('computeContactActivity', () => {
   })
 })
 
+describe('enrichOneContactDeep (rich promote)', () => {
+  it('backfills a name-matching email from the timeline and writes the crossSource summary', async () => {
+    // A name-only contact, as produced by promoting a derived person.
+    const carol = addContact('derived:person:carol vane', 'Carol Vane')
+    addPerson('Carol Vane', 'carol vane', 3, ['linkedin'], 100, 900)
+    addRecord('gmail', 'email', 'Note', 'from carol.vane@example.com about the plan', 500)
+    const { enrichOneContactDeep } = await import('./contact-enrich')
+
+    enrichOneContactDeep(carol)
+
+    const row = sqlite.prepare('SELECT emails FROM contacts WHERE id = ?').get(carol) as {
+      emails: string | null
+    }
+    const emails = JSON.parse(row.emails ?? '[]') as { value: string }[]
+    expect(emails.map((e) => e.value)).toContain('carol.vane@example.com') // backfilled
+
+    const enr = readEnrichment(carol)
+    expect(enr?.crossSource?.sources).toEqual(['gmail', 'linkedin']) // name entity + email match
+    expect(enr?.crossSource?.matchedBy).toEqual(['name', 'email'])
+  })
+
+  it('does not attach an unrelated email that does not match the name', async () => {
+    const dan = addContact('derived:person:dan ives', 'Dan Ives')
+    addPerson('Dan Ives', 'dan ives', 1, ['linkedin'], 10, 20)
+    // A record mentioning Dan but only carrying a newsletter address (name mismatch).
+    addRecord('gmail', 'email', 'Re: Dan Ives intro', 'noreply@marketing.example sent this', 300)
+    const { enrichOneContactDeep } = await import('./contact-enrich')
+
+    enrichOneContactDeep(dan)
+
+    const row = sqlite.prepare('SELECT emails FROM contacts WHERE id = ?').get(dan) as {
+      emails: string | null
+    }
+    expect(JSON.parse(row.emails ?? '[]')).toEqual([]) // nothing attached
+    // Still enriched by the name-key entity.
+    expect(readEnrichment(dan)?.crossSource?.sources).toEqual(['linkedin'])
+  })
+})
+
 describe('materializeGooglePhotos', () => {
   function addContactWithPhotoUrl(externalId: string, name: string, photoUrl: string): number {
     const info = sqlite

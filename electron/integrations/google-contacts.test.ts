@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   ContactsScopeError,
   buildGoogleContactInputs,
+  buildGoogleOtherContactInputs,
   fetchContactGroups,
   fetchGoogleConnections,
+  fetchGoogleOtherContacts,
   googlePersonToContact
 } from './google-contacts'
 
@@ -269,5 +271,54 @@ describe('buildGoogleContactInputs', () => {
     expect(inputs[0].displayName).toBe('Jane Doe')
     expect(inputs[0].source).toBe('google')
     expect(inputs[0].enrichment?.google?.googleLabels).toEqual(['Friends'])
+  })
+})
+
+describe('fetchGoogleOtherContacts', () => {
+  it('uses the restricted readMask, paginates, and reports no truncation', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResp({ otherContacts: [{ resourceName: 'o1' }], nextPageToken: 'p2' })
+      )
+      .mockResolvedValueOnce(jsonResp({ otherContacts: [{ resourceName: 'o2' }] }))
+    const { people, truncated } = await fetchGoogleOtherContacts(
+      'tok',
+      fetchImpl as unknown as typeof fetch
+    )
+    expect(people.map((p) => p.resourceName)).toEqual(['o1', 'o2'])
+    expect(truncated).toBe(false)
+    const url = String(fetchImpl.mock.calls[0][0])
+    expect(url).toContain('/otherContacts')
+    expect(url).toContain('readMask=names%2CemailAddresses%2CphoneNumbers%2Cmetadata')
+    // The wide personFields mask must NOT be used here (Google 400s it).
+    expect(url).not.toContain('birthdays')
+  })
+
+  it('throws ContactsScopeError on a 403 (scope not granted)', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResp({}, 403))
+    await expect(
+      fetchGoogleOtherContacts('tok', fetchImpl as unknown as typeof fetch)
+    ).rejects.toBeInstanceOf(ContactsScopeError)
+  })
+})
+
+describe('buildGoogleOtherContactInputs', () => {
+  it("tags rows source:'google-other' and maps email-only rows via the email fallback", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResp({
+        otherContacts: [
+          { resourceName: 'o1', emailAddresses: [{ value: 'emailed@example.com' }] }, // no name
+          { resourceName: 'o2', names: [{ displayName: 'Pat Roe' }] }
+        ]
+      })
+    )
+    const { inputs } = await buildGoogleOtherContactInputs(
+      'tok',
+      fetchImpl as unknown as typeof fetch
+    )
+    expect(inputs).toHaveLength(2)
+    expect(inputs.every((c) => c.source === 'google-other')).toBe(true)
+    expect(inputs[0].displayName).toBe('emailed@example.com') // fallback to email
   })
 })

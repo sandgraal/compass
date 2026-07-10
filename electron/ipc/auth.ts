@@ -44,6 +44,29 @@ export function deleteToken(service: string): void {
   }
 }
 
+/**
+ * The scopes Google ACTUALLY granted, from the stored token's space-delimited
+ * `scope` field (Google echoes the granted set on token exchange; a user can
+ * grant a subset). This is the reliable "what was granted" signal — the
+ * `integrations.scopes` column only records what we REQUESTED. Returns the bare
+ * scope names (the `.../auth/` prefix is stripped) so callers can check e.g.
+ * `contacts.other.readonly`. Empty when disconnected or the token predates a
+ * `scope` field.
+ */
+export function googleGrantedScopes(): string[] {
+  const token = loadToken('google') as { scope?: string } | null
+  if (!token?.scope || typeof token.scope !== 'string') return []
+  return token.scope
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((s) => s.replace('https://www.googleapis.com/auth/', ''))
+}
+
+/** True when Google granted the given bare scope (e.g. `contacts.other.readonly`). */
+export function hasGoogleScope(scope: string): boolean {
+  return googleGrantedScopes().includes(scope)
+}
+
 // =====================================================================
 // OAuth client credentials (separate from access/refresh tokens)
 // =====================================================================
@@ -407,6 +430,10 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
       'https://www.googleapis.com/auth/drive.readonly',
       // Read-only address book → the owned `contacts` table (People API).
       'https://www.googleapis.com/auth/contacts.readonly',
+      // "Other contacts" — everyone the user has emailed (auto-saved by Google).
+      // This is where the bulk of a real address book lives; a reconnect is
+      // required to grant it (a token refresh never widens scopes).
+      'https://www.googleapis.com/auth/contacts.other.readonly',
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/userinfo.profile'
     ]

@@ -16,7 +16,11 @@ import { readAppleCalendars } from '../integrations/apple-calendar'
 import { syncArcadia } from '../integrations/arcadia'
 import { syncArgyle } from '../integrations/argyle'
 import { syncCanopy } from '../integrations/canopy'
-import { ContactsScopeError, buildGoogleContactInputs } from '../integrations/google-contacts'
+import {
+  ContactsScopeError,
+  buildGoogleContactInputs,
+  buildGoogleOtherContactInputs
+} from '../integrations/google-contacts'
 import { syncKnot } from '../integrations/knot'
 import { syncLinear } from '../integrations/linear'
 import { syncMetriport } from '../integrations/metriport'
@@ -51,7 +55,7 @@ import {
 } from '../knowledge/suggestions'
 import { readKnowledgeFile } from '../knowledge/writer'
 import { KNOWLEDGE_DIR } from '../paths'
-import { getValidGoogleToken, loadToken } from './auth'
+import { getValidGoogleToken, hasGoogleScope, loadToken } from './auth'
 import { upsertContacts } from './contacts'
 import { afterConnectorSync, afterFinanceSync } from './storehouse-sync'
 
@@ -645,6 +649,22 @@ export async function syncGoogle(
         console.warn('[sync] google contacts skipped — reconnect Google to grant the scope')
       } else {
         console.warn('[sync] google contacts sync failed (non-fatal):', (err as Error).message)
+      }
+    }
+
+    // ---- Other Contacts (the auto-saved address book — everyone you've emailed) ----
+    // Gated on the granted `contacts.other.readonly` scope so we don't 403 every
+    // sync before the user reconnects. Tagged `source:'google-other'` at build time.
+    if (hasGoogleScope('contacts.other.readonly')) {
+      try {
+        const { inputs, truncated } = await buildGoogleOtherContactInputs(accessToken)
+        const { imported, updated } = upsertContacts(inputs)
+        recordsUpdated += imported + updated
+        if (truncated) {
+          console.warn('[sync] google other-contacts hit the page cap — some were not imported')
+        }
+      } catch (err) {
+        console.warn('[sync] google other-contacts failed (non-fatal):', (err as Error).message)
       }
     }
 

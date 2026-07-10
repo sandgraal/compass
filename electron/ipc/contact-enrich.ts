@@ -31,7 +31,8 @@ import {
 } from '../lib/contact-enrichment'
 import { normalizeName } from '../lib/people'
 import { type TimelineSearchHit, searchRecords } from '../lib/records-search'
-import { writeContactEnrichment } from './contacts'
+import { hasGoogleScope, loadToken } from './auth'
+import { addContactIdentifiers, writeContactEnrichment } from './contacts'
 
 // Bounds for the deep pass so a huge address book can't wedge the main process.
 const MAX_EMAIL_QUERIES = 5 // emails searched per contact
@@ -146,6 +147,33 @@ export function enrichContactsFromCache(): number {
   }
 }
 
+/** Deep-enrich a single contact (name-key entity + per-email FTS). Returns true if written. */
+function enrichContactDeep(
+  c: EnrichContact,
+  entities: Map<string, EnrichmentPersonEntity>,
+  sqlite: ReturnType<typeof getRawSqlite>,
+  now: number
+): boolean {
+  const entity = entities.get(normalizeName(c.displayName)) ?? null
+  const hits: EnrichmentRecordHit[] = []
+  for (const e of c.emails.slice(0, MAX_EMAIL_QUERIES)) {
+    if (!e.value?.trim()) continue
+    for (const h of searchRecords(sqlite, { q: e.value, limit: HITS_PER_QUERY })) {
+      hits.push({
+        recordId: h.id,
+        source: h.source,
+        type: h.type,
+        title: h.title,
+        occurredAt: h.occurredAt,
+        matchedVia: 'email'
+      })
+    }
+  }
+  if (!entity && hits.length === 0) return false // no signal at all
+  const summary = computeCrossSourceSummary(entity, hits, now)
+  return !isEmptySummary(summary) && writeContactEnrichment(c.id, summary)
+}
+
 /**
  * DEEP tier: the cheap name-match PLUS a per-contact FTS search over the `records`
  * timeline by each email address (high-specificity — the full address tokenizes to
@@ -159,26 +187,95 @@ export function enrichAllContactsDeep(): number {
   const now = Date.now()
   let written = 0
   for (const c of rows) {
-    const entity = entities.get(normalizeName(c.displayName)) ?? null
-    const hits: EnrichmentRecordHit[] = []
-    for (const e of c.emails.slice(0, MAX_EMAIL_QUERIES)) {
-      if (!e.value?.trim()) continue
-      for (const h of searchRecords(sqlite, { q: e.value, limit: HITS_PER_QUERY })) {
-        hits.push({
-          recordId: h.id,
-          source: h.source,
-          type: h.type,
-          title: h.title,
-          occurredAt: h.occurredAt,
-          matchedVia: 'email'
-        })
-      }
-    }
-    if (!entity && hits.length === 0) continue // no signal at all
-    const summary = computeCrossSourceSummary(entity, hits, now)
-    if (!isEmptySummary(summary) && writeContactEnrichment(c.id, summary)) written++
+    if (enrichContactDeep(c, entities, sqlite, now)) written++
   }
   return written
+}
+
+function readOneContact(id: number): EnrichContact | null {
+  const r = getDb()
+    .select({
+      id: contacts.id,
+      displayName: contacts.displayName,
+      emails: contacts.emails,
+      phones: contacts.phones
+    })
+    .from(contacts)
+    .where(eq(contacts.id, id))
+    .all()[0]
+  if (!r) return null
+  return {
+    id: r.id,
+    displayName: r.displayName,
+    emails: parseValues(r.emails),
+    phones: parseValues(r.phones)
+  }
+}
+
+const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
+const NOISE_LOCAL =
+  /^(no-?reply|do-?not-?reply|donotreply|notifications?|mailer-daemon|postmaster|bounce)/i
+
+/** Does the email's local-part plausibly belong to this person (avoid attaching a stray address)? */
+function emailMatchesName(email: string, displayName: string): boolean {
+  const local = email
+    .split('@')[0]
+    .toLowerCase()
+    .replace(/[^a-z]/g, '')
+  if (!local) return false
+  const parts = displayName
+    .toLowerCase()
+    .split(/\s+/)
+    .map((p) => p.replace(/[^a-z]/g, ''))
+    .filter((p) => p.length >= 2)
+  return parts.some((p) => local.includes(p))
+}
+
+/**
+ * Best-effort identifier backfill for a name-only promoted contact: scan the records
+ * they appear in and keep only email addresses whose local-part matches their name
+ * (so a random mailing-list address isn't attached). Phones are intentionally skipped
+ * (digit fragments false-positive against order/confirmation numbers).
+ */
+function backfillIdentifiersFromTimeline(c: EnrichContact): void {
+  if (c.emails.length > 0 || !c.displayName.trim()) return // don't fight curated data
+  const sqlite = getRawSqlite()
+  const found = new Set<string>()
+  for (const h of searchRecords(sqlite, { q: c.displayName, limit: 40 })) {
+    const hay = `${h.title}\n${h.body ?? ''}`
+    for (const m of hay.match(EMAIL_RE) ?? []) {
+      const v = m.toLowerCase()
+      if (
+        found.has(v) ||
+        NOISE_LOCAL.test(v.split('@')[0]) ||
+        !emailMatchesName(v, c.displayName)
+      ) {
+        continue
+      }
+      found.add(v)
+    }
+  }
+  if (found.size > 0) {
+    addContactIdentifiers(c.id, { emails: [...found].map((value) => ({ value })) })
+  }
+}
+
+/**
+ * Rich-enrich ONE contact right after it's promoted from the People directory:
+ * backfill any email we can find in their timeline, then compute + persist the
+ * cross-source summary so the new contact immediately shows "Seen across N sources"
+ * + activity instead of a bare name. Never throws.
+ */
+export function enrichOneContactDeep(contactId: number): void {
+  try {
+    let c = readOneContact(contactId)
+    if (!c) return
+    backfillIdentifiersFromTimeline(c)
+    c = readOneContact(contactId) ?? c // re-read so the deep pass searches any found emails
+    enrichContactDeep(c, readPersonEntities(), getRawSqlite(), Date.now())
+  } catch (err) {
+    console.warn('[contact-enrich] enrichOneContactDeep failed (non-fatal):', err)
+  }
 }
 
 /**
@@ -259,18 +356,52 @@ export function computeContactActivity(id: number, limit = 20): ContactActivityH
 
 export interface EnrichAllResult {
   success: boolean
+  /** Net-new contacts added this run (Google saved connections + Other Contacts). */
+  imported: number
+  /** Existing contacts whose cross-source summary changed. */
   enriched: number
   photos: number
+  /** Google is connected but a contacts scope isn't granted → prompt a reconnect. */
+  needsReconnect: boolean
   error?: string
 }
 
+/** Total contacts, for a before/after import delta. */
+function countContacts(): number {
+  try {
+    const row = getRawSqlite().prepare('SELECT COUNT(*) AS n FROM contacts').get() as {
+      n: number
+    }
+    return row?.n ?? 0
+  } catch {
+    return 0
+  }
+}
+
 /**
- * The "Enrich all" orchestration: pull the latest Google contacts (widened fields)
- * and reproject the spine, materialize photos, then deep cross-source enrich.
- * `syncGoogle` is imported lazily to avoid a static import cycle (sync →
- * storehouse-sync → contact-enrich).
+ * True when Google is connected but hasn't granted a contacts scope — the signal
+ * to prompt a reconnect (a token refresh never widens scopes). `contacts.other.readonly`
+ * is the one added after most users first connected, so it's the usual trigger.
+ */
+export function googleNeedsContactsReconnect(): boolean {
+  try {
+    if (!loadToken('google')) return false // not connected → nothing to reconnect
+    return !hasGoogleScope('contacts.readonly') || !hasGoogleScope('contacts.other.readonly')
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The "Enrich all" orchestration: pull the latest Google contacts — saved
+ * connections AND the Other Contacts address book (when scoped) — reproject the
+ * spine, materialize photos, then deep cross-source enrich. Reports how many
+ * contacts were newly imported and whether a Google reconnect is needed to unlock
+ * the full address book. `syncGoogle` is imported lazily to avoid a static import
+ * cycle (sync → storehouse-sync → contact-enrich).
  */
 export async function runEnrichAll(win?: BrowserWindow | null): Promise<EnrichAllResult> {
+  const before = countContacts()
   try {
     const { syncGoogle, maybeSendNotification } = await import('./sync')
     const google = await syncGoogle(win)
@@ -291,17 +422,26 @@ export async function runEnrichAll(win?: BrowserWindow | null): Promise<EnrichAl
       // photos are a bonus — never fail the run
     }
     const enriched = enrichAllContactsDeep()
+    const imported = Math.max(0, countContacts() - before)
+    const needsReconnect = googleNeedsContactsReconnect()
     win?.webContents.send('sync:update', {
       service: 'contacts',
       status: 'success',
-      recordsUpdated: enriched
+      recordsUpdated: imported + enriched
     })
-    maybeSendNotification('contacts', enriched)
-    return { success: true, enriched, photos }
+    maybeSendNotification('contacts', imported + enriched)
+    return { success: true, imported, enriched, photos, needsReconnect }
   } catch (err) {
     const message = (err as Error).message
     win?.webContents.send('sync:update', { service: 'contacts', status: 'error', error: message })
-    return { success: false, enriched: 0, photos: 0, error: message }
+    return {
+      success: false,
+      imported: Math.max(0, countContacts() - before),
+      enriched: 0,
+      photos: 0,
+      needsReconnect: googleNeedsContactsReconnect(),
+      error: message
+    }
   }
 }
 
@@ -315,4 +455,9 @@ export function registerContactEnrichHandlers(ipcMain: IpcMain): void {
     if (!Number.isInteger(id)) throw new Error('contacts:activity requires an integer id')
     return computeContactActivity(id)
   })
+
+  // Cheap read so the Contacts page can proactively show the reconnect prompt on load.
+  ipcMain.handle('contacts:enrich-status', (): { needsReconnect: boolean } => ({
+    needsReconnect: googleNeedsContactsReconnect()
+  }))
 }
