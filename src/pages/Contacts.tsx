@@ -116,7 +116,7 @@ export default function Contacts(): JSX.Element {
     const ok = await confirm({
       title: 'Merge contacts?',
       description: `"${loserName}" will be merged into "${survivorName}" and permanently deleted. This cannot be undone.`,
-      confirmLabel: 'Merge',
+      confirmLabel: 'Merge'
     })
     if (!ok) return
     setDupesBusy(true)
