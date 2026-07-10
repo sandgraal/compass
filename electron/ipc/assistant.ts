@@ -7,10 +7,15 @@
  *   - The BYO-key LLM client (`electron/integrations/llm-client.ts`)
  *     turns the chunks + the user's question into a cited answer.
  *
- * Privacy posture:
- *   - The renderer's question + the top-K knowledge chunks are sent
- *     to the configured provider (Anthropic or OpenAI). NOTHING else
- *     leaves the machine — no vault, no DB rows, no other notes.
+ * Privacy posture (per docs/data-access-policy.md — a documented decision,
+ * not an accident):
+ *   - RAG mode ships the question + top-K knowledge chunks to the provider.
+ *   - Agent mode (Anthropic) can additionally pull ANY tool result into the
+ *     provider call: raw transactions, medical records, contacts, paystubs,
+ *     timeline records, and vault DOCUMENT entries (decrypted in memory per
+ *     call). The user opted into full-detail AI access; the two things that
+ *     never leave the machine are the vault `credentials` category + token
+ *     vaults, and raw GPS coordinates.
  *   - The API key never crosses the IPC boundary in either direction
  *     after it's set. The renderer can read a masked tail via
  *     `assistant:get-status`; the raw value is only ever read from
@@ -26,9 +31,15 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { IpcMain } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
-import { ASSISTANT_TOOLS, executeAssistantTool } from '../integrations/assistant-tools'
+import {
+  ASSISTANT_TOOLS,
+  VAULT_DOC_CATEGORIES,
+  type VaultReader,
+  executeAssistantTool
+} from '../integrations/assistant-tools'
 import {
   type LlmProvider,
   clearAllAssistantKeys,
@@ -47,7 +58,8 @@ import {
   callLlm
 } from '../integrations/llm-client'
 import { semanticSearch } from '../knowledge/embeddings'
-import { KNOWLEDGE_DIR } from '../paths'
+import { decryptBlob, getOrCreateKey } from '../lib/crypto-vault'
+import { KNOWLEDGE_DIR, VAULT_DIR } from '../paths'
 
 const MAX_AGENT_STEPS = 6
 
@@ -59,13 +71,34 @@ How to work:
 - Call a read tool (e.g. get_upcoming, get_week_tasks, get_finance_summary) to ground your answer in real data BEFORE answering. Don't guess at the user's tasks, events, or numbers.
 - For weekly planning ("plan my week"): gather get_week_tasks + get_upcoming + get_weekly_goals + get_habit_streaks (and get_insights for caveats), draft a balanced plan around existing commitments, then propose each concrete task with its own propose_task call on a specific listDate. Summarize the plan and remind the user the tasks await approval.
 - To add or change something, call a propose_* tool. This enqueues a proposal the user must APPROVE in the Compass "Claude Inbox" — it does NOT take effect immediately. After proposing, tell the user plainly that you've queued it for their approval and that nothing has changed yet. Never claim you already made the change.
-- The Timeline (imported data exports) is fully searchable: use search_records to read the user's ACTUAL records for "what/when did I…" questions, and get_timeline for totals/shape. Finances are still summaries only (no individual transactions), and the vault (secrets) is never available to you.
+- Everything is readable in detail: the full Timeline (search_records / get_timeline), individual transactions (list_transactions), medical records (get_medical_records), contacts (search_contacts / get_contact), paystubs (get_paystubs), and the vault's DOCUMENT categories — financial, identity, medical, legal, foreign-accounts (search_vault / get_vault_entry).
+- The ONLY things you can never see, by design: the vault credentials category (passwords, API keys, tokens — permanently sealed) and raw GPS coordinates (country-level travel IS on the timeline). If asked for a password, say credentials are sealed and point the user to the Vault page.
 - Be concise. Prefer tight bullets. When you cite a number or item, it should come from a tool result, not memory.`
 
 const MAX_QUESTION_LENGTH = 2000
 const MAX_HISTORY_TURNS = 12
 const TOP_K_CONTEXT = 6
 const MIN_SEMANTIC_SCORE = 0.2
+
+/**
+ * The production VaultReader for the agent's vault-document tools:
+ * decrypt-in-memory per call, nothing cached, nothing written. Defense in
+ * depth — the tool layer already rejects `credentials`, and this reader
+ * refuses ANY category outside the document allowlist, so a future tool bug
+ * can't reach passwords or token blobs through it.
+ */
+const vaultReader: VaultReader = {
+  readCategory(category: string): Array<Record<string, unknown>> {
+    if (!(VAULT_DOC_CATEGORIES as readonly string[]).includes(category)) {
+      throw new Error(`Vault category not readable by the assistant: ${category}`)
+    }
+    const path = join(VAULT_DIR, `${category}.enc`)
+    if (!existsSync(path)) return []
+    const json = decryptBlob(readFileSync(path), getOrCreateKey())
+    const parsed: unknown = JSON.parse(json)
+    return Array.isArray(parsed) ? (parsed as Array<Record<string, unknown>>) : []
+  }
+}
 
 let currentController: AbortController | null = null
 
@@ -255,7 +288,7 @@ async function runAgent(
       // Execute each requested tool and feed results back.
       const resultBlocks: AnthropicContentBlock[] = []
       for (const tu of res.toolUses) {
-        const out = executeAssistantTool(db, sqlite, tu.name, tu.input)
+        const out = executeAssistantTool(db, sqlite, tu.name, tu.input, { vault: vaultReader })
         toolCalls.push({ name: tu.name, ok: out.ok })
         if (out.ok) {
           const data = out.data as { proposalId?: string }
