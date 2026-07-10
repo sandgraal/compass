@@ -46,6 +46,7 @@ export default function DerivedEntityList({
   useEffect(() => {
     if (!isElectron()) {
       setLoaded(true)
+      onCount?.(0)
       return
     }
     window.api.entities
@@ -56,8 +57,7 @@ export default function DerivedEntityList({
       })
       .catch(() => toast(`Could not load your ${kind}s`, 'error'))
       .finally(() => setLoaded(true))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, toast])
+  }, [kind, onCount, toast])
 
   async function save(e: DerivedEntity): Promise<void> {
     if (!isElectron() || promoting) return
