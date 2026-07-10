@@ -372,6 +372,19 @@ declare global {
     title: string
     occurredAt: number | null
   }
+  interface DuplicateContactSummary {
+    id: number
+    externalId: string
+    displayName: string
+    source: string
+    emails: string[]
+    phones: string[]
+  }
+  interface DuplicatePair {
+    a: DuplicateContactSummary
+    b: DuplicateContactSummary
+    nameKey: string
+  }
   interface ContactRecord {
     id: number
     externalId: string
@@ -1142,6 +1155,9 @@ declare global {
         }>
         enrichStatus(): Promise<{ needsReconnect: boolean }>
         activity(id: number): Promise<ContactActivityHit[]>
+        duplicates(): Promise<DuplicatePair[]>
+        merge(survivorId: number, loserIds: number[]): Promise<{ success: boolean }>
+        dismissDuplicate(aExternalId: string, bExternalId: string): Promise<{ success: boolean }>
       }
       curation: {
         counts(): Promise<Record<string, number>>

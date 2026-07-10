@@ -17,13 +17,14 @@ import { join } from 'node:path'
 import { and, eq, like } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
-import { contacts, derivedEntities } from '../db/schema'
+import { contacts, curationExclusions, derivedEntities } from '../db/schema'
 import { writeRelationships } from '../knowledge/contacts-extractor'
 import {
   parseFacebookFriends,
   parseGoogleVoice,
   parseLinkedInConnections
 } from '../lib/archive-importers'
+import { type DedupeContact, computeDedupe, dedupePairKey } from '../lib/contact-dedupe'
 import {
   type ContactEnrichment,
   type CrossSourceSummary,
@@ -272,6 +273,7 @@ export function upsertContacts(inputs: ContactInput[]): {
   imported: number
   updated: number
   skipped: number
+  merged: number
 } {
   const db = getDb()
   let imported = 0
@@ -327,7 +329,19 @@ export function upsertContacts(inputs: ContactInput[]): {
       imported++
     }
   }
-  return { imported, updated, skipped }
+  // Auto-dedupe after every batch that changed rows: the same person arriving
+  // via a second source (google vs google-other vs a CSV) provably shares an
+  // email/phone and folds into one contact without asking. Best-effort — a
+  // dedupe hiccup must never fail the import itself.
+  let merged = 0
+  if (imported + updated > 0) {
+    try {
+      merged = runAutoDedupe()
+    } catch (err) {
+      console.warn('[contacts] auto-dedupe failed (non-fatal):', err)
+    }
+  }
+  return { imported, updated, skipped, merged }
 }
 
 /**
@@ -407,6 +421,189 @@ export function addContactIdentifiers(
     .where(eq(contacts.id, contactId))
     .run()
   return true
+}
+
+// ─── Duplicate detection + merge ─────────────────────────────────────────────
+
+/** Rough completeness signal for survivor selection. */
+function filledScore(row: ContactRow): number {
+  let score = 0
+  for (const v of [
+    row.givenName,
+    row.familyName,
+    row.org,
+    row.jobTitle,
+    row.birthday,
+    row.url,
+    row.relationship,
+    row.notes,
+    row.photo
+  ]) {
+    if (v) score++
+  }
+  score +=
+    parseArr(row.emails).length + parseArr(row.phones).length + parseArr(row.addresses).length
+  return score
+}
+
+function readDedupeRows(): DedupeContact[] {
+  const db = getDb()
+  return db
+    .select()
+    .from(contacts)
+    .all()
+    .map((row) => ({
+      id: row.id,
+      externalId: row.externalId,
+      displayName: row.displayName,
+      source: row.source,
+      createdAt: row.createdAt ? row.createdAt.getTime() : null,
+      emails: parseArr<ContactEmail>(row.emails),
+      phones: parseArr<ContactPhone>(row.phones),
+      filledScore: filledScore(row)
+    }))
+}
+
+/**
+ * Fold the losers into the survivor and delete them, in ONE transaction:
+ * identifiers + addresses unioned, distinct notes concatenated, empty scalar
+ * fields filled from losers, photo copied if the survivor lacks one, enrichment
+ * merged by namespace, each loser's externalId recorded as `contact-merged` (so
+ * no sync re-creates it as a fresh duplicate), and any derived-entity promotion
+ * remapped to the survivor. `syncRelationships` is the caller's job (once per
+ * batch, not per merge).
+ */
+export function mergeContacts(survivorId: number, loserIds: number[]): boolean {
+  const db = getDb()
+  const survivor = db.select().from(contacts).where(eq(contacts.id, survivorId)).all()[0]
+  if (!survivor) return false
+  const losers = loserIds
+    .filter((id) => id !== survivorId)
+    .map((id) => db.select().from(contacts).where(eq(contacts.id, id)).all()[0])
+    .filter((r): r is ContactRow => !!r)
+  if (losers.length === 0) return false
+
+  const emails = parseArr<ContactEmail>(survivor.emails)
+  const phones = parseArr<ContactPhone>(survivor.phones)
+  const addresses = parseArr<ContactAddress>(survivor.addresses)
+  const emailSet = new Set(emails.map((e) => e.value.toLowerCase()))
+  const phoneSet = new Set(phones.map((p) => p.value))
+  const addrSet = new Set(addresses.map((a) => JSON.stringify(a)))
+  const notes: string[] = survivor.notes ? [survivor.notes] : []
+  const scalars: Partial<
+    Record<
+      | 'givenName'
+      | 'familyName'
+      | 'middleName'
+      | 'org'
+      | 'jobTitle'
+      | 'birthday'
+      | 'url'
+      | 'relationship',
+      string
+    >
+  > = {}
+  let photo = survivor.photo
+  let enrichment = parseEnrichment(survivor.enrichment)
+
+  for (const loser of losers) {
+    for (const e of parseArr<ContactEmail>(loser.emails)) {
+      if (e.value && !emailSet.has(e.value.toLowerCase())) {
+        emails.push(e)
+        emailSet.add(e.value.toLowerCase())
+      }
+    }
+    for (const p of parseArr<ContactPhone>(loser.phones)) {
+      if (p.value && !phoneSet.has(p.value)) {
+        phones.push(p)
+        phoneSet.add(p.value)
+      }
+    }
+    for (const a of parseArr<ContactAddress>(loser.addresses)) {
+      const key = JSON.stringify(a)
+      if (!addrSet.has(key)) {
+        addresses.push(a)
+        addrSet.add(key)
+      }
+    }
+    if (loser.notes && !notes.includes(loser.notes)) notes.push(loser.notes)
+    for (const f of [
+      'givenName',
+      'familyName',
+      'middleName',
+      'org',
+      'jobTitle',
+      'birthday',
+      'url',
+      'relationship'
+    ] as const) {
+      if (!survivor[f] && !scalars[f] && loser[f]) scalars[f] = loser[f] as string
+    }
+    if (!photo && loser.photo) photo = loser.photo
+    const loserEnr = parseEnrichment(loser.enrichment)
+    // Namespace-merge, preferring the survivor's existing halves.
+    enrichment = {
+      google: enrichment.google ?? loserEnr.google,
+      crossSource: enrichment.crossSource ?? loserEnr.crossSource
+    }
+  }
+
+  db.transaction((tx) => {
+    tx.update(contacts)
+      .set({
+        ...scalars,
+        emails: JSON.stringify(emails),
+        phones: JSON.stringify(phones),
+        addresses: JSON.stringify(addresses),
+        notes: notes.length > 0 ? notes.join('\n\n') : survivor.notes,
+        photo,
+        enrichment: JSON.stringify(enrichment),
+        searchBlob: computeSearchBlob({
+          displayName: survivor.displayName,
+          org: (scalars.org ?? survivor.org) || null,
+          emails,
+          phones,
+          nicknames: enrichment.google?.nicknames
+        }),
+        updatedAt: new Date()
+      })
+      .where(eq(contacts.id, survivorId))
+      .run()
+    for (const loser of losers) {
+      // The loser's externalId must never re-import as a fresh duplicate row.
+      tx.insert(curationExclusions)
+        .values({ kind: 'contact-merged', target: loser.externalId })
+        .onConflictDoNothing()
+        .run()
+      tx.update(derivedEntities)
+        .set({ promotedId: survivorId })
+        .where(
+          and(eq(derivedEntities.promotedKind, 'contact'), eq(derivedEntities.promotedId, loser.id))
+        )
+        .run()
+      tx.delete(contacts).where(eq(contacts.id, loser.id)).run()
+    }
+  })
+  return true
+}
+
+/**
+ * Run the AUTO tier of the dedupe engine over the whole contacts table:
+ * merge every exact-identifier group (shared email / same-name shared phone).
+ * Called at the end of `upsertContacts` batches so every sync/import inherits
+ * it. Deterministic + idempotent (a second run finds nothing). Returns the
+ * number of contacts folded away.
+ */
+export function runAutoDedupe(): number {
+  const db = getDb()
+  const dismissed = loadExclusionSet(db, ['dedupe-dismissed'])
+  const { autoGroups } = computeDedupe(readDedupeRows(), { dismissedPairs: dismissed })
+  let merged = 0
+  for (const group of autoGroups) {
+    if (mergeContacts(group.survivorId, group.loserIds)) merged += group.loserIds.length
+  }
+  if (merged > 0) syncRelationships()
+  return merged
 }
 
 /** Structural equality of two summaries, ignoring the ever-changing `refreshedAt`. */
@@ -735,6 +932,58 @@ export function registerContactsHandlers(ipcMain: IpcMain): void {
     syncRelationships()
     return { success: true }
   })
+
+  // ── Duplicates review queue ────────────────────────────────────────────────
+  // The MANUAL tier: name-only matches (and demoted shared-phone pairs) that the
+  // auto tier wasn't sure about. Computed on demand; the only persistence is the
+  // 'dedupe-dismissed' exclusion for pairs the user rejected.
+  ipcMain.handle('contacts:duplicates', () => {
+    const db = getDb()
+    const dismissed = loadExclusionSet(db, ['dedupe-dismissed'])
+    const rows = readDedupeRows()
+    const byId = new Map(rows.map((r) => [r.id, r]))
+    const { fuzzyPairs } = computeDedupe(rows, { dismissedPairs: dismissed })
+    const summarize = (r: DedupeContact) => ({
+      id: r.id,
+      externalId: r.externalId,
+      displayName: r.displayName,
+      source: r.source,
+      emails: r.emails.map((e) => e.value).slice(0, 3),
+      phones: r.phones.map((p) => p.value).slice(0, 3)
+    })
+    return fuzzyPairs
+      .map((p) => {
+        const a = byId.get(p.aId)
+        const b = byId.get(p.bId)
+        return a && b ? { a: summarize(a), b: summarize(b), nameKey: p.nameKey } : null
+      })
+      .filter((p): p is NonNullable<typeof p> => p !== null)
+  })
+
+  ipcMain.handle('contacts:merge', (_event, req: { survivorId: number; loserIds: number[] }) => {
+    const { survivorId, loserIds } = req ?? {}
+    if (!Number.isInteger(survivorId) || !Array.isArray(loserIds) || loserIds.length === 0) {
+      throw new Error('contacts:merge requires survivorId and loserIds')
+    }
+    const ok = mergeContacts(
+      survivorId,
+      loserIds.filter((id: unknown): id is number => Number.isInteger(id))
+    )
+    if (ok) syncRelationships()
+    return { success: ok }
+  })
+
+  ipcMain.handle(
+    'contacts:dismiss-duplicate',
+    (_event, req: { aExternalId: string; bExternalId: string }) => {
+      const { aExternalId, bExternalId } = req ?? {}
+      if (!aExternalId || !bExternalId) {
+        throw new Error('contacts:dismiss-duplicate requires both external ids')
+      }
+      addExclusions(getDb(), 'dedupe-dismissed', [dedupePairKey(aExternalId, bExternalId)])
+      return { success: true }
+    }
+  )
 
   ipcMain.handle('contacts:import-vcard', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({

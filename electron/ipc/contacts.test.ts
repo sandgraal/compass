@@ -491,6 +491,118 @@ describe('contact tombstones (delete = gone forever)', () => {
   })
 })
 
+describe('contact dedupe (auto-merge + review queue)', () => {
+  it('auto-merges same-email contacts arriving from two sources via upsertContacts', async () => {
+    const { upsertContacts } = await import('./contacts')
+    const first = upsertContacts([
+      {
+        externalId: 'people/d1',
+        displayName: 'Mia Torres',
+        source: 'google',
+        emails: [{ value: 'mia@x.com' }],
+        notes: 'met at conf'
+      }
+    ])
+    expect(first.merged).toBe(0)
+    const second = upsertContacts([
+      {
+        externalId: 'other/d1',
+        displayName: 'Mia T.',
+        source: 'google-other',
+        emails: [{ value: 'MIA@X.COM' }],
+        phones: [{ value: '+1 415 555 0100' }]
+      }
+    ])
+    expect(second.merged).toBe(1)
+    const listed = (await invoke('contacts:list')) as Array<{
+      id: number
+      displayName: string
+      phones: Array<{ value: string }>
+    }>
+    expect(listed).toHaveLength(1)
+    expect(listed[0].displayName).toBe('Mia Torres') // google survivor
+    expect(listed[0].phones.map((p) => p.value)).toContain('+1 415 555 0100') // folded in
+    // The loser's externalId is suppressed — re-syncing it does NOT resurrect a dupe.
+    const resync = upsertContacts([
+      {
+        externalId: 'other/d1',
+        displayName: 'Mia T.',
+        source: 'google-other',
+        emails: [{ value: 'mia@x.com' }]
+      }
+    ])
+    expect(resync).toMatchObject({ imported: 0, skipped: 1 })
+    expect(((await invoke('contacts:list')) as unknown[]).length).toBe(1)
+  })
+
+  it('mergeContacts remaps derived-entity promotion to the survivor', async () => {
+    const { upsertContacts, mergeContacts } = await import('./contacts')
+    upsertContacts([
+      { externalId: 'a1', displayName: 'Ned Ott', source: 'google', emails: [] },
+      { externalId: 'b1', displayName: 'Ned Ott Jr', source: 'csv', emails: [] }
+    ])
+    const listed = (await invoke('contacts:list')) as Array<{ id: number; displayName: string }>
+    const survivor = listed.find((c) => c.displayName === 'Ned Ott') as { id: number }
+    const loser = listed.find((c) => c.displayName === 'Ned Ott Jr') as { id: number }
+    sqlite
+      .prepare(
+        "INSERT INTO derived_entities (kind, match_key, name, promoted_kind, promoted_id) VALUES ('person','ned ott','Ned Ott','contact',?)"
+      )
+      .run(loser.id)
+    expect(mergeContacts(survivor.id, [loser.id])).toBe(true)
+    const row = sqlite
+      .prepare("SELECT promoted_id AS pid FROM derived_entities WHERE match_key='ned ott'")
+      .get() as { pid: number }
+    expect(row.pid).toBe(survivor.id)
+    expect(((await invoke('contacts:list')) as unknown[]).length).toBe(1)
+  })
+
+  it('name-only pairs appear in contacts:duplicates and dismiss hides them permanently', async () => {
+    const { upsertContacts } = await import('./contacts')
+    upsertContacts([
+      { externalId: 'n1', displayName: 'Ola Vik', emails: [{ value: 'ola@a.com' }] },
+      { externalId: 'n2', displayName: 'Ola Vik', emails: [{ value: 'ola@b.net' }] }
+    ])
+    const pairs = (await invoke('contacts:duplicates')) as Array<{
+      a: { externalId: string }
+      b: { externalId: string }
+    }>
+    expect(pairs).toHaveLength(1)
+    await invoke('contacts:dismiss-duplicate', {
+      aExternalId: pairs[0].a.externalId,
+      bExternalId: pairs[0].b.externalId
+    })
+    expect((await invoke('contacts:duplicates')) as unknown[]).toHaveLength(0)
+  })
+
+  it('contacts:merge folds a reviewed pair', async () => {
+    const { upsertContacts } = await import('./contacts')
+    upsertContacts([
+      {
+        externalId: 'm1',
+        displayName: 'Pia Q',
+        emails: [{ value: 'p@a.com' }],
+        notes: 'note A'
+      },
+      { externalId: 'm2', displayName: 'Pia Q', emails: [{ value: 'p@b.com' }], notes: 'note B' }
+    ])
+    const listed = (await invoke('contacts:list')) as Array<{ id: number }>
+    const [s, l] = listed
+    const r = (await invoke('contacts:merge', { survivorId: s.id, loserIds: [l.id] })) as {
+      success: boolean
+    }
+    expect(r.success).toBe(true)
+    const after = (await invoke('contacts:get', s.id)) as {
+      emails: Array<{ value: string }>
+      notes: string
+    }
+    expect(after.emails.map((e) => e.value).sort()).toEqual(['p@a.com', 'p@b.com'])
+    expect(after.notes).toContain('note A')
+    expect(after.notes).toContain('note B')
+    expect(((await invoke('contacts:list')) as unknown[]).length).toBe(1)
+  })
+})
+
 type ContactEnrichmentShape = {
   google?: { nicknames?: string[]; biography?: string | null }
   crossSource?: { sources?: string[] }

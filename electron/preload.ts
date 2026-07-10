@@ -361,7 +361,13 @@ const api = {
     // Go out and pull + enrich every contact from Google + your connected sources.
     enrichAll: () => ipcRenderer.invoke('contacts:enrich-all'),
     enrichStatus: () => ipcRenderer.invoke('contacts:enrich-status'),
-    activity: (id: number) => ipcRenderer.invoke('contacts:activity', id)
+    activity: (id: number) => ipcRenderer.invoke('contacts:activity', id),
+    // Duplicates review queue (auto tier merges during sync; this is the manual tier).
+    duplicates: () => ipcRenderer.invoke('contacts:duplicates'),
+    merge: (survivorId: number, loserIds: number[]) =>
+      ipcRenderer.invoke('contacts:merge', { survivorId, loserIds }),
+    dismissDuplicate: (aExternalId: string, bExternalId: string) =>
+      ipcRenderer.invoke('contacts:dismiss-duplicate', { aExternalId, bExternalId })
   },
 
   // --- Curation (the durable "no" list: tombstones, exclusions, dismissals) ---

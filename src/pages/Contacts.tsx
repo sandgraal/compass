@@ -72,6 +72,9 @@ export default function Contacts(): JSX.Element {
   const [reconnecting, setReconnecting] = useState(false)
   const [activity, setActivity] = useState<ContactActivityHit[]>([])
   const [activityLoading, setActivityLoading] = useState(false)
+  const [dupes, setDupes] = useState<DuplicatePair[]>([])
+  const [dupesBusy, setDupesBusy] = useState(false)
+  const [showDupes, setShowDupes] = useState(false)
   const { toast } = useToast()
   const confirm = useConfirm()
   const navigate = useNavigate()
@@ -93,7 +96,59 @@ export default function Contacts(): JSX.Element {
       .enrichStatus()
       .then((s) => setNeedsReconnect(s.needsReconnect))
       .catch(() => {})
+    void loadDupes()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  async function loadDupes(): Promise<void> {
+    if (!isElectron()) return
+    try {
+      setDupes(await window.api.contacts.duplicates())
+    } catch (err) {
+      console.error('[contacts] duplicates failed', err)
+    }
+  }
+
+  async function mergePair(pair: DuplicatePair, survivorId: number): Promise<void> {
+    if (!isElectron()) return
+    setDupesBusy(true)
+    try {
+      const loserId = survivorId === pair.a.id ? pair.b.id : pair.a.id
+      const r = await window.api.contacts.merge(survivorId, [loserId])
+      if (r.success) {
+        toast(
+          `Merged into ${survivorId === pair.a.id ? pair.a.displayName : pair.b.displayName}.`,
+          'success'
+        )
+        setDupes((prev) => prev.filter((p) => p !== pair))
+        await load(search)
+        if (selectedId === loserId) {
+          setSelectedId(null)
+          setSelected(null)
+        }
+      } else {
+        toast('Merge failed.', 'error')
+      }
+    } catch (err) {
+      console.error('[contacts] merge failed', err)
+      toast('Merge failed.', 'error')
+    } finally {
+      setDupesBusy(false)
+    }
+  }
+
+  async function dismissPair(pair: DuplicatePair): Promise<void> {
+    if (!isElectron()) return
+    setDupesBusy(true)
+    try {
+      await window.api.contacts.dismissDuplicate(pair.a.externalId, pair.b.externalId)
+      setDupes((prev) => prev.filter((p) => p !== pair))
+    } catch (err) {
+      console.error('[contacts] dismiss failed', err)
+    } finally {
+      setDupesBusy(false)
+    }
+  }
 
   async function load(q = ''): Promise<void> {
     setLoading(true)
@@ -164,6 +219,7 @@ export default function Contacts(): JSX.Element {
         const didWork = r.imported > 0 || r.enriched > 0
         toast(r.message ? `${summary} ${r.message}` : summary, didWork ? 'success' : 'info')
         await load(search)
+        await loadDupes()
         if (selectedId != null) await openContact(selectedId)
       } else {
         toast(`Pull failed: ${r.error ?? 'unknown error'}`, 'error')
@@ -292,6 +348,7 @@ export default function Contacts(): JSX.Element {
         const updated = r.updated ?? 0
         toast(`Imported ${added} new, updated ${updated} contact(s).`, 'success')
         await load(search)
+        await loadDupes()
       } else {
         toast(`Import failed: ${r.error}`, 'error')
       }
@@ -521,6 +578,67 @@ export default function Contacts(): JSX.Element {
             >
               {reconnecting ? 'Reconnecting…' : 'Reconnect Google'}
             </button>
+          </div>
+        )}
+
+        {dupes.length > 0 && !editing && (
+          <div className="mx-6 mt-4 rounded-lg border border-border bg-card/40">
+            <button
+              type="button"
+              onClick={() => setShowDupes((v) => !v)}
+              aria-expanded={showDupes}
+              className="w-full flex items-center gap-2 px-4 py-3 text-left"
+            >
+              <Users size={14} className="text-primary shrink-0" />
+              <span className="text-sm font-medium text-foreground">
+                Possible duplicates ({dupes.length})
+              </span>
+              <span className="ml-auto text-xs text-muted-foreground">
+                {showDupes ? 'Hide' : 'Review'}
+              </span>
+            </button>
+            {showDupes && (
+              <div className="border-t border-border divide-y divide-border">
+                {dupes.slice(0, 20).map((pair) => (
+                  <div
+                    key={`${pair.a.externalId}::${pair.b.externalId}`}
+                    className="px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-2"
+                  >
+                    <div className="flex-1 min-w-0 grid grid-cols-2 gap-3">
+                      {[pair.a, pair.b].map((side) => (
+                        <div key={side.externalId} className="min-w-0">
+                          <p className="text-sm text-foreground truncate">{side.displayName}</p>
+                          <p className="text-xs text-muted-foreground truncate capitalize">
+                            {side.source}
+                            {side.emails[0] ? ` · ${side.emails[0]}` : ''}
+                            {!side.emails[0] && side.phones[0] ? ` · ${side.phones[0]}` : ''}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        disabled={dupesBusy}
+                        onClick={() => mergePair(pair, pair.a.id)}
+                        title={`Keep ${pair.a.displayName}, fold the other in`}
+                        className="text-xs px-2.5 py-1.5 bg-primary/15 hover:bg-primary/25 text-primary rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        Merge
+                      </button>
+                      <button
+                        type="button"
+                        disabled={dupesBusy}
+                        onClick={() => dismissPair(pair)}
+                        className="text-xs px-2.5 py-1.5 border border-border hover:border-primary/50 text-muted-foreground hover:text-foreground rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        Not the same
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
