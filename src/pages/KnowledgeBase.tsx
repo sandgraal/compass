@@ -994,7 +994,7 @@ function htmlToMarkdown(html: string): string {
             .replace(/&amp;/g, '&')
             .replace(/&quot;/g, '"')
             .replace(/&lt;/g, '<')
-          const d = display.replace(/[<>]/g, '')
+          const d = display.replace(/&lt;|&gt;|[<>]/g, '')
           return t.toLowerCase() === d.toLowerCase() ? `[[${t}]]` : `[[${t}|${d}]]`
         }
       )
