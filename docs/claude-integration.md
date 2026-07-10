@@ -49,6 +49,7 @@ flowchart LR
 4. The **vault is never exposed** to any Claude surface (read or write).
 5. Finance is exposed as **summaries/aggregates only** — never raw transaction rows. **This does not apply uniformly to every domain:** Phase 10.7 "Converse" made one deliberate, documented exception — the `records` Timeline (purchases, media, messages, browsing, documents, health, credit/tax, connections, and more, imported from the user's own data exports) is searchable **in detail**, not just in aggregate, via `search_records` (embedded agent) / `compass_search_timeline` (MCP). This was a conscious relaxation for the user's *own acquired data*, scoped narrowly to the records store — vault and raw finance/transaction rows remain aggregates-only with no equivalent exception. `compass_timeline` / `get_timeline` stay aggregate-only (counts by source/kind/year); the detail read is a separate, explicitly-named tool.
 6. Cloud LLM access stays **BYO-key, opt-in, local-first** (Ollama preferred).
+7. **Location stays aggregates-only at every AI surface** — raw `location_points` are never readable by the assistant or MCP (only country-level `travel_segments`). The Places-page map reads clustered location cells through `location:map-data`, but that is a **renderer-local UI read only**; it is not, and must never be, registered as an assistant or MCP tool.
 
 ## Phase 8 tracks (proposed)
 

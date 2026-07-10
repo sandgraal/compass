@@ -724,6 +724,34 @@ of § 11.4):
 
 ---
 
+## Addendum (2026-07-10) — Curation arc: deletions and dismissals finally stick
+
+> Follow-up to the 2026-07-02 addendum above: the cross-reference engine could surface and promote
+> derived entities, but nothing the user deleted or dismissed stayed gone — a re-sync or cache rebuild
+> would bring it right back. Five PRs close that loop (#339–342 merged, #345 open).
+
+A new `curation_exclusions` table (migration `0036`, mirrors `timeline_mutes`' shape) is the durable "no"
+list behind all of it, with a **Settings → Curation** section (`curation:counts` / `curation:clear`) to
+undo any of it:
+
+- **Contact tombstones** (#339) — `contacts:delete` records the deleted contact's external id so no future
+  sync or import can re-create it.
+- **Contact dedupe** (#340) — the pure `electron/lib/contact-dedupe.ts` engine auto-merges contacts that
+  share an email (or a phone when their names agree) at the end of every import/sync batch
+  (`upsertContacts` now returns `{imported, updated, skipped, merged}`); same-name-only pairs go to a
+  manual **"Possible duplicates (N)"** review panel on Contacts (`contacts:duplicates` / `:merge` /
+  `:dismiss-duplicate`).
+- **Entity exclusions** (#341) — multi-select **"Not interested"** on People/Merchants/Places
+  (`entities:exclude`) permanently hides a derived person/merchant/place from every
+  `refreshDerivedEntities` rebuild; `people:list` also now drops anyone already promoted into `contacts`.
+- **Merchants & Places split + offline map** (#342, #345) — the combined Merchants & Places page is now
+  two routes, `/merchants` and `/places` (shared `src/components/DerivedEntityList.tsx`); `/places` opens
+  with an offline, zero-network SVG map (`src/components/LocationMap.tsx`) of clustered `location_points`
+  cells served by the new `location:map-data` handler — a deliberate, renderer-only widening of the
+  location UI boundary that leaves the AI-facing boundary (`travel_segments` aggregates only) untouched.
+
+---
+
 ## Backlog (deferred, considered but out of scope this round)
 
 ## Phase 5 — Strategic-review follow-ups (May 2026)

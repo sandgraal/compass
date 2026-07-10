@@ -596,6 +596,25 @@ declare global {
     source: string
   }
 
+  // Offline Places map — clustered GPS cells + the bundled country basemap.
+  // Renderer-only; raw location points never cross IPC (see electron/ipc/location.ts).
+  interface LocationMapCell {
+    lat: number
+    lng: number
+    count: number
+    firstSeen: number | null
+    lastSeen: number | null
+  }
+  interface LocationMapData {
+    cells: LocationMapCell[]
+    bounds: [number, number, number, number] | null
+    totalPoints: number
+    truncated: boolean
+    firstSeen: number | null
+    lastSeen: number | null
+    basemap: Array<{ iso2: string; bbox: number[]; geom: number[][][][] }>
+  }
+
   interface OverviewSuggestionItem {
     name: string
     key: string
@@ -1295,6 +1314,9 @@ declare global {
         exclude(
           items: Array<{ kind: EntityKind; key: string }>
         ): Promise<{ success: boolean; excluded: number }>
+      }
+      location: {
+        mapData(): Promise<LocationMapData>
       }
       places: {
         list(): Promise<PlaceRecord[]>
