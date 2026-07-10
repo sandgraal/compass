@@ -17,6 +17,7 @@ import { type SQL, and, asc, desc, eq, like } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
 import { derivedEntities, subscriptions } from '../db/schema'
+import { type ExclusionKind, addExclusions } from '../lib/curation'
 import type { EntityAttrs, EntityKind } from '../lib/entities'
 import { refreshDerivedEntities } from '../lib/entities-projection'
 import { enrichOneContactDeep } from './contact-enrich'
@@ -159,4 +160,47 @@ export function registerEntitiesHandlers(ipcMain: IpcMain): void {
   })
 
   ipcMain.handle('entities:refresh', () => refreshDerivedEntities(getDb()))
+
+  // "Not interested" — permanently hide derived entities. The exclusion lives in
+  // curation_exclusions (survives every cache rebuild via the filter inside
+  // refreshDerivedEntities); the immediate DELETE below just updates the UI
+  // without waiting for the next full rebuild. Renderer-only; never an AI tool.
+  ipcMain.handle(
+    'entities:exclude',
+    (_event, req: { items: Array<{ kind: EntityKind; key: string }> }) => {
+      const items = Array.isArray(req?.items) ? req.items.slice(0, 500) : []
+      const valid = items
+        .filter(
+          (i): i is { kind: EntityKind; key: string } =>
+            !!i &&
+            KINDS.includes(i.kind) &&
+            i.kind !== 'subscription-candidate' &&
+            typeof i.key === 'string' &&
+            i.key.trim().length > 0
+        )
+        .map((i) => ({ kind: i.kind, key: i.key.trim() }))
+
+      if (valid.length === 0) throw new Error('entities:exclude: no valid items')
+      const db = getDb()
+      const byKind = new Map<EntityKind, Set<string>>()
+      for (const i of valid) {
+        const set = byKind.get(i.kind) ?? new Set<string>()
+        set.add(i.key)
+        byKind.set(i.kind, set)
+      }
+
+      let excluded = 0
+      for (const [kind, keySet] of byKind) {
+        const keys = [...keySet]
+        excluded += keys.length
+        addExclusions(db, `entity:${kind}` as ExclusionKind, keys)
+        for (const key of keys) {
+          db.delete(derivedEntities)
+            .where(and(eq(derivedEntities.kind, kind), eq(derivedEntities.matchKey, key)))
+            .run()
+        }
+      }
+      return { success: true, excluded }
+    }
+  )
 }
