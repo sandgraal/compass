@@ -9,8 +9,10 @@
  * and the schema comment on `location_points`). This handler serves the LOCAL
  * renderer map only and must NEVER be registered as an assistant tool
  * (electron/ipc/assistant*.ts) or an MCP tool (mcp/). It also never returns raw
- * per-point rows: points are clustered in the main process (electron/lib/
- * location-clusters.ts) into a bounded set of ~1 km cells before crossing IPC.
+ * per-point rows: points are grouped into ~1 km grid cells IN SQLite (so a
+ * hundreds-of-thousands-row history never materializes in JS or blocks the main
+ * process), then ranked/capped by electron/lib/location-clusters.ts before
+ * crossing IPC.
  * ─────────────────────────────────────────────────────────────────────────────
  *
  * `location:map-data` → clustered cells + data bounds + the bundled offline
@@ -20,7 +22,7 @@
 import type { IpcMain } from 'electron'
 import { getRawSqlite } from '../db/client'
 import boundariesRaw from '../lib/country-boundaries.json'
-import { type MapCell, clusterLocationPoints } from '../lib/location-clusters'
+import { MAX_MAP_CELLS, type MapCell, finalizeMapCells } from '../lib/location-clusters'
 
 interface CountryShape {
   iso2: string
@@ -38,35 +40,57 @@ export interface LocationMapData {
   basemap: CountryShape[]
 }
 
-/** Read + cluster the raw points. Separated for tests (no dialog/window deps). */
+// In-range guard shared by the grouping + totals queries — off-earth coordinates
+// (corrupt exports, sentinel 0/0-ish junk beyond the poles) never reach the map.
+const VALID_COORDS = 'lat BETWEEN -90 AND 90 AND lng BETWEEN -180 AND 180'
+
+/** Cluster (in SQL) + shape the payload. Separated for tests (no dialog/window deps). */
 export function buildLocationMapData(): LocationMapData {
-  let rows: Array<{ lat: number; lng: number; occurred_at: number | null }> = []
+  const basemap = boundariesRaw as CountryShape[]
+  let grouped: MapCell[] = []
+  let totals = { n: 0, mn: null as number | null, mx: null as number | null }
   try {
-    rows = getRawSqlite()
-      .prepare('SELECT lat, lng, occurred_at FROM location_points')
-      .all() as typeof rows
+    const sqlite = getRawSqlite()
+    // Snap to a ~1.1 km grid and aggregate IN SQLite — only the ranked cells cross
+    // into JS. LIMIT is MAX_MAP_CELLS + 1 so finalizeMapCells can detect overflow
+    // without counting every group.
+    grouped = sqlite
+      .prepare(
+        `SELECT AVG(lat) AS lat, AVG(lng) AS lng, COUNT(*) AS count,
+                MIN(occurred_at) AS firstSeen, MAX(occurred_at) AS lastSeen
+           FROM location_points
+          WHERE ${VALID_COORDS}
+          GROUP BY ROUND(lat, 2), ROUND(lng, 2)
+          ORDER BY count DESC
+          LIMIT ?`
+      )
+      .all(MAX_MAP_CELLS + 1) as MapCell[]
+    totals = sqlite
+      .prepare(
+        `SELECT COUNT(*) AS n, MIN(occurred_at) AS mn, MAX(occurred_at) AS mx
+           FROM location_points WHERE ${VALID_COORDS}`
+      )
+      .get() as typeof totals
   } catch {
-    rows = [] // table absent on a pristine DB → empty map
+    return {
+      cells: [],
+      bounds: null,
+      totalPoints: 0,
+      truncated: false,
+      firstSeen: null,
+      lastSeen: null,
+      basemap
+    } // table absent on a pristine DB → empty map
   }
-  const { cells, bounds, totalPoints, truncated } = clusterLocationPoints(
-    rows.map((r) => ({ lat: r.lat, lng: r.lng, occurredAt: r.occurred_at }))
-  )
-  let firstSeen: number | null = null
-  let lastSeen: number | null = null
-  for (const c of cells) {
-    if (c.firstSeen != null && (firstSeen == null || c.firstSeen < firstSeen)) {
-      firstSeen = c.firstSeen
-    }
-    if (c.lastSeen != null && (lastSeen == null || c.lastSeen > lastSeen)) lastSeen = c.lastSeen
-  }
+  const { cells, bounds, truncated } = finalizeMapCells(grouped, { maxCells: MAX_MAP_CELLS })
   return {
     cells,
     bounds,
-    totalPoints,
+    totalPoints: totals.n ?? 0,
     truncated,
-    firstSeen,
-    lastSeen,
-    basemap: boundariesRaw as CountryShape[]
+    firstSeen: totals.mn,
+    lastSeen: totals.mx,
+    basemap
   }
 }
 

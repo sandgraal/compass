@@ -39,6 +39,32 @@ export default function LocationMap({ data }: { data: LocationMapData }): JSX.El
     setViewBox(fitBounds(data.bounds, ASPECT))
   }, [data.bounds])
 
+  // Wheel-zoom needs a NON-passive native listener: React 18 registers `onWheel`
+  // as passive on the root, so preventDefault() there is ignored and the page
+  // scrolls while zooming. Bind directly so we can preventDefault and cursor-anchor
+  // the zoom. Cursor world-coords are computed inside the updater against the live
+  // viewBox, so the empty-dep effect never reads a stale one.
+  useEffect(() => {
+    const svg = svgRef.current
+    if (!svg) return
+    function onWheel(e: WheelEvent): void {
+      const el = svgRef.current
+      if (!el) return
+      e.preventDefault()
+      const rect = el.getBoundingClientRect()
+      const relX = (e.clientX - rect.left) / rect.width
+      const relY = (e.clientY - rect.top) / rect.height
+      const factor = e.deltaY > 0 ? 1.2 : 1 / 1.2
+      setViewBox((vb) => {
+        const cursor = { x: vb.x + relX * vb.w, y: vb.y + relY * vb.h }
+        const next = zoomAt(vb, cursor, factor)
+        return next.w < MIN_ZOOM_SPAN ? vb : next
+      })
+    }
+    svg.addEventListener('wheel', onWheel, { passive: false })
+    return () => svg.removeEventListener('wheel', onWheel)
+  }, [])
+
   // Build the country paths ONCE — 175 shapes, static for the app's lifetime.
   const countryPaths = useMemo(
     () => data.basemap.map((c) => ({ iso2: c.iso2, d: c.geom.map(polygonToPath).join('') })),
@@ -46,25 +72,6 @@ export default function LocationMap({ data }: { data: LocationMapData }): JSX.El
   )
 
   const maxCount = useMemo(() => Math.max(1, ...data.cells.map((c) => c.count)), [data.cells])
-
-  /** Convert a pointer event into world coordinates via the current viewBox. */
-  function eventToWorld(e: React.PointerEvent | React.WheelEvent): { x: number; y: number } {
-    const svg = svgRef.current
-    if (!svg) return { x: 0, y: 0 }
-    const rect = svg.getBoundingClientRect()
-    const relX = (e.clientX - rect.left) / rect.width
-    const relY = (e.clientY - rect.top) / rect.height
-    return { x: viewBox.x + relX * viewBox.w, y: viewBox.y + relY * viewBox.h }
-  }
-
-  function onWheel(e: React.WheelEvent): void {
-    const cursor = eventToWorld(e)
-    const factor = e.deltaY > 0 ? 1.2 : 1 / 1.2
-    setViewBox((vb) => {
-      const next = zoomAt(vb, cursor, factor)
-      return next.w < MIN_ZOOM_SPAN ? vb : next
-    })
-  }
 
   function onPointerDown(e: React.PointerEvent): void {
     ;(e.target as Element).setPointerCapture?.(e.pointerId)
@@ -113,7 +120,6 @@ export default function LocationMap({ data }: { data: LocationMapData }): JSX.El
         style={{ aspectRatio: `${ASPECT}` }}
         role="img"
         aria-label={`Map of ${data.cells.length} places you've been`}
-        onWheel={onWheel}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
