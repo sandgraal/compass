@@ -586,7 +586,7 @@ function EmptyState({ onAdd, onImport }: { onAdd: () => void; onImport: () => vo
           <p className="text-base font-semibold text-foreground">Import contacts from your phone</p>
           <p className="text-xs text-muted-foreground mt-1 max-w-sm">
             Export a <span className="font-mono text-foreground">.vcf</span> from your phone or
-            account, then drop it in below. Everything stays on your machine.
+            account, then choose it below. Everything stays on your machine.
           </p>
         </div>
       </div>
