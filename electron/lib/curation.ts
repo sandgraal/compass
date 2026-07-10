@@ -71,13 +71,7 @@ export function removeExclusion(db: Db, kind: ExclusionKind, target: string): vo
 /** Clear a whole kind (the Settings "Clear" action). Returns how many were removed. */
 export function clearExclusions(db: Db, kind: ExclusionKind): number {
   try {
-    const before = db
-      .select({ target: curationExclusions.target })
-      .from(curationExclusions)
-      .where(eq(curationExclusions.kind, kind))
-      .all().length
-    db.delete(curationExclusions).where(eq(curationExclusions.kind, kind)).run()
-    return before
+    return db.delete(curationExclusions).where(eq(curationExclusions.kind, kind)).run().changes
   } catch {
     return 0
   }
