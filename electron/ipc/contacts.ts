@@ -495,6 +495,8 @@ export function mergeContacts(survivorId: number, loserIds: number[]): boolean {
       | 'givenName'
       | 'familyName'
       | 'middleName'
+      | 'prefix'
+      | 'suffix'
       | 'org'
       | 'jobTitle'
       | 'birthday'
