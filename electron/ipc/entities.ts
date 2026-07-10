@@ -169,18 +169,30 @@ export function registerEntitiesHandlers(ipcMain: IpcMain): void {
     'entities:exclude',
     (_event, req: { items: Array<{ kind: EntityKind; key: string }> }) => {
       const items = Array.isArray(req?.items) ? req.items.slice(0, 500) : []
-      const valid = items.filter(
-        (i) => i && KINDS.includes(i.kind) && i.kind !== 'subscription-candidate' && !!i.key
-      )
+      const valid = items
+        .filter(
+          (i): i is { kind: EntityKind; key: string } =>
+            !!i &&
+            KINDS.includes(i.kind) &&
+            i.kind !== 'subscription-candidate' &&
+            typeof i.key === 'string' &&
+            i.key.trim().length > 0
+        )
+        .map((i) => ({ kind: i.kind, key: i.key.trim() }))
+
       if (valid.length === 0) throw new Error('entities:exclude: no valid items')
       const db = getDb()
-      const byKind = new Map<EntityKind, string[]>()
+      const byKind = new Map<EntityKind, Set<string>>()
       for (const i of valid) {
-        const list = byKind.get(i.kind) ?? []
-        list.push(i.key)
-        byKind.set(i.kind, list)
+        const set = byKind.get(i.kind) ?? new Set<string>()
+        set.add(i.key)
+        byKind.set(i.kind, set)
       }
-      for (const [kind, keys] of byKind) {
+
+      let excluded = 0
+      for (const [kind, keySet] of byKind) {
+        const keys = [...keySet]
+        excluded += keys.length
         addExclusions(db, `entity:${kind}` as ExclusionKind, keys)
         for (const key of keys) {
           db.delete(derivedEntities)
@@ -188,7 +200,7 @@ export function registerEntitiesHandlers(ipcMain: IpcMain): void {
             .run()
         }
       }
-      return { success: true, excluded: valid.length }
+      return { success: true, excluded }
     }
   )
 }

@@ -121,7 +121,7 @@ class UnionFind {
 
 export function computeDedupe(
   rows: DedupeContact[],
-  opts: { dismissedPairs: Set<string> }
+  opts: { dismissedPairs: Set<string>; skipFuzzy?: boolean }
 ): DedupeResult {
   const byId = new Map(rows.map((r) => [r.id, r]))
 
@@ -229,6 +229,8 @@ export function computeDedupe(
   }
 
   // ── Fuzzy pairs: same ≥2-token name, no shared identifier ─────────────────
+  if (opts.skipFuzzy) return { autoGroups, fuzzyPairs: [] }
+
   const byName = new Map<string, number[]>()
   for (const r of rows) {
     if (grouped.has(r.id)) continue // already auto-merging this run
@@ -247,9 +249,14 @@ export function computeDedupe(
     if (opts.dismissedPairs.has(dedupePairKey(a.externalId, b.externalId))) return
     fuzzyPairs.push({ aId, bId, nameKey })
   }
-  for (const [key, ids] of byName) {
+  const MAX_FUZZY_IDS_PER_NAME = 50
+  const MAX_FUZZY_PAIRS = 500
+  for (const [key, idsAll] of byName) {
+    if (fuzzyPairs.length >= MAX_FUZZY_PAIRS) break
+    const ids = idsAll.slice(0, MAX_FUZZY_IDS_PER_NAME)
     for (let i = 0; i < ids.length; i++) {
       for (let j = i + 1; j < ids.length; j++) {
+        if (fuzzyPairs.length >= MAX_FUZZY_PAIRS) break
         pushFuzzy(ids[i], ids[j], key)
       }
     }

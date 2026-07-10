@@ -633,6 +633,7 @@ const CURATION_ROWS: Array<{ kind: string; label: string; description: string }>
 
 function CurationSettings(): JSX.Element | null {
   const { toast } = useToast()
+  const confirm = useConfirm()
   const [counts, setCounts] = useState<Record<string, number>>({})
   const [clearing, setClearing] = useState<string | null>(null)
 
@@ -646,6 +647,13 @@ function CurationSettings(): JSX.Element | null {
 
   async function clear(kind: string, label: string): Promise<void> {
     if (!window.api?.curation) return
+    const ok = await confirm({
+      title: `Clear ${label}?`,
+      description: `This removes all ${label.toLowerCase()} from the blocked list. Cleared entries may re-appear on the next sync. Continue?`,
+      confirmLabel: 'Clear',
+      destructive: true
+    })
+    if (!ok) return
     setClearing(kind)
     try {
       const r = await window.api.curation.clear(kind)
