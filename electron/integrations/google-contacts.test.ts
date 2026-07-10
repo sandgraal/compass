@@ -10,7 +10,12 @@ import {
 } from './google-contacts'
 
 const jsonResp = (body: unknown, status = 200): Response =>
-  ({ ok: status >= 200 && status < 300, status, json: async () => body }) as Response
+  ({
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+    text: async () => JSON.stringify(body)
+  }) as Response
 
 describe('googlePersonToContact', () => {
   it('maps the core fields to a google-sourced ContactInput', () => {
@@ -291,15 +296,23 @@ describe('fetchGoogleOtherContacts', () => {
     const url = String(fetchImpl.mock.calls[0][0])
     expect(url).toContain('/otherContacts')
     expect(url).toContain('readMask=names%2CemailAddresses%2CphoneNumbers%2Cmetadata')
+    expect(url).toContain('sources=READ_SOURCE_TYPE_CONTACT')
     // The wide personFields mask must NOT be used here (Google 400s it).
     expect(url).not.toContain('birthdays')
   })
 
-  it('throws ContactsScopeError on a 403 (scope not granted)', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(jsonResp({}, 403))
+  it('surfaces Google’s error message (status + body) instead of swallowing it', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResp(
+          { error: { code: 403, status: 'PERMISSION_DENIED', message: 'insufficient scopes' } },
+          403
+        )
+      )
     await expect(
       fetchGoogleOtherContacts('tok', fetchImpl as unknown as typeof fetch)
-    ).rejects.toBeInstanceOf(ContactsScopeError)
+    ).rejects.toThrow(/otherContacts 403.*insufficient scopes/)
   })
 })
 

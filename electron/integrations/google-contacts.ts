@@ -382,9 +382,11 @@ interface OtherContactsResponse {
 }
 
 /**
- * Page through `otherContacts.list`. Requires the `contacts.other.readonly` scope
- * → throws `ContactsScopeError` on 403 so the caller can prompt a reconnect.
- * Returns the raw people plus a `truncated` flag when the page cap was hit.
+ * Page through `otherContacts.list`. Requires the `contacts.other.readonly` scope.
+ * On any non-OK response it throws an Error carrying the HTTP status AND Google's
+ * error body (e.g. "insufficient scopes" / "API not enabled") — the block is
+ * already scope-gated, so a failure here is a config/permission issue we want to
+ * SURFACE, not silently swallow. Returns the raw people + a `truncated` flag.
  */
 export async function fetchGoogleOtherContacts(
   accessToken: string,
@@ -397,12 +399,18 @@ export async function fetchGoogleOtherContacts(
   for (let page = 0; page < MAX_OTHER_PAGES; page++) {
     const url = new URL('https://people.googleapis.com/v1/otherContacts')
     url.searchParams.set('readMask', OTHER_CONTACT_FIELDS)
+    // Explicit — the auto-saved "Other contacts" are CONTACT-source.
+    url.searchParams.set('sources', 'READ_SOURCE_TYPE_CONTACT')
     url.searchParams.set('pageSize', String(PAGE_SIZE))
     if (pageToken) url.searchParams.set('pageToken', pageToken)
 
     const resp = await fetchImpl(url.toString(), { headers })
-    if (resp.status === 403) throw new ContactsScopeError()
-    if (!resp.ok) throw new Error(`People API otherContacts ${resp.status}`)
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '')
+      throw new Error(
+        `otherContacts ${resp.status}: ${extractApiError(body) || body.slice(0, 200)}`
+      )
+    }
     const data = (await resp.json()) as OtherContactsResponse
     if (data.otherContacts) people.push(...data.otherContacts)
     if (!data.nextPageToken) break
@@ -412,20 +420,33 @@ export async function fetchGoogleOtherContacts(
   return { people, truncated }
 }
 
+/** Pull the human-readable `error.message` out of a Google API JSON error body. */
+function extractApiError(body: string): string | null {
+  try {
+    const j = JSON.parse(body) as { error?: { message?: string; status?: string } }
+    if (j.error?.message) return `${j.error.status ?? ''} ${j.error.message}`.trim()
+  } catch {
+    /* not JSON */
+  }
+  return null
+}
+
 /**
  * Fetch + map every "other contact" into ContactInput rows tagged
  * `source:'google-other'` (so they stay separable/bulk-removable from the curated
  * connections). Name-less, email-only rows map fine — `googlePersonToContact`
- * falls back to the email as the display name.
+ * falls back to the email as the display name. `fetched` is the RAW row count
+ * Google returned (before mapping/dropping), so the caller can distinguish
+ * "API returned nothing" from "returned rows but all were dropped".
  */
 export async function buildGoogleOtherContactInputs(
   accessToken: string,
   fetchImpl: typeof fetch = fetch
-): Promise<{ inputs: ContactInput[]; truncated: boolean }> {
+): Promise<{ inputs: ContactInput[]; truncated: boolean; fetched: number }> {
   const { people, truncated } = await fetchGoogleOtherContacts(accessToken, fetchImpl)
   const inputs = people
     .map((p) => googlePersonToContact(p))
     .filter((c): c is ContactInput => c !== null)
     .map((c) => ({ ...c, source: 'google-other' }))
-  return { inputs, truncated }
+  return { inputs, truncated, fetched: people.length }
 }
