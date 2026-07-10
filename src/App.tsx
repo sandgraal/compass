@@ -18,6 +18,7 @@ import GoogleSaved from './pages/GoogleSaved'
 import Health from './pages/Health'
 import Integrations from './pages/Integrations'
 import KnowledgeBase from './pages/KnowledgeBase'
+import Merchants from './pages/Merchants'
 import Monthly from './pages/Monthly'
 import Overview from './pages/Overview'
 import People from './pages/People'
@@ -92,6 +93,7 @@ export default function App(): JSX.Element {
           <Route path="vault" element={<Vault />} />
           <Route path="contacts" element={<Contacts />} />
           <Route path="people" element={<People />} />
+          <Route path="merchants" element={<Merchants />} />
           <Route path="places" element={<Places />} />
           <Route path="finance" element={<Finance />} />
           <Route path="health" element={<Health />} />

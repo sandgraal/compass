@@ -19,6 +19,7 @@ import {
   LayoutDashboard,
   LayoutGrid,
   LineChart,
+  MapPin,
   Network,
   PartyPopper,
   PiggyBank,
@@ -259,12 +260,20 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       keywords: ['connections', 'friends', 'linkedin', 'facebook', 'who', 'relationships']
     },
     {
-      id: 'places',
-      label: 'Merchants & Places',
-      description: 'Businesses you buy from & places you go',
+      id: 'merchants',
+      label: 'Merchants',
+      description: 'Businesses you buy from',
       icon: <Store size={15} />,
+      action: () => nav('/merchants'),
+      keywords: ['merchants', 'stores', 'shops', 'spending', 'amazon', 'paypal']
+    },
+    {
+      id: 'places',
+      label: 'Places',
+      description: 'The places you go',
+      icon: <MapPin size={15} />,
       action: () => nav('/places'),
-      keywords: ['merchants', 'stores', 'shops', 'places', 'spending', 'amazon', 'paypal']
+      keywords: ['places', 'map', 'locations', 'travel', 'been']
     },
     {
       id: 'subscriptions',
