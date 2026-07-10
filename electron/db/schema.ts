@@ -762,6 +762,34 @@ export const timelineMutes = sqliteTable(
   })
 )
 
+// ---- Curation exclusions (contacts & entities curation) ----
+// The user's durable "no" list — the memory that makes deletions/dismissals STICK
+// across syncs and cache rebuilds (same shape as timeline_mutes). `kind` scopes
+// the target:
+//   'contact-tombstone'  target = contacts.external_id — user deleted it; no sync
+//                        or import may ever re-create it (Settings can clear).
+//   'contact-merged'     target = a dedupe loser's external_id — folded into a
+//                        survivor; kept SEPARATE from tombstones so clearing
+//                        blocked contacts can't resurrect merge losers as dupes.
+//   'entity:person' | 'entity:merchant' | 'entity:place'
+//                        target = derived_entities.match_key — "Not interested";
+//                        filtered out of every refreshDerivedEntities rebuild.
+//   'dedupe-dismissed'   target = JSON.stringify([extIdA, extIdB].sort()) — a
+//                        rejected fuzzy-duplicate pair; never re-suggested.
+//                        (JSON, not a joined string: external ids can contain '|'.)
+export const curationExclusions = sqliteTable(
+  'curation_exclusions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    kind: text('kind').notNull(),
+    target: text('target').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+  },
+  (t) => ({
+    kindTargetUnique: uniqueIndex('curation_exclusions_kind_target').on(t.kind, t.target)
+  })
+)
+
 // ---- Financial goals (Phase 11.6 — "Goals & milestones") ----
 // Target-date savings goals that tie the cross-border picture together: a tax
 // reserve, the next CR capex draw, the retirement number, an emergency fund.

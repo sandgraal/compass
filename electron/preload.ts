@@ -364,6 +364,12 @@ const api = {
     activity: (id: number) => ipcRenderer.invoke('contacts:activity', id)
   },
 
+  // --- Curation (the durable "no" list: tombstones, exclusions, dismissals) ---
+  curation: {
+    counts: () => ipcRenderer.invoke('curation:counts'),
+    clear: (kind: string) => ipcRenderer.invoke('curation:clear', kind)
+  },
+
   // --- Storehouse overview (Phase 9.6 — "see ALL my info in one place") ---
   storehouse: {
     summary: () => ipcRenderer.invoke('storehouse:summary'),

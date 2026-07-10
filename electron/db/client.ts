@@ -349,6 +349,16 @@ function ensureNewTables(sqlite: Database.Database): void {
       created_at INTEGER
     );
     CREATE UNIQUE INDEX IF NOT EXISTS timeline_mutes_kind_target ON timeline_mutes (kind, target);
+    -- Curation exclusions (migration 0036, mirrored here — the fallback path).
+    -- The durable "no" list: contact tombstones, dedupe merge losers,
+    -- "not interested" entities, dismissed duplicate pairs.
+    CREATE TABLE IF NOT EXISTS curation_exclusions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      target TEXT NOT NULL,
+      created_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS curation_exclusions_kind_target ON curation_exclusions (kind, target);
     CREATE TABLE IF NOT EXISTS snapshot_facts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       source TEXT NOT NULL, category TEXT NOT NULL, label TEXT, value TEXT NOT NULL,
