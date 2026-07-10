@@ -12,6 +12,7 @@ import {
   Pencil,
   Phone,
   Plus,
+  Smartphone,
   Sparkles,
   Tag,
   Trash2,
@@ -341,6 +342,18 @@ export default function Contacts(): JSX.Element {
           />
         </div>
 
+        <div className="px-3 pb-2">
+          <button
+            type="button"
+            onClick={() => importFrom('vcard')}
+            disabled={busy}
+            title="Import a .vcf exported from your phone (iCloud / Google / Outlook)"
+            className="w-full flex items-center justify-center gap-1.5 text-sm px-3 py-2 bg-primary/15 hover:bg-primary/25 text-primary rounded-lg transition-colors disabled:opacity-50"
+          >
+            <Smartphone size={14} /> Import from phone
+          </button>
+        </div>
+
         <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
           {loading ? (
             [1, 2, 3, 4].map((n) => (
@@ -564,33 +577,69 @@ function HeaderButton({
 
 function EmptyState({ onAdd, onImport }: { onAdd: () => void; onImport: () => void }): JSX.Element {
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
-      <div className="w-16 h-16 rounded-full bg-secondary flex items-center justify-center text-muted-foreground">
-        <Users size={28} />
+    <div className="max-w-lg mx-auto py-6">
+      <div className="flex flex-col items-center text-center gap-3">
+        <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+          <Smartphone size={26} />
+        </div>
+        <div>
+          <p className="text-base font-semibold text-foreground">Import contacts from your phone</p>
+          <p className="text-xs text-muted-foreground mt-1 max-w-sm">
+            Export a <span className="font-mono text-foreground">.vcf</span> from your phone or
+            account, then choose it below. Everything stays on your machine.
+          </p>
+        </div>
       </div>
-      <div>
-        <p className="text-sm font-semibold text-foreground">Your address book lives here</p>
-        <p className="text-xs text-muted-foreground mt-1 max-w-sm">
-          Import a .vcf exported from your phone, Google Contacts, or iCloud — or add someone by
-          hand. Everything stays on your machine, and you can export it back out anytime.
-        </p>
+
+      <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <PhoneImportGuide
+          title="iPhone / iCloud"
+          steps={[
+            'Open icloud.com/contacts',
+            'Gear icon (bottom-left) → Select All',
+            'Gear icon → Export vCard'
+          ]}
+        />
+        <PhoneImportGuide
+          title="Android / Google"
+          steps={['Open contacts.google.com', 'Left sidebar → Export', 'Choose vCard → Export']}
+        />
       </div>
-      <div className="flex items-center gap-2">
+
+      <div className="mt-6 flex items-center justify-center gap-2">
         <button
           type="button"
           onClick={onImport}
-          className="flex items-center gap-1.5 text-sm px-3 py-2 border border-border hover:border-primary/50 text-foreground rounded-lg transition-colors"
+          className="flex items-center gap-1.5 text-sm px-3.5 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors"
         >
-          <Upload size={14} /> Import vCard
+          <Upload size={14} /> Choose .vcf file
         </button>
         <button
           type="button"
           onClick={onAdd}
-          className="flex items-center gap-1.5 text-sm px-3 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors"
+          className="flex items-center gap-1.5 text-sm px-3.5 py-2 border border-border hover:border-primary/50 text-foreground rounded-lg transition-colors"
         >
-          <UserPlus size={14} /> Add contact
+          <UserPlus size={14} /> Add by hand
         </button>
       </div>
+      <p className="text-[11px] text-muted-foreground/70 text-center mt-3">
+        Works with any .vcf from iCloud, Google, Outlook, or a phone export.
+      </p>
+    </div>
+  )
+}
+
+function PhoneImportGuide({ title, steps }: { title: string; steps: string[] }): JSX.Element {
+  return (
+    <div className="rounded-lg border border-border bg-card/40 p-3 text-left">
+      <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+        <Smartphone size={13} className="text-primary" /> {title}
+      </p>
+      <ol className="mt-2 text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+        {steps.map((s) => (
+          <li key={s}>{s}</li>
+        ))}
+      </ol>
     </div>
   )
 }
