@@ -158,8 +158,10 @@ export default function Contacts(): JSX.Element {
               ? 'No new contacts — reconnect Google to pull your full address book.'
               : 'No new contacts.'
         // Always append the honest per-source breakdown (e.g. Google's actual error)
-        // so a zero-result never leaves the user guessing.
-        toast(r.message ? `${summary} ${r.message}` : summary, r.imported > 0 ? 'success' : 'info')
+        // so a zero-result never leaves the user guessing. `success` when any work
+        // happened (imported OR enriched), else `info`.
+        const didWork = r.imported > 0 || r.enriched > 0
+        toast(r.message ? `${summary} ${r.message}` : summary, didWork ? 'success' : 'info')
         await load(search)
         if (selectedId != null) await openContact(selectedId)
       } else {

@@ -385,9 +385,10 @@ function describeContactsSync(
     | undefined
 ): string | undefined {
   if (!info) return undefined
+  const upd = (n: number): string => (n > 0 ? ` (+${n} updated)` : '')
   const parts: string[] = []
   if (info.savedError) parts.push(`saved contacts failed (${info.savedError})`)
-  else parts.push(`${info.savedImported} saved`)
+  else parts.push(`${info.savedImported} saved${upd(info.savedUpdated)}`)
   if (!info.otherScoped) {
     parts.push('Other Contacts need a Google reconnect')
   } else if (info.otherError) {
@@ -396,7 +397,7 @@ function describeContactsSync(
     parts.push('Google returned 0 Other Contacts')
   } else {
     parts.push(
-      `${info.otherImported} of ${info.otherFetched} Other Contacts${info.otherTruncated ? ' (truncated)' : ''}`
+      `${info.otherImported} of ${info.otherFetched} Other Contacts${upd(info.otherUpdated)}${info.otherTruncated ? ' (truncated)' : ''}`
     )
   }
   return `Google — ${parts.join('; ')}.`
