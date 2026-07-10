@@ -486,7 +486,7 @@ export function mergeContacts(survivorId: number, loserIds: number[]): boolean {
   const emails = parseArr<ContactEmail>(survivor.emails)
   const phones = parseArr<ContactPhone>(survivor.phones)
   const addresses = parseArr<ContactAddress>(survivor.addresses)
-  const emailSet = new Set(emails.map((e) => e.value.toLowerCase()))
+  const emailSet = new Set(emails.map((e) => e.value.trim().toLowerCase()))
   const phoneSet = new Set(phones.map((p) => p.value))
   const addrSet = new Set(addresses.map((a) => JSON.stringify(a)))
   const notes: string[] = survivor.notes ? [survivor.notes] : []
