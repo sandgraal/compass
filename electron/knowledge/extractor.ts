@@ -120,7 +120,7 @@ export async function updateDriveKnowledge(files: DriveFile[]): Promise<void> {
   ]
 
   for (const f of files.slice(0, 30)) {
-    const name = f.name.replace(/\|/g, '\\|')
+    const name = f.name.replace(/\\/g, '\\\\').replace(/\|/g, '\\|')
     const type = (f.mimeType || '').split('.').pop() || 'file'
     const modified = f.modifiedTime ? format(new Date(f.modifiedTime), 'MMM d, yyyy') : '-'
     const link = f.webViewLink ? `[${name}](${f.webViewLink})` : name
