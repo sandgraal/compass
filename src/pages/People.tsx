@@ -1,4 +1,5 @@
 import {
+  EyeOff,
   Facebook,
   Linkedin,
   MessageSquare,
@@ -6,9 +7,9 @@ import {
   Phone,
   Search,
   User,
-  UserCheck,
   UserPlus,
-  Wallet
+  Wallet,
+  X
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -40,23 +41,34 @@ function fmtMonth(ms: number | null): string {
 
 export default function People(): JSX.Element {
   const [people, setPeople] = useState<Person[]>([])
+  const [promotedCount, setPromotedCount] = useState(0)
   const [query, setQuery] = useState('')
   const [loaded, setLoaded] = useState(false)
   const [promoting, setPromoting] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [excluding, setExcluding] = useState(false)
   const navigate = useNavigate()
   const { toast } = useToast()
 
-  /** Promote a derived person into the owned contacts table (idempotent). */
+  /**
+   * Promote a derived person into the owned contacts table. Once they're a
+   * contact they LEAVE this page — Contacts is their home now (their info keeps
+   * flowing into the contact record via enrichment).
+   */
   async function addToContacts(p: Person): Promise<void> {
     if (!isElectron() || promoting) return
     setPromoting(p.key)
     try {
       const res = await window.api.entities.promote({ kind: 'person', key: p.key })
-      // Only mark "in contacts" with a REAL contact id — never a `-1` sentinel that
-      // would point the UI at a non-existent row.
       if (res.success && res.promotedId != null) {
-        const id = res.promotedId
-        setPeople((prev) => prev.map((x) => (x.key === p.key ? { ...x, contactId: id } : x)))
+        setPeople((prev) => prev.filter((x) => x.key !== p.key))
+        setPromotedCount((n) => n + 1)
+        setSelected((prev) => {
+          if (!prev.has(p.key)) return prev
+          const next = new Set(prev)
+          next.delete(p.key)
+          return next
+        })
         toast(`Added ${p.name} to your contacts`, 'success')
       } else {
         toast(res.error ?? 'Could not add to contacts', 'error')
@@ -68,6 +80,39 @@ export default function People(): JSX.Element {
     }
   }
 
+  /** Permanently hide the selected people — they never reappear on any rebuild. */
+  async function excludeSelected(): Promise<void> {
+    if (!isElectron() || selected.size === 0) return
+    setExcluding(true)
+    try {
+      const items = [...selected].map((key) => ({ kind: 'person' as const, key }))
+      const r = await window.api.entities.exclude(items)
+      if (r.success) {
+        setPeople((prev) => prev.filter((p) => !selected.has(p.key)))
+        toast(
+          `Hidden ${r.excluded} ${r.excluded === 1 ? 'entry' : 'entries'} — they won't come back. (Undo in Settings → Hidden people.)`,
+          'success'
+        )
+        setSelected(new Set())
+      } else {
+        toast('Could not hide the selection', 'error')
+      }
+    } catch {
+      toast('Could not hide the selection', 'error')
+    } finally {
+      setExcluding(false)
+    }
+  }
+
+  function toggleSelect(key: string): void {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
   useEffect(() => {
     if (!isElectron()) {
       setLoaded(true)
@@ -77,7 +122,10 @@ export default function People(): JSX.Element {
     // (neither the empty state nor the list).
     void window.api.people
       .list()
-      .then(setPeople)
+      .then((r) => {
+        setPeople(r.people)
+        setPromotedCount(r.promotedCount)
+      })
       .catch(() => toast('Could not load your people directory', 'error'))
       .finally(() => setLoaded(true))
   }, [toast])
@@ -87,8 +135,6 @@ export default function People(): JSX.Element {
     return q ? people.filter((p) => p.key.includes(q)) : people
   }, [people, query])
 
-  const inContacts = people.filter((p) => p.contactId != null).length
-
   return (
     <div className="p-8 pt-14 max-w-3xl mx-auto animate-fade-in">
       <div className="mb-6">
@@ -97,11 +143,11 @@ export default function People(): JSX.Element {
           <h1 className="text-2xl font-semibold text-foreground">People</h1>
         </div>
         <p className="text-sm text-muted-foreground">
-          {people.length > 0 ? (
+          {people.length > 0 || promotedCount > 0 ? (
             <>
               <span className="font-semibold text-foreground">{people.length}</span>{' '}
               {people.length === 1 ? 'person' : 'people'} across your data
-              {inContacts > 0 && ` · ${inContacts} in your contacts`}
+              {promotedCount > 0 && ` · ${promotedCount} already in your contacts`}
             </>
           ) : (
             'The people in your imported data — who you connect with, message, and pay, in one place'
@@ -126,13 +172,42 @@ export default function People(): JSX.Element {
         </div>
       )}
 
+      {selected.size > 0 && (
+        <div className="sticky top-12 z-10 mb-3 flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-2.5 shadow-sm">
+          <span className="text-sm text-foreground">{selected.size} selected</span>
+          <button
+            type="button"
+            onClick={excludeSelected}
+            disabled={excluding}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 text-foreground rounded-lg transition-colors disabled:opacity-50"
+          >
+            <EyeOff size={12} />
+            {excluding ? 'Hiding…' : `Not interested (${selected.size})`}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelected(new Set())}
+            aria-label="Clear selection"
+            className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <X size={12} /> Clear
+          </button>
+        </div>
+      )}
+
       {loaded && people.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center text-sm text-muted-foreground">
-          No people yet. Import a <span className="text-foreground">LinkedIn</span>,{' '}
-          <span className="text-foreground">Facebook</span>, or{' '}
-          <span className="text-foreground">PayPal</span> export — or your{' '}
-          <span className="text-foreground">Messages</span> — on the Timeline to see everyone you
-          connect with, message, and pay.
+          {promotedCount > 0 ? (
+            <>Everyone here is already in your contacts. New people show up as your data grows.</>
+          ) : (
+            <>
+              No people yet. Import a <span className="text-foreground">LinkedIn</span>,{' '}
+              <span className="text-foreground">Facebook</span>, or{' '}
+              <span className="text-foreground">PayPal</span> export — or your{' '}
+              <span className="text-foreground">Messages</span> — on the Timeline to see everyone
+              you connect with, message, and pay.
+            </>
+          )}
         </div>
       ) : (
         <ul className="flex flex-col gap-1.5">
@@ -141,21 +216,23 @@ export default function People(): JSX.Element {
               key={p.key}
               className="flex items-center gap-2 rounded-lg border border-border bg-card pr-2 hover:border-primary/40 hover:bg-card/80 transition-colors"
             >
+              <label className="pl-3 py-2.5 shrink-0 flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selected.has(p.key)}
+                  onChange={() => toggleSelect(p.key)}
+                  aria-label={`Select ${p.name}`}
+                  className="h-3.5 w-3.5 accent-[hsl(var(--primary))] cursor-pointer"
+                />
+              </label>
               <button
                 type="button"
                 onClick={() => navigate(`/timeline?q=${encodeURIComponent(p.name)}`)}
                 title={`See everything involving ${p.name} on the timeline`}
-                className="flex-1 min-w-0 flex items-center gap-3 px-4 py-2.5 text-left"
+                className="flex-1 min-w-0 flex items-center gap-3 pr-4 py-2.5 text-left"
               >
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-foreground truncate">{p.name}</span>
-                    {p.contactId != null && (
-                      <span className="flex items-center gap-1 text-[11px] text-primary shrink-0">
-                        <UserCheck size={12} /> In contacts
-                      </span>
-                    )}
-                  </div>
+                  <span className="font-medium text-foreground truncate block">{p.name}</span>
                   <div className="flex items-center gap-1.5 mt-1">
                     {p.sources.map((s) => (
                       <span
@@ -176,18 +253,16 @@ export default function People(): JSX.Element {
                   </div>
                 </div>
               </button>
-              {p.contactId == null && (
-                <button
-                  type="button"
-                  onClick={() => addToContacts(p)}
-                  disabled={promoting === p.key}
-                  title={`Add ${p.name} to your contacts`}
-                  aria-label={`Add ${p.name} to your contacts`}
-                  className="shrink-0 flex items-center gap-1 text-[11px] text-primary border border-primary/30 rounded px-2 py-1 hover:bg-primary/10 disabled:opacity-50 transition-colors"
-                >
-                  <UserPlus size={12} /> Add
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => addToContacts(p)}
+                disabled={promoting === p.key}
+                title={`Add ${p.name} to your contacts`}
+                aria-label={`Add ${p.name} to your contacts`}
+                className="shrink-0 flex items-center gap-1 text-[11px] text-primary border border-primary/30 rounded px-2 py-1 hover:bg-primary/10 disabled:opacity-50 transition-colors"
+              >
+                <UserPlus size={12} /> Add
+              </button>
             </li>
           ))}
           {shown.length === 0 && query && (

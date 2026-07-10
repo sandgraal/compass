@@ -1276,7 +1276,7 @@ declare global {
         clearRequested(sourceId: string): Promise<{ success: boolean }>
       }
       people: {
-        list(): Promise<Person[]>
+        list(): Promise<{ people: Person[]; promotedCount: number }>
       }
       entities: {
         list(opts: {
@@ -1292,6 +1292,9 @@ declare global {
           promotedId?: number
         }>
         refresh(): Promise<{ count: number }>
+        exclude(
+          items: Array<{ kind: EntityKind; key: string }>
+        ): Promise<{ success: boolean; excluded: number }>
       }
       places: {
         list(): Promise<PlaceRecord[]>

@@ -15,6 +15,7 @@ import { inArray } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type * as schema from '../db/schema'
 import { contacts, derivedEntities, places, records, subscriptions } from '../db/schema'
+import { loadExclusionSet } from './curation'
 import { ENTITY_EXTRACTORS, type EntityRecordRow, type OwnedRefs, deriveEntities } from './entities'
 
 /** Distinct sources that have at least one extractor — the DB read is scoped here. */
@@ -66,7 +67,20 @@ export function refreshDerivedEntities(db: BetterSQLite3Database<typeof schema>)
     places: db.select({ id: places.id, externalId: places.externalId }).from(places).all()
   }
 
-  const entities = deriveEntities(rows, owned)
+  // The user's "Not interested" list survives the full-replace rebuild because
+  // it lives in its OWN table — enforce it here, the single write choke point,
+  // so every reader (People / Merchants / Places / Overview) inherits it.
+  const excludedPeople = loadExclusionSet(db, ['entity:person'])
+  const excludedMerchants = loadExclusionSet(db, ['entity:merchant'])
+  const excludedPlaces = loadExclusionSet(db, ['entity:place'])
+  const isExcluded = (kind: string, key: string): boolean => {
+    if (kind === 'person') return excludedPeople.has(key)
+    if (kind === 'merchant') return excludedMerchants.has(key)
+    if (kind === 'place') return excludedPlaces.has(key)
+    return false
+  }
+
+  const entities = deriveEntities(rows, owned).filter((e) => !isExcluded(e.kind, e.key))
   const now = new Date()
 
   // Full replace — the projection is a pure cache, so delete-then-insert is the

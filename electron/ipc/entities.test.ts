@@ -70,6 +70,10 @@ beforeEach(async () => {
       name TEXT NOT NULL, category TEXT, address TEXT, url TEXT, total_spend REAL, notes TEXT,
       source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER
     );
+    CREATE TABLE curation_exclusions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, target TEXT NOT NULL, created_at INTEGER
+    );
+    CREATE UNIQUE INDEX curation_exclusions_kind_target ON curation_exclusions (kind, target);
   `)
   for (const k of Object.keys(handlers)) delete handlers[k]
   const mod = await import('./entities')
@@ -232,5 +236,34 @@ describe('entities:promote', () => {
       .get() as { promoted_kind: string; promoted_id: number }
     expect(row.promoted_kind).toBe('place')
     expect(row.promoted_id).toBe(res.promotedId)
+  })
+})
+
+describe('entities:exclude ("Not interested")', () => {
+  it('removes from the cache immediately AND survives a full rebuild', () => {
+    addRecord('linkedin', 'connection', 'Connected with Spam Bot', null, day('2026-01-01'))
+    addRecord('linkedin', 'connection', 'Connected with Real Friend', null, day('2026-01-02'))
+    refreshDerivedEntities(drizzle(sqlite, { schema }))
+
+    const res = invoke('entities:exclude', {
+      items: [{ kind: 'person', key: 'spam bot' }]
+    }) as { success: boolean; excluded: number }
+    expect(res).toEqual({ success: true, excluded: 1 })
+
+    // Gone immediately (no rebuild needed)...
+    const now = invoke('entities:list', { kind: 'person' }) as Array<{ name: string }>
+    expect(now.map((p) => p.name)).toEqual(['Real Friend'])
+
+    // ...and still gone after the full-replace rebuild (the durable part).
+    refreshDerivedEntities(drizzle(sqlite, { schema }))
+    const after = invoke('entities:list', { kind: 'person' }) as Array<{ name: string }>
+    expect(after.map((p) => p.name)).toEqual(['Real Friend'])
+  })
+
+  it('rejects empty/invalid payloads and subscription-candidates', () => {
+    expect(() => invoke('entities:exclude', { items: [] })).toThrow()
+    expect(() =>
+      invoke('entities:exclude', { items: [{ kind: 'subscription-candidate', key: 'x' }] })
+    ).toThrow()
   })
 })

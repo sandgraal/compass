@@ -10,10 +10,12 @@
  * builds mid-upgrade) just behaves as "no exclusions" instead of throwing.
  */
 import { and, eq, inArray } from 'drizzle-orm'
-import type { getDb } from '../db/client'
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
+import type * as schema from '../db/schema'
 import { curationExclusions } from '../db/schema'
 
-type Db = ReturnType<typeof getDb>
+// The loosest drizzle handle both getDb() and the projection writer satisfy.
+type Db = BetterSQLite3Database<typeof schema>
 
 /** The known exclusion kinds. Free text in the schema; validated at the IPC edge. */
 export const EXCLUSION_KINDS = [
