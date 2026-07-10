@@ -31,9 +31,9 @@ function addRecord(source: string, type: string, title: string, occurredAt: numb
 }
 
 /** Rebuild the projection from the seeded records, then invoke people:list. */
-async function listPeople(): Promise<Person[]> {
+async function listPeople(): Promise<{ people: Person[]; promotedCount: number }> {
   refreshDerivedEntities(drizzle(sqlite, { schema }))
-  return handlers['people:list']({}) as Promise<Person[]>
+  return handlers['people:list']({}) as Promise<{ people: Person[]; promotedCount: number }>
 }
 
 beforeEach(async () => {
@@ -73,7 +73,7 @@ afterEach(() => sqlite.close())
 type Person = { name: string; count: number; sources: string[]; contactId: number | null }
 
 describe('people:list', () => {
-  it('derives people from the people-bearing records, collapsing across sources', async () => {
+  it('derives people from records and FILTERS OUT anyone already promoted to Contacts', async () => {
     addRecord('linkedin', 'connection', 'Connected with John Doe', Date.UTC(2020, 0, 1))
     addRecord('facebook', 'connection', 'Became friends with John Doe', Date.UTC(2015, 0, 1))
     addRecord('linkedin', 'connection', 'Connected with Jane Roe', Date.UTC(2021, 0, 1))
@@ -81,17 +81,15 @@ describe('people:list', () => {
     addRecord('linkedin', 'job', 'Engineer at Acme', Date.UTC(2022, 0, 1))
     addRecord('netflix', 'watch', 'The Matrix', Date.UTC(2023, 0, 1))
 
+    // John is already a contact → he leaves the People page (promotedCount reports him).
     sqlite
       .prepare("INSERT INTO contacts (external_id, display_name) VALUES ('u1', 'John Doe')")
       .run()
 
-    const people = await listPeople()
-    expect(people.map((p) => p.name)).toEqual(['John Doe', 'Jane Roe']) // John has 2 touchpoints → first
-    const john = people[0]
-    expect(john.count).toBe(2)
-    expect(john.sources).toEqual(['facebook', 'linkedin'])
-    expect(john.contactId).toBe(1) // matched the contact
-    expect(people[1].contactId).toBeNull() // Jane isn't a contact
+    const { people, promotedCount } = await listPeople()
+    expect(people.map((p) => p.name)).toEqual(['Jane Roe'])
+    expect(people[0].contactId).toBeNull()
+    expect(promotedCount).toBe(1)
   })
 
   it('includes PayPal payees + message partners (people only) and skips merchants', async () => {
@@ -100,7 +98,7 @@ describe('people:list', () => {
     addRecord('imessage', 'messages', '12 messages with Jane Doe', Date.UTC(2024, 2, 1)) // collapses w/ the payee
     addRecord('imessage', 'messages', '3 messages with +14155551234', Date.UTC(2024, 3, 1)) // phone → dropped
 
-    const people = await listPeople()
+    const { people } = await listPeople()
     expect(people.map((p) => p.name)).toEqual(['Jane Doe']) // only the real person
     expect(people[0].count).toBe(2) // paypal + imessage touchpoints
     expect(people[0].sources).toEqual(['imessage', 'paypal'])
@@ -108,6 +106,31 @@ describe('people:list', () => {
 
   it('returns an empty list when there are no people-bearing records', async () => {
     addRecord('netflix', 'watch', 'The Matrix', Date.UTC(2023, 0, 1))
-    expect(await listPeople()).toEqual([])
+    const { people, promotedCount } = await listPeople()
+    expect(people).toEqual([])
+    expect(promotedCount).toBe(0)
+  })
+
+  it('"Not interested" exclusions never reappear after a full rebuild', async () => {
+    sqlite.exec(`
+      CREATE TABLE curation_exclusions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, target TEXT NOT NULL, created_at INTEGER
+      );
+      CREATE UNIQUE INDEX curation_exclusions_kind_target ON curation_exclusions (kind, target);
+    `)
+    addRecord('linkedin', 'connection', 'Connected with Spam Bot', Date.UTC(2024, 0, 1))
+    addRecord('linkedin', 'connection', 'Connected with Real Friend', Date.UTC(2024, 0, 2))
+    sqlite
+      .prepare(
+        "INSERT INTO curation_exclusions (kind, target) VALUES ('entity:person', 'spam bot')"
+      )
+      .run()
+
+    // listPeople() runs refreshDerivedEntities — the full-replace rebuild.
+    const { people } = await listPeople()
+    expect(people.map((p) => p.name)).toEqual(['Real Friend'])
+    // And it survives ANOTHER rebuild (the exclusion is durable, not cache state).
+    const second = await listPeople()
+    expect(second.people.map((p) => p.name)).toEqual(['Real Friend'])
   })
 })

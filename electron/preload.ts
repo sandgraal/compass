@@ -460,7 +460,10 @@ const api = {
       ipcRenderer.invoke('entities:list', opts),
     promote: (req: { kind: EntityKind; key: string }) =>
       ipcRenderer.invoke('entities:promote', req),
-    refresh: () => ipcRenderer.invoke('entities:refresh')
+    refresh: () => ipcRenderer.invoke('entities:refresh'),
+    // "Not interested" — permanently hide derived entities (survives rebuilds).
+    exclude: (items: Array<{ kind: EntityKind; key: string }>) =>
+      ipcRenderer.invoke('entities:exclude', { items })
   },
   places: {
     list: () => ipcRenderer.invoke('places:list'),

@@ -5,26 +5,37 @@
  * `people:list` reads the `kind='person'` slice of the `derived_entities`
  * projection — which the engine (`electron/lib/entities.ts`) builds from ALL
  * people-bearing sources, not just the four the original hardcoded filter knew.
- * Same `Person` shape as before, so the People page is unchanged; it's just no
- * longer blind to email/messages/payments people once those extractors land.
+ *
+ * People PROMOTED to Contacts are filtered out server-side: once someone is a
+ * contact they live on the Contacts page (their info keeps flowing into the
+ * contact record via enrichment) — People is the discovery surface for everyone
+ * who ISN'T one yet. `promotedCount` keeps the header's "in your contacts" line
+ * honest. "Not interested" exclusions never reach this query at all — they're
+ * filtered out of the cache itself at rebuild (see entities-projection.ts).
  *
  * Read-only, local, no vault. The projection is rebuilt after each import and
  * self-heals on demand via `entities:refresh`.
  */
 
-import { asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
 import { derivedEntities } from '../db/schema'
 import type { Person } from '../lib/people'
 
+export interface PeopleListResult {
+  people: Person[]
+  /** How many derived people are already promoted into Contacts (hidden here). */
+  promotedCount: number
+}
+
 export function registerPeopleHandlers(ipcMain: IpcMain): void {
-  ipcMain.handle('people:list', (): Person[] => {
+  ipcMain.handle('people:list', (): PeopleListResult => {
     const db = getDb()
     const rows = db
       .select()
       .from(derivedEntities)
-      .where(eq(derivedEntities.kind, 'person'))
+      .where(and(eq(derivedEntities.kind, 'person'), isNull(derivedEntities.promotedId)))
       // Stable sort keys (the engine's order) — NOT `id`, which is a delete+insert
       // cache rowid that shuffles between refreshes and would jitter the UI.
       .orderBy(
@@ -33,7 +44,13 @@ export function registerPeopleHandlers(ipcMain: IpcMain): void {
         asc(derivedEntities.name)
       )
       .all()
-    return rows.map((r) => {
+    const promotedCount =
+      db
+        .select({ n: sql<number>`count(*)` })
+        .from(derivedEntities)
+        .where(and(eq(derivedEntities.kind, 'person'), eq(derivedEntities.promotedKind, 'contact')))
+        .get()?.n ?? 0
+    const people = rows.map((r) => {
       let sources: string[] = []
       try {
         sources = JSON.parse(r.sources) as string[]
@@ -47,8 +64,9 @@ export function registerPeopleHandlers(ipcMain: IpcMain): void {
         sources,
         firstSeen: r.firstSeen ? r.firstSeen.getTime() : null,
         lastSeen: r.lastSeen ? r.lastSeen.getTime() : null,
-        contactId: r.promotedKind === 'contact' ? (r.promotedId ?? null) : null
+        contactId: null
       }
     })
+    return { people, promotedCount }
   })
 }
