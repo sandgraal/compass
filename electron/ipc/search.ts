@@ -1,29 +1,30 @@
 /**
- * Global search across the four content domains that the May 2026
- * strategic review flagged as table stakes: knowledge bodies, vault
- * titles (never bodies — secrets stay encrypted), checklist titles,
- * and transaction descriptions.
+ * Global search — the ⌘K surface over EVERYTHING, per the data-access
+ * policy (docs/data-access-policy.md): knowledge bodies, the records
+ * spine (FTS — timeline, finance, medical, habits, tasks-as-records,
+ * trips, paystubs, facts…), checklist titles, contacts, and vault
+ * BODIES for the document categories.
  *
  * Returns a single ranked list the renderer can fan out into typed
- * sections without doing the cross-domain JOIN itself. Capped at 40
- * results overall so the ⌘K palette stays scrollable.
+ * sections without doing the cross-domain JOIN itself.
  *
- * Why title-only for vault: even surfacing the field VALUES through the
- * search index would defeat the whole "renderer never sees secrets"
- * boundary. The title is the user-supplied label for the entry; if they
- * named the entry "Chase Sapphire", searching "chase" should find it.
+ * The two walls that remain:
+ *  - vault `credentials` stays title-only (the `service` label). Passwords,
+ *    API keys, and usernames are access keys, not life data — indexing
+ *    them is leak risk with zero search value.
+ *  - vault bodies are decrypted PER QUERY in the main process and never
+ *    written to any on-disk index; only the matched snippet crosses the
+ *    IPC boundary.
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, extname, join, relative } from 'node:path'
+import { like } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
-import { getDb } from '../db/client'
-import {
-  checklistItems,
-  financeTransactions as financeTxns,
-  knowledgeFiles as knowledgeFilesTable
-} from '../db/schema'
+import { getDb, getRawSqlite } from '../db/client'
+import { checklistItems, contacts, knowledgeFiles as knowledgeFilesTable } from '../db/schema'
 import { decryptBlob, getOrCreateKey } from '../lib/crypto-vault'
+import { searchRecords } from '../lib/records-search'
 import { KNOWLEDGE_DIR, VAULT_DIR } from '../paths'
 
 export type GlobalSearchHit =
@@ -39,6 +40,10 @@ export type GlobalSearchHit =
       category: string
       id: string
       title: string
+      /** ±40-char window around a body match (open categories only). */
+      snippet?: string
+      /** Which entry field matched, e.g. 'notes' / 'policyNumber'. */
+      matchedField?: string
       score: number
     }
   | {
@@ -51,30 +56,54 @@ export type GlobalSearchHit =
       score: number
     }
   | {
-      kind: 'transaction'
+      kind: 'record'
       id: number
-      date: string
-      amount: number
-      description: string
+      source: string
+      type: string
+      occurredAt: number | null
+      title: string
+      snippet: string
+      score: number
+    }
+  | {
+      kind: 'contact'
+      id: number
+      displayName: string
+      org: string | null
+      relationship: string | null
       score: number
     }
 
-const MAX_RESULTS = 40
+const MAX_RESULTS = 60
 const MAX_PER_KIND = 12
 const MAX_QUERY_LENGTH = 200
 
-// Same five categories the vault knows about; mirrored here so we don't
+// Same six categories the vault knows about; mirrored here so we don't
 // have to take a dependency on `electron/ipc/vault.ts` (which would
 // pull in its own dialog-using imports).
-const VAULT_CATEGORIES = ['financial', 'identity', 'credentials', 'medical', 'legal']
+const VAULT_CATEGORIES = [
+  'financial',
+  'identity',
+  'credentials',
+  'medical',
+  'legal',
+  'foreign-accounts'
+]
 
-// Per-category label-only allowlist. The renderer must NEVER see
-// secret-bearing fields (passwords, account numbers, API keys, SSNs,
-// notes, etc.) through search — so we don't have a generic fallback.
-// If none of these fields are populated for an entry, the entry simply
-// isn't searchable. That's intentional: a vault row without a label is
-// not something the user can find by typing, but also not something we
-// should expose by leaking a different field through Object.values().
+// Document categories whose FULL bodies are searchable (decrypt-per-query,
+// nothing persisted). `credentials` is deliberately absent — it stays
+// title-only below.
+const OPEN_VAULT_CATEGORIES = new Set([
+  'financial',
+  'identity',
+  'medical',
+  'legal',
+  'foreign-accounts'
+])
+
+// Per-category label fields used as the hit TITLE. For the open categories
+// these are just the preferred display labels (body fields are searchable
+// too); for `credentials` this allowlist is the ENTIRE searchable surface.
 //
 // `username` is excluded from `credentials` even though it's the most
 // natural alternate label, because usernames are sensitive in their own
@@ -84,7 +113,8 @@ const TITLE_FIELDS_BY_CATEGORY: Record<string, string[]> = {
   identity: ['documentType', 'name'],
   credentials: ['service'],
   medical: ['provider', 'condition'],
-  legal: ['title', 'documentType']
+  legal: ['title', 'documentType'],
+  'foreign-accounts': ['institution', 'country']
 }
 
 function pickTitle(category: string, entry: Record<string, unknown>): string | null {
@@ -162,10 +192,22 @@ function searchKnowledge(query: string): GlobalSearchHit[] {
   return hits.slice(0, MAX_PER_KIND)
 }
 
+/** ±40-char window around the first match of `lq` in `value` (for vault snippets). */
+function matchWindow(value: string, lq: string): string {
+  const idx = value.toLowerCase().indexOf(lq)
+  const at = idx >= 0 ? idx : 0
+  return value
+    .slice(Math.max(0, at - 40), at + lq.length + 40)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120)
+}
+
 function searchVault(query: string): GlobalSearchHit[] {
-  // Vault search must NEVER decrypt + return secret fields. We decrypt in
-  // the main process, extract only the title field, and discard the rest
-  // before returning to the renderer.
+  // Decrypt-per-query in the main process; nothing is ever written to an
+  // on-disk index. Open (document) categories are body-searchable per the
+  // data-access policy; `credentials` remains title-only — passwords and
+  // API keys never cross the IPC boundary, not even as snippets.
   const lq = query.toLowerCase()
   const hits: GlobalSearchHit[] = []
   let key: Buffer
@@ -187,10 +229,32 @@ function searchVault(query: string): GlobalSearchHit[] {
         const id = entry.id
         if (typeof id !== 'string') continue
         const title = pickTitle(category, entry)
-        if (title === null) continue // no allowlisted label → not searchable
-        const score = scoreMatch(title, lq)
-        if (score === 0) continue
-        hits.push({ kind: 'vault', category, id, title, score })
+
+        // Title (label) match — works for every category, credentials included.
+        const titleScore = title === null ? 0 : scoreMatch(title, lq)
+        if (titleScore > 0 && title !== null) {
+          hits.push({ kind: 'vault', category, id, title, score: titleScore })
+          continue
+        }
+
+        // Body match — open categories only. Scan every string field of the
+        // entry and return the matched field + a snippet window.
+        if (!OPEN_VAULT_CATEGORIES.has(category)) continue
+        for (const [field, value] of Object.entries(entry)) {
+          if (field === 'id' || typeof value !== 'string' || !value.trim()) continue
+          const score = scoreMatch(value, lq)
+          if (score === 0) continue
+          hits.push({
+            kind: 'vault',
+            category,
+            id,
+            title: title ?? `${category} entry`,
+            snippet: matchWindow(value, lq),
+            matchedField: field,
+            score
+          })
+          break // one hit per entry — the first matching field wins
+        }
       }
     } catch {
       /* category file may be corrupted or wrong key; skip */
@@ -231,30 +295,63 @@ function searchTasks(query: string): GlobalSearchHit[] {
   return hits.slice(0, MAX_PER_KIND)
 }
 
-function searchTransactions(query: string): GlobalSearchHit[] {
+/**
+ * The records spine via FTS — one query covers finance txns, medical,
+ * habits, trips, paystubs, bills, goals, facts, and every import source.
+ * (This replaced the old LIKE-scan transaction domain: finance rows live
+ * on the spine now, so they arrive here with everything else.)
+ */
+function searchRecordsSpine(query: string): GlobalSearchHit[] {
+  const lq = query.toLowerCase()
+  let rows: ReturnType<typeof searchRecords>
+  try {
+    rows = searchRecords(getRawSqlite(), { q: query, limit: MAX_PER_KIND })
+  } catch {
+    return [] // records_fts absent on an odd/old DB
+  }
+  return rows.map((r, i) => {
+    const titleScore = scoreMatch(r.title, lq)
+    return {
+      kind: 'record' as const,
+      id: r.id,
+      source: r.source,
+      type: r.type,
+      occurredAt: r.occurredAt,
+      title: r.title,
+      snippet: (r.body ?? '').replace(/\s+/g, ' ').trim().slice(0, 120),
+      // Title matches rank like the other domains; body/payload-only FTS
+      // matches get a floor that decays with bm25 order (rows arrive best-first).
+      score: titleScore > 0 ? titleScore + 10 : Math.max(10, 40 - i * 3)
+    }
+  })
+}
+
+function searchContacts(query: string): GlobalSearchHit[] {
   const lq = query.toLowerCase()
   const db = getDb()
-  // Pull only the columns we need — the table can grow large.
+  // Same searchBlob LIKE idiom as `contacts:list` — never selects
+  // photo/enrichment, so the palette payload stays light.
   const rows = db
     .select({
-      id: financeTxns.id,
-      date: financeTxns.date,
-      amount: financeTxns.amount,
-      description: financeTxns.description
+      id: contacts.id,
+      displayName: contacts.displayName,
+      org: contacts.org,
+      relationship: contacts.relationship
     })
-    .from(financeTxns)
+    .from(contacts)
+    .where(like(contacts.searchBlob, `%${lq}%`))
     .all()
   const hits: GlobalSearchHit[] = []
   for (const r of rows) {
-    const score = scoreMatch(r.description ?? '', lq)
-    if (score === 0) continue
+    const nameScore = scoreMatch(r.displayName ?? '', lq)
     hits.push({
-      kind: 'transaction',
+      kind: 'contact',
       id: r.id,
-      date: r.date,
-      amount: r.amount,
-      description: r.description,
-      score
+      displayName: r.displayName,
+      org: r.org,
+      relationship: r.relationship,
+      // Blob-only matches (email/phone/nickname) still surface, below name matches.
+      score: nameScore > 0 ? nameScore + 20 : 30
     })
   }
   hits.sort((a, b) => b.score - a.score)
@@ -274,9 +371,10 @@ export function registerSearchHandlers(ipcMain: IpcMain): void {
     const knowledge = searchKnowledge(trimmed)
     const vault = searchVault(trimmed)
     const tasks = searchTasks(trimmed)
-    const transactions = searchTransactions(trimmed)
+    const records = searchRecordsSpine(trimmed)
+    const contactHits = searchContacts(trimmed)
 
-    const all = [...knowledge, ...vault, ...tasks, ...transactions]
+    const all = [...knowledge, ...vault, ...tasks, ...records, ...contactHits]
     all.sort((a, b) => b.score - a.score)
     return {
       hits: all.slice(0, MAX_RESULTS),
@@ -284,7 +382,8 @@ export function registerSearchHandlers(ipcMain: IpcMain): void {
         knowledge: knowledge.length,
         vault: vault.length,
         tasks: tasks.length,
-        transactions: transactions.length
+        records: records.length,
+        contacts: contactHits.length
       }
     }
   })
@@ -304,6 +403,7 @@ export const _internal = {
   searchKnowledge,
   searchVault,
   searchTasks,
-  searchTransactions,
+  searchRecordsSpine,
+  searchContacts,
   scoreMatch
 }
