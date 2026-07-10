@@ -18,6 +18,7 @@
  */
 
 import { getRawSqlite } from '../db/client'
+import { afterDomainWrite } from '../ipc/storehouse-sync'
 import { type LocPoint, pointsToSegments } from '../lib/location-country'
 import type { SqliteForFx } from './finance-fx'
 import { getResidencyConfig } from './residency'
@@ -80,6 +81,9 @@ export function deriveLocationSegments(
 export function afterLocationImport(): void {
   try {
     deriveLocationSegments(getRawSqlite())
+    // Derived segments live on the records spine (source 'travel') — re-project
+    // so the timeline reflects the fresh trips. Raw points never enter records.
+    afterDomainWrite({ entities: true })
   } catch (err) {
     console.error('[location-residency] derive failed', err)
   }

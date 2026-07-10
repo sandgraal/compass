@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { BrowserWindow, app, ipcMain, nativeTheme, shell } from 'electron'
 import { startCronJobs } from './cron'
-import { getDb, initDb } from './db/client'
+import { getDb, getRawSqlite, initDb } from './db/client'
 import { registerArcadiaHandlers } from './ipc/arcadia'
 import { registerArgyleHandlers } from './ipc/argyle'
 import { registerAssetsHandlers } from './ipc/assets'
@@ -45,7 +45,10 @@ import { registerSimplefinHandlers } from './ipc/simplefin'
 import { registerSnaptradeHandlers } from './ipc/snaptrade'
 import { registerSpotlightHandlers, startKnowledgeMirrorWatcher } from './ipc/spotlight'
 import { registerStorehouseHandlers } from './ipc/storehouse'
-import { registerStorehouseSyncHandlers } from './ipc/storehouse-sync'
+import {
+  registerStorehouseSyncHandlers,
+  runSpineExpansionBackfillIfNeeded
+} from './ipc/storehouse-sync'
 import { registerSubscriptionsHandlers } from './ipc/subscriptions'
 import { registerSyncHandlers } from './ipc/sync'
 import { registerTerraHandlers } from './ipc/terra'
@@ -169,6 +172,15 @@ app.whenReady().then(async () => {
         }
       } catch (err) {
         console.error('[main] generic reclassify failed:', err)
+      }
+      // One-shot spine expansion (data-access policy): project the domains
+      // that predate their projectors (habits, tasks, medical, travel,
+      // paystubs, utility bills, goals, comps, facts) onto `records`.
+      try {
+        const res = runSpineExpansionBackfillIfNeeded(getRawSqlite())
+        if (res.ran) console.log(`[main] spine expansion backfill (${res.imported} records)`)
+      } catch (err) {
+        console.error('[main] spine expansion backfill failed:', err)
       }
       try {
         const { built, count } = ensureDerivedEntities(getDb())

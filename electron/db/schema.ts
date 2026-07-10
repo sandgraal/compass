@@ -659,14 +659,13 @@ export const travelSegments = sqliteTable('travel_segments', {
 
 // ---- Location points (Phase 10.8 — "Location → Residency autopilot") ----
 // Raw GPS points from a location-history export (OwnTracks / GPX / Google Location
-// History). DELIBERATELY its own table, NOT the `records` timeline spine: precise
-// coordinates are the most sensitive stream in the app, and the assistant/MCP
-// timeline search (`searchRecords` / `compass_search_timeline`) has no per-source
-// denylist — so raw location must never enter `records`. This mirrors how finance
-// keeps rows in `finance_transactions` (aggregates-only to the AI); only the
-// derived, coarse `travel_segments` (country + date window) ever surface. Re-import
-// is idempotent via the UNIQUE `dedup_hash` (same content-addressed idiom as
-// `records`/`finance_transactions`).
+// History). DELIBERATELY its own table, NOT the `records` timeline spine: this is
+// the ONE exclusion in the data-access policy (docs/data-access-policy.md). The
+// assistant/MCP timeline search (`searchRecords` / `compass_search_timeline`) has
+// no per-source denylist, so keeping coordinates out of `records` IS the wall.
+// The derived, coarse `travel_segments` (country + date window) DO project onto
+// the spine. Re-import is idempotent via the UNIQUE `dedup_hash` (same
+// content-addressed idiom as `records`/`finance_transactions`).
 export const locationPoints = sqliteTable('location_points', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   occurredAt: integer('occurred_at', { mode: 'timestamp_ms' }).notNull(), // when the point was recorded
@@ -681,10 +680,10 @@ export const locationPoints = sqliteTable('location_points', {
 // ---- Argyle paystubs (Phase 10.9 — "Argyle → forecast") ----
 // Real payroll paystubs from the Argyle aggregator, feeding the cash-flow
 // forecast (ground-truth income cadence + net pay, replacing bank-deposit
-// inference) and an income summary. DELIBERATELY OFF the `records` spine (like
-// location_points / finance_transactions): payroll is sensitive → aggregates-
-// only at the AI/MCP boundary, never raw paystub lines. Only summed withholding
-// / deductions are kept — never the per-tax breakdown. Amounts are numeric in
+// inference) and an income summary. Projects onto the `records` spine
+// (`source:'paystub'`) per the data-access policy — full-detail searchable.
+// Only summed withholding / deductions are kept — never the per-tax breakdown
+// (that detail is stripped at ingest and never stored). Amounts are numeric in
 // the paystub's own `currency`; dates are local-day 'YYYY-MM-DD' strings.
 export const argylePaystubs = sqliteTable('argyle_paystubs', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -705,11 +704,12 @@ export const argylePaystubs = sqliteTable('argyle_paystubs', {
 // ---- Utility bills (Phase 10.9 — "Arcadia → property P&L") ----
 // Utility statements from the Arcadia aggregator, surfaced on the Schedule-E property P&L
 // (`finance-property.ts`) — always informationally, and as the utilities operating-expense
-// line only when the user opts in (`propertyIncludeUtilityBills`). DELIBERATELY OFF the
-// `records`/finance_transactions spine: keeps utility STATEMENTS out of the cash ledger
-// (no double-count vs the bank payment) and the service address off the AI timeline
-// (aggregates-only). Holds `usage_kwh` for future carbon leverage. Amounts are positive
-// (bill totals) in the statement's own `currency`; dates are local-day 'YYYY-MM-DD'.
+// line only when the user opts in (`propertyIncludeUtilityBills`). Projects onto the
+// `records` spine (`source:'utility'`) per the data-access policy. Statements stay OUT of
+// `finance_transactions` (the cash ledger) so nothing double-counts vs the bank payment —
+// spend math reads finance_transactions only. Holds `usage_kwh` for future carbon
+// leverage. Amounts are positive (bill totals) in the statement's own `currency`; dates
+// are local-day 'YYYY-MM-DD'.
 export const utilityBills = sqliteTable('utility_bills', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   externalId: text('external_id').notNull().unique(), // Arcadia statement id (dedup key)
@@ -726,11 +726,12 @@ export const utilityBills = sqliteTable('utility_bills', {
 
 // ---- Medical records (Phase 10.9 — "Metriport → medical records") ----
 // Clinical records pulled from the health-information networks via Metriport (FHIR R4):
-// conditions, medications, labs, immunizations, allergies, encounters. DELIBERATELY OFF
-// the `records`/AI spine (like location_points / argyle_paystubs) — medical is the most
-// sensitive domain, so it's aggregates-only at the AI/MCP boundary and never timeline-
-// searchable. Stores the clinical SUMMARY (category + display name + status + date), never
-// raw values, patient identifiers, MRN/SSN, or provider contact info. `category` is one of
+// conditions, medications, labs, immunizations, allergies, encounters. Projects onto the
+// `records` spine (`source:'medical'`) per the data-access policy — full-detail searchable
+// and AI-readable; the on-this-day sensitivity guard (timeline-memories.ts) keeps medical
+// from ever auto-resurfacing unprompted. Stores the clinical SUMMARY (category + display
+// name + status + date), never raw values, patient identifiers, MRN/SSN, or provider
+// contact info — that detail is stripped at ingest and never stored. `category` is one of
 // 'condition'|'medication'|'lab'|'immunization'|'allergy'|'encounter'|'procedure'.
 export const medicalRecords = sqliteTable('medical_records', {
   id: integer('id').primaryKey({ autoIncrement: true }),

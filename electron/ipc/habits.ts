@@ -2,6 +2,7 @@ import { and, eq, gte, lt } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
 import { habitEntries, habits } from '../db/schema'
+import { afterDomainWrite } from './storehouse-sync'
 
 export function registerHabitsHandlers(ipcMain: IpcMain): void {
   // ── List habits (active only by default) ─────────────────────────────────
@@ -56,6 +57,7 @@ export function registerHabitsHandlers(ipcMain: IpcMain): void {
     ) => {
       const db = getDb()
       db.update(habits).set(updates).where(eq(habits.id, id)).run()
+      afterDomainWrite() // a rename re-titles the habit's spine records in place
       return { success: true }
     }
   )
@@ -126,6 +128,7 @@ export function registerHabitsHandlers(ipcMain: IpcMain): void {
         .set({ completed: !existing.completed, source: null })
         .where(eq(habitEntries.id, existing.id))
         .run()
+      afterDomainWrite()
       return { success: true, completed: !existing.completed }
     }
     db.insert(habitEntries)
@@ -135,6 +138,7 @@ export function registerHabitsHandlers(ipcMain: IpcMain): void {
         completed: true
       })
       .run()
+    afterDomainWrite()
     return { success: true, completed: true }
   })
 }

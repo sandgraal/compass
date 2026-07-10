@@ -177,12 +177,14 @@ export function insertRecords(inputs: RecordInput[], provenance: string): { impo
 
 /**
  * Insert a batch of location points into the DEDICATED `location_points` table —
- * deliberately NOT the `records` spine. Raw coordinates are the most sensitive stream
- * in the app, and the assistant/MCP timeline search has no per-source denylist, so
- * location must never enter `records` (mirrors finance keeping rows in
- * `finance_transactions`). Only the derived `travel_segments` surface. Dedup + the
- * content-addressed hash mirror `insertRecords`. Points without a timestamp or valid
- * coordinates are skipped (useless for residency).
+ * deliberately NOT the `records` spine. This is the ONE exclusion in the data-access
+ * policy (docs/data-access-policy.md): every other domain projects onto the spine in
+ * full detail, but raw GPS coordinates never enter `records` — the assistant/MCP
+ * timeline search has no per-source denylist, so keeping coordinates out of the table
+ * is the wall. Only the derived, coarse `travel_segments` (country + date window)
+ * surface, and those DO project. Dedup + the content-addressed hash mirror
+ * `insertRecords`. Points without a timestamp or valid coordinates are skipped
+ * (useless for residency).
  */
 export function insertLocationPoints(
   inputs: RecordInput[],

@@ -26,6 +26,7 @@ import { detectOllama } from '../knowledge/ollama'
 import { localYmd } from '../lib/dates'
 import { restartQuickCaptureShortcut } from '../menu-bar'
 import { DATA_DIR, KNOWLEDGE_DIR, VAULT_DIR } from '../paths'
+import { afterDomainWrite } from './storehouse-sync'
 
 const DEFAULTS: Record<string, string> = {
   theme: 'system',
@@ -167,6 +168,7 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
       })
       .returning()
       .get()
+    afterDomainWrite()
     return result
   })
 
@@ -175,6 +177,7 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
     (_event, id: number, updates: Record<string, unknown>) => {
       const db = getDb()
       db.update(checklistItems).set(updates).where(eq(checklistItems.id, id)).run()
+      afterDomainWrite()
       return { success: true }
     }
   )
@@ -182,6 +185,7 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('checklist:delete-item', (_event, id: number) => {
     const db = getDb()
     db.delete(checklistItems).where(eq(checklistItems.id, id)).run()
+    afterDomainWrite()
     return { success: true }
   })
 
@@ -208,6 +212,7 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
         })
         .run()
     }
+    if (unfinished.length > 0) afterDomainWrite()
     return { rolledOver: unfinished.length }
   })
 
@@ -251,6 +256,7 @@ export function registerSettingsHandlers(ipcMain: IpcMain): void {
           createdAt: new Date()
         })
         .run()
+      afterDomainWrite()
       return { success: true }
     } catch (err) {
       return { success: false, error: String(err) }

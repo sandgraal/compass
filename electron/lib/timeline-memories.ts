@@ -86,16 +86,22 @@ function amountFrom(body: string | null): number | null {
 }
 
 /**
- * Sensitive classes never auto-resurface (still browsable/searchable). Kinds
- * first (medical/diagnosis style records), then loss/grief/breakup language —
- * a deliberately narrow list: false positives hide a memory, false negatives
- * push a painful one, and the mute button covers the long tail.
+ * Sensitive classes never auto-resurface (still browsable/searchable). The
+ * whole `medical` source first (every clinical category — medication,
+ * immunization, encounter… — now that medical_records project onto the spine),
+ * then medical-flavored kinds from other sources, then loss/grief/breakup
+ * language — a deliberately narrow list: false positives hide a memory, false
+ * negatives push a painful one, and the mute button covers the long tail.
  */
+const SENSITIVE_SOURCES = new Set(['medical'])
 const SENSITIVE_TYPES = new Set(['medical', 'diagnosis', 'condition', 'lab'])
 const SENSITIVE_TEXT =
   /\b(funeral|obituar\w*|passed away|in memoriam|bereave\w*|divorce\w*|break[- ]?up|autopsy|biopsy|oncolog\w*|chemo(?:therapy)?|hospice|miscarriage)\b/i
 
-export function isSensitiveMemory(r: Pick<MemoryCandidate, 'type' | 'title' | 'body'>): boolean {
+export function isSensitiveMemory(
+  r: Pick<MemoryCandidate, 'source' | 'type' | 'title' | 'body'>
+): boolean {
+  if (SENSITIVE_SOURCES.has(r.source)) return true
   if (SENSITIVE_TYPES.has(r.type)) return true
   return SENSITIVE_TEXT.test(r.title) || (r.body != null && SENSITIVE_TEXT.test(r.body))
 }

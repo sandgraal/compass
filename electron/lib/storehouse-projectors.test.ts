@@ -3,16 +3,34 @@ import { parseMoney } from './entities'
 import {
   type CalendarRow,
   type FinanceTxnRow,
+  type FinancialGoalRow,
   type GithubRow,
   type GmailRow,
+  type HabitCheckRow,
   type LinearRow,
+  type MedicalRow,
   type OuraRow,
+  type PaystubRow,
+  type RentalCompRow,
+  type SnapshotFactRow,
+  type TaskRow,
+  type TravelSegmentRow,
+  type UtilityBillRow,
   projectCalendar,
   projectFinanceTransactions,
+  projectFinancialGoals,
   projectGithub,
   projectGmail,
+  projectHabitChecks,
   projectLinear,
-  projectOuraMetrics
+  projectMedicalRecords,
+  projectOuraMetrics,
+  projectPaystubs,
+  projectRentalComps,
+  projectSnapshotFacts,
+  projectTasks,
+  projectTravelSegments,
+  projectUtilityBills
 } from './storehouse-projectors'
 
 const txn = (partial: Partial<FinanceTxnRow> & Pick<FinanceTxnRow, 'hash'>): FinanceTxnRow => ({
@@ -230,5 +248,308 @@ describe('projectOuraMetrics', () => {
     const [a] = projectOuraMetrics([day({ date: '2026-06-12', sleepScore: 50 })])
     const [b] = projectOuraMetrics([day({ date: '2026-06-12', sleepScore: 90 })])
     expect(a.naturalKey).toBe(b.naturalKey)
+  })
+})
+
+// ── Spine expansion (data-access policy) ─────────────────────────────────────
+
+describe('projectHabitChecks', () => {
+  const check = (p: Partial<HabitCheckRow> = {}): HabitCheckRow => ({
+    habitId: 3,
+    habitName: 'Meditate',
+    date: '2026-07-01',
+    source: null,
+    ...p
+  })
+
+  it('maps a completed check with a habitId|date key stable across renames', () => {
+    const [r] = projectHabitChecks([check()])
+    expect(r.source).toBe('habit')
+    expect(r.type).toBe('habit-check')
+    expect(r.title).toBe('Meditate')
+    expect(r.body).toBe('checked')
+    expect(r.naturalKey).toBe('3|2026-07-01')
+    expect(r.occurredAt).toBe(new Date('2026-07-01T00:00:00').getTime())
+  })
+
+  it('labels auto-filled checks with their source', () => {
+    const [r] = projectHabitChecks([check({ source: 'oura' })])
+    expect(r.body).toBe('auto-filled · oura')
+  })
+
+  it('skips rows without a habit id or date', () => {
+    expect(projectHabitChecks([check({ habitId: 0 })])).toHaveLength(0)
+    expect(projectHabitChecks([check({ date: '' })])).toHaveLength(0)
+  })
+})
+
+describe('projectTasks', () => {
+  const task = (p: Partial<TaskRow> = {}): TaskRow => ({
+    id: 7,
+    listType: 'daily',
+    listDate: '2026-07-02',
+    title: 'Call the bank',
+    body: null,
+    status: 'done',
+    checked: true,
+    category: 'personal',
+    ...p
+  })
+
+  it('maps a task with list/status/category in the body and the row id as key', () => {
+    const [r] = projectTasks([task()])
+    expect(r.source).toBe('task')
+    expect(r.type).toBe('task')
+    expect(r.title).toBe('Call the bank')
+    expect(r.body).toBe('daily · done · personal')
+    expect(r.naturalKey).toBe('7')
+    expect(r.occurredAt).toBe(new Date('2026-07-02T00:00:00').getTime())
+  })
+
+  it('derives status from checked when the status column is empty, and appends the note', () => {
+    const [r] = projectTasks([task({ status: null, checked: false, body: 'ext. 204' })])
+    expect(r.body).toBe('daily · unchecked · personal · ext. 204')
+  })
+
+  it('skips rows without an id or list date', () => {
+    expect(projectTasks([task({ id: 0 })])).toHaveLength(0)
+    expect(projectTasks([task({ listDate: '' })])).toHaveLength(0)
+  })
+})
+
+describe('projectMedicalRecords', () => {
+  const med = (p: Partial<MedicalRow> = {}): MedicalRow => ({
+    externalId: 'metriport:MedicationRequest:1',
+    category: 'medication',
+    description: 'Aspirin 81mg',
+    code: 'RxNorm:243670',
+    status: 'active',
+    recordedAt: '2026-03-10',
+    ...p
+  })
+
+  it('maps a clinical row with the category as the record type (full detail on the spine)', () => {
+    const [r] = projectMedicalRecords([med()])
+    expect(r.source).toBe('medical')
+    expect(r.type).toBe('medication')
+    expect(r.title).toBe('Aspirin 81mg')
+    expect(r.body).toBe('active · RxNorm:243670')
+    expect(r.naturalKey).toBe('metriport:MedicationRequest:1')
+    expect(r.occurredAt).toBe(new Date('2026-03-10T00:00:00').getTime())
+  })
+
+  it('is undated when there is no recorded date, and falls back to the category title', () => {
+    const [r] = projectMedicalRecords([med({ recordedAt: null, description: null })])
+    expect(r.occurredAt).toBeNull()
+    expect(r.title).toBe('medication')
+  })
+
+  it('omits the body when neither status nor code is present', () => {
+    const [r] = projectMedicalRecords([med({ status: null, code: null })])
+    expect(r.body).toBeUndefined()
+  })
+
+  it('skips rows without an external id or category', () => {
+    expect(projectMedicalRecords([med({ externalId: '' })])).toHaveLength(0)
+    expect(projectMedicalRecords([med({ category: '' })])).toHaveLength(0)
+  })
+})
+
+describe('projectTravelSegments', () => {
+  const seg = (p: Partial<TravelSegmentRow> = {}): TravelSegmentRow => ({
+    id: 4,
+    country: 'CR',
+    startDate: '2026-02-01',
+    endDate: '2026-02-14',
+    notes: null,
+    ...p
+  })
+
+  it('maps a trip with the country display name and date window (coarse — never raw GPS)', () => {
+    const [r] = projectTravelSegments([seg()])
+    expect(r.source).toBe('travel')
+    expect(r.type).toBe('trip')
+    expect(r.title).toBe('Trip to Costa Rica')
+    expect(r.body).toBe('2026-02-01 → 2026-02-14')
+    expect(r.naturalKey).toBe('4')
+    expect(r.occurredAt).toBe(new Date('2026-02-01T00:00:00').getTime())
+  })
+
+  it('collapses a single-day window and appends notes', () => {
+    const [r] = projectTravelSegments([seg({ endDate: '2026-02-01', notes: 'visa run' })])
+    expect(r.body).toBe('2026-02-01 · visa run')
+  })
+
+  it('falls back to the raw code for an unmappable country', () => {
+    const [r] = projectTravelSegments([seg({ country: 'ZZ' })])
+    expect(r.title).toContain('Trip to')
+  })
+
+  it('skips rows without an id, country, or start date', () => {
+    expect(projectTravelSegments([seg({ id: 0 })])).toHaveLength(0)
+    expect(projectTravelSegments([seg({ country: '' })])).toHaveLength(0)
+    expect(projectTravelSegments([seg({ startDate: '' })])).toHaveLength(0)
+  })
+})
+
+describe('projectPaystubs', () => {
+  const stub = (p: Partial<PaystubRow> = {}): PaystubRow => ({
+    externalId: 'ps-1',
+    employer: 'Initech',
+    grossPay: 4000,
+    netPay: 3000,
+    currency: 'USD',
+    periodStart: '2026-06-01',
+    periodEnd: '2026-06-15',
+    paidAt: '2026-06-16',
+    ...p
+  })
+
+  it('maps a paystub with a money-first body parseMoney can read back', () => {
+    const [r] = projectPaystubs([stub()])
+    expect(r.source).toBe('paystub')
+    expect(r.type).toBe('paycheck')
+    expect(r.title).toBe('Paycheck — Initech')
+    expect(r.body).toBe('3000.00 USD · gross 4000.00 USD · 2026-06-01–2026-06-15')
+    expect(parseMoney(r.body ?? null)).toEqual({ amount: 3000, currency: 'USD' })
+    expect(r.naturalKey).toBe('ps-1')
+    expect(r.occurredAt).toBe(new Date('2026-06-16T00:00:00').getTime())
+  })
+
+  it('falls back to gross when net is missing, and to a generic title without an employer', () => {
+    const [r] = projectPaystubs([stub({ netPay: null, employer: null })])
+    expect(r.title).toBe('Paycheck')
+    expect(r.body).toBe('4000.00 USD · 2026-06-01–2026-06-15')
+  })
+
+  it('skips rows without an external id', () => {
+    expect(projectPaystubs([stub({ externalId: '' })])).toHaveLength(0)
+  })
+})
+
+describe('projectUtilityBills', () => {
+  const bill = (p: Partial<UtilityBillRow> = {}): UtilityBillRow => ({
+    externalId: 'ub-1',
+    provider: 'CNFL',
+    serviceAddress: '123 Calle Real, Cartago',
+    statementDate: '2026-06-20',
+    amount: 84.5,
+    currency: 'USD',
+    ...p
+  })
+
+  it('maps a statement with amount and service address in the body', () => {
+    const [r] = projectUtilityBills([bill()])
+    expect(r.source).toBe('utility')
+    expect(r.type).toBe('bill')
+    expect(r.title).toBe('CNFL bill')
+    expect(r.body).toBe('84.50 USD · 123 Calle Real, Cartago')
+    expect(r.naturalKey).toBe('ub-1')
+  })
+
+  it('handles a missing provider/amount/address gracefully', () => {
+    const [r] = projectUtilityBills([bill({ provider: null, amount: null, serviceAddress: null })])
+    expect(r.title).toBe('Utility bill')
+    expect(r.body).toBeUndefined()
+  })
+
+  it('skips rows without an external id', () => {
+    expect(projectUtilityBills([bill({ externalId: '' })])).toHaveLength(0)
+  })
+})
+
+describe('projectFinancialGoals', () => {
+  const goal = (p: Partial<FinancialGoalRow> = {}): FinancialGoalRow => ({
+    id: 2,
+    name: 'Emergency fund',
+    category: 'emergency',
+    targetAmount: 25000,
+    targetDate: '2027-01-01',
+    createdAt: 1750000000000,
+    ...p
+  })
+
+  it('maps a goal dated at creation with target details in the body', () => {
+    const [r] = projectFinancialGoals([goal()])
+    expect(r.source).toBe('goal')
+    expect(r.type).toBe('financial-goal')
+    expect(r.title).toBe('Emergency fund')
+    expect(r.body).toBe('emergency · target 25000.00 USD · by 2027-01-01')
+    expect(r.naturalKey).toBe('2')
+    expect(r.occurredAt).toBe(1750000000000)
+  })
+
+  it('omits the date segment for an open-ended goal', () => {
+    const [r] = projectFinancialGoals([goal({ targetDate: null })])
+    expect(r.body).toBe('emergency · target 25000.00 USD')
+  })
+
+  it('skips rows without an id or name', () => {
+    expect(projectFinancialGoals([goal({ id: 0 })])).toHaveLength(0)
+    expect(projectFinancialGoals([goal({ name: '  ' })])).toHaveLength(0)
+  })
+})
+
+describe('projectRentalComps', () => {
+  const comp = (p: Partial<RentalCompRow> = {}): RentalCompRow => ({
+    id: 9,
+    name: 'Casa Verde',
+    zone: 'Cartago',
+    bedrooms: 2,
+    nightlyUsd: 95,
+    savedAt: '2026-05-05',
+    createdAt: 1746000000000,
+    ...p
+  })
+
+  it('maps a comp dated at capture', () => {
+    const [r] = projectRentalComps([comp()])
+    expect(r.source).toBe('rental-comp')
+    expect(r.type).toBe('comp')
+    expect(r.title).toBe('Casa Verde')
+    expect(r.body).toBe('Cartago · 2bd · $95/nt')
+    expect(r.naturalKey).toBe('9')
+    expect(r.occurredAt).toBe(new Date('2026-05-05T00:00:00').getTime())
+  })
+
+  it('falls back to createdAt when savedAt is missing, and to a generic title', () => {
+    const [r] = projectRentalComps([comp({ savedAt: null, name: '' })])
+    expect(r.occurredAt).toBe(1746000000000)
+    expect(r.title).toBe('Rental comp')
+  })
+
+  it('skips rows without an id', () => {
+    expect(projectRentalComps([comp({ id: 0 })])).toHaveLength(0)
+  })
+})
+
+describe('projectSnapshotFacts', () => {
+  const fact = (p: Partial<SnapshotFactRow> = {}): SnapshotFactRow => ({
+    source: 'facebook',
+    category: 'ad-profile',
+    label: 'Interest',
+    value: 'Woodworking',
+    dedupHash: 'fh-1',
+    ...p
+  })
+
+  it('maps a fact as an UNDATED record (searchable, never on the dated timeline)', () => {
+    const [r] = projectSnapshotFacts([fact()])
+    expect(r.source).toBe('facebook')
+    expect(r.type).toBe('fact')
+    expect(r.title).toBe('Interest')
+    expect(r.body).toBe('Woodworking')
+    expect(r.naturalKey).toBe('fh-1')
+    expect(r.occurredAt).toBeNull()
+  })
+
+  it('falls back to the category when there is no label', () => {
+    const [r] = projectSnapshotFacts([fact({ label: null })])
+    expect(r.title).toBe('ad-profile')
+  })
+
+  it('skips rows without a dedup hash or value', () => {
+    expect(projectSnapshotFacts([fact({ dedupHash: '' })])).toHaveLength(0)
+    expect(projectSnapshotFacts([fact({ value: '  ' })])).toHaveLength(0)
   })
 })

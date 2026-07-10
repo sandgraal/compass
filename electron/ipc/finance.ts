@@ -112,6 +112,7 @@ import { writeAllFinanceKnowledge } from '../knowledge/finance-extractor'
 import { localYm, localYmd } from '../lib/dates'
 import { DATA_DIR } from '../paths'
 import { insertRecords } from './records'
+import { afterDomainWrite } from './storehouse-sync'
 
 const DEFAULT_MONEY_FOLDER = join(homedir(), 'Documents', 'Money')
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -1246,6 +1247,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       const err = validComp(input.addComp)
       if (err) return { success: false, error: err }
       addComp(sqlite, input.addComp)
+      afterDomainWrite()
     }
     if (input.updateComp !== undefined) {
       const { id, patch } = input.updateComp ?? {}
@@ -1253,12 +1255,14 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       const err = validComp(patch)
       if (err) return { success: false, error: err }
       updateComp(sqlite, Number(id), patch ?? {})
+      afterDomainWrite()
     }
     if (input.deleteComp !== undefined) {
       if (!Number.isFinite(Number(input.deleteComp))) {
         return { success: false, error: `Invalid comp id: ${input.deleteComp}` }
       }
       deleteComp(sqlite, Number(input.deleteComp))
+      afterDomainWrite()
     }
     if (input.units !== undefined) {
       if (!Array.isArray(input.units) || input.units.length > 50) {
@@ -1311,6 +1315,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       }
       const { imported, skipped } = importComps(sqlite, comps)
       setRetirementConfig(sqlite, { airbnbAnnualNet: Math.round(studioPlanAnnualNet(sqlite)) })
+      afterDomainWrite()
       return { success: true, imported, skipped, studio: buildRentalStudio(sqlite) }
     } catch (err) {
       return { success: false, error: String(err) }
@@ -1380,6 +1385,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     const res = buildGoalPatch(input, true)
     if (!res.ok) return { success: false, error: res.error }
     const id = addGoal(getRawSqlite(), res.value as GoalInput)
+    afterDomainWrite()
     return { success: true, id }
   })
 
@@ -1390,6 +1396,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     const res = buildGoalPatch(input, false)
     if (!res.ok) return { success: false, error: res.error }
     updateGoal(getRawSqlite(), id, res.value)
+    afterDomainWrite()
     return { success: true }
   })
 
@@ -1398,6 +1405,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       return { success: false, error: `Invalid goal id: ${id}` }
     }
     deleteGoal(getRawSqlite(), id)
+    afterDomainWrite()
     return { success: true }
   })
 
@@ -1463,6 +1471,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
         endDate: seg.endDate,
         notes
       })
+      afterDomainWrite({ entities: true }) // trips can derive Places
       return { success: true, id }
     }
   )
@@ -1472,6 +1481,7 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       return { success: false, error: `Invalid id: ${id}` }
     }
     deleteTravelSegment(getRawSqlite(), id)
+    afterDomainWrite({ entities: true })
     return { success: true }
   })
 

@@ -19,6 +19,7 @@ import { eq } from 'drizzle-orm'
 import { getDb, getRawSqlite } from '../db/client'
 import { integrations, medicalRecords, syncEvents } from '../db/schema'
 import { loadToken, saveToken } from '../ipc/auth'
+import { afterConnectorSync } from '../ipc/storehouse-sync'
 import type { SqliteForFx } from './finance-fx'
 import { relayFetch, resolveRelayConfig } from './relay-client'
 
@@ -259,6 +260,9 @@ export async function syncMetriport(): Promise<SyncResult> {
     if (integrationId != null) {
       db.insert(syncEvents).values({ integrationId, syncedAt: new Date(), recordsUpdated }).run()
     }
+    // Medical rows live on the records spine (data-access policy) — project the
+    // fresh pull. Same defensive contract as the Oura/Linear syncs.
+    afterConnectorSync()
     return { service: 'metriport', success: true, recordsUpdated }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

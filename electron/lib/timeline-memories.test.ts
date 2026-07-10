@@ -52,18 +52,44 @@ describe('memoryScore', () => {
 
 describe('isSensitiveMemory', () => {
   it('flags sensitive kinds and loss/grief language', () => {
-    expect(isSensitiveMemory({ type: 'medical', title: 'Lab result', body: null })).toBe(true)
     expect(
-      isSensitiveMemory({ type: 'email', title: 'Funeral arrangements for Saturday', body: null })
+      isSensitiveMemory({ source: 'document', type: 'medical', title: 'Lab result', body: null })
     ).toBe(true)
-    expect(isSensitiveMemory({ type: 'email', title: 'Lunch?', body: 'divorce lawyer' })).toBe(true)
+    expect(
+      isSensitiveMemory({
+        source: 'gmail',
+        type: 'email',
+        title: 'Funeral arrangements for Saturday',
+        body: null
+      })
+    ).toBe(true)
+    expect(
+      isSensitiveMemory({ source: 'gmail', type: 'email', title: 'Lunch?', body: 'divorce lawyer' })
+    ).toBe(true)
+  })
+
+  it('flags EVERY record from the medical source, whatever the clinical category', () => {
+    // The spine expansion projects medical_records with type = category
+    // (medication/immunization/encounter/…); the source check must catch them all.
+    for (const type of ['medication', 'immunization', 'allergy', 'encounter', 'procedure']) {
+      expect(isSensitiveMemory({ source: 'medical', type, title: 'Aspirin', body: null })).toBe(
+        true
+      )
+    }
   })
 
   it('leaves ordinary records alone', () => {
-    expect(isSensitiveMemory({ type: 'watch', title: 'The Godfather', body: null })).toBe(false)
-    expect(isSensitiveMemory({ type: 'order', title: 'Chemistry textbook', body: null })).toBe(
-      false
-    )
+    expect(
+      isSensitiveMemory({ source: 'netflix', type: 'watch', title: 'The Godfather', body: null })
+    ).toBe(false)
+    expect(
+      isSensitiveMemory({
+        source: 'amazon',
+        type: 'order',
+        title: 'Chemistry textbook',
+        body: null
+      })
+    ).toBe(false)
   })
 })
 
