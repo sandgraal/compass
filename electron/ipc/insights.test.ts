@@ -242,6 +242,170 @@ describe('stale notes', () => {
   })
 })
 
+// ── Cross-domain detectors (data-access policy wiring) ───────────────────────
+// Their tables are created per-describe; the shared beforeEach deliberately
+// omits them so the empty-DB test also proves safeDetect() guards older DBs.
+
+describe('goal off-track', () => {
+  function createGoals(): void {
+    sqlite.exec(`
+      CREATE TABLE financial_goals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'other',
+        target_amount REAL NOT NULL DEFAULT 0, target_date TEXT, source TEXT NOT NULL DEFAULT 'manual',
+        manual_current REAL NOT NULL DEFAULT 0, monthly_contribution REAL NOT NULL DEFAULT 0,
+        notes TEXT, created_at INTEGER, updated_at INTEGER
+      );
+    `)
+  }
+  function addGoal(
+    name: string,
+    target: number,
+    targetDate: string,
+    current: number,
+    monthly: number
+  ): void {
+    sqlite
+      .prepare(
+        "INSERT INTO financial_goals (name, target_amount, target_date, manual_current, monthly_contribution, source) VALUES (?,?,?,?,?,'manual')"
+      )
+      .run(name, target, targetDate, current, monthly)
+  }
+
+  it('flags a goal whose planned contribution cannot reach the target in time', async () => {
+    createGoals()
+    // ~6 months left, $24k to go → needs ~$4k/mo; planned $500/mo.
+    addGoal('Tax reserve', 25000, '2026-12-15', 1000, 500)
+    const { buildInsights } = await import('./insights')
+    const hit = buildInsights(db(), NOW).insights.find((i) => i.kind === 'goal-off-track')
+    expect(hit).toBeTruthy()
+    expect(hit?.severity).toBe('warn')
+    expect(hit?.title).toContain('Tax reserve')
+  })
+
+  it('stays quiet for on-track, funded, or past-date goals', async () => {
+    createGoals()
+    addGoal('On track', 6000, '2026-12-15', 3000, 600) // needs ~$500/mo, planned $600
+    addGoal('Funded', 5000, '2026-12-15', 5000, 0) // already there
+    addGoal('Past', 5000, '2026-01-01', 0, 0) // date behind us
+    const { buildInsights } = await import('./insights')
+    expect(buildInsights(db(), NOW).insights.some((i) => i.kind === 'goal-off-track')).toBe(false)
+  })
+})
+
+describe('renewals due', () => {
+  function createTables(): void {
+    sqlite.exec(`
+      CREATE TABLE assets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, type TEXT NOT NULL DEFAULT 'other',
+        name TEXT NOT NULL, value REAL, provider TEXT, reference TEXT, renewal_date TEXT,
+        status TEXT NOT NULL DEFAULT 'active', notes TEXT, created_at INTEGER, updated_at INTEGER
+      );
+      CREATE TABLE subscriptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+        cost REAL NOT NULL DEFAULT 0, cadence TEXT NOT NULL DEFAULT 'monthly', category TEXT,
+        status TEXT NOT NULL DEFAULT 'active', next_renewal TEXT, payment_account TEXT,
+        cancel_url TEXT, notes TEXT, source TEXT NOT NULL DEFAULT 'manual',
+        created_at INTEGER, updated_at INTEGER
+      );
+    `)
+  }
+
+  it('surfaces assets + long-cadence subscriptions renewing in the window', async () => {
+    createTables()
+    sqlite
+      .prepare(
+        "INSERT INTO assets (external_id, type, name, renewal_date) VALUES ('a1', 'insurance', 'Car insurance', '2026-07-01')"
+      )
+      .run()
+    sqlite
+      .prepare(
+        "INSERT INTO subscriptions (external_id, name, cost, cadence, next_renewal) VALUES ('s1', 'Domain', 120, 'yearly', '2026-06-20')"
+      )
+      .run()
+    // Outside window / routine cadence — must NOT appear.
+    sqlite
+      .prepare(
+        "INSERT INTO subscriptions (external_id, name, cost, cadence, next_renewal) VALUES ('s2', 'Netflix', 15, 'monthly', '2026-06-20')"
+      )
+      .run()
+    const { buildInsights } = await import('./insights')
+    const hit = buildInsights(db(), NOW).insights.find((i) => i.kind === 'renewal-due')
+    expect(hit).toBeTruthy()
+    expect(hit?.title).toContain('2 renewals')
+    expect(hit?.detail).toContain('Car insurance')
+    expect(hit?.detail).toContain('Domain')
+    expect(hit?.detail).not.toContain('Netflix')
+  })
+})
+
+describe('paycheck anomaly', () => {
+  function createPaystubs(): void {
+    sqlite.exec(`
+      CREATE TABLE argyle_paystubs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, employer TEXT,
+        gross_pay REAL, net_pay REAL, withholding REAL, deductions REAL,
+        currency TEXT NOT NULL DEFAULT 'USD', period_start TEXT, period_end TEXT, paid_at TEXT,
+        pay_cycle TEXT, ingested_at INTEGER
+      );
+    `)
+  }
+  function addStub(id: string, net: number, paidAt: string): void {
+    sqlite
+      .prepare(
+        "INSERT INTO argyle_paystubs (external_id, employer, net_pay, paid_at) VALUES (?, 'Initech', ?, ?)"
+      )
+      .run(id, net, paidAt)
+  }
+
+  it('flags a latest paycheck far from the trailing median', async () => {
+    createPaystubs()
+    addStub('p1', 3000, '2026-05-01')
+    addStub('p2', 3000, '2026-05-15')
+    addStub('p3', 3010, '2026-06-01')
+    addStub('p4', 2200, '2026-06-14') // ~$800 under median
+    const { buildInsights } = await import('./insights')
+    const hit = buildInsights(db(), NOW).insights.find((i) => i.kind === 'paycheck-anomaly')
+    expect(hit).toBeTruthy()
+    expect(hit?.title).toContain('lower')
+  })
+
+  it('stays quiet for a normal paycheck or thin history', async () => {
+    createPaystubs()
+    addStub('p1', 3000, '2026-05-01')
+    addStub('p2', 3010, '2026-05-15')
+    addStub('p3', 3005, '2026-06-01')
+    const { buildInsights } = await import('./insights')
+    expect(buildInsights(db(), NOW).insights.some((i) => i.kind === 'paycheck-anomaly')).toBe(false)
+  })
+})
+
+describe('utility spike', () => {
+  it('flags a latest bill well above the provider average', async () => {
+    sqlite.exec(`
+      CREATE TABLE utility_bills (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, provider TEXT,
+        service_address TEXT, statement_date TEXT, period_start TEXT, period_end TEXT,
+        amount REAL, currency TEXT NOT NULL DEFAULT 'USD', usage_kwh REAL, ingested_at INTEGER
+      );
+    `)
+    const add = (id: string, amount: number, date: string): void => {
+      sqlite
+        .prepare(
+          "INSERT INTO utility_bills (external_id, provider, amount, statement_date) VALUES (?, 'CNFL', ?, ?)"
+        )
+        .run(id, amount, date)
+    }
+    add('u1', 80, '2026-03-20')
+    add('u2', 85, '2026-04-20')
+    add('u3', 82, '2026-05-20')
+    add('u4', 160, '2026-06-10') // ~2× the trailing average
+    const { buildInsights } = await import('./insights')
+    const hit = buildInsights(db(), NOW).insights.find((i) => i.kind === 'utility-spike')
+    expect(hit).toBeTruthy()
+    expect(hit?.title).toContain('CNFL')
+  })
+})
+
 describe('ordering + IPC registration', () => {
   it('sorts warnings before infos and registers insights:get', async () => {
     const mod = await import('./insights')
