@@ -17,6 +17,7 @@ import {
   Layers,
   LayoutDashboard,
   LayoutGrid,
+  MapPin,
   Network,
   PiggyBank,
   Plug2,
@@ -109,7 +110,8 @@ export function Sidebar(): JSX.Element {
       items: [
         { label: 'People', to: '/people', icon: <Network size={18} /> },
         { label: 'Contacts', to: '/contacts', icon: <Users size={18} /> },
-        { label: 'Merchants & Places', to: '/places', icon: <Store size={18} /> }
+        { label: 'Merchants', to: '/merchants', icon: <Store size={18} /> },
+        { label: 'Places', to: '/places', icon: <MapPin size={18} /> }
       ]
     },
     {
