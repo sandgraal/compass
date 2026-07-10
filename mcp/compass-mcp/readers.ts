@@ -99,8 +99,9 @@ const EMPTY_TIMELINE: TimelineSummary = { total: 0, sources: [], kinds: [], span
 
 /**
  * Content-light summary of the unified `records` Timeline — counts by source and
- * kind, the UTC year span, and per-year totals. NEVER the raw records or their
- * titles, honoring the same "summaries only" boundary the rest of the MCP keeps.
+ * kind, the UTC year span, and per-year totals. No raw records or titles here —
+ * not as a boundary (readTimelineSearch returns full detail) but because this is
+ * the shape-of-the-data view; keeping it content-light keeps it cheap and small.
  * Returns an empty summary when nothing's imported, or when the `records` table
  * doesn't exist yet (an older DB predating the Acquisition Engine migration).
  */
@@ -193,12 +194,11 @@ function ymdMs(value: string | undefined, endOfDay: boolean): number | null {
 
 /**
  * Full-text search over the `records` Timeline, returning the ACTUAL matching
- * records (date, source, kind, title, short detail). The deliberate, scoped
- * relaxation of the MCP's "timeline summaries only" boundary (Phase 10.7): the
- * user opted into letting connected Claude clients read their own records. Bounded
- * by a result cap + char budget; payload is never returned. Only touches `records`
- * — vault + raw finance stay aggregates-only. Empty/guarded when the FTS index or
- * the table is absent (older DB).
+ * records (date, source, kind, title, short detail). Per the data-access policy
+ * every domain lives on the spine, so this is the MCP's broadest read. Bounded
+ * by a result cap + char budget; payload is never returned (raw import JSON —
+ * noise, not a secrecy boundary). Empty/guarded when the FTS index or the
+ * table is absent (older DB).
  */
 export function readTimelineSearch(
   db: Database.Database,
@@ -270,4 +270,174 @@ export function readTimelineSearch(
     result.note = 'Showing the top matches — add a source/kind/date filter or refine the query.'
   }
   return result
+}
+
+// ── Full-detail readers (data-access policy) ─────────────────────────────────
+// Every domain is readable in detail. The exclusions live elsewhere: raw GPS
+// never enters the DB tables these read, and the vault isn't reachable from
+// this process at all (no Keychain — vault documents are in-app-assistant-only).
+
+const YM_RE = /^\d{4}-\d{2}$/
+
+export interface TransactionsResult {
+  count: number
+  transactions: Array<Record<string, unknown>>
+  note?: string
+  error?: string
+}
+
+export const TRANSACTIONS_DEFAULT = 20
+export const TRANSACTIONS_MAX = 50
+
+/** Individual finance transactions, newest first, with month/range/category/substring filters. */
+export function readTransactions(
+  db: Database.Database,
+  opts: {
+    from?: string
+    to?: string
+    month?: string
+    category?: string
+    q?: string
+    limit?: number
+  }
+): TransactionsResult {
+  if (!hasObject(db, 'finance_transactions')) {
+    return { count: 0, transactions: [], note: 'No finance data yet.' }
+  }
+  const month = opts.month?.trim() || null
+  if (month && !YM_RE.test(month))
+    return { count: 0, transactions: [], error: 'month must be YYYY-MM' }
+  const from = opts.from?.trim() || null
+  const to = opts.to?.trim() || null
+  if (from && !YMD_RE.test(from))
+    return { count: 0, transactions: [], error: 'from must be YYYY-MM-DD' }
+  if (to && !YMD_RE.test(to)) return { count: 0, transactions: [], error: 'to must be YYYY-MM-DD' }
+  const limit = Math.max(
+    1,
+    Math.min(Math.floor(opts.limit ?? TRANSACTIONS_DEFAULT), TRANSACTIONS_MAX)
+  )
+  const rows = db
+    .prepare(
+      `SELECT date, amount, currency, description, category FROM finance_transactions
+        WHERE (@month IS NULL OR substr(date,1,7) = @month)
+          AND (@from IS NULL OR date >= @from)
+          AND (@to IS NULL OR date <= @to)
+          AND (@category IS NULL OR category = @category)
+          AND (@q IS NULL OR instr(lower(description), lower(@q)) > 0)
+        ORDER BY date DESC, id DESC LIMIT @limit`
+    )
+    .all({
+      month,
+      from,
+      to,
+      category: opts.category?.trim() || null,
+      q: opts.q?.trim() || null,
+      limit
+    }) as Array<Record<string, unknown>>
+  const result: TransactionsResult = { count: rows.length, transactions: rows }
+  if (rows.length >= limit) {
+    result.note = 'Hit the limit — narrow with month/category/q or raise limit (max 50).'
+  }
+  return result
+}
+
+export interface ContactHit {
+  id: number
+  displayName: string
+  org: string | null
+  jobTitle: string | null
+  relationship: string | null
+}
+
+export const CONTACTS_MAX = 25
+
+/**
+ * Address-book search over the precomputed search blob (name/org/email/phone/
+ * nickname). Explicit column list — never photo (a data URI) or enrichment.
+ */
+export function readContacts(db: Database.Database, q: string, limit = 10): ContactHit[] {
+  if (!hasObject(db, 'contacts')) return []
+  const needle = q.trim().toLowerCase()
+  if (!needle) return []
+  const capped = Math.max(1, Math.min(Math.floor(limit), CONTACTS_MAX))
+  return db
+    .prepare(
+      `SELECT id, display_name AS displayName, org, job_title AS jobTitle, relationship
+         FROM contacts WHERE search_blob LIKE ? ORDER BY display_name LIMIT ?`
+    )
+    .all(`%${needle}%`, capped) as ContactHit[]
+}
+
+const MEDICAL_CATEGORIES = new Set([
+  'condition',
+  'medication',
+  'lab',
+  'immunization',
+  'allergy',
+  'encounter',
+  'procedure'
+])
+
+export interface MedicalRecordsResult {
+  count: number
+  records: Array<Record<string, unknown>>
+  error?: string
+}
+
+export const MEDICAL_MAX = 100
+
+/** Full clinical rows (description, code, status, date) with optional filters. */
+export function readMedicalRecords(
+  db: Database.Database,
+  opts: { category?: string; status?: string; limit?: number }
+): MedicalRecordsResult {
+  if (!hasObject(db, 'medical_records')) return { count: 0, records: [] }
+  const category = opts.category?.trim() || null
+  if (category && !MEDICAL_CATEGORIES.has(category)) {
+    return {
+      count: 0,
+      records: [],
+      error: `category must be one of: ${[...MEDICAL_CATEGORIES].join(', ')}`
+    }
+  }
+  const limit = Math.max(1, Math.min(Math.floor(opts.limit ?? 50), MEDICAL_MAX))
+  const rows = db
+    .prepare(
+      `SELECT category, description, code, status, recorded_at AS recordedAt
+         FROM medical_records
+        WHERE (@category IS NULL OR category = @category)
+          AND (@status IS NULL OR status = @status COLLATE NOCASE)
+        ORDER BY recorded_at IS NULL, recorded_at DESC LIMIT @limit`
+    )
+    .all({ category, status: opts.status?.trim() || null, limit }) as Array<Record<string, unknown>>
+  return { count: rows.length, records: rows }
+}
+
+export interface PaystubsResult {
+  paystubs: Array<Record<string, unknown>>
+  totals: Record<string, unknown> | null
+  note: string
+}
+
+export const PAYSTUBS_MAX = 36
+
+/** Per-paystub rows newest-first plus running totals. */
+export function readPaystubs(db: Database.Database, limit = 12): PaystubsResult {
+  const note = 'Withholding/deductions are summed per stub — per-tax line detail is never stored.'
+  if (!hasObject(db, 'argyle_paystubs')) return { paystubs: [], totals: null, note }
+  const capped = Math.max(1, Math.min(Math.floor(limit), PAYSTUBS_MAX))
+  const rows = db
+    .prepare(
+      `SELECT employer, gross_pay AS grossPay, net_pay AS netPay, withholding, deductions,
+              currency, period_start AS periodStart, period_end AS periodEnd, paid_at AS paidAt
+         FROM argyle_paystubs
+        ORDER BY paid_at IS NULL, paid_at DESC LIMIT ?`
+    )
+    .all(capped) as Array<Record<string, unknown>>
+  const totals = db
+    .prepare(
+      'SELECT COUNT(*) AS count, ROUND(SUM(net_pay),2) AS totalNet, ROUND(SUM(gross_pay),2) AS totalGross FROM argyle_paystubs'
+    )
+    .get() as Record<string, unknown>
+  return { paystubs: rows, totals, note }
 }

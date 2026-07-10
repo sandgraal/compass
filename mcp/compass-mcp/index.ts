@@ -22,8 +22,13 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
  * what actually applies the change, via the app's existing validated write IPC.
  * See proposals.ts and docs/claude-integration.md.
  *
- * Vault fields and OAuth tokens are EXPLICITLY EXCLUDED. Returned data may
- * include user content (task titles, calendar event titles, knowledge files).
+ * Data boundary (docs/data-access-policy.md): every domain is exposed in FULL
+ * DETAIL — timeline records, individual transactions, medical records,
+ * contacts, paystubs. The exclusions: the encrypted vault and OAuth/API tokens
+ * are unreachable from this process (no Keychain access — vault documents are
+ * readable only by the in-app Ask Compass assistant, and the credentials
+ * category is sealed everywhere), and raw GPS coordinates never enter the
+ * tables this server reads (country-level travel does).
  *
  * Run: tsx mcp/compass-mcp/index.ts
  * Register in .mcp.json (already done at repo root).
@@ -34,10 +39,14 @@ import { DAY_MS, localYm, localYmd } from './dates.js'
 import { PROPOSE_TOOLS, appendProposal, buildProposal, makeProposal } from './proposals.js'
 import {
   normalizeTaskRange,
+  readContacts,
+  readMedicalRecords,
+  readPaystubs,
   readRecentNotes,
   readTasksRange,
   readTimelineSearch,
-  readTimelineSummary
+  readTimelineSummary,
+  readTransactions
 } from './readers.js'
 
 // Mirror electron/paths.ts — but we open the DB read-only. Honor the same
@@ -179,7 +188,7 @@ const TOOLS = [
   {
     name: 'compass_finance_summary',
     description:
-      'Returns AGGREGATE financial figures only — net worth (assets/liabilities), per-month income/expense/net for the last N months, and current-month spend by category. NEVER returns individual transaction rows, descriptions, or account numbers (privacy boundary). Read-only.',
+      'Returns the AGGREGATE finance picture — net worth (assets/liabilities), per-month income/expense/net for the last N months, and current-month spend by category. The convenient rollup view; for individual transaction rows use compass_transactions. Read-only.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -189,22 +198,85 @@ const TOOLS = [
     }
   },
   {
+    name: 'compass_transactions',
+    description:
+      'Returns individual finance transactions — date, amount, currency, description (merchant/payee), category — newest first. Filter by a date range, a single month (YYYY-MM), a category, and/or a description substring. Use for "what did I spend at X", "list June charges", "when did I last pay Y". Read-only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Start date YYYY-MM-DD (inclusive)' },
+        to: { type: 'string', description: 'End date YYYY-MM-DD (inclusive)' },
+        month: { type: 'string', description: 'Single month YYYY-MM (overrides from/to)' },
+        category: { type: 'string', description: 'Exact category, e.g. "Dining"' },
+        q: { type: 'string', description: 'Description substring, e.g. a merchant name' },
+        limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'compass_contacts',
+    description:
+      "Search the user's address book by name, organization, email, phone, or nickname. Returns matching contacts (id, name, org, title, relationship). Read-only.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        q: { type: 'string', description: 'Search text' },
+        limit: { type: 'integer', minimum: 1, maximum: 25, default: 10 }
+      },
+      required: ['q'],
+      additionalProperties: false
+    }
+  },
+  {
     name: 'compass_health_summary',
     description:
-      'Returns AGGREGATE health figures only — 7/30-day step + sleep averages, latest Oura sleep/readiness/activity scores (plus 7-day averages), resting-heart-rate latest + 30-day average, 30-day workout count, and active-day count. Unified across Oura + Apple Health / Fitbit / Garmin. NEVER returns raw daily rows, coordinates, workout titles, or body-weight values (privacy boundary — aggregates only, like finance). Read-only.',
+      'Returns the AGGREGATE health picture — 7/30-day step + sleep averages, latest Oura sleep/readiness/activity scores (plus 7-day averages), resting-heart-rate latest + 30-day average, 30-day workout count, and active-day count. Unified across Oura + Apple Health / Fitbit / Garmin. For individual daily rows, search the timeline (compass_search_timeline, e.g. source "oura"). Read-only.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false }
   },
   {
     name: 'compass_income_summary',
     description:
-      'Returns AGGREGATE income figures only, from connected payroll (Argyle paystubs): per-employer pay cadence, annualized net (and gross when known), effective withholding rate, and the next expected payday — plus blended totals. NEVER returns raw paystub lines, individual checks, per-tax detail, or account numbers (privacy boundary — aggregates only, like finance/health). Read-only.',
+      'Returns the AGGREGATE income picture, from connected payroll (Argyle paystubs): per-employer pay cadence, annualized net (and gross when known), effective withholding rate, and the next expected payday — plus blended totals. For individual paystubs use compass_paystubs. Read-only.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
+    name: 'compass_paystubs',
+    description:
+      'Returns individual payroll paystubs — employer, gross/net pay, summed withholding and deductions, pay period, deposit date — newest first, plus totals. (Per-tax line detail is never stored.) Read-only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'integer', minimum: 1, maximum: 36, default: 12 }
+      },
+      additionalProperties: false
+    }
   },
   {
     name: 'compass_medical_summary',
     description:
-      'Returns AGGREGATE medical figures only, from connected clinical records (Metriport FHIR): total record count, counts per category (conditions/medications/labs/immunizations/allergies/encounters), active-condition count, and the earliest + most-recent record dates. NEVER returns a diagnosis, medication, vaccine, lab value, provider, or any PHI (STRICT privacy boundary — counts + dates only). Read-only.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+      "Returns the user's clinical records (Metriport FHIR) in FULL detail — each record's category (condition/medication/lab/immunization/allergy/encounter/procedure), description, code (ICD-10/RxNorm/LOINC/CVX), status, and date — plus per-category counts and the date span. Optional category/status filters. Read-only.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        category: {
+          type: 'string',
+          enum: [
+            'condition',
+            'medication',
+            'lab',
+            'immunization',
+            'allergy',
+            'encounter',
+            'procedure'
+          ],
+          description: 'Optional: one clinical category'
+        },
+        status: { type: 'string', description: 'Optional: e.g. "active", "resolved"' },
+        limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 }
+      },
+      additionalProperties: false
+    }
   },
   {
     name: 'compass_habit_streaks',
@@ -257,13 +329,13 @@ const TOOLS = [
   {
     name: 'compass_timeline',
     description:
-      "Summarize the user's unified life Timeline — records imported from all their data sources (purchases, media watched/listened, messages, documents, health, credit/tax, and more). Returns AGGREGATES (total, counts by source and kind, the year span, per-year totals). Use for 'how far back does my data go', 'what have I imported', 'how much/what kind of data do I have', or 'how active was I in <year>'. To read the actual matching records, use compass_search_timeline. Read-only.",
+      "Summarize the user's unified life Timeline — records from every domain (purchases, media, messages, documents, health, medical, habits, tasks, trips, paychecks, bills, goals, credit/tax, and more). Returns AGGREGATES (total, counts by source and kind, the year span, per-year totals). Use for 'how far back does my data go', 'what have I imported', 'how much/what kind of data do I have', or 'how active was I in <year>'. To read the actual matching records, use compass_search_timeline. Read-only.",
     inputSchema: { type: 'object', properties: {}, additionalProperties: false }
   },
   {
     name: 'compass_search_timeline',
     description:
-      "Search the user's unified life Timeline — the ACTUAL records imported from their data exports (purchases, media watched/listened, messages, browsing, documents, health, credit/tax, connections, and more) — and return the matching records (date, source, kind, title, short detail). Use for 'what/when did I…' questions: 'when did I last watch X', 'what did I buy from Y', 'find anything about Z', 'what was I doing in <month/year>'. Optional source/kind filters and a from/to date range (YYYY-MM-DD). Read-only. (For totals by source or year, use compass_timeline.)",
+      "Search the user's unified life Timeline — the ACTUAL records from every domain (purchases, media, messages, browsing, documents, health, medical, habits, tasks, trips, paychecks, bills, goals, credit/tax, connections, facts, and more) — and return the matching records (date, source, kind, title, short detail). Use for 'what/when did I…' questions: 'when did I last watch X', 'what did I buy from Y', 'find anything about Z', 'what was I doing in <month/year>'. Optional source/kind filters and a from/to date range (YYYY-MM-DD). Exclusions: raw GPS coordinates never appear (country-level trips do), and the encrypted Vault is not reachable from MCP — vault documents are readable only by the in-app Ask Compass assistant. Read-only. (For totals by source or year, use compass_timeline.)",
     inputSchema: {
       type: 'object',
       properties: {
@@ -817,12 +889,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
     }
 
-    // Aggregates-only medical view — counts + dates ONLY, never a diagnosis/medication/lab
-    // value or any PHI. Medical is the strictest privacy boundary in the app.
+    // Full-detail medical view (data-access policy): the actual clinical rows
+    // plus the per-category counts the old aggregates-only tool returned.
     if (name === 'compass_medical_summary') {
       const db = openDb()
       if (!db) return errorResult('Compass DB not found')
       try {
+        const detail = readMedicalRecords(db, {
+          category: args?.category ? String(args.category) : undefined,
+          status: args?.status ? String(args.status) : undefined,
+          limit: Number.isFinite(Number(args?.limit)) ? Number(args?.limit) : undefined
+        })
+        if (detail.error) {
+          db.close()
+          return errorResult(detail.error)
+        }
         type MedRow = { category: string; status: string | null; recordedAt: string | null }
         let rows: MedRow[] = []
         try {
@@ -852,7 +933,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               byCategory,
               activeConditions,
               firstDate: dates[0] ?? null,
-              lastDate: dates.length ? dates[dates.length - 1] : null
+              lastDate: dates.length ? dates[dates.length - 1] : null,
+              records: detail.records
             },
             null,
             2
@@ -861,6 +943,56 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       } catch (err) {
         db.close()
         return errorResult(String(err))
+      }
+    }
+
+    if (name === 'compass_transactions') {
+      const db = openDb()
+      if (!db) return errorResult('Compass DB not found')
+      try {
+        const res = readTransactions(db, {
+          from: args?.from ? String(args.from) : undefined,
+          to: args?.to ? String(args.to) : undefined,
+          month: args?.month ? String(args.month) : undefined,
+          category: args?.category ? String(args.category) : undefined,
+          q: args?.q ? String(args.q) : undefined,
+          limit: Number.isFinite(Number(args?.limit)) ? Number(args?.limit) : undefined
+        })
+        if (res.error) return errorResult(res.error)
+        return textResult(JSON.stringify(res, null, 2))
+      } finally {
+        db.close()
+      }
+    }
+
+    if (name === 'compass_contacts') {
+      const db = openDb()
+      if (!db) return errorResult('Compass DB not found')
+      try {
+        const q = String(args?.q ?? '').trim()
+        if (!q) return errorResult('q (search text) is required')
+        const hits = readContacts(
+          db,
+          q,
+          Number.isFinite(Number(args?.limit)) ? Number(args?.limit) : undefined
+        )
+        return textResult(JSON.stringify({ query: q, count: hits.length, contacts: hits }, null, 2))
+      } finally {
+        db.close()
+      }
+    }
+
+    if (name === 'compass_paystubs') {
+      const db = openDb()
+      if (!db) return errorResult('Compass DB not found')
+      try {
+        const res = readPaystubs(
+          db,
+          Number.isFinite(Number(args?.limit)) ? Number(args?.limit) : undefined
+        )
+        return textResult(JSON.stringify(res, null, 2))
+      } finally {
+        db.close()
       }
     }
 
@@ -922,7 +1054,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               accountCount: accounts.length,
               monthly,
               currentMonth: { month: currentMonth, byCategory },
-              note: 'Aggregates only — no individual transactions or account numbers are exposed.'
+              note: 'Aggregate rollup — use compass_transactions for individual rows.'
             },
             null,
             2

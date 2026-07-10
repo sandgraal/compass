@@ -84,3 +84,8 @@ knip-report.json
 .husky/_/
 .husky/_/
 .husky/_/
+
+# A background installer in worktree sessions keeps dropping pnpm artifacts;
+# this repo is npm-managed (package-lock.json) — never commit these.
+pnpm-lock.yaml
+pnpm-workspace.yaml
