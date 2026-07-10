@@ -263,7 +263,8 @@ function parsedToInput(p: ParsedContact, source: string): ContactInput {
 
 /**
  * Upsert a batch of contacts keyed by `externalId`. Returns how many rows were
- * freshly inserted vs. updated in place — the importer reports both to the user.
+ * freshly inserted (`imported`), updated in place (`updated`), or skipped
+ * (`skipped`) because the externalId is on the tombstone/merged suppression list.
  *
  * Exported so the Google Contacts live sync reuses the exact same owned-writer path
  * as file imports (dedupe by external id, search-blob recompute) instead of a
