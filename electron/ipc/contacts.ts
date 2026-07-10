@@ -603,7 +603,10 @@ export function mergeContacts(survivorId: number, loserIds: number[]): boolean {
 export function runAutoDedupe(): number {
   const db = getDb()
   const dismissed = loadExclusionSet(db, ['dedupe-dismissed'])
-  const { autoGroups } = computeDedupe(readDedupeRows(), { dismissedPairs: dismissed })
+  const { autoGroups } = computeDedupe(readDedupeRows(), {
+    dismissedPairs: dismissed,
+    skipFuzzy: true
+  })
   let merged = 0
   for (const group of autoGroups) {
     if (mergeContacts(group.survivorId, group.loserIds)) merged += group.loserIds.length
@@ -957,7 +960,8 @@ export function registerContactsHandlers(ipcMain: IpcMain): void {
       emails: r.emails.map((e) => e.value).slice(0, 3),
       phones: r.phones.map((p) => p.value).slice(0, 3)
     })
-    return fuzzyPairs.slice(0, 200)
+    return fuzzyPairs
+      .slice(0, 200)
       .map((p) => {
         const a = byId.get(p.aId)
         const b = byId.get(p.bId)
