@@ -508,9 +508,10 @@ export function mergeContacts(survivorId: number, loserIds: number[]): boolean {
 
   for (const loser of losers) {
     for (const e of parseArr<ContactEmail>(loser.emails)) {
-      if (e.value && !emailSet.has(e.value.toLowerCase())) {
-        emails.push(e)
-        emailSet.add(e.value.toLowerCase())
+      const key = e.value?.trim().toLowerCase()
+      if (key && !emailSet.has(key)) {
+        emails.push({ ...e, value: e.value.trim() })
+        emailSet.add(key)
       }
     }
     for (const p of parseArr<ContactPhone>(loser.phones)) {
