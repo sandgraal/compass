@@ -120,8 +120,9 @@ export default function Contacts(): JSX.Element {
           `Merged into ${survivorId === pair.a.id ? pair.a.displayName : pair.b.displayName}.`,
           'success'
         )
-        setDupes((prev) => prev.filter((p) => p !== pair))
+        setDupes((prev) => prev.filter((p) => p.a.id !== loserId && p.b.id !== loserId))
         await load(search)
+        await loadDupes()
         if (selectedId === loserId) {
           setSelectedId(null)
           setSelected(null)
