@@ -111,6 +111,14 @@ export default function Contacts(): JSX.Element {
 
   async function mergePair(pair: DuplicatePair, survivorId: number): Promise<void> {
     if (!isElectron()) return
+    const survivorName = survivorId === pair.a.id ? pair.a.displayName : pair.b.displayName
+    const loserName = survivorId === pair.a.id ? pair.b.displayName : pair.a.displayName
+    const ok = await confirm({
+      title: 'Merge contacts?',
+      description: `"${loserName}" will be merged into "${survivorName}" and permanently deleted. This cannot be undone.`,
+      confirmLabel: 'Merge',
+    })
+    if (!ok) return
     setDupesBusy(true)
     try {
       const loserId = survivorId === pair.a.id ? pair.b.id : pair.a.id
@@ -120,8 +128,9 @@ export default function Contacts(): JSX.Element {
           `Merged into ${survivorId === pair.a.id ? pair.a.displayName : pair.b.displayName}.`,
           'success'
         )
-        setDupes((prev) => prev.filter((p) => p !== pair))
+        setDupes((prev) => prev.filter((p) => p.a.id !== loserId && p.b.id !== loserId))
         await load(search)
+        await loadDupes()
         if (selectedId === loserId) {
           setSelectedId(null)
           setSelected(null)

@@ -263,7 +263,8 @@ function parsedToInput(p: ParsedContact, source: string): ContactInput {
 
 /**
  * Upsert a batch of contacts keyed by `externalId`. Returns how many rows were
- * freshly inserted vs. updated in place — the importer reports both to the user.
+ * freshly inserted (`imported`), updated in place (`updated`), or skipped
+ * (`skipped`) because the externalId is on the tombstone/merged suppression list.
  *
  * Exported so the Google Contacts live sync reuses the exact same owned-writer path
  * as file imports (dedupe by external id, search-blob recompute) instead of a
@@ -486,7 +487,7 @@ export function mergeContacts(survivorId: number, loserIds: number[]): boolean {
   const emails = parseArr<ContactEmail>(survivor.emails)
   const phones = parseArr<ContactPhone>(survivor.phones)
   const addresses = parseArr<ContactAddress>(survivor.addresses)
-  const emailSet = new Set(emails.map((e) => e.value.toLowerCase()))
+  const emailSet = new Set(emails.map((e) => e.value.trim().toLowerCase()))
   const phoneSet = new Set(phones.map((p) => p.value))
   const addrSet = new Set(addresses.map((a) => JSON.stringify(a)))
   const notes: string[] = survivor.notes ? [survivor.notes] : []
@@ -495,6 +496,8 @@ export function mergeContacts(survivorId: number, loserIds: number[]): boolean {
       | 'givenName'
       | 'familyName'
       | 'middleName'
+      | 'prefix'
+      | 'suffix'
       | 'org'
       | 'jobTitle'
       | 'birthday'
@@ -508,9 +511,10 @@ export function mergeContacts(survivorId: number, loserIds: number[]): boolean {
 
   for (const loser of losers) {
     for (const e of parseArr<ContactEmail>(loser.emails)) {
-      if (e.value && !emailSet.has(e.value.toLowerCase())) {
-        emails.push(e)
-        emailSet.add(e.value.toLowerCase())
+      const key = e.value?.trim().toLowerCase()
+      if (key && !emailSet.has(key)) {
+        emails.push({ ...e, value: e.value.trim() })
+        emailSet.add(key)
       }
     }
     for (const p of parseArr<ContactPhone>(loser.phones)) {
@@ -531,6 +535,8 @@ export function mergeContacts(survivorId: number, loserIds: number[]): boolean {
       'givenName',
       'familyName',
       'middleName',
+      'prefix',
+      'suffix',
       'org',
       'jobTitle',
       'birthday',
@@ -597,7 +603,10 @@ export function mergeContacts(survivorId: number, loserIds: number[]): boolean {
 export function runAutoDedupe(): number {
   const db = getDb()
   const dismissed = loadExclusionSet(db, ['dedupe-dismissed'])
-  const { autoGroups } = computeDedupe(readDedupeRows(), { dismissedPairs: dismissed })
+  const { autoGroups } = computeDedupe(readDedupeRows(), {
+    dismissedPairs: dismissed,
+    skipFuzzy: true
+  })
   let merged = 0
   for (const group of autoGroups) {
     if (mergeContacts(group.survivorId, group.loserIds)) merged += group.loserIds.length
@@ -952,6 +961,7 @@ export function registerContactsHandlers(ipcMain: IpcMain): void {
       phones: r.phones.map((p) => p.value).slice(0, 3)
     })
     return fuzzyPairs
+      .slice(0, 200)
       .map((p) => {
         const a = byId.get(p.aId)
         const b = byId.get(p.bId)
