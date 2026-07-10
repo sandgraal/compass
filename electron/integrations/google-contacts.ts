@@ -368,3 +368,64 @@ export async function buildGoogleContactInputs(
     .map((p) => googlePersonToContact(p, groupNames))
     .filter((c): c is ContactInput => c !== null)
 }
+
+// "Other contacts" — everyone the user has emailed, auto-saved by Google. This is
+// where the bulk of a real address book lives. The API RESTRICTS the readMask to
+// these four fields (the wide `PERSON_FIELDS` mask 400s here), and many rows are
+// email-only with no name.
+const OTHER_CONTACT_FIELDS = 'names,emailAddresses,phoneNumbers,metadata'
+const MAX_OTHER_PAGES = 100 // up to 100k; sets `truncated` if it caps out
+
+interface OtherContactsResponse {
+  otherContacts?: GooglePerson[]
+  nextPageToken?: string
+}
+
+/**
+ * Page through `otherContacts.list`. Requires the `contacts.other.readonly` scope
+ * → throws `ContactsScopeError` on 403 so the caller can prompt a reconnect.
+ * Returns the raw people plus a `truncated` flag when the page cap was hit.
+ */
+export async function fetchGoogleOtherContacts(
+  accessToken: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<{ people: GooglePerson[]; truncated: boolean }> {
+  const headers = { Authorization: `Bearer ${accessToken}` }
+  const people: GooglePerson[] = []
+  let pageToken: string | undefined
+  let truncated = false
+  for (let page = 0; page < MAX_OTHER_PAGES; page++) {
+    const url = new URL('https://people.googleapis.com/v1/otherContacts')
+    url.searchParams.set('readMask', OTHER_CONTACT_FIELDS)
+    url.searchParams.set('pageSize', String(PAGE_SIZE))
+    if (pageToken) url.searchParams.set('pageToken', pageToken)
+
+    const resp = await fetchImpl(url.toString(), { headers })
+    if (resp.status === 403) throw new ContactsScopeError()
+    if (!resp.ok) throw new Error(`People API otherContacts ${resp.status}`)
+    const data = (await resp.json()) as OtherContactsResponse
+    if (data.otherContacts) people.push(...data.otherContacts)
+    if (!data.nextPageToken) break
+    pageToken = data.nextPageToken
+    if (page === MAX_OTHER_PAGES - 1) truncated = true
+  }
+  return { people, truncated }
+}
+
+/**
+ * Fetch + map every "other contact" into ContactInput rows tagged
+ * `source:'google-other'` (so they stay separable/bulk-removable from the curated
+ * connections). Name-less, email-only rows map fine — `googlePersonToContact`
+ * falls back to the email as the display name.
+ */
+export async function buildGoogleOtherContactInputs(
+  accessToken: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<{ inputs: ContactInput[]; truncated: boolean }> {
+  const { people, truncated } = await fetchGoogleOtherContacts(accessToken, fetchImpl)
+  const inputs = people
+    .map((p) => googlePersonToContact(p))
+    .filter((c): c is ContactInput => c !== null)
+    .map((c) => ({ ...c, source: 'google-other' }))
+  return { inputs, truncated }
+}

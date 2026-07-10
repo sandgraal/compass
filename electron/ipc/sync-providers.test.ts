@@ -136,9 +136,11 @@ vi.mock('../knowledge/writer', () => ({ readKnowledgeFile: () => readKnowledgeFi
 // Auth: tokens — per-test settable.
 const loadTokenMock = vi.fn()
 const getValidGoogleTokenMock = vi.fn()
+const hasGoogleScopeMock = vi.fn((_scope: string) => false)
 vi.mock('./auth', () => ({
   loadToken: (service: string) => loadTokenMock(service),
-  getValidGoogleToken: () => getValidGoogleTokenMock()
+  getValidGoogleToken: () => getValidGoogleTokenMock(),
+  hasGoogleScope: (scope: string) => hasGoogleScopeMock(scope)
 }))
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown

@@ -344,6 +344,57 @@ export function writeContactEnrichment(
   return true
 }
 
+/**
+ * Merge additional emails/phones into a contact (de-duped), preserving every other
+ * field and recomputing `search_blob`. Used to backfill identifiers discovered in
+ * the timeline onto a name-only promoted contact. Returns true if anything changed.
+ */
+export function addContactIdentifiers(
+  contactId: number,
+  add: { emails?: ContactEmail[]; phones?: ContactPhone[] }
+): boolean {
+  const db = getDb()
+  const row = db.select().from(contacts).where(eq(contacts.id, contactId)).all()[0]
+  if (!row) return false
+  const emails = parseArr<ContactEmail>(row.emails)
+  const phones = parseArr<ContactPhone>(row.phones)
+  const emailSet = new Set(emails.map((e) => e.value.toLowerCase()))
+  const phoneSet = new Set(phones.map((p) => p.value))
+  let changed = false
+  for (const e of add.emails ?? []) {
+    if (e.value && !emailSet.has(e.value.toLowerCase())) {
+      emails.push(e)
+      emailSet.add(e.value.toLowerCase())
+      changed = true
+    }
+  }
+  for (const p of add.phones ?? []) {
+    if (p.value && !phoneSet.has(p.value)) {
+      phones.push(p)
+      phoneSet.add(p.value)
+      changed = true
+    }
+  }
+  if (!changed) return false
+  const enr = parseEnrichment(row.enrichment)
+  db.update(contacts)
+    .set({
+      emails: JSON.stringify(emails),
+      phones: JSON.stringify(phones),
+      searchBlob: computeSearchBlob({
+        displayName: row.displayName,
+        org: row.org,
+        emails,
+        phones,
+        nicknames: enr.google?.nicknames
+      }),
+      updatedAt: new Date()
+    })
+    .where(eq(contacts.id, contactId))
+    .run()
+  return true
+}
+
 /** Structural equality of two summaries, ignoring the ever-changing `refreshedAt`. */
 function crossSourceEqual(a: CrossSourceSummary | undefined, b: CrossSourceSummary): boolean {
   if (!a) return false
