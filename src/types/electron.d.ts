@@ -1137,6 +1137,7 @@ declare global {
           enriched: number
           photos: number
           needsReconnect: boolean
+          message?: string
           error?: string
         }>
         enrichStatus(): Promise<{ needsReconnect: boolean }>

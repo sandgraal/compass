@@ -59,11 +59,25 @@ import { getValidGoogleToken, hasGoogleScope, loadToken } from './auth'
 import { upsertContacts } from './contacts'
 import { afterConnectorSync, afterFinanceSync } from './storehouse-sync'
 
+/** Per-source diagnostic for the Google contacts pull, surfaced to the user. */
+export interface GoogleContactsSyncInfo {
+  savedImported: number
+  savedUpdated: number
+  savedError?: string
+  otherScoped: boolean
+  otherFetched: number // raw rows Google returned before mapping/dropping
+  otherImported: number
+  otherUpdated: number
+  otherError?: string
+  otherTruncated?: boolean
+}
+
 type SyncResult = {
   service: string
   success: boolean
   recordsUpdated?: number
   error?: string
+  contacts?: GoogleContactsSyncInfo
 }
 
 type SyncResultInternal = SyncResult & {
@@ -639,32 +653,44 @@ export async function syncGoogle(
     // ---- Contacts (People API) ----
     // Best-effort: an already-connected user who hasn't re-granted the
     // contacts.readonly scope gets a soft-skip (ContactsScopeError) rather than a
-    // failed Google sync. Reuses the owned vCard upsert writer.
+    // failed Google sync. Reuses the owned vCard upsert writer. All outcomes are
+    // captured into `contactsInfo` so the enrich-all UI can report them honestly.
+    const contactsInfo: GoogleContactsSyncInfo = {
+      savedImported: 0,
+      savedUpdated: 0,
+      otherScoped: false,
+      otherFetched: 0,
+      otherImported: 0,
+      otherUpdated: 0
+    }
     try {
       const inputs = await buildGoogleContactInputs(accessToken)
       const { imported, updated } = upsertContacts(inputs)
+      contactsInfo.savedImported = imported
+      contactsInfo.savedUpdated = updated
       recordsUpdated += imported + updated
     } catch (err) {
-      if (err instanceof ContactsScopeError) {
-        console.warn('[sync] google contacts skipped — reconnect Google to grant the scope')
-      } else {
-        console.warn('[sync] google contacts sync failed (non-fatal):', (err as Error).message)
-      }
+      contactsInfo.savedError =
+        err instanceof ContactsScopeError ? 'reconnect needed' : (err as Error).message
+      console.warn('[sync] google contacts sync failed (non-fatal):', contactsInfo.savedError)
     }
 
     // ---- Other Contacts (the auto-saved address book — everyone you've emailed) ----
-    // Gated on the granted `contacts.other.readonly` scope so we don't 403 every
+    // Gated on the granted `contacts.other.readonly` scope so we don't error every
     // sync before the user reconnects. Tagged `source:'google-other'` at build time.
-    if (hasGoogleScope('contacts.other.readonly')) {
+    contactsInfo.otherScoped = hasGoogleScope('contacts.other.readonly')
+    if (contactsInfo.otherScoped) {
       try {
-        const { inputs, truncated } = await buildGoogleOtherContactInputs(accessToken)
+        const { inputs, truncated, fetched } = await buildGoogleOtherContactInputs(accessToken)
+        contactsInfo.otherFetched = fetched
+        contactsInfo.otherTruncated = truncated
         const { imported, updated } = upsertContacts(inputs)
+        contactsInfo.otherImported = imported
+        contactsInfo.otherUpdated = updated
         recordsUpdated += imported + updated
-        if (truncated) {
-          console.warn('[sync] google other-contacts hit the page cap — some were not imported')
-        }
       } catch (err) {
-        console.warn('[sync] google other-contacts failed (non-fatal):', (err as Error).message)
+        contactsInfo.otherError = (err as Error).message
+        console.warn('[sync] google other-contacts failed (non-fatal):', contactsInfo.otherError)
       }
     }
 
@@ -698,7 +724,7 @@ export async function syncGoogle(
     afterConnectorSync()
 
     maybeSendNotification('google', recordsUpdated)
-    return { service: 'google', success: true, recordsUpdated }
+    return { service: 'google', success: true, recordsUpdated, contacts: contactsInfo }
   } catch (err) {
     const message = (err as Error).message
     db.update(integrations)

@@ -363,7 +363,44 @@ export interface EnrichAllResult {
   photos: number
   /** Google is connected but a contacts scope isn't granted → prompt a reconnect. */
   needsReconnect: boolean
+  /** Human-readable breakdown of what Google returned (shown in the toast). */
+  message?: string
   error?: string
+}
+
+/** Compose an honest, specific breakdown of the Google contacts pull for the UI. */
+function describeContactsSync(
+  info:
+    | {
+        savedImported: number
+        savedUpdated: number
+        savedError?: string
+        otherScoped: boolean
+        otherFetched: number
+        otherImported: number
+        otherUpdated: number
+        otherError?: string
+        otherTruncated?: boolean
+      }
+    | undefined
+): string | undefined {
+  if (!info) return undefined
+  const upd = (n: number): string => (n > 0 ? ` (+${n} updated)` : '')
+  const parts: string[] = []
+  if (info.savedError) parts.push(`saved contacts failed (${info.savedError})`)
+  else parts.push(`${info.savedImported} saved${upd(info.savedUpdated)}`)
+  if (!info.otherScoped) {
+    parts.push('Other Contacts need a Google reconnect')
+  } else if (info.otherError) {
+    parts.push(`Other Contacts error — ${info.otherError}`)
+  } else if (info.otherFetched === 0) {
+    parts.push('Google returned 0 Other Contacts')
+  } else {
+    parts.push(
+      `${info.otherImported} of ${info.otherFetched} Other Contacts${upd(info.otherUpdated)}${info.otherTruncated ? ' (truncated)' : ''}`
+    )
+  }
+  return `Google — ${parts.join('; ')}.`
 }
 
 /** Total contacts, for a before/after import delta. */
@@ -423,14 +460,19 @@ export async function runEnrichAll(win?: BrowserWindow | null): Promise<EnrichAl
     }
     const enriched = enrichAllContactsDeep()
     const imported = Math.max(0, countContacts() - before)
-    const needsReconnect = googleNeedsContactsReconnect()
+    const message = describeContactsSync(google.contacts)
+    // A permission/scope error on Other Contacts (granted in the token but rejected
+    // by the API) also warrants a reconnect prompt.
+    const otherErr = google.contacts?.otherError?.toLowerCase() ?? ''
+    const otherPermission = /403|scope|permission|insufficient/.test(otherErr)
+    const needsReconnect = googleNeedsContactsReconnect() || otherPermission
     win?.webContents.send('sync:update', {
       service: 'contacts',
       status: 'success',
       recordsUpdated: imported + enriched
     })
     maybeSendNotification('contacts', imported + enriched)
-    return { success: true, imported, enriched, photos, needsReconnect }
+    return { success: true, imported, enriched, photos, needsReconnect, message }
   } catch (err) {
     const message = (err as Error).message
     win?.webContents.send('sync:update', { service: 'contacts', status: 'error', error: message })
