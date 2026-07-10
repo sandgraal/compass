@@ -953,9 +953,8 @@ export function registerContactsHandlers(ipcMain: IpcMain): void {
       emails: r.emails.map((e) => e.value).slice(0, 3),
       phones: r.phones.map((p) => p.value).slice(0, 3)
     })
-    return fuzzyPairs
+    return fuzzyPairs.slice(0, 200)
       .map((p) => {
-        const a = byId.get(p.aId)
         const b = byId.get(p.bId)
         return a && b ? { a: summarize(a), b: summarize(b), nameKey: p.nameKey } : null
       })
