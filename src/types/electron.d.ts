@@ -272,6 +272,21 @@ declare global {
       count: number
       items: Array<{ id: number; title: string; listDate: string; category: string | null }>
     }
+    crossDomain: {
+      spend: {
+        total: number
+        prevTotal: number
+        topCategories: Array<{ category: string; amount: number }>
+      } | null
+      habits: Array<{ name: string; done: number }>
+      health: {
+        steps: number | null
+        prevSteps: number | null
+        sleepHours: number | null
+        prevSleepHours: number | null
+      } | null
+      highlights: Array<{ source: string; type: string; title: string; occurredAt: number | null }>
+    }
   }
 
   interface MonthlyWeek {

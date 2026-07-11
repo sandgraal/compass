@@ -13,11 +13,117 @@ import {
   CheckSquare,
   ChevronLeft,
   ChevronRight,
-  GitBranch
+  Flame,
+  GitBranch,
+  HeartPulse,
+  Sparkles,
+  Wallet
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useToast } from '../components/ui/Toast'
 import { cn, isoDate } from '../lib/utils'
+
+function fmtUsd(n: number): string {
+  return `$${Math.round(n).toLocaleString('en-US')}`
+}
+
+/** "This week across your life" — the cross-domain weekly review card. */
+function WeekAcrossLife({ x }: { x: WeeklyReview['crossDomain'] }): JSX.Element | null {
+  const hasAny =
+    x.spend != null || x.habits.length > 0 || x.health != null || x.highlights.length > 0
+  if (!hasAny) return null
+  const delta = (cur: number, prev: number): JSX.Element | null => {
+    if (prev <= 0) return null
+    const d = Math.round(((cur - prev) / prev) * 100)
+    if (d === 0) return <span className="text-muted-foreground">· flat</span>
+    return (
+      <span className={cn(d > 0 ? 'text-amber-400' : 'text-emerald-400')}>
+        · {d > 0 ? '↑' : '↓'}
+        {Math.abs(d)}% vs last wk
+      </span>
+    )
+  }
+  return (
+    <div className="bg-card border border-border rounded-xl mb-8 overflow-hidden">
+      <div className="flex items-center gap-2 px-5 py-3 border-b border-border">
+        <Sparkles size={15} className="text-primary" />
+        <h2 className="text-sm font-semibold text-foreground">This week across your life</h2>
+      </div>
+      <div className="grid gap-px bg-border sm:grid-cols-2">
+        {x.spend != null && (
+          <div className="bg-card p-4">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
+              <Wallet size={13} className="text-emerald-400" /> Spend
+            </div>
+            <div className="text-lg font-semibold text-foreground">
+              {fmtUsd(x.spend.total)}{' '}
+              <span className="text-xs font-normal">{delta(x.spend.total, x.spend.prevTotal)}</span>
+            </div>
+            {x.spend.topCategories.length > 0 && (
+              <div className="text-xs text-muted-foreground mt-1 truncate">
+                {x.spend.topCategories.map((c) => `${c.category} ${fmtUsd(c.amount)}`).join(' · ')}
+              </div>
+            )}
+          </div>
+        )}
+        {x.health != null && (
+          <div className="bg-card p-4">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
+              <HeartPulse size={13} className="text-rose-400" /> Health
+            </div>
+            <div className="text-sm text-foreground space-y-0.5">
+              {x.health.steps != null && (
+                <div>
+                  {x.health.steps.toLocaleString('en-US')} steps{' '}
+                  <span className="text-xs">
+                    {x.health.prevSteps != null && delta(x.health.steps, x.health.prevSteps)}
+                  </span>
+                </div>
+              )}
+              {x.health.sleepHours != null && (
+                <div>
+                  {x.health.sleepHours}h asleep{' '}
+                  <span className="text-xs">
+                    {x.health.prevSleepHours != null &&
+                      delta(x.health.sleepHours, x.health.prevSleepHours)}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {x.habits.length > 0 && (
+          <div className="bg-card p-4">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
+              <Flame size={13} className="text-orange-400" /> Habits
+            </div>
+            <div className="text-xs text-foreground flex flex-wrap gap-x-3 gap-y-0.5">
+              {x.habits.slice(0, 6).map((h) => (
+                <span key={h.name}>
+                  {h.name} <span className="text-muted-foreground">{h.done}/7</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {x.highlights.length > 0 && (
+          <div className="bg-card p-4">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
+              <Sparkles size={13} className="text-amber-400" /> Highlights
+            </div>
+            <ul className="text-xs text-foreground space-y-0.5">
+              {x.highlights.map((h) => (
+                <li key={`${h.source}-${h.title}`} className="truncate">
+                  {h.title}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 export default function Weekly(): JSX.Element {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }))
@@ -29,6 +135,7 @@ export default function Weekly(): JSX.Element {
   const [prevCompletionPct, setPrevCompletionPct] = useState<number | null>(null)
   // Carry-over: count of unfinished manual tasks this week (from weekly-review:get).
   const [carryOverCount, setCarryOverCount] = useState(0)
+  const [crossDomain, setCrossDomain] = useState<WeeklyReview['crossDomain'] | null>(null)
   const [reloadNonce, setReloadNonce] = useState(0)
   const { toast } = useToast()
 
@@ -63,11 +170,18 @@ export default function Weekly(): JSX.Element {
       setEvents(results[7] as CalendarEvent[])
       setGithubItems(results[8] as GitHubItem[])
 
-      // Weekly review close-out stats (carry-over candidates).
+      // Weekly review close-out stats (carry-over candidates) + the cross-domain
+      // "this week across your life" summary (spend/habits/health/highlights).
       window.api.weeklyReview
         ?.get(isoDate(weekStart))
-        .then((r) => setCarryOverCount(r.carryOver.count))
-        .catch(() => setCarryOverCount(0))
+        .then((r) => {
+          setCarryOverCount(r.carryOver.count)
+          setCrossDomain(r.crossDomain)
+        })
+        .catch(() => {
+          setCarryOverCount(0)
+          setCrossDomain(null)
+        })
 
       const s = results[9] as Record<string, string>
       const savedGoals = s[`weekly_goals_${weekKey}`]
@@ -241,6 +355,8 @@ export default function Weekly(): JSX.Element {
           )}
         </div>
       </div>
+
+      {crossDomain && <WeekAcrossLife x={crossDomain} />}
 
       {/* 7-day grid */}
       <div className="grid grid-cols-7 gap-3 mb-8">

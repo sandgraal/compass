@@ -15,14 +15,35 @@
  * checklist rows are stored (see electron/lib/dates.ts).
  */
 
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, between, eq, gte, inArray, lt } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
-import { checklistItems } from '../db/schema'
+import { checklistItems, financeTransactions, habitEntries, habits, records } from '../db/schema'
 import { localYmd } from '../lib/dates'
+import { rankMemories } from '../lib/timeline-memories'
 
 const MAX_CARRYOVER_PREVIEW = 10
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/** Spend categories excluded from the week's discretionary total (internal plumbing). */
+const NON_SPEND_CATEGORIES = new Set(['Transfers', 'Transfer'])
+
+/** This week across every domain — the cross-domain half of the review. */
+export interface WeeklyCrossDomain {
+  spend: {
+    total: number
+    prevTotal: number
+    topCategories: Array<{ category: string; amount: number }>
+  } | null
+  habits: Array<{ name: string; done: number }>
+  health: {
+    steps: number | null
+    prevSteps: number | null
+    sleepHours: number | null
+    prevSleepHours: number | null
+  } | null
+  highlights: Array<{ source: string; type: string; title: string; occurredAt: number | null }>
+}
 
 export interface WeeklyReview {
   weekStart: string
@@ -37,6 +58,8 @@ export interface WeeklyReview {
     count: number
     items: Array<{ id: number; title: string; listDate: string; category: string | null }>
   }
+  /** Spend + habits + health + biggest events for the week — the leverage layer. */
+  crossDomain: WeeklyCrossDomain
 }
 
 function isValidYmd(value: unknown): value is string {
@@ -87,6 +110,157 @@ function dailyRowsForKeys(db: ReturnType<typeof getDb>, keys: string[]): DailyRo
     .all()
 }
 
+/** Never let one cross-domain section (a table absent on an older DB) break the review. */
+function safe<T>(fn: () => T, fallback: T): T {
+  try {
+    return fn()
+  } catch {
+    return fallback
+  }
+}
+
+/** Sum of |negative amounts| (spend) for a finance-date range, excluding transfers, + top categories. */
+function weekSpend(
+  db: ReturnType<typeof getDb>,
+  from: string,
+  to: string
+): { total: number; byCategory: Map<string, number> } {
+  const rows = db
+    .select({ amount: financeTransactions.amount, category: financeTransactions.category })
+    .from(financeTransactions)
+    .where(and(between(financeTransactions.date, from, to), lt(financeTransactions.amount, 0)))
+    .all()
+  let total = 0
+  const byCategory = new Map<string, number>()
+  for (const r of rows) {
+    const cat = r.category ?? 'Uncategorized'
+    if (NON_SPEND_CATEGORIES.has(cat)) continue
+    const v = Math.abs(r.amount)
+    total += v
+    byCategory.set(cat, (byCategory.get(cat) ?? 0) + v)
+  }
+  return { total: Math.round(total * 100) / 100, byCategory }
+}
+
+/** Sum a numeric field from `apple-health` records of a given type over [startMs, endMs). */
+function weekHealthMetric(
+  db: ReturnType<typeof getDb>,
+  type: string,
+  field: 'value' | 'ms',
+  startMs: number,
+  endMs: number
+): number | null {
+  const rows = db
+    .select({ payload: records.payload })
+    .from(records)
+    .where(
+      and(
+        eq(records.source, 'apple-health'),
+        eq(records.type, type),
+        gte(records.occurredAt, new Date(startMs)),
+        lt(records.occurredAt, new Date(endMs))
+      )
+    )
+    .all()
+  if (rows.length === 0) return null
+  let sum = 0
+  for (const r of rows) {
+    try {
+      const p = JSON.parse(r.payload ?? '{}') as Record<string, number>
+      const v = Number(p[field])
+      if (Number.isFinite(v)) sum += v
+    } catch {
+      /* skip unparseable payload */
+    }
+  }
+  return Math.round(sum)
+}
+
+/** Compute the cross-domain half of the review — each section guarded independently. */
+function buildCrossDomain(
+  db: ReturnType<typeof getDb>,
+  weekStartYmd: string,
+  weekEndYmd: string
+): WeeklyCrossDomain {
+  const startMs = new Date(`${weekStartYmd}T00:00:00`).getTime()
+  const endMs = startMs + 7 * 86_400_000
+  const prevStartMs = startMs - 7 * 86_400_000
+  const prevStartYmd = addDaysYmd(weekStartYmd, -7)
+  const prevEndYmd = addDaysYmd(weekStartYmd, -1)
+
+  const spend = safe<WeeklyCrossDomain['spend']>(() => {
+    const cur = weekSpend(db, weekStartYmd, weekEndYmd)
+    const prev = weekSpend(db, prevStartYmd, prevEndYmd)
+    if (cur.total === 0 && prev.total === 0) return null
+    const topCategories = [...cur.byCategory.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([category, amount]) => ({ category, amount: Math.round(amount * 100) / 100 }))
+    return { total: cur.total, prevTotal: prev.total, topCategories }
+  }, null)
+
+  const habitList = safe<WeeklyCrossDomain['habits']>(() => {
+    const active = db.select().from(habits).where(eq(habits.active, true)).all()
+    if (active.length === 0) return []
+    const keys = weekDayKeys(weekStartYmd)
+    const out: Array<{ name: string; done: number }> = []
+    for (const h of active) {
+      if (h.id == null) continue
+      const done = db
+        .select({ date: habitEntries.date })
+        .from(habitEntries)
+        .where(
+          and(
+            eq(habitEntries.habitId, h.id),
+            eq(habitEntries.completed, true),
+            inArray(habitEntries.date, keys)
+          )
+        )
+        .all().length
+      if (done > 0) out.push({ name: h.name, done })
+    }
+    return out.sort((a, b) => b.done - a.done)
+  }, [])
+
+  const health = safe<WeeklyCrossDomain['health']>(() => {
+    const steps = weekHealthMetric(db, 'steps', 'value', startMs, endMs)
+    const prevSteps = weekHealthMetric(db, 'steps', 'value', prevStartMs, startMs)
+    const sleepMs = weekHealthMetric(db, 'sleep', 'ms', startMs, endMs)
+    const prevSleepMs = weekHealthMetric(db, 'sleep', 'ms', prevStartMs, startMs)
+    if (steps == null && sleepMs == null) return null
+    const hrs = (ms: number | null): number | null =>
+      ms == null ? null : Math.round((ms / 3_600_000) * 10) / 10
+    return { steps, prevSteps, sleepHours: hrs(sleepMs), prevSleepHours: hrs(prevSleepMs) }
+  }, null)
+
+  const highlights = safe<WeeklyCrossDomain['highlights']>(() => {
+    const weekRecords = db
+      .select({
+        id: records.id,
+        source: records.source,
+        type: records.type,
+        occurredAt: records.occurredAt,
+        title: records.title,
+        body: records.body
+      })
+      .from(records)
+      .where(
+        and(gte(records.occurredAt, new Date(startMs)), lt(records.occurredAt, new Date(endMs)))
+      )
+      .all()
+      .map((r) => ({ ...r, occurredAt: r.occurredAt ? r.occurredAt.getTime() : null }))
+    // Reuse the on-this-day memory ranker to pick the week's most notable events.
+    return rankMemories(weekRecords, { cap: 5 }).map((r) => ({
+      source: r.source,
+      type: r.type,
+      title: r.title,
+      occurredAt: r.occurredAt
+    }))
+  }, [])
+
+  return { spend, habits: habitList, health, highlights }
+}
+
 export function buildWeeklyReview(
   db: ReturnType<typeof getDb>,
   weekStartYmd: string
@@ -132,7 +306,8 @@ export function buildWeeklyReview(
         listDate: r.listDate,
         category: r.category
       }))
-    }
+    },
+    crossDomain: buildCrossDomain(db, weekStartYmd, keys[6])
   }
 }
 
