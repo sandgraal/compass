@@ -3,6 +3,7 @@
  * `insertRecords` (the spine projection) is mocked to a spy so this suite stays
  * focused on the documents domain without pulling in records.ts's dep tree.
  */
+import { createHash } from 'node:crypto'
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -14,10 +15,18 @@ import * as schema from '../db/schema'
 
 let sqlite: Database.Database
 
+function documentSpineHash(sha256: string): string {
+  return createHash('sha1').update(`document|file||${sha256}`).digest('hex').slice(0, 16)
+}
+
 vi.mock('../db/client', () => ({ getDb: () => drizzle(sqlite, { schema }) }))
-vi.mock('../lib/pdf', () => ({
-  extractPdfText: vi.fn(async () => ({ text: 'ACME invoice — total 4200 due March', pages: 3 }))
-}))
+vi.mock('../lib/pdf', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/pdf')>()
+  return {
+    ...actual,
+    extractPdfText: vi.fn(async () => ({ text: 'ACME invoice — total 4200 due March', pages: 3 }))
+  }
+})
 vi.mock('./records', () => ({ insertRecords: vi.fn(() => ({ imported: 1 })) }))
 vi.mock('electron', () => ({
   dialog: { showOpenDialog: vi.fn() },
@@ -189,7 +198,13 @@ describe('documents:delete', () => {
     // Simulate the spine projection the mocked insertRecords didn't actually write.
     sqlite
       .prepare('INSERT INTO records (source, type, title, payload, dedup_hash) VALUES (?,?,?,?,?)')
-      .run('document', 'file', 'bye', JSON.stringify({ sha256: doc.sha256 }), `doc-${doc.sha256}`)
+      .run(
+        'document',
+        'file',
+        'bye',
+        JSON.stringify({ sha256: doc.sha256 }),
+        documentSpineHash(doc.sha256)
+      )
 
     expect(readdirSync(DOCS_DIR)).toContain(doc.storedPath)
 

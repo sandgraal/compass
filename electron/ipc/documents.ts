@@ -18,12 +18,12 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, resolve, sep } from 'node:path'
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import { type IpcMain, dialog, shell } from 'electron'
 import { getDb } from '../db/client'
 import { documentLinks, documents, records } from '../db/schema'
 import { extractPdfText } from '../lib/pdf'
-import type { RecordInput } from '../lib/recognizers'
+import { type RecordInput, hashRecord } from '../lib/recognizers'
 import { DOCUMENTS_DIR } from '../paths'
 import { insertRecords } from './records'
 
@@ -191,22 +191,10 @@ async function importPaths(paths: string[]): Promise<DocumentsImportResult> {
 
 /** Delete the projected `document|file` spine rows for a given content hash. */
 function deleteSpineFor(sha256: string): void {
-  const db = getDb()
-  const rows = db
-    .select({ id: records.id, payload: records.payload })
-    .from(records)
-    .where(and(eq(records.source, 'document'), eq(records.type, 'file')))
-    .all()
-  const ids = rows
-    .filter((r) => {
-      try {
-        return (JSON.parse(r.payload ?? '{}') as { sha256?: string }).sha256 === sha256
-      } catch {
-        return false
-      }
-    })
-    .map((r) => r.id)
-  if (ids.length > 0) db.delete(records).where(inArray(records.id, ids)).run()
+  getDb()
+    .delete(records)
+    .where(eq(records.dedupHash, hashRecord('document', 'file', null, sha256)))
+    .run()
 }
 
 const intId = (v: unknown): number | null =>
