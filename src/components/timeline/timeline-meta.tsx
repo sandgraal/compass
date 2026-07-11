@@ -163,6 +163,12 @@ const TYPE_LABEL: Record<string, string> = {
   comp: 'Rental Comps',
   fact: 'Facts',
   wellness: 'Wellness',
+  hrv: 'HRV',
+  'resting-hr': 'Resting HR',
+  'respiratory-rate': 'Respiratory Rate',
+  'blood-glucose': 'Blood Glucose',
+  vo2max: 'VO₂max',
+  'active-energy': 'Active Energy',
   txn: 'Transactions',
   issue: 'Issues',
   pr: 'Pull Requests'
