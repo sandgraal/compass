@@ -735,6 +735,25 @@ describe('calendar load vs habits (gcal × habits, weekly)', () => {
       buildInsights(db(), NOW).insights.filter((i) => i.kind === 'calendar-load-vs-habits')
     ).toHaveLength(0)
   })
+
+  it('counts busy weeks the user tracked but completed nothing (0% not dropped)', async () => {
+    const { buildInsights } = await import('./insights')
+    const h = addHabit('Meditate')
+    // Busy weeks: many events + a tracked-but-unchecked entry (completed=0) → 0% rate,
+    // which the old `.filter(rateByWeek.has)` would have silently dropped.
+    for (let w = 0; w < 8; w++) {
+      const md = weekYmd(w)
+      const heavy = w % 2 === 0
+      for (let e = 0; e < (heavy ? 8 : 2); e++)
+        addRecord('gcal', 'event', ymdMs(md), { title: 'mtg' })
+      if (heavy) addEntry(h, md, 0)
+      else for (let c = 0; c < 6; c++) addEntry(h, md, 1)
+    }
+    const hit = buildInsights(db(), NOW).insights.filter(
+      (i) => i.kind === 'calendar-load-vs-habits'
+    )
+    expect(hit).toHaveLength(1)
+  })
 })
 
 describe('correlations (chart data for /insights)', () => {

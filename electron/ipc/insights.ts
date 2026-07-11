@@ -970,7 +970,16 @@ function readCalendarByWeek(db: Db, since: Date): Map<string, number> {
   return byWeek
 }
 
-/** Habit completion RATE per week = completed checks / (activeHabits × 7). */
+/**
+ * Habit completion RATE per week = completed checks / (activeHabits × 7). A week
+ * counts as "tracked" if it has ANY habit entry — an unchecked day leaves a
+ * `completed=0` row (see `habits:toggle`), so a busy week where the user
+ * completed nothing still surfaces at rate 0 (the strongest slippage signal)
+ * rather than being dropped. Every tracked week therefore gets a defined rate,
+ * so callers that filter on `.has(week)` never hit an `undefined` → `NaN`. Weeks
+ * with no habit activity at all stay absent — we don't invent 0% for weeks the
+ * user never engaged with (which would false-positive on pre-tracking stretches).
+ */
 function readHabitRateByWeek(db: Db, since: Date, activeCount: number): Map<string, number> {
   if (activeCount <= 0) return new Map()
   const sinceYmd = localYmd(since)
@@ -979,16 +988,17 @@ function readHabitRateByWeek(db: Db, since: Date, activeCount: number): Map<stri
     .from(habitEntries)
     .where(gte(habitEntries.date, sinceYmd))
     .all()
-  const counts = new Map<string, number>()
+  const completed = new Map<string, number>()
+  const tracked = new Set<string>()
   for (const e of rows) {
-    if (!e.completed) continue
     const d = new Date(`${e.date}T00:00:00`)
     if (Number.isNaN(d.getTime())) continue
     const k = weekKey(d)
-    counts.set(k, (counts.get(k) ?? 0) + 1)
+    tracked.add(k)
+    if (e.completed) completed.set(k, (completed.get(k) ?? 0) + 1)
   }
   const rate = new Map<string, number>()
-  for (const [k, c] of counts) rate.set(k, c / (activeCount * 7))
+  for (const k of tracked) rate.set(k, (completed.get(k) ?? 0) / (activeCount * 7))
   return rate
 }
 
