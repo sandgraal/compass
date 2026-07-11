@@ -2282,6 +2282,22 @@ declare global {
           }>
           caja: { monthlyUsd: number; annualUsd: number; ratePct: number }
         }>
+        getTripBundles(): Promise<
+          Array<{
+            id: number
+            country: string
+            countryName: string
+            startDate: string
+            endDate: string
+            days: number
+            notes: string | null
+            source: string
+            spend: number
+            currency: string | null
+            recordCount: number
+            topCategories: Array<{ category: string; amount: number }>
+          }>
+        >
         addTravelSegment(seg: {
           country: string
           startDate: string

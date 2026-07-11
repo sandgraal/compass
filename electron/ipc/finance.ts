@@ -108,6 +108,7 @@ import {
   deleteTravelSegment,
   setResidencyConfig
 } from '../integrations/residency'
+import { buildTripBundles } from '../integrations/trip-bundles'
 import { writeAllFinanceKnowledge } from '../knowledge/finance-extractor'
 import { localYm, localYmd } from '../lib/dates'
 import { DATA_DIR } from '../paths'
@@ -1444,6 +1445,10 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('finance:get-residency-summary', () => {
     return buildResidencySummary(getRawSqlite(), new Date().getFullYear())
   })
+
+  // Per-trip cost bundles: each travel segment joined to the spend + timeline
+  // activity that happened during it ("your CR trip cost $X, N events").
+  ipcMain.handle('finance:get-trip-bundles', () => buildTripBundles(getRawSqlite()))
 
   ipcMain.handle(
     'finance:add-travel-segment',
