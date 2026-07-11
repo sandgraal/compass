@@ -1057,9 +1057,9 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
     if (!auth) return { ok: false, reason: 'no-key' }
     const prompt = yearReviewNarrationPrompt(buildYearReview(getRawSqlite(), year))
     if (!prompt) return { ok: false, reason: 'empty' }
+    yearReviewNarrateController?.abort()
     const controller = new AbortController()
     yearReviewNarrateController = controller
-    try {
       const res = await callLlm({
         provider: auth.provider,
         apiKey: auth.key,
