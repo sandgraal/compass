@@ -252,6 +252,24 @@ describe('deriveEntities — Gmail senders & calendar places', () => {
   })
 })
 
+describe('deriveEntities — travel places', () => {
+  it('derives a country-level place from a logged trip', () => {
+    const [place] = deriveEntities(
+      [
+        rec({
+          source: 'travel',
+          type: 'trip',
+          title: 'Trip to Costa Rica',
+          body: '2026-02-01 → 2026-02-14'
+        })
+      ],
+      NO_OWNED
+    )
+    expect(place.kind).toBe('place')
+    expect(place.name).toBe('Costa Rica')
+  })
+})
+
 describe('deriveEntities — GitHub authors', () => {
   const gh = (repo: string, author: string): EntityRecordRow =>
     rec({ source: 'github', type: 'pr', title: 'A change', body: `${repo} · open · @${author}` })

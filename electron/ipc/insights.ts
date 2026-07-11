@@ -1,22 +1,43 @@
 /**
- * Proactive insights — Phase 7 Track E.
+ * Proactive insights — Phase 7 Track E, expanded by the data-access policy's
+ * cross-domain wiring.
  *
  * One read-only aggregator (`insights:get`) that scans local data for things
  * worth surfacing before the user goes looking: category spending anomalies,
- * uncategorized-spend buildup, habit slippage, and stale notes. Pure
- * detectors over the DB — no network, no LLM, no writes.
+ * uncategorized-spend buildup, habit slippage, stale notes, off-track savings
+ * goals, upcoming renewals (assets + subscriptions), paycheck anomalies, and
+ * utility-bill spikes. Pure detectors over the DB — no network, no LLM, no
+ * writes.
  *
  * `buildInsights(db, now)` is exported for tests (same pattern as
  * `buildMorningBrief`). Thresholds are exported consts so tests pin them.
  */
-import { and, eq, gte, isNull, lt, or } from 'drizzle-orm'
+import { and, asc, eq, gte, isNotNull, isNull, lt, lte, or } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
-import { financeTransactions, habitEntries, habits, knowledgeFiles } from '../db/schema'
+import {
+  argylePaystubs,
+  assets,
+  financeTransactions,
+  financialGoals,
+  habitEntries,
+  habits,
+  knowledgeFiles,
+  subscriptions,
+  utilityBills
+} from '../db/schema'
 import { localYm, localYmd } from '../lib/dates'
 
 export interface Insight {
-  kind: 'spending-anomaly' | 'uncategorized-spend' | 'habit-slippage' | 'stale-notes'
+  kind:
+    | 'spending-anomaly'
+    | 'uncategorized-spend'
+    | 'habit-slippage'
+    | 'stale-notes'
+    | 'goal-off-track'
+    | 'renewal-due'
+    | 'paycheck-anomaly'
+    | 'utility-spike'
   severity: 'info' | 'warn'
   title: string
   detail: string
@@ -46,6 +67,16 @@ export const SLIPPAGE_PRIOR_RATE = 0.5
 export const SLIPPAGE_WEEK_MAX = 1
 /** Stale notes: untouched for this many days (user-authored, non-mirror). */
 export const STALE_NOTE_DAYS = 90
+/** Goal off-track: required monthly must exceed planned by this ratio. */
+export const GOAL_OFF_TRACK_RATIO = 1.25
+/** Renewals (assets + subscriptions) due within this many days. */
+export const RENEWAL_WINDOW_DAYS = 30
+/** Paycheck anomaly: |net − trailing median| must exceed both of these. */
+export const PAYCHECK_DEVIATION_RATIO = 0.1
+export const PAYCHECK_MIN_DELTA = 100
+/** Utility spike: latest bill vs the provider's trailing average. */
+export const UTILITY_SPIKE_RATIO = 1.5
+export const UTILITY_MIN_DELTA = 25
 
 const EXCLUDED_ANOMALY_CATEGORIES = new Set(['Transfers', 'Transfer', 'Uncategorized'])
 /** Mirror namespaces (Notion/Obsidian imports) aren't user-authored notes. */
@@ -216,6 +247,177 @@ function detectStaleNotes(db: Db, now: Date): Insight[] {
   ]
 }
 
+/**
+ * Manual-source savings goals whose planned monthly contribution can't reach
+ * the target by its date. (Auto-linked goals track live aggregates and need
+ * the finance engines to resolve a current value — the Goals page covers those.)
+ */
+function detectGoalsOffTrack(db: Db, now: Date): Insight[] {
+  const today = localYmd(now)
+  const rows = db
+    .select({
+      name: financialGoals.name,
+      targetAmount: financialGoals.targetAmount,
+      targetDate: financialGoals.targetDate,
+      manualCurrent: financialGoals.manualCurrent,
+      monthlyContribution: financialGoals.monthlyContribution
+    })
+    .from(financialGoals)
+    .where(and(eq(financialGoals.source, 'manual'), isNotNull(financialGoals.targetDate)))
+    .all()
+  const insights: Insight[] = []
+  for (const g of rows) {
+    if (!g.targetDate || g.targetDate <= today) continue
+    const needed = g.targetAmount - g.manualCurrent
+    if (needed <= 0) continue
+    const monthsLeft = Math.max(
+      1,
+      (new Date(`${g.targetDate}T00:00:00`).getTime() - now.getTime()) / (30.44 * 24 * 3600 * 1000)
+    )
+    const requiredMonthly = needed / monthsLeft
+    if (
+      g.monthlyContribution <= 0 ||
+      requiredMonthly >= g.monthlyContribution * GOAL_OFF_TRACK_RATIO
+    ) {
+      insights.push({
+        kind: 'goal-off-track',
+        severity: 'warn',
+        title: `"${g.name}" is off track`,
+        detail: `Needs ${money(requiredMonthly)}/month to hit ${money(g.targetAmount)} by ${g.targetDate}; planned contribution is ${money(g.monthlyContribution)}/month.`,
+        route: '/finance'
+      })
+    }
+  }
+  return insights
+}
+
+/** Assets (insurance, memberships, warranties) + subscriptions renewing soon. */
+function detectRenewalsDue(db: Db, now: Date): Insight[] {
+  const today = localYmd(now)
+  const windowEnd = localYmd(new Date(now.getTime() + RENEWAL_WINDOW_DAYS * 24 * 3600 * 1000))
+  const dueAssets = db
+    .select({ name: assets.name, type: assets.type, renewalDate: assets.renewalDate })
+    .from(assets)
+    .where(
+      and(
+        eq(assets.status, 'active'),
+        gte(assets.renewalDate, today),
+        lte(assets.renewalDate, windowEnd)
+      )
+    )
+    .orderBy(asc(assets.renewalDate))
+    .all()
+    .map((a) => `${a.name} (${a.type}, ${a.renewalDate})`)
+  const dueSubs = db
+    .select({
+      name: subscriptions.name,
+      cost: subscriptions.cost,
+      cadence: subscriptions.cadence,
+      nextRenewal: subscriptions.nextRenewal
+    })
+    .from(subscriptions)
+    .where(
+      and(
+        eq(subscriptions.status, 'active'),
+        // Only the longer cadences are worth a heads-up — a monthly renewal
+        // is routine, an annual one is a decision point.
+        or(eq(subscriptions.cadence, 'yearly'), eq(subscriptions.cadence, 'semi-annual')),
+        gte(subscriptions.nextRenewal, today),
+        lte(subscriptions.nextRenewal, windowEnd)
+      )
+    )
+    .orderBy(asc(subscriptions.nextRenewal))
+    .all()
+    .map((s) => `${s.name} (${money(s.cost)}/${s.cadence}, ${s.nextRenewal})`)
+  const due = [...dueAssets, ...dueSubs]
+  if (due.length === 0) return []
+  return [
+    {
+      kind: 'renewal-due',
+      severity: 'info',
+      title: `${due.length} renewal${due.length === 1 ? '' : 's'} in the next ${RENEWAL_WINDOW_DAYS} days`,
+      detail: due.slice(0, 4).join('; ') + (due.length > 4 ? '…' : '.'),
+      route: due.length === dueSubs.length ? '/subscriptions' : '/assets'
+    }
+  ]
+}
+
+/** Latest paycheck's net pay deviating from the trailing median. */
+function detectPaycheckAnomaly(db: Db): Insight[] {
+  const stubs = db
+    .select({
+      employer: argylePaystubs.employer,
+      netPay: argylePaystubs.netPay,
+      paidAt: argylePaystubs.paidAt
+    })
+    .from(argylePaystubs)
+    .where(and(isNotNull(argylePaystubs.netPay), isNotNull(argylePaystubs.paidAt)))
+    .all()
+    .sort((a, b) => (b.paidAt ?? '').localeCompare(a.paidAt ?? ''))
+  if (stubs.length < 3) return [] // not enough history for a meaningful median
+  const [latest, ...prior] = stubs
+  const trailing = prior
+    .slice(0, 6)
+    .map((s) => s.netPay as number)
+    .sort((a, b) => a - b)
+  const mid = Math.floor(trailing.length / 2)
+  const median = trailing.length % 2 === 0 ? (trailing[mid - 1] + trailing[mid]) / 2 : trailing[mid]
+  const latestNet = latest.netPay as number
+  const delta = latestNet - median
+  if (Math.abs(delta) < PAYCHECK_MIN_DELTA || Math.abs(delta) < median * PAYCHECK_DEVIATION_RATIO) {
+    return []
+  }
+  const dir = delta > 0 ? 'higher' : 'lower'
+  return [
+    {
+      kind: 'paycheck-anomaly',
+      severity: 'warn',
+      title: `Latest paycheck is ${money(Math.abs(delta))} ${dir} than usual`,
+      detail: `${latest.employer ?? 'Your employer'} deposited ${money(latestNet)} on ${latest.paidAt} vs a ${money(median)} trailing median.`,
+      route: '/finance'
+    }
+  ]
+}
+
+/** Latest utility statement per provider vs that provider's trailing average. */
+function detectUtilitySpikes(db: Db): Insight[] {
+  const bills = db
+    .select({
+      provider: utilityBills.provider,
+      amount: utilityBills.amount,
+      statementDate: utilityBills.statementDate
+    })
+    .from(utilityBills)
+    .where(and(isNotNull(utilityBills.amount), isNotNull(utilityBills.statementDate)))
+    .all()
+  const byProvider = new Map<string, Array<{ amount: number; date: string }>>()
+  for (const b of bills) {
+    const key = b.provider ?? 'Utility'
+    const list = byProvider.get(key) ?? []
+    list.push({ amount: b.amount as number, date: b.statementDate as string })
+    byProvider.set(key, list)
+  }
+  const insights: Insight[] = []
+  for (const [provider, list] of byProvider) {
+    if (list.length < 3) continue
+    list.sort((a, b) => b.date.localeCompare(a.date))
+    const [latest, ...prior] = list
+    const baseline = prior.slice(0, 3)
+    const avg = baseline.reduce((s, b) => s + b.amount, 0) / baseline.length
+    if (avg <= 0) continue
+    if (latest.amount >= avg * UTILITY_SPIKE_RATIO && latest.amount - avg >= UTILITY_MIN_DELTA) {
+      insights.push({
+        kind: 'utility-spike',
+        severity: 'warn',
+        title: `${provider} bill is up ${Math.round((latest.amount / avg - 1) * 100)}%`,
+        detail: `${money(latest.amount)} on ${latest.date} vs a ${money(avg)} average over the prior ${baseline.length} statements.`,
+        route: '/finance'
+      })
+    }
+  }
+  return insights
+}
+
 // ── Aggregator ───────────────────────────────────────────────────────────────
 
 export function buildInsights(db: Db, now: Date = new Date()): InsightsResult {
@@ -223,11 +425,28 @@ export function buildInsights(db: Db, now: Date = new Date()): InsightsResult {
     ...detectSpendingAnomalies(db, now),
     ...detectUncategorizedSpend(db, now),
     ...detectHabitSlippage(db, now),
-    ...detectStaleNotes(db, now)
+    ...detectStaleNotes(db, now),
+    ...safeDetect(() => detectGoalsOffTrack(db, now)),
+    ...safeDetect(() => detectRenewalsDue(db, now)),
+    ...safeDetect(() => detectPaycheckAnomaly(db)),
+    ...safeDetect(() => detectUtilitySpikes(db))
   ]
   // Warnings first, stable within severity (detector order is intentional).
   insights.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'warn' ? -1 : 1))
   return { generatedAt: now.toISOString(), insights }
+}
+
+/**
+ * The cross-domain detectors read tables that may not exist on an older DB
+ * (goals/assets/subscriptions/paystubs/bills post-date several releases) —
+ * a missing table must not take down the whole insights card.
+ */
+function safeDetect(fn: () => Insight[]): Insight[] {
+  try {
+    return fn()
+  } catch {
+    return []
+  }
 }
 
 export function registerInsightsHandlers(ipcMain: IpcMain): void {
