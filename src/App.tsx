@@ -16,6 +16,7 @@ import Export from './pages/Export'
 import Finance from './pages/Finance'
 import GoogleSaved from './pages/GoogleSaved'
 import Health from './pages/Health'
+import Insights from './pages/Insights'
 import Integrations from './pages/Integrations'
 import KnowledgeBase from './pages/KnowledgeBase'
 import Merchants from './pages/Merchants'
@@ -86,6 +87,7 @@ export default function App(): JSX.Element {
           <Route index element={<Navigate to="/overview" replace />} />
           <Route path="overview" element={<Overview />} />
           <Route path="dashboard" element={<Dashboard />} />
+          <Route path="insights" element={<Insights />} />
           <Route path="daily" element={<Daily />} />
           <Route path="weekly" element={<Weekly />} />
           <Route path="monthly" element={<Monthly />} />

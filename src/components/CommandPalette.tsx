@@ -125,6 +125,25 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       keywords: ['home', 'today']
     },
     {
+      id: 'insights',
+      label: 'Insights',
+      description: 'Cross-domain correlations from your data',
+      icon: <LineChart size={15} />,
+      action: () => nav('/insights'),
+      keywords: [
+        'insights',
+        'correlations',
+        'trends',
+        'sleep',
+        'spend',
+        'commits',
+        'recovery',
+        'calendar',
+        'habits',
+        'leverage'
+      ]
+    },
+    {
       id: 'health',
       label: 'Health',
       description: 'Sleep, activity, and recovery trends',

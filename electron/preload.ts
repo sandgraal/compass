@@ -217,7 +217,8 @@ const api = {
 
   // --- Proactive insights (Phase 7 Track E) ---
   insights: {
-    get: () => ipcRenderer.invoke('insights:get')
+    get: () => ipcRenderer.invoke('insights:get'),
+    correlations: () => ipcRenderer.invoke('insights:correlations')
   },
 
   // --- Plaid (Phase 4.6 — bank Link flow) ---

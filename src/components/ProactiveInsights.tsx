@@ -2,7 +2,9 @@ import {
   Archive,
   BellRing,
   CalendarClock,
+  CalendarDays,
   Flame,
+  GitCommitHorizontal,
   Lightbulb,
   Moon,
   PiggyBank,
@@ -34,6 +36,8 @@ type Insight = {
     | 'sleep-vs-spend'
     | 'savings-rate'
     | 'medical-out-of-pocket'
+    | 'dev-productivity-vs-recovery'
+    | 'calendar-load-vs-habits'
   severity: 'info' | 'warn'
   title: string
   detail: string
@@ -53,7 +57,9 @@ const KIND_ICON: Record<Insight['kind'], JSX.Element> = {
   'unused-subscription': <Repeat size={15} className="text-sky-400" />,
   'sleep-vs-spend': <Moon size={15} className="text-indigo-400" />,
   'savings-rate': <PiggyBank size={15} className="text-amber-400" />,
-  'medical-out-of-pocket': <Stethoscope size={15} className="text-rose-400" />
+  'medical-out-of-pocket': <Stethoscope size={15} className="text-rose-400" />,
+  'dev-productivity-vs-recovery': <GitCommitHorizontal size={15} className="text-emerald-400" />,
+  'calendar-load-vs-habits': <CalendarDays size={15} className="text-violet-400" />
 }
 
 /**

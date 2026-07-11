@@ -1109,11 +1109,28 @@ declare global {
               | 'sleep-vs-spend'
               | 'savings-rate'
               | 'medical-out-of-pocket'
+              | 'dev-productivity-vs-recovery'
+              | 'calendar-load-vs-habits'
             severity: 'info' | 'warn'
             title: string
             detail: string
             route: string
           }>
+        }>
+        correlations(): Promise<{
+          generatedAt: string
+          sleepVsSpend: {
+            source: 'apple-health' | 'oura'
+            points: Array<{ week: string; sleep: number; spend: number }>
+          } | null
+          devVsRecovery: {
+            axis: string
+            betterIsHigher: boolean
+            points: Array<{ day: string; commits: number; recovery: number }>
+          } | null
+          calendarVsHabits: {
+            points: Array<{ week: string; events: number; completionRate: number }>
+          } | null
         }>
       }
       plaid: {

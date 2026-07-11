@@ -1,4 +1,5 @@
 import {
+  Activity,
   BedDouble,
   Blocks,
   BookOpen,
@@ -102,6 +103,7 @@ export function Sidebar(): JSX.Element {
       items: [
         { label: 'Overview', to: '/overview', icon: <LayoutGrid size={18} /> },
         { label: 'Dashboard', to: '/dashboard', icon: <LayoutDashboard size={18} /> },
+        { label: 'Insights', to: '/insights', icon: <Activity size={18} /> },
         { label: 'Timeline', to: '/timeline', icon: <Clock size={18} /> }
       ]
     },
