@@ -149,17 +149,19 @@ function addRecord(
     )
 }
 
+let subSeq = 0
 function addSubscription(
   name: string,
   cost: number,
   opts: { cadence?: string; status?: string } = {}
 ): void {
+  subSeq++
   sqlite
     .prepare(
       'INSERT INTO subscriptions (external_id, name, cost, cadence, status) VALUES (?,?,?,?,?)'
     )
     .run(
-      `sub-${name}-${Math.random()}`,
+      `sub-${name}-${subSeq}`,
       name,
       cost,
       opts.cadence ?? 'monthly',
