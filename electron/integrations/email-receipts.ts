@@ -185,7 +185,7 @@ export function receiptsToRecords(messages: Array<{ id: string; data: GmailFull 
     const from = header(data.payload?.headers, 'From')
     const dateHeader = header(data.payload?.headers, 'Date')
     const internalMs = Number(data.internalDate)
-    const headerMs = dateHeader ? Date.parse(dateHeader) : NaN
+    const headerMs = dateHeader ? Date.parse(dateHeader) : Number.NaN
     const receivedAt = Number.isFinite(internalMs) ? internalMs : headerMs
     if (!Number.isFinite(receivedAt)) continue
     const bodyText = extractBody(data.payload)
