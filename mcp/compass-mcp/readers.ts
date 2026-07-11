@@ -358,7 +358,7 @@ export const CONTACT_QUERY_MAX = 200
  */
 export function readContacts(db: Database.Database, q: string, limit = 10): ContactHit[] {
   if (!hasObject(db, 'contacts')) return []
-  const needle = q.trim().toLowerCase().slice(0, CONTACT_QUERY_MAX)
+  const needle = q.slice(0, CONTACT_QUERY_MAX).trim().toLowerCase()
   if (!needle) return []
   const capped = Math.max(1, Math.min(Math.floor(limit), CONTACTS_MAX))
   return db

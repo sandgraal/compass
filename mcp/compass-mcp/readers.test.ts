@@ -283,9 +283,9 @@ describe('readTransactions', () => {
     createTxns()
     add('2026-06-01', -6.5, 'STARBUCKS')
     add('2026-06-15', -42, 'WHOLE FOODS', 'Groceries')
-    expect(
-      readTransactions(db, { month: '2026-06', from: '2026-06-10', to: '2026-06-12' }).count
-    ).toBe(2)
+    const result = readTransactions(db, { month: '2026-06', from: '2026-06-10', to: '2026-06-12' })
+    expect(result.count).toBe(2)
+    expect(result.transactions.map((t) => t.date)).toEqual(['2026-06-15', '2026-06-01'])
   })
 
   it('rejects malformed month/date filters', () => {
