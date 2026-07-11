@@ -507,7 +507,7 @@ CRED (10.6).
   Link child-window bridge): opt-in, vault-backed (`portal-credentials`), isolated, assisted-login for MFA.
   Cross-cutting + riskiest → **last**. **Design gate:** [`cred-engine-design.md`](cred-engine-design.md)
   (assisted-first / no-stored-creds v1, threat model, phased build, open questions).
-- [x] **10.7 Advanced leverage** ✅ *Converse (FTS + semantic search) · Connect (People + "on this day") · Curate (firehose tiering) all shipped — see sub-items; rich combined dashboards remain a follow-up* — rich unified timeline, cross-source insights (sleep vs. spending, "on this
+- [x] **10.7 Advanced leverage** ✅ *Converse (FTS + semantic search) · Connect (People + "on this day") · Curate (firehose tiering) · combined dashboards all shipped — see sub-items* — rich unified timeline, cross-source insights (sleep vs. spending, "on this
   day"), Ask-Compass-over-everything (extends the Phase 5.9 semantic index + Phase 8.5 agent tools), combined
   dashboards. *(Basic timeline + Ask-over-it ship incrementally from 10.1.)*
   - [x] **"Converse" — full-text search + ask-over-everything (PR1).** `records_fts` external-content FTS5
@@ -558,6 +558,15 @@ CRED (10.6).
     `yearReviewNarrationEnabled` + a configured key, own `AbortController` (never cancels an in-flight
     `assistant:ask`); any failure keeps the deterministic template. `records:year-review-markdown` gained an
     optional `narrative` override so the Save-to-Knowledge export matches whichever prose is on screen.
+  - [x] **"Combined dashboards" — cross-domain correlations** (Phase 1 of the post-v1.6.0 leverage roadmap,
+    `feat/leverage-complete`). Two new detectors — `detectDevProductivityVsRecovery` (GitHub commits/day vs. a
+    recovery axis: Oura readiness → Apple HRV → resting-HR, first with ≥20 days wins) and
+    `detectCalendarLoadVsHabits` (Google Calendar event density vs. habit-check completion) — plus a broadened
+    `detectSleepVsSpend` that falls back to Oura `sleepScore` when Apple Health sleep is absent. New
+    `insights:correlations` IPC returns the underlying paired series (`sleepVsSpend` / `devVsRecovery` /
+    `calendarVsHabits`) for a new `/insights` page (recharts scatter plots, reuses the same read helpers as the
+    detectors so chart data can't drift from the nudges). This closes the "rich combined dashboards" follow-up
+    noted above. 14 new tests.
 - [x] **10.8 Location → Residency autopilot** ✅ *shipped* — the first **completes-a-feature** source: a dropped
   location export (OwnTracks `.rec`/`.json`, GPX, Google `Records.json` streamed) → raw points in a dedicated
   `location_points` table (migration `0029`, BOTH paths) → an offline point-in-polygon projector
