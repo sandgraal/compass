@@ -70,8 +70,10 @@ function groupByName(rows: Row[]): DirectoryEntry[] {
     if (r.recordedAt) {
       e.dates.push(r.recordedAt)
       // Track the status of the most recent record (undated never wins).
-      if (!e.latest || r.recordedAt > e.latest.date)
-        e.latest = { date: r.recordedAt, status: r.status }
+      if (!e.latest || r.recordedAt > e.latest.date) e.latest = { date: r.recordedAt, status: r.status }
+    } else if (!e.latest || (e.latest.date === '' && !e.latest.status && r.status)) {
+      // If everything is undated, keep a status rather than dropping it.
+      e.latest = { date: '', status: r.status }
     }
   }
   return (
