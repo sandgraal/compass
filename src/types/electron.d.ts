@@ -1258,7 +1258,11 @@ declare global {
           }>
         >
         yearReview(opts?: { year?: number }): Promise<YearReviewSummary | null>
-        yearReviewMarkdown(opts?: { year?: number }): Promise<string | null>
+        yearReviewMarkdown(opts?: { year?: number; narrative?: string }): Promise<string | null>
+        narrateYearReview(opts?: { year?: number }): Promise<
+          | { ok: true; narrative: string; provider: 'anthropic' | 'openai' }
+          | { ok: false; reason: string; error?: string }
+        >
         mute(opts: {
           kind: 'record' | 'source-type'
           target: string | number

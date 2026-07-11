@@ -420,8 +420,10 @@ const api = {
     moments: (opts?: { month?: number; day?: number }) =>
       ipcRenderer.invoke('records:moments', opts),
     yearReview: (opts?: { year?: number }) => ipcRenderer.invoke('records:year-review', opts),
-    yearReviewMarkdown: (opts?: { year?: number }) =>
+    yearReviewMarkdown: (opts?: { year?: number; narrative?: string }) =>
       ipcRenderer.invoke('records:year-review-markdown', opts),
+    narrateYearReview: (opts?: { year?: number }) =>
+      ipcRenderer.invoke('records:year-review-narrate', opts),
     mute: (opts: { kind: 'record' | 'source-type'; target: string | number }) =>
       ipcRenderer.invoke('records:mute', opts),
     mutes: () => ipcRenderer.invoke('records:mutes'),
