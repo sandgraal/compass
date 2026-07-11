@@ -113,10 +113,11 @@ function WeekAcrossLife({ x }: { x: WeeklyReview['crossDomain'] }): JSX.Element 
               <Sparkles size={13} className="text-amber-400" /> Highlights
             </div>
             <ul className="text-xs text-foreground space-y-0.5">
-              {x.highlights.map((h) => (
-                <li key={`${h.source}-${h.title}`} className="truncate">
-                  {h.title}
-                </li>
+{x.highlights.map((h) => (
+  <li key={`${h.source}-${h.type}-${h.occurredAt ?? 'na'}-${h.title}`} className="truncate">
+    {h.title}
+  </li>
+))}
               ))}
             </ul>
           </div>
