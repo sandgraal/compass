@@ -265,7 +265,7 @@ export async function syncEmailReceipts(mainWindow?: BrowserWindow): Promise<Syn
     }
   }
   try {
-    if (!(await hasGoogleScope('gmail.readonly'))) {
+    if (!hasGoogleScope('gmail.readonly')) {
       throw new Error('Gmail read permission not granted — reconnect Google.')
     }
     const accessToken = await getValidGoogleToken()
