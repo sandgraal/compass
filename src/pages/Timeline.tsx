@@ -290,6 +290,16 @@ export default function Timeline(): JSX.Element {
     setQuery(title)
   }
 
+  // Pivot: "See all <source>" from the drawer → Browse filtered to that source.
+  function pivotToSource(source: string): void {
+    setDetail(null)
+    setQuery('')
+    setRange(null)
+    setTypesSel([])
+    setSourcesSel([source])
+    switchView('browse')
+  }
+
   async function muteMemory(kind: 'record' | 'source-type', target: string): Promise<void> {
     if (!isElectron()) return
     const res = await window.api.records.mute({ kind, target })
@@ -617,6 +627,7 @@ export default function Timeline(): JSX.Element {
           record={detail}
           onClose={() => setDetail(null)}
           onFindSimilar={findSimilar}
+          onPivotSource={pivotToSource}
           onMute={(kind, target) => void muteMemory(kind, target)}
         />
       )}

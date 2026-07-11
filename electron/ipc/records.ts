@@ -14,7 +14,7 @@
  * `location_points` off the spine. See docs/data-access-policy.md.
  */
 
-import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
+import { closeSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname } from 'node:path'
 import Database from 'better-sqlite3'
 import { type SQL, and, desc, eq, inArray, like, notInArray, or, sql } from 'drizzle-orm'
@@ -1029,6 +1029,46 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
       // the export matches what the user is looking at; else the template.
       const override = typeof opts?.narrative === 'string' ? opts.narrative.trim() : ''
       return yearReviewMarkdown(buildYearReview(getRawSqlite(), year), override || undefined)
+    }
+  )
+
+  // Save a shareable Year-in-Review PNG (Timeline 2.1). The renderer rasterizes
+  // the SVG card to a base64 PNG (local, no network) and hands the bytes here;
+  // this shows a save dialog and writes them. Purely local file I/O.
+  ipcMain.handle(
+    'records:export-year-review-image',
+    async (_event, opts?: { year?: number; pngBase64?: string }) => {
+      const year = Math.trunc(opts?.year ?? new Date().getUTCFullYear())
+      // Validate the year window like the other Year Review handlers.
+      if (!Number.isInteger(year) || year < 1970 || year > 2100) {
+        return { saved: false, error: 'bad-year' }
+      }
+      const b64 = typeof opts?.pngBase64 === 'string' ? opts.pngBase64 : ''
+      // Reject anything that isn't a base64 string up front (cheap, bounds the
+      // decode). The ~11 MB encoded ceiling ≈ 8 MB decoded — a coarse first cut.
+      if (!/^[A-Za-z0-9+/=]+$/.test(b64) || b64.length > 11_000_000) {
+        return { saved: false, error: 'bad-image' }
+      }
+      // Decode once, then enforce the real (decoded-byte) cap and confirm the
+      // payload is actually a PNG — the renderer only ever produces PNGs, so a
+      // mismatch means a malformed/hostile payload we should not write.
+      const buf = Buffer.from(b64, 'base64')
+      const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+      if (buf.length === 0 || buf.length > 8_000_000 || !buf.subarray(0, 8).equals(PNG_SIGNATURE)) {
+        return { saved: false, error: 'bad-image' }
+      }
+      const { canceled, filePath } = await dialog.showSaveDialog({
+        title: `Save ${year} in Review`,
+        defaultPath: `year-review-${year}.png`,
+        filters: [{ name: 'PNG image', extensions: ['png'] }]
+      })
+      if (canceled || !filePath) return { saved: false, canceled: true }
+      try {
+        writeFileSync(filePath, buf)
+        return { saved: true, path: filePath }
+      } catch (err) {
+        return { saved: false, error: err instanceof Error ? err.message : String(err) }
+      }
     }
   )
 

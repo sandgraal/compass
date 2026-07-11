@@ -547,6 +547,17 @@ CRED (10.6).
     with X" / "— X", strips "Chat with"). Title-based, no payload parsing. *Deferred: Venmo (ambiguous "From → To"
     in the body) + email senders (payload + newsletter noise).* **This completes the Phase 10.7 leverage arc**
     (Converse · Connect · Curate); candidate for a v0.14.0 release.
+  - [x] **"Timeline 2.1" — memory-surface glow-up + opt-in cloud narration** (`feat/timeline-polish`, #354–#355;
+    builds on the memory-ranking/year-review work in `electron/lib/timeline-memories.ts` +
+    `electron/lib/records-year-review.ts` — full `records:*` surface documented in `docs/architecture.md`'s IPC
+    map). **Visual (#355):** per-source `sourceColor`, a timeline spine, score-weighted hero cards sized off
+    `TimelineRecord.memoryScore` (now surfaced through `records:on-this-day` / `records:on-this-day-v2`, was
+    previously dropped before the UI), and a payload→fact grid in the detail drawer — pure helpers in
+    `src/lib/timeline-facts.ts`. **Narration (#354):** `records:year-review-narrate` — opt-in, BYO-key cloud-LLM
+    prose for Year in Review (Settings → "AI assist (optional)" → `YearReviewNarrationSetting`), gated on
+    `yearReviewNarrationEnabled` + a configured key, own `AbortController` (never cancels an in-flight
+    `assistant:ask`); any failure keeps the deterministic template. `records:year-review-markdown` gained an
+    optional `narrative` override so the Save-to-Knowledge export matches whichever prose is on screen.
 - [x] **10.8 Location → Residency autopilot** ✅ *shipped* — the first **completes-a-feature** source: a dropped
   location export (OwnTracks `.rec`/`.json`, GPX, Google `Records.json` streamed) → raw points in a dedicated
   `location_points` table (migration `0029`, BOTH paths) → an offline point-in-polygon projector

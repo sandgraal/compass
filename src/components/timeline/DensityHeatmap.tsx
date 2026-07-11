@@ -13,15 +13,19 @@ const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-// Intensity buckets: index = ceil(√(count/max) × 4), so mid-volume months stay
-// visibly distinct from empty ones even next to a massive recent year.
+// Intensity buckets: index = ceil(√(count/max) × 6), so mid-volume months stay
+// visibly distinct from empty ones even next to a massive recent year. A wider
+// 7-step ramp (vs the old 5) gives the grid GitHub-graph richness.
 const LEVEL_CLASS = [
   'bg-secondary',
-  'bg-primary/20',
-  'bg-primary/45',
+  'bg-primary/15',
+  'bg-primary/30',
+  'bg-primary/50',
   'bg-primary/70',
+  'bg-primary/85',
   'bg-primary'
 ]
+const LEVEL_MAX = LEVEL_CLASS.length - 1
 
 export function DensityHeatmap({
   onPickMonth
@@ -100,7 +104,12 @@ export function DensityHeatmap({
                 const key = `${year}-${String(month0 + 1).padStart(2, '0')}`
                 const count = cells.get(key) ?? 0
                 const level =
-                  count === 0 ? 0 : Math.min(4, Math.max(1, Math.ceil(Math.sqrt(count / max) * 4)))
+                  count === 0
+                    ? 0
+                    : Math.min(
+                        LEVEL_MAX,
+                        Math.max(1, Math.ceil(Math.sqrt(count / max) * LEVEL_MAX))
+                      )
                 return (
                   <button
                     key={key}

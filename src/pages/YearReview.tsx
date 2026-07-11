@@ -10,6 +10,7 @@ import {
   BookmarkPlus,
   ChevronLeft,
   ChevronRight,
+  ImageDown,
   PartyPopper,
   RefreshCw,
   Sparkles
@@ -19,6 +20,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { sourceMeta, typeLabel } from '../components/timeline/timeline-meta'
 import { useToast } from '../components/ui/Toast'
+import { CARD_H, CARD_W, buildYearReviewSvg } from '../lib/year-review-image'
 
 const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
 
@@ -108,6 +110,50 @@ export default function YearReview(): JSX.Element {
   // The prose actually on screen (LLM when present, else the template).
   const shownNarrative = narrated?.text ?? review?.narrative ?? ''
 
+  // Render the shareable card SVG → PNG locally (no network, CSP-safe data:
+  // URI) and hand the bytes to the save-dialog IPC.
+  async function shareImage(): Promise<void> {
+    if (!isElectron() || !review) return
+    const svg = buildYearReviewSvg({
+      year: review.year,
+      totalRecords: review.totalRecords,
+      sources: review.topSources.length,
+      newPeople: review.newPeople,
+      countries: review.countries.length,
+      narrative: shownNarrative
+    })
+    const pngBase64 = await new Promise<string | null>((resolve) => {
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        canvas.width = CARD_W
+        canvas.height = CARD_H
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return resolve(null)
+        ctx.drawImage(img, 0, 0)
+        canvas.toBlob((blob) => {
+          if (!blob) return resolve(null)
+          const reader = new FileReader()
+          reader.onloadend = () =>
+            resolve(typeof reader.result === 'string' ? reader.result.split(',')[1] : null)
+          reader.onerror = () => resolve(null)
+          reader.readAsDataURL(blob)
+        }, 'image/png')
+      }
+      img.onerror = () => resolve(null)
+      img.src = `data:image/svg+xml,${encodeURIComponent(svg)}`
+    })
+    if (!pngBase64) {
+      toast('Could not render the image', 'error')
+      return
+    }
+    // Use review.year (what the card was built from), not the state year — a
+    // year change mid-render could otherwise mismatch the image and filename.
+    const res = await window.api.records.exportYearReviewImage({ year: review.year, pngBase64 })
+    if (res.saved) toast('Saved your Year in Review image', 'success')
+    else if (!res.canceled) toast('Could not save the image', 'error')
+  }
+
   async function saveToKnowledge(): Promise<void> {
     if (!isElectron()) return
     // Export what's displayed — the LLM prose if we narrated, else the template.
@@ -166,9 +212,18 @@ export default function YearReview(): JSX.Element {
           </button>
           <button
             type="button"
+            onClick={shareImage}
+            disabled={loading || !review || review.totalRecords === 0}
+            title="Save a shareable image"
+            className="ml-2 flex items-center gap-1.5 text-sm px-3 py-2 border border-border text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors disabled:opacity-50"
+          >
+            <ImageDown size={14} /> Share image
+          </button>
+          <button
+            type="button"
             onClick={saveToKnowledge}
-            disabled={!review || review.totalRecords === 0}
-            className="ml-2 flex items-center gap-1.5 text-sm px-3 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
+            disabled={loading || !review || review.totalRecords === 0}
+            className="flex items-center gap-1.5 text-sm px-3 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
           >
             <BookmarkPlus size={14} /> Save to Knowledge
           </button>
