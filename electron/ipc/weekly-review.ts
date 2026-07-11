@@ -200,25 +200,35 @@ function buildCrossDomain(
   }, null)
 
   const habitList = safe<WeeklyCrossDomain['habits']>(() => {
-    const active = db.select().from(habits).where(eq(habits.active, true)).all()
-    if (active.length === 0) return []
+    const active = db
+      .select({ id: habits.id, name: habits.name })
+      .from(habits)
+      .where(eq(habits.active, true))
+      .all()
+    const ids = active.flatMap((h) => (h.id == null ? [] : [h.id]))
+    if (ids.length === 0) return []
     const keys = weekDayKeys(weekStartYmd)
-    const out: Array<{ name: string; done: number }> = []
-    for (const h of active) {
-      if (h.id == null) continue
-      const done = db
-        .select({ date: habitEntries.date })
-        .from(habitEntries)
-        .where(
-          and(
-            eq(habitEntries.habitId, h.id),
-            eq(habitEntries.completed, true),
-            inArray(habitEntries.date, keys)
-          )
+    const entries = db
+      .select({ habitId: habitEntries.habitId })
+      .from(habitEntries)
+      .where(
+        and(
+          eq(habitEntries.completed, true),
+          inArray(habitEntries.date, keys),
+          inArray(habitEntries.habitId, ids)
         )
-        .all().length
-      if (done > 0) out.push({ name: h.name, done })
+      )
+      .all()
+    const counts = new Map<number, number>()
+    for (const e of entries) {
+      if (e.habitId == null) continue
+      counts.set(e.habitId, (counts.get(e.habitId) ?? 0) + 1)
     }
+    const out = active.flatMap((h) => {
+      if (h.id == null) return []
+      const done = counts.get(h.id) ?? 0
+      return done > 0 ? [{ name: h.name, done }] : []
+    })
     return out.sort((a, b) => b.done - a.done)
   }, [])
 

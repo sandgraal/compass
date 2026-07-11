@@ -98,10 +98,12 @@ function seedRecord(
       `wr-rec-${recN}`
     )
 }
+let txnN = 0
 function seedTxn(date: string, amount: number, category: string): void {
+  txnN++
   sqlite
     .prepare('INSERT INTO finance_transactions (hash, date, amount, category) VALUES (?,?,?,?)')
-    .run(`wr-${date}-${amount}-${category}-${Math.random()}`, date, amount, category)
+    .run(`wr-${date}-${amount}-${category}-${txnN}`, date, amount, category)
 }
 
 afterEach(() => {
