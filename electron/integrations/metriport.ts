@@ -2,9 +2,10 @@
  * Metriport integration (Phase 10.9) — the seventh relay-fronted aggregator, and the first
  * MEDICAL one. Metriport pulls a patient's clinical records from the health-information
  * networks (TEFCA / Carequality / Commonwell) as **FHIR R4** and returns a consolidated
- * bundle. We normalize it into the dedicated `medical_records` table — OFF the records/AI
- * spine (medical is the most sensitive domain → aggregates-only) — for a Medical records
- * surface + an aggregates-only summary.
+ * bundle. We normalize it into the dedicated `medical_records` table, which projects onto
+ * the records spine (data-access policy — docs/data-access-policy.md) for a Medical
+ * records surface, full-detail timeline search, and the AI/MCP medical tools. The
+ * on-this-day sensitivity guard keeps medical out of unsolicited resurfacing.
  *
  * Managed-only (keyed by a static app `x-api-key` in the relay). `normalizeMetriportBundle`
  * is PURE (unit-tested, no network) and stores only the clinical SUMMARY (category, display

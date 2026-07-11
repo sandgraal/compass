@@ -223,8 +223,8 @@ function ensureNewTables(sqlite: Database.Database): void {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS location_points_dedup_hash_unique ON location_points (dedup_hash);
     -- Argyle paystubs (Phase 10.9). Here (always-run fallback) as well as the
-    -- migration because packaged builds skip migrations. OFF the records spine —
-    -- payroll is aggregates-only at the AI/MCP boundary; feeds the forecast.
+    -- migration because packaged builds skip migrations. Projects onto the records
+    -- spine (data-access policy — full-detail paystub tools); feeds the forecast.
     CREATE TABLE IF NOT EXISTS argyle_paystubs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       external_id TEXT NOT NULL,
@@ -242,8 +242,9 @@ function ensureNewTables(sqlite: Database.Database): void {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS argyle_paystubs_external_id_unique ON argyle_paystubs (external_id);
     -- Utility bills (Phase 10.9). Here (always-run fallback) as well as the migration
-    -- because packaged builds skip migrations. OFF the records/finance_transactions spine
-    -- (no double-count; aggregates-only); feeds the property P&L utilities line.
+    -- because packaged builds skip migrations. Projects onto the records spine but stays
+    -- OUT of finance_transactions (no double-count vs the bank payment); feeds the
+    -- property P&L utilities line.
     CREATE TABLE IF NOT EXISTS utility_bills (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       external_id TEXT NOT NULL,
@@ -259,8 +260,9 @@ function ensureNewTables(sqlite: Database.Database): void {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS utility_bills_external_id_unique ON utility_bills (external_id);
     -- Medical records (Phase 10.9). Here (always-run fallback) as well as the migration
-    -- because packaged builds skip migrations. OFF the records/AI spine — medical is the
-    -- most sensitive domain, aggregates-only; stores the clinical summary, never PHI.
+    -- because packaged builds skip migrations. Projects onto the records spine (data-access
+    -- policy — full-detail medical tools; on-this-day guard excludes it from resurfacing);
+    -- stores the clinical summary, never PHI (that detail is stripped at ingest).
     CREATE TABLE IF NOT EXISTS medical_records (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       external_id TEXT NOT NULL,

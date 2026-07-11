@@ -7,11 +7,11 @@
  * `onConflictDoNothing`), exactly like the finance ledger.
  *
  * Local-only: reads files the user explicitly chose, writes a summary to the
- * knowledge base. No network, no vault, no CSP widening. As of Phase 10.7
- * ("Converse") the user opted in to letting the assistant + MCP SEARCH the raw
- * timeline (`records:search` / `search_records` / `compass_search_timeline`),
- * a scoped relaxation that covers `records` ONLY — the vault and raw finance rows
- * stay aggregates-only.
+ * knowledge base. No network, no vault, no CSP widening. The assistant + MCP
+ * SEARCH the timeline in full detail (`records:search` / `search_records` /
+ * `compass_search_timeline`) — per the data-access policy every domain projects
+ * onto `records`; the one exclusion is raw GPS coordinates, which stay in
+ * `location_points` off the spine. See docs/data-access-policy.md.
  */
 
 import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs'

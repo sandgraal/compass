@@ -37,25 +37,25 @@ flowchart LR
   inbox -->|"approve → existing write IPC (validated)"| db[("compass.db / knowledge files")]
   inbox -->|"reject → discard + log"| q
   subgraph excluded["Never exposed to Claude"]
-    vault[["Vault (secrets)"]]
-    raw["Raw finance rows"]
+    creds[["Vault credentials category\n+ token vaults (passwords, API keys,\nbank access tokens)"]]
+    gps["Raw GPS coordinates\n(location_points)"]
   end
 ```
 
-**Invariants (non-negotiable):**
+**Invariants (non-negotiable — see [`data-access-policy.md`](data-access-policy.md) for the full statement):**
 1. Claude **never** writes `compass.db`, the vault, or knowledge files — it only appends to the separate, append-only proposal inbox.
 2. Compass remains the **sole writer**, executing approved proposals through its **existing, input-validating** IPC handlers.
 3. **Every** mutation is **human-approved** in the Claude Inbox and **audit-logged**.
-4. The **vault is never exposed** to any Claude surface (read or write).
-5. Finance is exposed as **summaries/aggregates only** — never raw transaction rows. **This does not apply uniformly to every domain:** Phase 10.7 "Converse" made one deliberate, documented exception — the `records` Timeline (purchases, media, messages, browsing, documents, health, credit/tax, connections, and more, imported from the user's own data exports) is searchable **in detail**, not just in aggregate, via `search_records` (embedded agent) / `compass_search_timeline` (MCP). This was a conscious relaxation for the user's *own acquired data*, scoped narrowly to the records store — vault and raw finance/transaction rows remain aggregates-only with no equivalent exception. `compass_timeline` / `get_timeline` stay aggregate-only (counts by source/kind/year); the detail read is a separate, explicitly-named tool.
-6. Cloud LLM access stays **BYO-key, opt-in, local-first** (Ollama preferred).
-7. **Location stays aggregates-only at every AI surface** — raw `location_points` are never readable by the assistant or MCP (only country-level `travel_segments`). The Places-page map reads clustered location cells through `location:map-data`, but that is a **renderer-local UI read only**; it is not, and must never be, registered as an assistant or MCP tool.
+4. The **vault `credentials` category and all token vaults are never exposed** to any Claude surface (read or write). The vault's *document* categories (financial, identity, medical, legal, foreign-accounts) are readable by the **in-app assistant only** — decrypted in memory per call; the MCP process has no Keychain access and cannot reach the vault at all.
+5. **Every domain is exposed in full detail** (2026-07 data-access policy): the `records` Timeline, individual finance transactions, medical records, contacts, paystubs, and the rest — via explicitly-named detail tools (`search_records`/`list_transactions`/`get_medical_records`/… in the agent; `compass_search_timeline`/`compass_transactions`/`compass_contacts`/… in the MCP). Aggregate tools remain as convenient rollups. The one data exclusion: **raw GPS coordinates never enter `records` or any AI surface** — only country-level `travel_segments` project.
+6. Cloud LLM access stays **BYO-key, opt-in, local-first** (Ollama preferred). Full-detail tool results (including vault documents, in the in-app agent) reach the provider on user-initiated turns — a documented decision, not an accident.
+7. **Raw location is never readable by the assistant or MCP** — reinforcing #5's GPS exclusion. `location_points` never enter `records`; only country-level `travel_segments` project. The Places-page map reads clustered location cells through `location:map-data`, but that is a **renderer-local UI read only**; it is not, and must never be, registered as an assistant or MCP tool.
 
 ## Phase 8 tracks (proposed)
 
-### 8.1 MCP capability expansion ✅ *(shipped)*
+### 8.1 MCP capability expansion ✅ *(shipped; expanded to full detail 2026-07)*
 Extends `mcp/compass-mcp/index.ts`:
-- **New privacy-respecting reads:** `compass_finance_summary` (aggregates only), `compass_health_summary` (Phase 10.3 — aggregates only: step/sleep averages, Oura scores, resting-HR, workout/active-day counts; no raw rows, titles, or weight), `compass_habit_streaks`, `compass_upcoming` (unified daily brief), `compass_tasks` (date-range checklist read, PR #167), `compass_recent_notes` (PR #167), `compass_timeline` (Phase 10.7 — aggregate counts over the unified life Timeline by source/kind/year), `compass_search_timeline` (Phase 10.7 — the detail-record read; see Invariant #5's records exception above).
+- **Reads:** rollups — `compass_finance_summary`, `compass_health_summary`, `compass_income_summary` — plus **full-detail tools** per the data-access policy: `compass_transactions` (individual rows with filters), `compass_contacts` (address-book search), `compass_paystubs` (per-stub rows + totals), `compass_medical_summary` (full clinical rows + counts), `compass_habit_streaks`, `compass_upcoming`, `compass_tasks`, `compass_recent_notes`, `compass_timeline` (aggregate counts by source/kind/year), `compass_search_timeline` (the detail-record read over the whole spine).
 - **Propose-write tools** (enqueue only): `compass_propose_task`, `compass_propose_note`, `compass_propose_txn_tag`, `compass_propose_habit_check` — in `proposals.ts`; each validates input, opens no DB / touches no vault, and appends a `status:'pending'` proposal to the append-only inbox (`<app-data>/.data/claude-inbox.jsonl`). Note paths are relative `.md` only (traversal blocked).
 - Per-tool unit tests in `proposals.test.ts` (validation + enqueue round-trip). The JSONL line schema (`{ id, createdAt, status, source, type, payload }`) is the contract 8.2 consumes — keep it stable.
 
@@ -76,27 +76,26 @@ Extends `mcp/compass-mcp/index.ts`:
 
 ### 8.5 Embedded Claude agent in Ask Compass — ✅ *(shipped)*
 - ✅ `assistant:agent` runs a **bounded Anthropic tool-use loop** (`electron/ipc/assistant.ts`). The client (`llm-client.ts`) gained tool-use + **`cache_control` prompt caching** — kept **HTTP-only, no SDK** to match the codebase's deliberate "don't pull in LLM SDKs" convention.
-- ✅ Tools (`electron/integrations/assistant-tools.ts`, `ASSISTANT_TOOLS`) — 9 today, all read-only except the last:
+- ✅ Tools (`electron/integrations/assistant-tools.ts`, `ASSISTANT_TOOLS`) — all read-only except `propose_task`:
   - `get_upcoming` — today's tasks, near-term calendar, accounts with a payment due
-  - `get_finance_summary` — **aggregates only** (net worth, monthly income/expense/net, current-month spend by category) — never individual transactions
-  - `get_week_tasks` — daily-checklist tasks across a date range
-  - `get_weekly_goals` — the week's goals
-  - `get_habit_streaks` — current/longest streak per active habit
-  - `get_insights` — the same proactive-insights data as the Dashboard "Worth a look" card
-  - `get_timeline` — **aggregate** counts over the unified life Timeline (totals by source/kind/year) — see Invariant #5's records exception above
-  - `search_records` — the **actual matching Timeline records** (not just aggregates) — the same documented "records" exception as the MCP's `compass_search_timeline` (Invariant #5 above)
+  - `get_finance_summary` — the aggregate rollup (net worth, monthly income/expense/net, current-month spend by category); `list_transactions` — **individual transaction rows** with month/range/category/substring filters
+  - `get_week_tasks` / `get_weekly_goals` / `get_habit_streaks` / `get_insights` — planning context
+  - `get_timeline` — aggregate counts over the unified life Timeline; `search_records` — the **actual matching records across every domain** on the spine
+  - `search_contacts` / `get_contact` — address-book search + the full card (never the photo)
+  - `get_medical_records` — full clinical rows; `get_paystubs` — per-stub rows + totals
+  - `search_vault` / `get_vault_entry` — the vault's **document categories** (financial, identity, medical, legal, foreign-accounts), decrypted in memory per call via an injected `VaultReader`. The `credentials` category is refused at the tool boundary AND by the reader's allowlist — passwords/API keys/tokens are sealed everywhere.
   - `propose_task` — **enqueues a `pending` `claude_proposals` row** (→ the Claude Inbox) rather than writing directly. The same propose→approve funnel as the MCP.
-  - Vault is excluded from every tool above; OpenAI keeps the single-shot RAG `ask` instead of the tool-use loop.
+  - OpenAI keeps the single-shot RAG `ask` instead of the tool-use loop.
 - ✅ Renderer **Agent toggle** in Ask Compass (`src/pages/Ask.tsx`) — routes through `assistant:agent`, shows the tool trace, and surfaces proposed changes as a banner linking to the Claude Inbox. Anthropic-only (auto-disabled for other providers).
 - 🔜 More propose-write tools (notes, habits, txn-tag — mirroring the MCP's `compass_propose_*` set) and proactive-insights surfacing beyond the read-only `get_insights`.
 
 ### 8.6 Claude Skills for Compass — ✅ *(shipped)*
-- `claude-plugin/skills/`: `morning-brief`, `weekly-review`, `budget-check`, `plan-my-week`, `capture-from-web`. Each is **read-first** (via the MCP read tools) and routes any change through `compass_propose_*` → the Claude Inbox approval flow — never a direct write. The vault is never exposed; finance stays at the summary level.
+- `claude-plugin/skills/`: `morning-brief`, `weekly-review`, `budget-check`, `plan-my-week`, `capture-from-web`. Each is **read-first** (via the MCP read tools) and routes any change through `compass_propose_*` → the Claude Inbox approval flow — never a direct write. The vault is unreachable from MCP (in-app-assistant-only for document categories; credentials sealed everywhere); finance is readable in full detail via `compass_transactions`.
 
 ## Expert deep-dive (five lenses)
 
 - **Integration architecture** — the read-only-MCP + proposal-queue split is what makes "confirmed writes" safe across a process boundary; the same propose→approve path serves Desktop, Cowork, Code, *and* the embedded Agent SDK, so there's one mutation funnel to secure and audit.
-- **Security / privacy** — vault is categorically excluded; finance is summaries-not-rows; nothing mutates without a human; keys/tokens never leave the device except on user-triggered turns. The Claude Inbox is the consent + audit surface.
+- **Security / privacy** — credentials + token vaults are categorically excluded and raw GPS never reaches an AI surface; everything else is full-detail by explicit policy ([`data-access-policy.md`](data-access-policy.md)); nothing mutates without a human. The Claude Inbox is the consent + audit surface.
 - **Product / UX** — the daily hook compounds: a **Claude-generated Morning Brief** (8.5/8.6) read *from* Compass, and "ask Claude to tidy my week" that lands as reviewable proposals *in* Compass. "Open in Claude" affordances on notes/tasks.
 - **Platform / ecosystem** — the DXT bundle + Cowork plugin + skills library make Compass installable and discoverable wherever Claude runs; the MCP tool contract is the stable, versioned API.
 - **Bidirectional flows** — *Claude→Compass:* "What did I spend on subscriptions last quarter?" (summary read) → "cancel-candidate list, add a task to review each" (proposals). *Compass→Claude:* Ask Compass runs "plan my week" agentically over calendar+tasks+goals, drafting a plan you accept into checklists.

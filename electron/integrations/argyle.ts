@@ -1,9 +1,10 @@
 /**
  * Argyle integration (Phase 10.9) — the third relay-fronted aggregator, feeding the
  * cash-flow forecast. Argyle ("Plaid for payroll") returns real paystubs; we store the
- * adequacy-relevant fields in the dedicated `argyle_paystubs` table (OFF the `records`
- * spine — payroll is aggregates-only at the AI/MCP boundary) and the forecast prefers
- * this ground-truth income over bank-deposit inference (`finance-income.ts`).
+ * adequacy-relevant fields in the dedicated `argyle_paystubs` table, which projects onto
+ * the `records` spine (data-access policy — docs/data-access-policy.md; full-detail
+ * paystub tools in the AI/MCP surface), and the forecast prefers this ground-truth
+ * income over bank-deposit inference (`finance-income.ts`).
  *
  * Managed-only (Argyle has no consumer dev accounts) → always through the relay, which
  * holds the paid Basic-auth key. `normalizeArgylePaystubs` is PURE so it unit-tests
