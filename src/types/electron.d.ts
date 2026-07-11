@@ -571,6 +571,9 @@ declare global {
     firstSeen: number | null
     lastSeen: number | null
     contactId: number | null
+    /** Total P2P money exchanged (Venmo/PayPal), |amount| summed; absent when none. */
+    totalSpend?: number
+    currency?: string | null
   }
 
   type EntityKind = 'person' | 'merchant' | 'place' | 'subscription-candidate'

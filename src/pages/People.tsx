@@ -39,6 +39,23 @@ function fmtMonth(ms: number | null): string {
   })
 }
 
+function fmtMoney(n: number, currency?: string | null): string {
+  const code = currency && /^[A-Za-z]{3}$/.test(currency) ? currency.toUpperCase() : 'USD'
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: code,
+      // Preserve cents when the amount has them (totalSpend is stored to 2dp),
+      // but keep whole amounts clean ("$640", not "$640.00").
+      minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
+      maximumFractionDigits: 2
+    }).format(n)
+  } catch {
+    // Non-ISO currency code → Intl throws; fall back to a plain suffix.
+    return `${n.toLocaleString('en-US')}${code === 'USD' ? '' : ` ${code}`}`
+  }
+}
+
 export default function People(): JSX.Element {
   const [people, setPeople] = useState<Person[]>([])
   const [promotedCount, setPromotedCount] = useState(0)
@@ -251,6 +268,14 @@ export default function People(): JSX.Element {
                     {p.count === 1 ? 'touchpoint' : 'touchpoints'}
                     {p.lastSeen != null && ` · ${fmtMonth(p.lastSeen)}`}
                   </div>
+                  {p.totalSpend != null && p.totalSpend > 0 && (
+                    <div
+                      className="text-[11px] text-emerald-500 mt-0.5"
+                      title="Money exchanged via Venmo / PayPal"
+                    >
+                      {fmtMoney(p.totalSpend, p.currency)} exchanged
+                    </div>
+                  )}
                 </div>
               </button>
               <button
