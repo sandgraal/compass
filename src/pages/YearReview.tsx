@@ -70,8 +70,7 @@ export default function YearReview(): JSX.Element {
         if (!stale) setReview(r)
         // Fire narration after the (instant) template render. The handler is a
         // cheap no-op when narration is off / no key — no egress in that case.
-        if (!stale && r && r.totalRecords > 0) void narrate(false)
-      })
+        if (!stale && r && r.totalRecords > 0) void narrate(false, () => stale)
       .finally(() => {
         if (!stale) setLoading(false)
       })
