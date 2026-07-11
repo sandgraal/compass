@@ -297,6 +297,7 @@ function DetailPanel({
           type="button"
           onClick={onOpen}
           title="Open the file"
+          aria-label="Open the file"
           className="text-muted-foreground hover:text-foreground transition-colors"
         >
           <ExternalLink size={16} />
