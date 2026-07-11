@@ -1380,6 +1380,7 @@ export default function Integrations(): JSX.Element {
             if (setup.authKind === 'paste-token') void submitToken(id)
             else if (setup.authKind === 'relay-widget') void relayConnect(id)
             else if (setup.authKind === 'local-file') void localConnect(id)
+            else if (setup.authKind === 'google-linked') void localConnect(id)
           }}
           onDisconnect={() => disconnect(id)}
           byo={

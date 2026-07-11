@@ -59,6 +59,18 @@ export const INTEGRATION_REGISTRY: Record<string, IntegrationMeta> = {
     logo: 'G',
     connected: true
   },
+  'email-receipts': {
+    id: 'email-receipts',
+    name: 'Email Receipts',
+    category: 'communication-productivity',
+    method: 'live',
+    description:
+      'Reads order/receipt emails from your connected Gmail onto your Timeline + Merchants.',
+    scopes: ['gmail.readonly'],
+    color: 'from-emerald-500/20 to-teal-500/20',
+    logo: 'R',
+    connected: true
+  },
   github: {
     id: 'github',
     name: 'GitHub',

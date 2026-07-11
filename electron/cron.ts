@@ -8,6 +8,7 @@ import { appSettings, integrations } from './db/schema'
 import { syncArcadia } from './integrations/arcadia'
 import { syncArgyle } from './integrations/argyle'
 import { syncCanopy } from './integrations/canopy'
+import { syncEmailReceipts } from './integrations/email-receipts'
 import { syncFxRates } from './integrations/finance-fx-fetch'
 import { captureSnapshots } from './integrations/finance-snapshot'
 import { syncKnot } from './integrations/knot'
@@ -155,6 +156,8 @@ function runSyncForService(service: string): void {
     void syncNotion(win)
   } else if (service === 'linear') {
     void syncLinear(win)
+  } else if (service === 'email-receipts') {
+    void syncEmailReceipts(win)
   } else if (service === 'todoist') {
     void syncTodoist(win)
   } else if (service === 'things') {

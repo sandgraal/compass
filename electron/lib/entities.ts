@@ -301,6 +301,18 @@ export const ENTITY_EXTRACTORS: EntityExtractor[] = [
     }
   },
   {
+    // Email receipts (Gmail) — the record's title IS the merchant; body leads
+    // with "<amount> <currency>" so parseMoney rolls the spend into Merchants.
+    id: 'email-receipt-merchant',
+    match: { source: 'email-receipt', types: ['order'] },
+    extract: (r) => {
+      const name = r.title.trim()
+      if (!name) return []
+      const money = parseMoney(r.body)
+      return [{ kind: 'merchant', name, amount: money?.amount, currency: money?.currency ?? null }]
+    }
+  },
+  {
     id: 'netflix-merchant',
     match: { source: 'netflix' },
     extract: () => [{ kind: 'merchant', name: 'Netflix' }]
