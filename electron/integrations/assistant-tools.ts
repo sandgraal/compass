@@ -616,7 +616,7 @@ const VAULT_SEARCH_MAX = 20
 
 function searchVaultTool(deps: AssistantToolDeps, input: Record<string, unknown>): unknown {
   if (!deps.vault) return { error: 'Vault unavailable in this context.' }
-  const q = str(input.q).toLowerCase()
+  const q = str(input.q).slice(0, 200).toLowerCase()
   if (!q) return { error: 'q (search text) is required' }
   const catFilter = str(input.category)
   if (catFilter === 'credentials') {
