@@ -17,10 +17,12 @@ import { createReadStream } from 'node:fs'
 import { createInterface } from 'node:readline'
 import type { RecordInput } from './recognizers'
 
-type Rollup = 'sum' | 'last'
+type Rollup = 'sum' | 'last' | 'avg'
 
 // HealthKit quantity types we roll up to one record per day. Anything not listed
 // here (and not handled specially below) is ignored. Add a row to support more.
+// `avg` (mean of the day's samples) suits point-in-time vitals — HRV, glucose,
+// respiratory rate — where neither a sum nor a single last reading is meaningful.
 const DAILY: Record<string, { type: string; rollup: Rollup; label: (v: number) => string }> = {
   HKQuantityTypeIdentifierStepCount: {
     type: 'steps',
@@ -36,7 +38,33 @@ const DAILY: Record<string, { type: string; rollup: Rollup; label: (v: number) =
     type: 'resting-hr',
     rollup: 'last',
     label: (v) => `${Math.round(v)} bpm resting`
+  },
+  // Recovery / vitals (the signal the cross-domain correlations want). Sampled
+  // through the day → averaged. Units are whatever the device wrote (SDNN in ms,
+  // glucose typically mg/dL, respiration in breaths/min).
+  HKQuantityTypeIdentifierHeartRateVariabilitySDNN: {
+    type: 'hrv',
+    rollup: 'avg',
+    label: (v) => `${Math.round(v)} ms HRV`
+  },
+  HKQuantityTypeIdentifierRespiratoryRate: {
+    type: 'respiratory-rate',
+    rollup: 'avg',
+    label: (v) => `${v.toFixed(1)} br/min`
+  },
+  HKQuantityTypeIdentifierBloodGlucose: {
+    type: 'blood-glucose',
+    rollup: 'avg',
+    label: (v) => `${Math.round(v)} glucose`
+  },
+  HKQuantityTypeIdentifierVO2Max: {
+    type: 'vo2max',
+    rollup: 'last',
+    label: (v) => `${v.toFixed(1)} VO₂max`
   }
+  // Blood pressure (systolic + diastolic) needs pairing two Record types on the
+  // same Correlation — awkward in a line-by-line stream — so it's deliberately
+  // left out here; add it when a correlation-aware pass is worth the complexity.
 }
 
 const ATTR = /(\w+)="([^"]*)"/g
@@ -88,8 +116,11 @@ export async function parseAppleHealth(
       crlfDelay: Number.POSITIVE_INFINITY
     })
 
-  const daily = new Map<string, { value: number; day: string }>() // key `${hkType}|${day}`
+  // Per (hkType, day) accumulator: keep sum + count + last so any rollup mode
+  // (sum / last / avg) resolves at emit time from the same running state.
+  const daily = new Map<string, { sum: number; count: number; last: number; day: string }>()
   const sleepMs = new Map<string, number>() // key `${day}` → total asleep ms
+  const sleepStages = new Map<string, number>() // key `${day}|${stage}` → ms in that stage
   const out: RecordInput[] = []
 
   for await (const line of src) {
@@ -105,8 +136,12 @@ export async function parseAppleHealth(
         if (!Number.isFinite(v)) continue
         const key = `${t}|${dayKey(start)}`
         const cur = daily.get(key)
-        if (!cur) daily.set(key, { value: v, day: dayKey(start) })
-        else cur.value = meta.rollup === 'sum' ? cur.value + v : v
+        if (!cur) daily.set(key, { sum: v, count: 1, last: v, day: dayKey(start) })
+        else {
+          cur.sum += v
+          cur.count++
+          cur.last = v
+        }
         continue
       }
 
@@ -132,6 +167,11 @@ export async function parseAppleHealth(
         if (Number.isFinite(ms) && ms > 0) {
           const day = dayKey(start)
           sleepMs.set(day, (sleepMs.get(day) ?? 0) + ms)
+          // Newer exports tag the stage (…AsleepCore / …AsleepDeep / …AsleepREM);
+          // roll each stage's ms up per day so the daily sleep record can carry a
+          // breakdown. Legacy "…Asleep" (unstaged) buckets as 'Unspecified'.
+          const stage = a.value.match(/Asleep(Core|Deep|REM|Unspecified)?$/)?.[1] || 'Unspecified'
+          sleepStages.set(`${day}|${stage}`, (sleepStages.get(`${day}|${stage}`) ?? 0) + ms)
         }
       }
     } else if (line.includes('<Workout ')) {
@@ -154,24 +194,42 @@ export async function parseAppleHealth(
     }
   }
 
-  for (const [key, { value, day }] of daily) {
+  for (const [key, { sum, count, last, day }] of daily) {
     const meta = DAILY[key.slice(0, key.indexOf('|'))]
+    const value = meta.rollup === 'avg' ? sum / count : meta.rollup === 'last' ? last : sum
     out.push({
       source: 'apple-health',
       type: meta.type,
       occurredAt: dayMidnight(day),
       title: meta.label(value),
-      payload: { value, day },
+      payload: { value, day, samples: count },
       naturalKey: `${meta.type}|${day}`
     })
   }
   for (const [day, ms] of sleepMs) {
+    // Attach the per-stage breakdown when the export tagged stages (a lone
+    // 'Unspecified' bucket means the export didn't). Kept as ONE record per day
+    // (not one per stage) so sleep doesn't flood the timeline; the structured
+    // stages live in `payload` and a compact summary rides in the body.
+    const stages: Record<string, number> = {}
+    for (const [k, sm] of sleepStages) {
+      if (k.startsWith(`${day}|`)) stages[k.slice(day.length + 1)] = sm
+    }
+    const staged = Object.keys(stages).filter((s) => s !== 'Unspecified')
+    const body =
+      staged.length > 0
+        ? staged
+            .sort()
+            .map((s) => `${s} ${fmtDuration(stages[s])}`)
+            .join(' · ')
+        : undefined
     out.push({
       source: 'apple-health',
       type: 'sleep',
       occurredAt: dayMidnight(day),
       title: `${fmtDuration(ms)} asleep`,
-      payload: { day, ms },
+      body,
+      payload: { day, ms, stages },
       naturalKey: `sleep|${day}`
     })
   }
