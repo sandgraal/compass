@@ -36,7 +36,25 @@ beforeEach(() => {
       asset_class TEXT, balance REAL, payment_due_date TEXT
     , is_foreign INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE finance_transactions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, amount REAL, category TEXT
+      id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, amount REAL, category TEXT,
+      description TEXT DEFAULT '', currency TEXT DEFAULT 'USD'
+    );
+    CREATE TABLE contacts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
+      given_name TEXT, family_name TEXT, middle_name TEXT, prefix TEXT, suffix TEXT, org TEXT, job_title TEXT,
+      phones TEXT, emails TEXT, addresses TEXT, birthday TEXT, url TEXT, relationship TEXT, notes TEXT,
+      photo TEXT, source TEXT NOT NULL DEFAULT 'manual', search_blob TEXT, enrichment TEXT,
+      created_at INTEGER, updated_at INTEGER
+    );
+    CREATE TABLE medical_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, category TEXT NOT NULL,
+      description TEXT, code TEXT, status TEXT, recorded_at TEXT, ingested_at INTEGER
+    );
+    CREATE TABLE argyle_paystubs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, employer TEXT,
+      gross_pay REAL, net_pay REAL, withholding REAL, deductions REAL,
+      currency TEXT NOT NULL DEFAULT 'USD', period_start TEXT, period_end TEXT, paid_at TEXT,
+      pay_cycle TEXT, ingested_at INTEGER
     );
     CREATE TABLE claude_proposals (
       id INTEGER PRIMARY KEY AUTOINCREMENT, proposal_id TEXT NOT NULL UNIQUE, type TEXT NOT NULL,
@@ -73,6 +91,13 @@ describe('ASSISTANT_TOOLS', () => {
     const names = ASSISTANT_TOOLS.map((t) => t.name)
     expect(names).toContain('get_upcoming')
     expect(names).toContain('get_finance_summary')
+    expect(names).toContain('list_transactions')
+    expect(names).toContain('search_contacts')
+    expect(names).toContain('get_contact')
+    expect(names).toContain('get_medical_records')
+    expect(names).toContain('get_paystubs')
+    expect(names).toContain('search_vault')
+    expect(names).toContain('get_vault_entry')
     expect(names).toContain('get_week_tasks')
     expect(names).toContain('get_weekly_goals')
     expect(names).toContain('get_habit_streaks')
@@ -81,6 +106,14 @@ describe('ASSISTANT_TOOLS', () => {
     expect(names).toContain('search_records')
     expect(names).toContain('propose_task')
     for (const t of ASSISTANT_TOOLS) expect(t.input_schema.type).toBe('object')
+  })
+
+  it('never offers the credentials vault category in any tool schema', () => {
+    // The enums on search_vault/get_vault_entry are the policy surface the
+    // model sees — credentials must not be selectable.
+    const json = JSON.stringify(ASSISTANT_TOOLS)
+    expect(json).not.toContain("'credentials'")
+    expect(json).not.toContain('"credentials"')
   })
 })
 
@@ -391,6 +424,254 @@ describe('executeAssistantTool', () => {
   it('returns an error for an unknown tool', () => {
     const res = executeAssistantTool(db(), sqlite, 'nope', {})
     expect(res).toEqual({ ok: false, error: 'Unknown tool: nope' })
+  })
+})
+
+// ── Full-detail tools (data-access policy) ───────────────────────────────────
+
+// biome-ignore lint/suspicious/noExplicitAny: terse access to the tagged tool result in assertions
+const toolData = (res: unknown): any => (res as { data: unknown }).data
+
+describe('list_transactions', () => {
+  function addTxn(date: string, amount: number, description: string, category = 'Dining'): void {
+    sqlite
+      .prepare(
+        'INSERT INTO finance_transactions (date, amount, description, category) VALUES (?,?,?,?)'
+      )
+      .run(date, amount, description, category)
+  }
+
+  it('returns individual rows newest-first (the old aggregates-only wall is gone)', () => {
+    addTxn('2026-06-01', -6.5, 'STARBUCKS')
+    addTxn('2026-06-15', -42, 'WHOLE FOODS', 'Groceries')
+    const res = executeAssistantTool(db(), sqlite, 'list_transactions', {})
+    expect(res.ok).toBe(true)
+    expect(toolData(res).transactions.map((t: { description: string }) => t.description)).toEqual([
+      'WHOLE FOODS',
+      'STARBUCKS'
+    ])
+  })
+
+  it('filters by month, category, and description substring', () => {
+    addTxn('2026-06-01', -6.5, 'STARBUCKS')
+    addTxn('2026-05-01', -9, 'STARBUCKS RESERVE')
+    addTxn('2026-06-02', -42, 'WHOLE FOODS', 'Groceries')
+    expect(
+      toolData(executeAssistantTool(db(), sqlite, 'list_transactions', { month: '2026-06' })).count
+    ).toBe(2)
+    expect(
+      toolData(executeAssistantTool(db(), sqlite, 'list_transactions', { q: 'starbucks' })).count
+    ).toBe(2)
+    expect(
+      toolData(executeAssistantTool(db(), sqlite, 'list_transactions', { category: 'Groceries' }))
+        .count
+    ).toBe(1)
+  })
+
+  it('rejects malformed dates/months', () => {
+    expect(executeAssistantTool(db(), sqlite, 'list_transactions', { month: 'June' }).ok).toBe(
+      false
+    )
+    expect(executeAssistantTool(db(), sqlite, 'list_transactions', { from: 'nope' }).ok).toBe(false)
+  })
+})
+
+describe('search_contacts / get_contact', () => {
+  beforeEach(() => {
+    sqlite
+      .prepare(
+        `INSERT INTO contacts (external_id, display_name, org, job_title, relationship, search_blob, phones, emails, photo, enrichment)
+         VALUES ('c1', 'Jane Doe', 'Acme', 'CTO', 'colleague', 'jane doe acme jane@example.com',
+                 '[{"type":"cell","value":"+1 555 0100"}]', '[{"type":"home","value":"jane@example.com"}]',
+                 'data:image/png;base64,xxxx', '{"crossSource":{"sources":["gmail","linkedin"]}}')`
+      )
+      .run()
+  })
+
+  it('search finds contacts by blob and returns the light list shape', () => {
+    const res = executeAssistantTool(db(), sqlite, 'search_contacts', { q: 'jane' })
+    expect(res.ok).toBe(true)
+    expect(toolData(res).contacts[0]).toEqual({
+      id: 1,
+      displayName: 'Jane Doe',
+      org: 'Acme',
+      jobTitle: 'CTO',
+      relationship: 'colleague'
+    })
+  })
+
+  it('get_contact returns the full card with parsed arrays + crossSource, never the photo', () => {
+    const res = executeAssistantTool(db(), sqlite, 'get_contact', { id: 1 })
+    expect(res.ok).toBe(true)
+    const card = toolData(res)
+    expect(card.emails).toEqual([{ type: 'home', value: 'jane@example.com' }])
+    expect(card.phones).toEqual([{ type: 'cell', value: '+1 555 0100' }])
+    expect(card.crossSource).toEqual({ sources: ['gmail', 'linkedin'] })
+    expect(JSON.stringify(card)).not.toContain('base64')
+  })
+
+  it('rejects a missing query / unknown id', () => {
+    expect(executeAssistantTool(db(), sqlite, 'search_contacts', {}).ok).toBe(false)
+    expect(executeAssistantTool(db(), sqlite, 'get_contact', { id: 99 }).ok).toBe(false)
+  })
+})
+
+describe('get_medical_records', () => {
+  beforeEach(() => {
+    sqlite
+      .prepare(
+        "INSERT INTO medical_records (external_id, category, description, code, status, recorded_at) VALUES ('m1', 'medication', 'Aspirin 81mg', 'RxNorm:243670', 'active', '2026-03-10')"
+      )
+      .run()
+    sqlite
+      .prepare(
+        "INSERT INTO medical_records (external_id, category, description, status) VALUES ('m2', 'condition', 'Migraine', 'resolved')"
+      )
+      .run()
+  })
+
+  it('returns FULL clinical rows (the counts-only wall is gone)', () => {
+    const res = executeAssistantTool(db(), sqlite, 'get_medical_records', {})
+    expect(res.ok).toBe(true)
+    expect(toolData(res).count).toBe(2)
+    expect(toolData(res).records[0]).toMatchObject({
+      category: 'medication',
+      description: 'Aspirin 81mg',
+      code: 'RxNorm:243670',
+      status: 'active',
+      recordedAt: '2026-03-10'
+    })
+  })
+
+  it('filters by category/status and rejects an unknown category', () => {
+    expect(
+      toolData(executeAssistantTool(db(), sqlite, 'get_medical_records', { category: 'condition' }))
+        .count
+    ).toBe(1)
+    expect(
+      toolData(executeAssistantTool(db(), sqlite, 'get_medical_records', { status: 'ACTIVE' }))
+        .count
+    ).toBe(1)
+    expect(
+      executeAssistantTool(db(), sqlite, 'get_medical_records', { category: 'surgery' }).ok
+    ).toBe(false)
+  })
+})
+
+describe('get_paystubs', () => {
+  it('returns per-stub rows newest-first plus totals', () => {
+    sqlite
+      .prepare(
+        "INSERT INTO argyle_paystubs (external_id, employer, gross_pay, net_pay, paid_at) VALUES ('p1', 'Initech', 4000, 3000, '2026-06-16')"
+      )
+      .run()
+    sqlite
+      .prepare(
+        "INSERT INTO argyle_paystubs (external_id, employer, gross_pay, net_pay, paid_at) VALUES ('p2', 'Initech', 4000, 3010, '2026-06-30')"
+      )
+      .run()
+    const res = executeAssistantTool(db(), sqlite, 'get_paystubs', {})
+    expect(res.ok).toBe(true)
+    expect(toolData(res).paystubs.map((p: { netPay: number }) => p.netPay)).toEqual([3010, 3000])
+    expect(toolData(res).totals).toMatchObject({ count: 2, totalNet: 6010, totalGross: 8000 })
+  })
+})
+
+describe('search_vault / get_vault_entry (docs open, credentials sealed)', () => {
+  const fakeVault = {
+    calls: [] as string[],
+    readCategory(category: string): Array<Record<string, unknown>> {
+      fakeVault.calls.push(category)
+      if (category === 'identity') {
+        return [
+          {
+            id: 'e1',
+            documentType: 'Passport',
+            name: 'Chris',
+            passportNumber: 'X1234567',
+            _history: [{ passportNumber: 'OLD' }]
+          }
+        ]
+      }
+      return []
+    }
+  }
+  beforeEach(() => {
+    fakeVault.calls = []
+  })
+
+  it('search_vault finds document entries by any field value', () => {
+    const res = executeAssistantTool(
+      db(),
+      sqlite,
+      'search_vault',
+      { q: 'x1234567' },
+      { vault: fakeVault }
+    )
+    expect(res.ok).toBe(true)
+    expect(toolData(res).entries[0]).toMatchObject({
+      category: 'identity',
+      id: 'e1',
+      matchedField: 'passportNumber'
+    })
+  })
+
+  it('get_vault_entry returns the full entry minus _history', () => {
+    const res = executeAssistantTool(
+      db(),
+      sqlite,
+      'get_vault_entry',
+      { category: 'identity', id: 'e1' },
+      { vault: fakeVault }
+    )
+    expect(res.ok).toBe(true)
+    expect(toolData(res).entry).toEqual({
+      id: 'e1',
+      documentType: 'Passport',
+      name: 'Chris',
+      passportNumber: 'X1234567'
+    })
+    expect('_history' in toolData(res).entry).toBe(false)
+  })
+
+  it('REFUSES the credentials category with an explanatory error, never touching the reader', () => {
+    for (const [tool, input] of [
+      ['search_vault', { q: 'netflix', category: 'credentials' }],
+      ['get_vault_entry', { category: 'credentials', id: 'c1' }]
+    ] as const) {
+      const res = executeAssistantTool(db(), sqlite, tool, input, { vault: fakeVault })
+      expect(res.ok).toBe(false)
+      expect(!res.ok && res.error).toContain('sealed')
+    }
+    // The reader was never asked for credentials — the gate is at the tool boundary.
+    expect(fakeVault.calls).not.toContain('credentials')
+  })
+
+  it('a full-vault search never queries the credentials category', () => {
+    executeAssistantTool(db(), sqlite, 'search_vault', { q: 'anything' }, { vault: fakeVault })
+    expect(fakeVault.calls).toEqual([
+      'financial',
+      'identity',
+      'medical',
+      'legal',
+      'foreign-accounts'
+    ])
+  })
+
+  it('fails cleanly when no vault reader is wired (tests, non-production contexts)', () => {
+    const res = executeAssistantTool(db(), sqlite, 'search_vault', { q: 'x' })
+    expect(res).toEqual({ ok: false, error: 'Vault unavailable in this context.' })
+  })
+
+  it('rejects an unknown category', () => {
+    const res = executeAssistantTool(
+      db(),
+      sqlite,
+      'search_vault',
+      { q: 'x', category: 'attic' },
+      { vault: fakeVault }
+    )
+    expect(res.ok).toBe(false)
   })
 })
 

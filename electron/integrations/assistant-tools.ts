@@ -1,28 +1,33 @@
 /**
  * Tools the embedded Claude agent ("Ask Compass", Phase 8.5) can call over the
- * user's local data. Two kinds, mirroring the MCP boundary:
+ * user's local data. Two kinds:
  *
- *   - READ tools answer questions from `compass.db` (aggregates / summaries —
- *     never the vault, never raw finance rows beyond what the MCP already
- *     exposes).
+ *   - READ tools answer questions from `compass.db` — per the data-access
+ *     policy (docs/data-access-policy.md) they see EVERY domain in full
+ *     detail: raw transactions, medical records, contacts, paystubs, the
+ *     records spine, and the vault DOCUMENT categories. The only things
+ *     sealed everywhere: the vault `credentials` category + token vaults
+ *     (access keys, not life data) and raw GPS coordinates.
  *   - PROPOSE tools never mutate anything; they enqueue a `pending` row in
  *     `claude_proposals`, exactly like the MCP propose tools, so the change
  *     surfaces in the Claude Inbox for human approval.
  *
  * `executeAssistantTool` is pure w.r.t. the model — it takes a db handle + the
- * tool name/input and returns a JSON-serialisable result — so it unit-tests
- * against an in-memory SQLite without any network.
+ * tool name/input (+ optional injected VaultReader) and returns a
+ * JSON-serialisable result — so it unit-tests against an in-memory SQLite
+ * without any network or keychain.
  */
 
 import { randomUUID } from 'node:crypto'
 import type BetterSqlite3 from 'better-sqlite3'
-import { and, asc, eq, gte, lte } from 'drizzle-orm'
+import { and, asc, eq, gte, like, lte } from 'drizzle-orm'
 import type { getDb } from '../db/client'
 import {
   appSettings,
   calendarEvents,
   checklistItems,
   claudeProposals,
+  contacts,
   financeAccounts
 } from '../db/schema'
 import { buildInsights } from '../ipc/insights'
@@ -30,6 +35,30 @@ import { searchRecords } from '../lib/records-search'
 
 type Db = ReturnType<typeof getDb>
 type RawSqlite = BetterSqlite3.Database
+
+/**
+ * Vault access injected by the caller (electron/ipc/assistant.ts wires the
+ * real decrypt-in-memory reader; tests pass a fake). Absent ⇒ the vault
+ * tools return a clean "vault unavailable" error. Only the document
+ * categories below are ever readable — `readCategory` is never called with
+ * `credentials`.
+ */
+export interface VaultReader {
+  readCategory(category: string): Array<Record<string, unknown>>
+}
+export interface AssistantToolDeps {
+  vault?: VaultReader
+}
+
+/** Vault document categories readable by the assistant. `credentials` is sealed. */
+export const VAULT_DOC_CATEGORIES = [
+  'financial',
+  'identity',
+  'medical',
+  'legal',
+  'foreign-accounts'
+] as const
+const VAULT_DOC_SET = new Set<string>(VAULT_DOC_CATEGORIES)
 
 const DAY_MS = 86_400_000
 const LIST_TYPES = new Set(['daily', 'weekly', 'monthly'])
@@ -71,7 +100,7 @@ export const ASSISTANT_TOOLS = [
   {
     name: 'get_finance_summary',
     description:
-      'Read AGGREGATE finances only — net worth (assets/liabilities), per-month income/expense/net for the last N months, and current-month spend by category. Never returns individual transactions. Read-only.',
+      'Read the AGGREGATE finance picture — net worth (assets/liabilities), per-month income/expense/net for the last N months, and current-month spend by category. The convenient rollup view; for individual transactions use list_transactions. Read-only.',
     input_schema: {
       type: 'object',
       properties: {
@@ -82,6 +111,138 @@ export const ASSISTANT_TOOLS = [
           description: 'Months of history (default 6)'
         }
       },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'list_transactions',
+    description:
+      'Read individual finance transactions — date, amount, currency, description (merchant/payee), category. Filter by a date range, a single month, a category, and/or a description substring. Use for "what did I spend at X", "list my June charges", "when did I last pay Y". Newest first. Read-only.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Start date YYYY-MM-DD (inclusive)' },
+        to: { type: 'string', description: 'End date YYYY-MM-DD (inclusive)' },
+        month: { type: 'string', description: 'Single month YYYY-MM (overrides from/to)' },
+        category: { type: 'string', description: 'Exact category, e.g. "Dining"' },
+        q: { type: 'string', description: 'Description substring, e.g. a merchant name' },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 50,
+          description: 'Max transactions (default 20)'
+        }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'search_contacts',
+    description:
+      "Search the user's address book by name, organization, email, phone, or nickname. Returns matching contacts (id, name, org, title, relationship). Use get_contact with an id for the full card. Read-only.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        q: { type: 'string', description: 'Search text' },
+        limit: { type: 'integer', minimum: 1, maximum: 25, description: 'Max results (default 10)' }
+      },
+      required: ['q'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'get_contact',
+    description:
+      'Read one full contact card by id (from search_contacts): names, org/title, emails, phones, addresses, birthday, URL, relationship, notes, and the cross-source summary of how the user knows them. Read-only.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'integer', description: 'Contact id from search_contacts' }
+      },
+      required: ['id'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'get_medical_records',
+    description:
+      "Read the user's clinical records in full detail — conditions, medications, labs, immunizations, allergies, encounters, procedures — each with description, code (ICD-10/RxNorm/LOINC/CVX), status, and date. Optional category/status filters. Read-only.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        category: {
+          type: 'string',
+          enum: [
+            'condition',
+            'medication',
+            'lab',
+            'immunization',
+            'allergy',
+            'encounter',
+            'procedure'
+          ],
+          description: 'Optional: one clinical category'
+        },
+        status: { type: 'string', description: 'Optional: e.g. "active", "resolved"' },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 100,
+          description: 'Max records (default 50)'
+        }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'get_paystubs',
+    description:
+      "Read the user's payroll paystubs — employer, gross/net pay, summed withholding and deductions, pay period, deposit date — newest first, plus totals. (Per-tax line detail is never stored.) Read-only.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 36,
+          description: 'Max paystubs (default 12)'
+        }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'search_vault',
+    description:
+      'Search the encrypted vault DOCUMENT categories (financial, identity, medical, legal, foreign-accounts) by any field value — e.g. "find my passport number", "which policy covers dental". Returns matching entries with the matched field. The credentials category (passwords, API keys) is permanently sealed and cannot be searched or read. Read-only; decryption happens in memory per call.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        q: { type: 'string', description: 'Search text' },
+        category: {
+          type: 'string',
+          enum: ['financial', 'identity', 'medical', 'legal', 'foreign-accounts'],
+          description: 'Optional: restrict to one document category'
+        }
+      },
+      required: ['q'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'get_vault_entry',
+    description:
+      'Read one full vault document entry by category + id (from search_vault) — every field, e.g. the passport number, policy details, account identifiers. The credentials category is permanently sealed. Read-only; decryption happens in memory per call.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        category: {
+          type: 'string',
+          enum: ['financial', 'identity', 'medical', 'legal', 'foreign-accounts']
+        },
+        id: { type: 'string', description: 'Entry id from search_vault' }
+      },
+      required: ['category', 'id'],
       additionalProperties: false
     }
   },
@@ -134,7 +295,7 @@ export const ASSISTANT_TOOLS = [
   {
     name: 'search_records',
     description:
-      'Search the user\'s unified life Timeline — the ACTUAL records imported from their data exports (purchases, media watched/listened, messages, browsing, documents, health, credit/tax, connections, and more) — and return the matching records themselves (date, source, kind, title, short detail). Use this for "what/when did I…" questions: "when did I last watch X", "what did I buy from Y", "find anything about Z", "what was I doing in <month/year>". Supports optional source/kind filters and a from/to date range (YYYY-MM-DD). Read-only. (For totals/counts by source or year, use get_timeline.)',
+      'Search the user\'s unified life Timeline — the ACTUAL records from every domain (purchases, media, messages, documents, health, medical, habits, tasks, trips, paychecks, bills, goals, credit/tax, connections, facts, and more) — and return the matching records themselves (date, source, kind, title, short detail). Use this for "what/when did I…" questions: "when did I last watch X", "what did I buy from Y", "find anything about Z", "what was I doing in <month/year>". Supports optional source/kind filters and a from/to date range (YYYY-MM-DD). The one exclusion: raw GPS coordinates are never on the timeline (country-level trips are). Read-only. (For totals/counts by source or year, use get_timeline.)',
     input_schema: {
       type: 'object',
       properties: {
@@ -290,8 +451,243 @@ function getFinanceSummary(db: Db, sqlite: RawSqlite, input: Record<string, unkn
     accountCount: accounts.length,
     monthly: monthlyRows,
     currentMonth: { month: localYm(), byCategory },
-    note: 'Aggregates only — no individual transactions or account numbers.'
+    note: 'Aggregate rollup — use list_transactions for individual transactions.'
   }
+}
+
+function clampInt(v: unknown, min: number, max: number, dflt: number): number {
+  return Math.min(max, Math.max(min, Number.isFinite(Number(v)) ? Math.trunc(Number(v)) : dflt))
+}
+
+function listTransactions(sqlite: RawSqlite, input: Record<string, unknown>): unknown {
+  const limit = clampInt(input.limit, 1, 50, 20)
+  const month = str(input.month)
+  if (month && !/^\d{4}-\d{2}$/.test(month)) return { error: 'month must be YYYY-MM' }
+  let from = str(input.from)
+  let to = str(input.to)
+  if (month) {
+    from = ''
+    to = ''
+  }
+  if (from && !isRealYmd(from)) return { error: 'from must be a real YYYY-MM-DD date' }
+  if (to && !isRealYmd(to)) return { error: 'to must be a real YYYY-MM-DD date' }
+  const q = str(input.q)
+  const category = str(input.category)
+  const rows = sqlite
+    .prepare(
+      `SELECT date, amount, currency, description, category FROM finance_transactions
+        WHERE (@month IS NULL OR substr(date,1,7) = @month)
+          AND (@from IS NULL OR date >= @from)
+          AND (@to IS NULL OR date <= @to)
+          AND (@category IS NULL OR category = @category)
+          AND (@q IS NULL OR instr(lower(description), lower(@q)) > 0)
+        ORDER BY date DESC, id DESC LIMIT @limit`
+    )
+    .all({
+      month: month || null,
+      from: from || null,
+      to: to || null,
+      category: category || null,
+      q: q || null,
+      limit
+    }) as Array<Record<string, unknown>>
+  const result: Record<string, unknown> = { count: rows.length, transactions: rows }
+  if (rows.length >= limit) {
+    result.note = 'Hit the limit — narrow with month/category/q or raise limit (max 50).'
+  }
+  return result
+}
+
+function searchContactsTool(db: Db, input: Record<string, unknown>): unknown {
+  const q = str(input.q).slice(0, 200).toLowerCase()
+  if (!q) return { error: 'q (search text) is required' }
+  const limit = clampInt(input.limit, 1, 25, 10)
+  // Same searchBlob LIKE idiom as contacts:list / ⌘K — never photo/enrichment
+  // in the list shape.
+  const rows = db
+    .select({
+      id: contacts.id,
+      displayName: contacts.displayName,
+      org: contacts.org,
+      jobTitle: contacts.jobTitle,
+      relationship: contacts.relationship
+    })
+    .from(contacts)
+    .where(like(contacts.searchBlob, `%${q}%`))
+    .limit(limit)
+    .all()
+  return { query: q, count: rows.length, contacts: rows }
+}
+
+function parseJsonArray(value: string | null): unknown[] {
+  if (!value) return []
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function getContact(db: Db, input: Record<string, unknown>): unknown {
+  const id = Number(input.id)
+  if (!Number.isInteger(id) || id <= 0) return { error: 'id must be a positive integer' }
+  const row = db.select().from(contacts).where(eq(contacts.id, id)).get()
+  if (!row) return { error: `No contact with id ${id}` }
+  // Full card minus the heavyweight/non-conversational fields: photo (a data
+  // URI) and searchBlob (an index). Enrichment is reduced to its cross-source
+  // summary — how the user knows this person.
+  let crossSource: unknown = null
+  try {
+    const parsed = row.enrichment ? (JSON.parse(row.enrichment) as Record<string, unknown>) : null
+    crossSource = parsed?.crossSource ?? null
+  } catch {
+    /* malformed enrichment JSON → omit */
+  }
+  return {
+    id: row.id,
+    displayName: row.displayName,
+    givenName: row.givenName,
+    familyName: row.familyName,
+    org: row.org,
+    jobTitle: row.jobTitle,
+    phones: parseJsonArray(row.phones),
+    emails: parseJsonArray(row.emails),
+    addresses: parseJsonArray(row.addresses),
+    birthday: row.birthday,
+    url: row.url,
+    relationship: row.relationship,
+    notes: row.notes,
+    source: row.source,
+    crossSource
+  }
+}
+
+const MEDICAL_CATEGORIES = new Set([
+  'condition',
+  'medication',
+  'lab',
+  'immunization',
+  'allergy',
+  'encounter',
+  'procedure'
+])
+
+function getMedicalRecords(sqlite: RawSqlite, input: Record<string, unknown>): unknown {
+  const category = str(input.category)
+  if (category && !MEDICAL_CATEGORIES.has(category)) {
+    return { error: `category must be one of: ${[...MEDICAL_CATEGORIES].join(', ')}` }
+  }
+  const status = str(input.status)
+  const limit = clampInt(input.limit, 1, 100, 50)
+  const rows = sqlite
+    .prepare(
+      `SELECT category, description, code, status, recorded_at AS recordedAt
+         FROM medical_records
+        WHERE (@category IS NULL OR category = @category)
+          AND (@status IS NULL OR status = @status COLLATE NOCASE)
+        ORDER BY recorded_at IS NULL, recorded_at DESC LIMIT @limit`
+    )
+    .all({ category: category || null, status: status || null, limit }) as Array<
+    Record<string, unknown>
+  >
+  return { count: rows.length, records: rows }
+}
+
+function getPaystubs(sqlite: RawSqlite, input: Record<string, unknown>): unknown {
+  const limit = clampInt(input.limit, 1, 36, 12)
+  const rows = sqlite
+    .prepare(
+      `SELECT employer, gross_pay AS grossPay, net_pay AS netPay, withholding, deductions,
+              currency, period_start AS periodStart, period_end AS periodEnd, paid_at AS paidAt
+         FROM argyle_paystubs
+        ORDER BY paid_at IS NULL, paid_at DESC LIMIT ?`
+    )
+    .all(limit) as Array<{ netPay: number | null; grossPay: number | null }>
+  const totals = sqlite
+    .prepare(
+      'SELECT COUNT(*) AS count, ROUND(SUM(net_pay),2) AS totalNet, ROUND(SUM(gross_pay),2) AS totalGross FROM argyle_paystubs'
+    )
+    .get()
+  return {
+    paystubs: rows,
+    totals,
+    note: 'Withholding/deductions are summed per stub — per-tax line detail is never stored.'
+  }
+}
+
+const VAULT_SEARCH_MAX = 20
+
+function searchVaultTool(deps: AssistantToolDeps, input: Record<string, unknown>): unknown {
+  if (!deps.vault) return { error: 'Vault unavailable in this context.' }
+  const q = str(input.q).slice(0, 200).toLowerCase()
+  if (!q) return { error: 'q (search text) is required' }
+  const catFilter = str(input.category)
+  if (catFilter === 'credentials') {
+    return {
+      error:
+        'The credentials category (passwords, API keys) is permanently sealed — the assistant can never search or read it.'
+    }
+  }
+  if (catFilter && !VAULT_DOC_SET.has(catFilter)) {
+    return { error: `Unknown vault document category: ${catFilter}` }
+  }
+  const categories = catFilter ? [catFilter] : [...VAULT_DOC_CATEGORIES]
+  const entriesOut: Array<Record<string, unknown>> = []
+  for (const category of categories) {
+    let entries: Array<Record<string, unknown>>
+    try {
+      entries = deps.vault.readCategory(category)
+    } catch {
+      continue // category file corrupt/unreadable — skip, keep searching the rest
+    }
+    for (const entry of entries) {
+      if (!entry || typeof entry !== 'object') continue
+      const id = typeof entry.id === 'string' ? entry.id : null
+      if (!id) continue
+      for (const [field, value] of Object.entries(entry)) {
+        if (field === 'id' || typeof value !== 'string') continue
+        if (!value.toLowerCase().includes(q)) continue
+        entriesOut.push({ category, id, matchedField: field, value: value.slice(0, 200) })
+        break // one hit per entry
+      }
+      if (entriesOut.length >= VAULT_SEARCH_MAX) break
+    }
+    if (entriesOut.length >= VAULT_SEARCH_MAX) break
+  }
+  return {
+    query: q,
+    count: entriesOut.length,
+    entries: entriesOut,
+    note: 'Use get_vault_entry(category, id) to read a full entry.'
+  }
+}
+
+function getVaultEntry(deps: AssistantToolDeps, input: Record<string, unknown>): unknown {
+  if (!deps.vault) return { error: 'Vault unavailable in this context.' }
+  const category = str(input.category)
+  if (category === 'credentials') {
+    return {
+      error:
+        'The credentials category (passwords, API keys) is permanently sealed — the assistant can never search or read it.'
+    }
+  }
+  if (!VAULT_DOC_SET.has(category)) {
+    return { error: `category must be one of: ${VAULT_DOC_CATEGORIES.join(', ')}` }
+  }
+  const id = str(input.id)
+  if (!id) return { error: 'id is required (from search_vault)' }
+  let entries: Array<Record<string, unknown>>
+  try {
+    entries = deps.vault.readCategory(category)
+  } catch {
+    return { error: `Could not read the ${category} vault category.` }
+  }
+  const entry = entries.find((e) => e && typeof e === 'object' && e.id === id)
+  if (!entry) return { error: `No ${category} entry with id ${id}` }
+  // Full entry minus `_history` (prior versions — bulk noise for the model).
+  const { _history, ...fields } = entry
+  return { category, entry: fields }
 }
 
 const MAX_WEEK_TASK_RANGE_DAYS = 31
@@ -405,10 +801,10 @@ function ymdToMs(value: string, endOfDay: boolean): number | null {
 
 /**
  * Full-text search over the `records` Timeline, returning the ACTUAL matching
- * records (date, source, kind, title, short detail) — the deliberate, scoped
- * relaxation of the old "timeline is aggregates-only" boundary (Phase 10.7).
- * Bounded by a result cap + char budget; payload is never returned. Only ever
- * touches `records` — the vault and raw finance rows stay excluded.
+ * records (date, source, kind, title, short detail). Per the data-access
+ * policy every domain lives on the spine, so this is the assistant's broadest
+ * read. Bounded by a result cap + char budget; payload is never returned
+ * (it's raw import JSON — noise for the model, not a secrecy boundary).
  */
 function searchRecordsTool(sqlite: RawSqlite, input: Record<string, unknown>): unknown {
   const q = str(input.q)
@@ -544,20 +940,44 @@ function proposeTask(db: Db, input: Record<string, unknown>): unknown {
 /**
  * Execute a single tool call. Read tools return data; propose tools enqueue a
  * pending proposal (never mutate user data). Returns a tagged result so the
- * caller can feed `data` back to the model (or surface `error`).
+ * caller can feed `data` back to the model (or surface `error`). `deps`
+ * carries capabilities only the production wiring can provide (the vault
+ * reader); when absent those tools fail cleanly.
  */
 export function executeAssistantTool(
   db: Db,
   sqlite: RawSqlite,
   name: string,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  deps: AssistantToolDeps = {}
 ): ToolResult {
+  const asResult = (res: unknown): ToolResult => {
+    const rec = res as Record<string, unknown>
+    if (rec && typeof rec === 'object' && 'error' in rec) {
+      return { ok: false, error: String(rec.error) }
+    }
+    return { ok: true, data: res }
+  }
   try {
     switch (name) {
       case 'get_upcoming':
         return { ok: true, data: getUpcoming(db, input) }
       case 'get_finance_summary':
         return { ok: true, data: getFinanceSummary(db, sqlite, input) }
+      case 'list_transactions':
+        return asResult(listTransactions(sqlite, input))
+      case 'search_contacts':
+        return asResult(searchContactsTool(db, input))
+      case 'get_contact':
+        return asResult(getContact(db, input))
+      case 'get_medical_records':
+        return asResult(getMedicalRecords(sqlite, input))
+      case 'get_paystubs':
+        return asResult(getPaystubs(sqlite, input))
+      case 'search_vault':
+        return asResult(searchVaultTool(deps, input))
+      case 'get_vault_entry':
+        return asResult(getVaultEntry(deps, input))
       case 'get_week_tasks': {
         const res = getWeekTasks(db, input) as Record<string, unknown>
         if ('error' in res) return { ok: false, error: String(res.error) }
