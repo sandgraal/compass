@@ -795,7 +795,13 @@ declare global {
       search: {
         global(query: string): Promise<{
           hits: GlobalSearchHit[]
-          counts?: { knowledge: number; vault: number; tasks: number; transactions: number }
+          counts?: {
+            knowledge: number
+            vault: number
+            tasks: number
+            records: number
+            contacts: number
+          }
         }>
       }
       assistant: {

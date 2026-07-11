@@ -340,6 +340,11 @@ function searchContacts(query: string): GlobalSearchHit[] {
     })
     .from(contacts)
     .where(like(contacts.searchBlob, `%${lq}%`))
+    // Overfetch 4× MAX_PER_KIND so the JS scoring/sorting step has enough
+    // candidates while keeping the per-keystroke DB scan bounded. Contacts
+    // whose searchBlob matches but whose displayName score falls outside the
+    // top 48 DB rows will be omitted — an acceptable trade-off for performance.
+    .limit(MAX_PER_KIND * 4)
     .all()
   const hits: GlobalSearchHit[] = []
   for (const r of rows) {
