@@ -352,8 +352,7 @@ function MedicalDirectoryList({
                 )}
               </span>
               <span className="text-xs text-muted-foreground shrink-0">
-                {e.status ?? ''}
-                {span ? ` · ${span}` : ''}
+                {[e.status, span].filter((p): p is string => Boolean(p)).join(' · ')}
               </span>
             </li>
           )
