@@ -147,7 +147,9 @@ export default function YearReview(): JSX.Element {
       toast('Could not render the image', 'error')
       return
     }
-    const res = await window.api.records.exportYearReviewImage({ year, pngBase64 })
+    // Use review.year (what the card was built from), not the state year — a
+    // year change mid-render could otherwise mismatch the image and filename.
+    const res = await window.api.records.exportYearReviewImage({ year: review.year, pngBase64 })
     if (res.saved) toast('Saved your Year in Review image', 'success')
     else if (!res.canceled) toast('Could not save the image', 'error')
   }
@@ -211,7 +213,7 @@ export default function YearReview(): JSX.Element {
           <button
             type="button"
             onClick={shareImage}
-            disabled={!review || review.totalRecords === 0}
+            disabled={loading || !review || review.totalRecords === 0}
             title="Save a shareable image"
             className="ml-2 flex items-center gap-1.5 text-sm px-3 py-2 border border-border text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors disabled:opacity-50"
           >
@@ -220,7 +222,7 @@ export default function YearReview(): JSX.Element {
           <button
             type="button"
             onClick={saveToKnowledge}
-            disabled={!review || review.totalRecords === 0}
+            disabled={loading || !review || review.totalRecords === 0}
             className="flex items-center gap-1.5 text-sm px-3 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
           >
             <BookmarkPlus size={14} /> Save to Knowledge

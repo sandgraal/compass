@@ -25,6 +25,11 @@ describe('wrapText', () => {
     expect(lines).toHaveLength(2)
     expect(lines[1].endsWith('…')).toBe(true)
   })
+  it('hard-splits a single token longer than the budget', () => {
+    // A long unbroken run (e.g. a URL) must never exceed maxChars per line.
+    const lines = wrapText('https://example.com/a/very/long/unbroken/path', 10, 5)
+    for (const l of lines) expect(l.length).toBeLessThanOrEqual(10)
+  })
 })
 
 describe('buildYearReviewSvg', () => {

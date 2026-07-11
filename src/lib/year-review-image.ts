@@ -33,7 +33,19 @@ export function escapeXml(s: string): string {
 
 /** Greedy word-wrap into at most `maxLines` lines of ≤ `maxChars` each (last line ellipsized). */
 export function wrapText(text: string, maxChars: number, maxLines: number): string[] {
-  const words = text.trim().split(/\s+/).filter(Boolean)
+  // Hard-split any single token longer than the budget so the ≤ maxChars
+  // guarantee holds even for an unbroken run (e.g. a long URL) and the card
+  // never overflows its fixed width.
+  const words = text
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .flatMap((w) => {
+      if (w.length <= maxChars) return [w]
+      const chunks: string[] = []
+      for (let i = 0; i < w.length; i += maxChars) chunks.push(w.slice(i, i + maxChars))
+      return chunks
+    })
   const lines: string[] = []
   let line = ''
   for (const w of words) {
@@ -57,12 +69,16 @@ export function wrapText(text: string, maxChars: number, maxLines: number): stri
 }
 
 export function buildYearReviewSvg(card: YearReviewCard): string {
-  const bg = '#0b0e14'
-  const panel = '#12161f'
-  const border = '#232a37'
-  const text = '#e6e9f0'
-  const muted = '#8b93a7'
-  const accent = '#6272f1' // Compass indigo — fixed brand look for the shared card
+  // Fixed literal copies of the app's DARK-theme design tokens (src/globals.css).
+  // The card is deliberately theme-independent — it's rasterized standalone into
+  // a PNG that renders outside the app, where CSS vars aren't available — so we
+  // inline the same HSL values the UI uses rather than reference `var(--…)`.
+  const bg = 'hsl(222 47% 7%)' // --background
+  const panel = 'hsl(222 47% 9%)' // --card
+  const border = 'hsl(222 47% 16%)' // --border
+  const text = 'hsl(213 31% 91%)' // --foreground
+  const muted = 'hsl(215 20% 55%)' // --muted-foreground
+  const accent = 'hsl(238 82% 68%)' // --primary (Compass indigo)
 
   const narrativeLines = wrapText(card.narrative, 64, 4)
   const stats: Array<{ label: string; value: string }> = [

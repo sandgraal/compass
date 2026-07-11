@@ -81,6 +81,7 @@ function YearSparkline({
           type="button"
           onClick={() => onJump(y.year)}
           title={`${y.year} · ${y.count} record${y.count === 1 ? '' : 's'}`}
+          aria-label={`${y.year}: ${y.count} record${y.count === 1 ? '' : 's'} — jump to this year`}
           className="group flex-1 flex flex-col items-center gap-1 min-w-0"
         >
           <span
