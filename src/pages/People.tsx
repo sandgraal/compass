@@ -39,6 +39,11 @@ function fmtMonth(ms: number | null): string {
   })
 }
 
+function fmtMoney(n: number, currency?: string | null): string {
+  const rounded = Math.round(n).toLocaleString('en-US')
+  return currency && currency !== 'USD' ? `${rounded} ${currency}` : `$${rounded}`
+}
+
 export default function People(): JSX.Element {
   const [people, setPeople] = useState<Person[]>([])
   const [promotedCount, setPromotedCount] = useState(0)
@@ -251,6 +256,14 @@ export default function People(): JSX.Element {
                     {p.count === 1 ? 'touchpoint' : 'touchpoints'}
                     {p.lastSeen != null && ` · ${fmtMonth(p.lastSeen)}`}
                   </div>
+                  {p.totalSpend != null && p.totalSpend > 0 && (
+                    <div
+                      className="text-[11px] text-emerald-500 mt-0.5"
+                      title="Money exchanged via Venmo / PayPal"
+                    >
+                      {fmtMoney(p.totalSpend, p.currency)} exchanged
+                    </div>
+                  )}
                 </div>
               </button>
               <button

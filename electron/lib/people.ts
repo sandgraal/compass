@@ -38,6 +38,10 @@ export interface Person {
   lastSeen: number | null
   /** Matched `contacts.id` when this person is already in your address book, else null. */
   contactId: number | null
+  /** Total money exchanged via P2P (Venmo/PayPal), |amount| summed; undefined when none. */
+  totalSpend?: number
+  /** Dominant currency of the exchanged amounts. */
+  currency?: string | null
 }
 
 /** Normalize a name for matching: lowercase, collapse internal whitespace, trim. */

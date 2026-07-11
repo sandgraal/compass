@@ -57,6 +57,21 @@ export function registerPeopleHandlers(ipcMain: IpcMain): void {
       } catch {
         sources = []
       }
+      // `attrs` carries the engine's per-entity rollup (JSON) — for people, the
+      // P2P money exchanged (Venmo/PayPal) surfaces as totalSpend/currency.
+      let totalSpend: number | undefined
+      let currency: string | null | undefined
+      try {
+        const attrs = r.attrs
+          ? (JSON.parse(r.attrs) as { totalSpend?: number; currency?: string | null })
+          : null
+        if (attrs?.totalSpend != null) {
+          totalSpend = attrs.totalSpend
+          currency = attrs.currency ?? null
+        }
+      } catch {
+        /* malformed attrs → no spend */
+      }
       return {
         name: r.name,
         key: r.matchKey,
@@ -64,7 +79,8 @@ export function registerPeopleHandlers(ipcMain: IpcMain): void {
         sources,
         firstSeen: r.firstSeen ? r.firstSeen.getTime() : null,
         lastSeen: r.lastSeen ? r.lastSeen.getTime() : null,
-        contactId: null
+        contactId: null,
+        ...(totalSpend != null ? { totalSpend, currency } : {})
       }
     })
     return { people, promotedCount }
