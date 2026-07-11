@@ -68,7 +68,7 @@ unchanged: AI reads everything, writes nothing without human approval.
 
 | Exception | Enforcement | Locked in by |
 |---|---|---|
-| GPS off the spine | `insertLocationPoints` routes to `location_points`; no projector reads it | `electron/ipc/records.test.ts` |
+| GPS off the spine | `insertLocationPoints` routes to `location_points`; no projector reads it | `electron/ipc/records-reclassify.test.ts` (asserts geolocation rows land in `location_points`, off `records`); `electron/lib/amazon-export.test.ts` |
 | Credentials sealed in ⌘K | title-field allowlist only for `credentials` in `electron/ipc/search.ts` | `electron/ipc/search.test.ts` |
 | Credentials sealed in the assistant | category refused at the tool boundary; `VaultReader` allowlist (defense in depth) in `electron/ipc/assistant.ts` | `electron/integrations/assistant-tools.test.ts` |
 | Vault unreachable from MCP | structural — separate process, read-only `compass.db`, no Keychain | `mcp/compass-mcp/index.ts` header |
