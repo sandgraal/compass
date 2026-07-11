@@ -21,10 +21,11 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useToast } from '../components/ui/Toast'
+import { formatMoney } from '../lib/money'
 import { cn, isoDate } from '../lib/utils'
 
 function fmtUsd(n: number): string {
-  return `$${Math.round(n).toLocaleString('en-US')}`
+  return formatMoney(n, 'USD', { decimals: 0 })
 }
 
 /** "This week across your life" — the cross-domain weekly review card. */
