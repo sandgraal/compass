@@ -329,8 +329,9 @@ export const ENTITY_EXTRACTORS: EntityExtractor[] = [
   // ── Live finance transactions (SimpleFIN/Plaid) → merchants + subscriptions ──
   // The description IS the payee/merchant; spend rides in the body's first segment
   // ("-25.00 USD · Category"). Recurring charges become subscription candidates via
-  // the cadence path. People are deliberately NOT derived here — bank memos are too
-  // noisy for isLikelyPerson; People come from Contacts + Gmail instead.
+  // the cadence path. People are deliberately NOT derived here — a QUALITY call,
+  // not a privacy wall (the data-access policy opens everything): bank memos are
+  // too noisy for isLikelyPerson; People come from Contacts + Gmail instead.
   //
   // A transaction that IS internal bank plumbing (a transfer, a card/ACH payment,
   // interest, principal) still becomes a searchable timeline record — we just don't
@@ -406,6 +407,17 @@ export const ENTITY_EXTRACTORS: EntityExtractor[] = [
     extract: (r) => {
       const loc = (r.body ?? '').trim()
       return loc ? [{ kind: 'place', name: loc }] : []
+    }
+  },
+  // ── Places from logged trips (travel_segments on the spine) ──
+  // Title shape from projectTravelSegments: "Trip to <country name>". Country-
+  // level only — the coarse derived layer; raw GPS never reaches the spine.
+  {
+    id: 'travel-place',
+    match: { source: 'travel', types: ['trip'] },
+    extract: (r) => {
+      const dest = r.title.replace(/^Trip to\s+/, '').trim()
+      return dest ? [{ kind: 'place', name: dest }] : []
     }
   }
 ]
