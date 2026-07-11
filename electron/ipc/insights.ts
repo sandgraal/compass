@@ -498,23 +498,35 @@ function detectUnusedSubscriptions(db: Db, now: Date): Insight[] {
     .all()
   if (subs.length === 0) return []
   const since = new Date(now.getTime() - UNUSED_SUB_DAYS * 24 * 3600 * 1000)
-  const out: Insight[] = []
-  for (const sub of subs) {
-    const map = STREAMING_USAGE.find((m) => m.match.test(sub.name))
-    if (!map) continue // not a service we can verify usage for → don't guess
-    const used = db
-      .select({ id: records.id })
+  const mapped = subs
+    .map((sub) => ({ sub, map: STREAMING_USAGE.find((m) => m.match.test(sub.name)) }))
+    .filter(
+      (entry): entry is { sub: (typeof subs)[number]; map: (typeof STREAMING_USAGE)[number] } =>
+        Boolean(entry.map)
+    )
+  if (mapped.length === 0) return []
+  const sources = [...new Set(mapped.flatMap((entry) => entry.map.sources))]
+  const types = [...new Set(mapped.flatMap((entry) => entry.map.types))]
+  const usedPairs = new Set(
+    db
+      .select({ source: records.source, type: records.type })
       .from(records)
       .where(
         and(
-          inArray(records.source, map.sources),
-          inArray(records.type, map.types),
+          inArray(records.source, sources),
+          inArray(records.type, types),
           gte(records.occurredAt, since)
         )
       )
-      .limit(1)
       .all()
-    if (used.length > 0) continue
+      .map((row) => `${row.source}\u0000${row.type}`)
+  )
+  const out: Insight[] = []
+  for (const { sub, map } of mapped) {
+    const used = map.sources.some((source) =>
+      map.types.some((type) => usedPairs.has(`${source}\u0000${type}`))
+    )
+    if (used) continue
     out.push({
       kind: 'unused-subscription',
       severity: 'info',
