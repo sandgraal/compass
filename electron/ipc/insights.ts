@@ -47,6 +47,8 @@ export interface Insight {
     | 'sleep-vs-spend'
     | 'savings-rate'
     | 'medical-out-of-pocket'
+    | 'dev-productivity-vs-recovery'
+    | 'calendar-load-vs-habits'
   severity: 'info' | 'warn'
   title: string
   detail: string
@@ -104,6 +106,24 @@ export const MEDICAL_OOP_LOOKBACK_DAYS = 90
 export const MEDICAL_OOP_WINDOW_DAYS = 14
 export const MEDICAL_OOP_MIN_TOTAL = 40
 export const MEDICAL_OOP_MAX = 3
+/** Dev productivity vs recovery: commit-day counts × a recovery axis, N-day window.
+ *  Heavy = ≥ BUSY commits, quiet = ≤ QUIET (the 2-4 gap is excluded for clean split).
+ *  Each axis has its own "meaningful drop" in that axis's worse direction. */
+export const DEV_RECOVERY_LOOKBACK_DAYS = 60
+export const DEV_RECOVERY_MIN_DAYS = 20
+export const DEV_RECOVERY_BUSY_COMMITS = 5
+export const DEV_RECOVERY_QUIET_COMMITS = 1
+export const DEV_RECOVERY_MIN_GROUP = 5
+export const DEV_RECOVERY_READINESS_DROP = 5 // Oura readiness points (higher = better)
+export const DEV_RECOVERY_HRV_DROP = 8 // Apple HRV ms (higher = better)
+export const DEV_RECOVERY_RHR_RISE = 3 // Apple resting HR bpm (lower = better)
+/** Calendar load vs habits: weekly event density × habit-check completion rate.
+ *  Heavy weeks must be genuinely busy (≥ MIN_EVENTS); fire when lighter weeks beat
+ *  heavier ones on completion rate by ≥ RATE_DROP (fractions, 0.2 = 20 points). */
+export const CAL_HABITS_MIN_WEEKS = 6
+export const CAL_HABITS_MIN_EVENTS = 5
+export const CAL_HABITS_RATE_DROP = 0.2
+export const CAL_HABITS_MIN_GROUP = 3
 
 const EXCLUDED_ANOMALY_CATEGORIES = new Set(['Transfers', 'Transfer', 'Uncategorized'])
 
@@ -149,6 +169,10 @@ function addMonths(ym: string, delta: number): string {
 
 function money(n: number): string {
   return `$${Math.round(n).toLocaleString('en-US')}`
+}
+
+function mean(xs: number[]): number {
+  return xs.length === 0 ? 0 : xs.reduce((s, x) => s + x, 0) / xs.length
 }
 
 // ── Detectors ────────────────────────────────────────────────────────────────
@@ -540,14 +564,17 @@ function detectUnusedSubscriptions(db: Db, now: Date): Insight[] {
 }
 
 /**
- * Sleep (apple-health) vs discretionary spend (finance), bucketed by week:
- * do the weeks you sleep least line up with heavier impulse spending? A
- * correlation nudge, not a causal claim — surfaces only with enough overlap.
+ * Total sleep per week — apple-health sleep hours when we have enough weeks of
+ * it, otherwise Oura's daily sleepScore averaged per week. Apple Health takes
+ * precedence; Oura only fills in for users without an Apple Health export, so a
+ * wearable-only user still gets the sleep-vs-spend nudge. Both series are
+ * "higher = more/better sleep," so the downstream mean-split is identical.
  */
-function detectSleepVsSpend(db: Db, now: Date): Insight[] {
-  const since = new Date(now.getTime() - (SLEEP_SPEND_MIN_WEEKS + 2) * 7 * 24 * 3600 * 1000)
-  const sinceYmd = localYmd(since)
-  // Sleep hours per week (payload.ms → hours), from the apple-health sleep records.
+function readSleepByWeek(
+  db: Db,
+  since: Date
+): { byWeek: Map<string, number>; source: 'apple-health' | 'oura' } {
+  const ah = new Map<string, number>()
   const sleepRows = db
     .select({ occurredAt: records.occurredAt, payload: records.payload })
     .from(records)
@@ -559,7 +586,6 @@ function detectSleepVsSpend(db: Db, now: Date): Insight[] {
       )
     )
     .all()
-  const sleepByWeek = new Map<string, number>()
   for (const r of sleepRows) {
     if (!r.occurredAt) continue
     let ms = 0
@@ -569,9 +595,45 @@ function detectSleepVsSpend(db: Db, now: Date): Insight[] {
       ms = 0
     }
     const k = weekKey(r.occurredAt)
-    sleepByWeek.set(k, (sleepByWeek.get(k) ?? 0) + ms / 3_600_000)
+    ah.set(k, (ah.get(k) ?? 0) + ms / 3_600_000)
   }
-  // Discretionary spend per week.
+  if (ah.size >= SLEEP_SPEND_MIN_WEEKS) return { byWeek: ah, source: 'apple-health' }
+  // Fallback: Oura daily sleepScore, averaged per week.
+  const ouraRows = db
+    .select({ occurredAt: records.occurredAt, payload: records.payload })
+    .from(records)
+    .where(
+      and(eq(records.source, 'oura'), eq(records.type, 'wellness'), gte(records.occurredAt, since))
+    )
+    .all()
+  const acc = new Map<string, { sum: number; n: number }>()
+  for (const r of ouraRows) {
+    if (!r.occurredAt) continue
+    let score: number | null = null
+    try {
+      const v = (JSON.parse(r.payload ?? '{}') as { sleepScore?: number | null }).sleepScore
+      score = v == null ? null : Number(v)
+    } catch {
+      score = null
+    }
+    if (score == null || Number.isNaN(score)) continue
+    const k = weekKey(r.occurredAt)
+    const cur = acc.get(k) ?? { sum: 0, n: 0 }
+    cur.sum += score
+    cur.n += 1
+    acc.set(k, cur)
+  }
+  const oura = new Map<string, number>()
+  for (const [k, { sum, n }] of acc) oura.set(k, sum / n)
+  // Oura only wins when Apple Health was too sparse to reach the threshold.
+  return oura.size > ah.size
+    ? { byWeek: oura, source: 'oura' }
+    : { byWeek: ah, source: 'apple-health' }
+}
+
+/** Discretionary spend per week (abs of negative txns in the watched categories). */
+function readDiscretionarySpendByWeek(db: Db, since: Date): Map<string, number> {
+  const sinceYmd = localYmd(since)
   const txns = db
     .select({
       date: financeTransactions.date,
@@ -581,14 +643,27 @@ function detectSleepVsSpend(db: Db, now: Date): Insight[] {
     .from(financeTransactions)
     .where(and(gte(financeTransactions.date, sinceYmd), lt(financeTransactions.amount, 0)))
     .all()
-  const spendByWeek = new Map<string, number>()
+  const byWeek = new Map<string, number>()
   for (const t of txns) {
     if (!DISCRETIONARY_CATEGORIES.has(t.category ?? '')) continue
     const d = new Date(`${t.date}T00:00:00`)
     if (Number.isNaN(d.getTime())) continue
     const k = weekKey(d)
-    spendByWeek.set(k, (spendByWeek.get(k) ?? 0) + Math.abs(t.amount))
+    byWeek.set(k, (byWeek.get(k) ?? 0) + Math.abs(t.amount))
   }
+  return byWeek
+}
+
+/**
+ * Sleep (apple-health, or Oura fallback) vs discretionary spend (finance),
+ * bucketed by week: do the weeks you sleep least line up with heavier impulse
+ * spending? A correlation nudge, not a causal claim — surfaces only with enough
+ * overlap.
+ */
+function detectSleepVsSpend(db: Db, now: Date): Insight[] {
+  const since = new Date(now.getTime() - (SLEEP_SPEND_MIN_WEEKS + 2) * 7 * 24 * 3600 * 1000)
+  const { byWeek: sleepByWeek } = readSleepByWeek(db, since)
+  const spendByWeek = readDiscretionarySpendByWeek(db, since)
   // Weeks present in BOTH series.
   const weeks = [...sleepByWeek.keys()].filter((k) => spendByWeek.has(k))
   if (weeks.length < SLEEP_SPEND_MIN_WEEKS) return []
@@ -596,16 +671,15 @@ function detectSleepVsSpend(db: Db, now: Date): Insight[] {
     sleep: sleepByWeek.get(k) as number,
     spend: spendByWeek.get(k) as number
   }))
-  const avg = (xs: number[]): number => xs.reduce((s, x) => s + x, 0) / xs.length
   // Split on the MEAN, not the median: sleep is often bimodal (good weeks vs
   // bad weeks), and a median can land exactly on the low cluster and empty one
   // side. The mean sits between the clusters and separates them cleanly.
-  const meanSleep = avg(paired.map((p) => p.sleep))
+  const meanSleep = mean(paired.map((p) => p.sleep))
   const low = paired.filter((p) => p.sleep < meanSleep)
   const high = paired.filter((p) => p.sleep >= meanSleep)
   if (low.length === 0 || high.length === 0) return []
-  const lowSpend = avg(low.map((p) => p.spend))
-  const highSpend = avg(high.map((p) => p.spend))
+  const lowSpend = mean(low.map((p) => p.spend))
+  const highSpend = mean(high.map((p) => p.spend))
   const delta = lowSpend - highSpend
   if (delta < SLEEP_SPEND_MIN_DELTA) return []
   return [
@@ -744,6 +818,305 @@ function detectMedicalOutOfPocket(db: Db, now: Date): Insight[] {
   return out
 }
 
+// ── Dev productivity × recovery ──────────────────────────────────────────────
+
+/** Commits per local day from the github spine (one record per commit). */
+function readCommitsByDay(db: Db, since: Date): Map<string, number> {
+  const rows = db
+    .select({ occurredAt: records.occurredAt })
+    .from(records)
+    .where(
+      and(eq(records.source, 'github'), eq(records.type, 'commit'), gte(records.occurredAt, since))
+    )
+    .all()
+  const byDay = new Map<string, number>()
+  for (const r of rows) {
+    if (!r.occurredAt) continue
+    const k = localYmd(r.occurredAt)
+    byDay.set(k, (byDay.get(k) ?? 0) + 1)
+  }
+  return byDay
+}
+
+interface RecoveryAxis {
+  byDay: Map<string, number>
+  /** Human label for the axis, e.g. "Oura readiness". */
+  axis: string
+  /** true when a HIGHER value means better recovery (readiness / HRV). */
+  betterIsHigher: boolean
+  /** Minimum meaningful gap between heavy- and quiet-day means, in axis units. */
+  drop: number
+}
+
+/**
+ * The best available daily recovery signal: Oura readiness → Apple Health HRV →
+ * Apple Health resting heart rate. Returns the first axis with ≥ MIN_DAYS days
+ * of readings in the window, or null if none is rich enough.
+ */
+function readRecoveryByDay(db: Db, since: Date): RecoveryAxis | null {
+  const readNumeric = (
+    source: string,
+    type: string,
+    field: 'readinessScore' | 'value'
+  ): Map<string, number> => {
+    const rows = db
+      .select({ occurredAt: records.occurredAt, payload: records.payload })
+      .from(records)
+      .where(
+        and(eq(records.source, source), eq(records.type, type), gte(records.occurredAt, since))
+      )
+      .all()
+    const acc = new Map<string, { sum: number; n: number }>()
+    for (const r of rows) {
+      if (!r.occurredAt) continue
+      let v: number | null = null
+      try {
+        const raw = (JSON.parse(r.payload ?? '{}') as Record<string, unknown>)[field]
+        v = raw == null ? null : Number(raw)
+      } catch {
+        v = null
+      }
+      if (v == null || Number.isNaN(v)) continue
+      const k = localYmd(r.occurredAt)
+      const cur = acc.get(k) ?? { sum: 0, n: 0 }
+      cur.sum += v
+      cur.n += 1
+      acc.set(k, cur)
+    }
+    const byDay = new Map<string, number>()
+    for (const [k, { sum, n }] of acc) byDay.set(k, sum / n)
+    return byDay
+  }
+  const readiness = readNumeric('oura', 'wellness', 'readinessScore')
+  if (readiness.size >= DEV_RECOVERY_MIN_DAYS)
+    return {
+      byDay: readiness,
+      axis: 'Oura readiness',
+      betterIsHigher: true,
+      drop: DEV_RECOVERY_READINESS_DROP
+    }
+  const hrv = readNumeric('apple-health', 'hrv', 'value')
+  if (hrv.size >= DEV_RECOVERY_MIN_DAYS)
+    return { byDay: hrv, axis: 'HRV', betterIsHigher: true, drop: DEV_RECOVERY_HRV_DROP }
+  const rhr = readNumeric('apple-health', 'resting-hr', 'value')
+  if (rhr.size >= DEV_RECOVERY_MIN_DAYS)
+    return {
+      byDay: rhr,
+      axis: 'resting heart rate',
+      betterIsHigher: false,
+      drop: DEV_RECOVERY_RHR_RISE
+    }
+  return null
+}
+
+/**
+ * Developer productivity (github commits/day) vs recovery (Oura readiness / HRV
+ * / resting HR): do your heaviest coding days track measurably worse recovery?
+ * Correlation, not causation — both streams already live on the spine.
+ */
+function detectDevProductivityVsRecovery(db: Db, now: Date): Insight[] {
+  const since = new Date(now.getTime() - DEV_RECOVERY_LOOKBACK_DAYS * 24 * 3600 * 1000)
+  const recovery = readRecoveryByDay(db, since)
+  if (!recovery) return []
+  const commitsByDay = readCommitsByDay(db, since)
+  const heavy: number[] = []
+  const quiet: number[] = []
+  for (const [day, value] of recovery.byDay) {
+    const commits = commitsByDay.get(day) ?? 0
+    if (commits >= DEV_RECOVERY_BUSY_COMMITS) heavy.push(value)
+    else if (commits <= DEV_RECOVERY_QUIET_COMMITS) quiet.push(value)
+    // days with 2..4 commits sit in the gap and are intentionally ignored
+  }
+  if (heavy.length < DEV_RECOVERY_MIN_GROUP || quiet.length < DEV_RECOVERY_MIN_GROUP) return []
+  const heavyMean = mean(heavy)
+  const quietMean = mean(quiet)
+  // "Worse" depends on the axis polarity (readiness/HRV higher = better; RHR lower = better).
+  const worseBy = recovery.betterIsHigher ? quietMean - heavyMean : heavyMean - quietMean
+  if (worseBy < recovery.drop) return []
+  const r = (n: number): string => `${Math.round(n)}`
+  return [
+    {
+      kind: 'dev-productivity-vs-recovery',
+      severity: 'info',
+      title: 'Your heavy coding days track worse recovery',
+      detail: `${recovery.axis} averaged ${r(heavyMean)} on your ${heavy.length} heaviest commit days (≥${DEV_RECOVERY_BUSY_COMMITS}) vs ${r(quietMean)} on ${quiet.length} quiet ones.`,
+      route: '/insights'
+    }
+  ]
+}
+
+// ── Calendar load × habits ───────────────────────────────────────────────────
+
+/** Count of active habits (0 → no habit signal at all). */
+function activeHabitCount(db: Db): number {
+  return db.select({ id: habits.id }).from(habits).where(eq(habits.active, true)).all().length
+}
+
+/** Calendar events per week from the gcal spine. */
+function readCalendarByWeek(db: Db, since: Date): Map<string, number> {
+  const rows = db
+    .select({ occurredAt: records.occurredAt })
+    .from(records)
+    .where(
+      and(eq(records.source, 'gcal'), eq(records.type, 'event'), gte(records.occurredAt, since))
+    )
+    .all()
+  const byWeek = new Map<string, number>()
+  for (const r of rows) {
+    if (!r.occurredAt) continue
+    const k = weekKey(r.occurredAt)
+    byWeek.set(k, (byWeek.get(k) ?? 0) + 1)
+  }
+  return byWeek
+}
+
+/** Habit completion RATE per week = completed checks / (activeHabits × 7). */
+function readHabitRateByWeek(db: Db, since: Date, activeCount: number): Map<string, number> {
+  if (activeCount <= 0) return new Map()
+  const sinceYmd = localYmd(since)
+  const rows = db
+    .select({ date: habitEntries.date, completed: habitEntries.completed })
+    .from(habitEntries)
+    .where(gte(habitEntries.date, sinceYmd))
+    .all()
+  const counts = new Map<string, number>()
+  for (const e of rows) {
+    if (!e.completed) continue
+    const d = new Date(`${e.date}T00:00:00`)
+    if (Number.isNaN(d.getTime())) continue
+    const k = weekKey(d)
+    counts.set(k, (counts.get(k) ?? 0) + 1)
+  }
+  const rate = new Map<string, number>()
+  for (const [k, c] of counts) rate.set(k, c / (activeCount * 7))
+  return rate
+}
+
+/**
+ * Calendar load (events/week) vs habit completion: do your busiest weeks come at
+ * the cost of the habits you're trying to hold? Fires when lighter weeks beat
+ * genuinely-busy weeks on completion by a clear margin.
+ */
+function detectCalendarLoadVsHabits(db: Db, now: Date): Insight[] {
+  const activeCount = activeHabitCount(db)
+  if (activeCount <= 0) return []
+  const since = new Date(now.getTime() - (CAL_HABITS_MIN_WEEKS + 2) * 7 * 24 * 3600 * 1000)
+  const eventsByWeek = readCalendarByWeek(db, since)
+  const rateByWeek = readHabitRateByWeek(db, since, activeCount)
+  const weeks = [...eventsByWeek.keys()].filter((k) => rateByWeek.has(k))
+  if (weeks.length < CAL_HABITS_MIN_WEEKS) return []
+  const paired = weeks.map((k) => ({
+    events: eventsByWeek.get(k) as number,
+    rate: rateByWeek.get(k) as number
+  }))
+  const meanEvents = mean(paired.map((p) => p.events))
+  const heavy = paired.filter((p) => p.events >= meanEvents)
+  const light = paired.filter((p) => p.events < meanEvents)
+  if (heavy.length < CAL_HABITS_MIN_GROUP || light.length < CAL_HABITS_MIN_GROUP) return []
+  const heavyEventsMean = mean(heavy.map((p) => p.events))
+  if (heavyEventsMean < CAL_HABITS_MIN_EVENTS) return [] // not genuinely busy → no signal
+  const heavyRate = mean(heavy.map((p) => p.rate))
+  const lightRate = mean(light.map((p) => p.rate))
+  if (lightRate - heavyRate < CAL_HABITS_RATE_DROP) return []
+  const pct = (x: number): string => `${Math.round(x * 100)}%`
+  return [
+    {
+      kind: 'calendar-load-vs-habits',
+      severity: 'info',
+      title: 'Busy calendar weeks, slipping habits',
+      detail: `On your busier weeks (${Math.round(heavyEventsMean)}+ events) you hit ${pct(heavyRate)} of your habit checks vs ${pct(lightRate)} on lighter ones.`,
+      route: '/insights'
+    }
+  ]
+}
+
+// ── Correlations (chart data for the /insights page) ─────────────────────────
+
+export interface CorrelationsResult {
+  generatedAt: string
+  sleepVsSpend: {
+    source: 'apple-health' | 'oura'
+    points: Array<{ week: string; sleep: number; spend: number }>
+  } | null
+  devVsRecovery: {
+    axis: string
+    betterIsHigher: boolean
+    points: Array<{ day: string; commits: number; recovery: number }>
+  } | null
+  calendarVsHabits: {
+    points: Array<{ week: string; events: number; completionRate: number }>
+  } | null
+}
+
+function safeSection<T>(fn: () => T | null): T | null {
+  try {
+    return fn()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The underlying paired series behind the cross-domain detectors, for charting
+ * on the /insights page. Unlike the detectors (which fire only past a delta),
+ * these surface whenever there's ENOUGH DATA to be worth plotting — so the user
+ * sees the relationship even when it isn't alarming. Reuses the same read
+ * helpers as the detectors so chart data and nudges can never drift apart.
+ */
+export function buildCorrelations(db: Db, now: Date = new Date()): CorrelationsResult {
+  const sleepVsSpend = safeSection(() => {
+    const since = new Date(now.getTime() - (SLEEP_SPEND_MIN_WEEKS + 2) * 7 * 24 * 3600 * 1000)
+    const { byWeek: sleepByWeek, source } = readSleepByWeek(db, since)
+    const spendByWeek = readDiscretionarySpendByWeek(db, since)
+    const weeks = [...sleepByWeek.keys()].filter((k) => spendByWeek.has(k)).sort()
+    if (weeks.length < SLEEP_SPEND_MIN_WEEKS) return null
+    return {
+      source,
+      points: weeks.map((week) => ({
+        week,
+        sleep: Math.round((sleepByWeek.get(week) as number) * 10) / 10,
+        spend: Math.round(spendByWeek.get(week) as number)
+      }))
+    }
+  })
+
+  const devVsRecovery = safeSection(() => {
+    const since = new Date(now.getTime() - DEV_RECOVERY_LOOKBACK_DAYS * 24 * 3600 * 1000)
+    const recovery = readRecoveryByDay(db, since)
+    if (!recovery) return null
+    const commitsByDay = readCommitsByDay(db, since)
+    const days = [...recovery.byDay.keys()].sort()
+    const points = days.map((day) => ({
+      day,
+      commits: commitsByDay.get(day) ?? 0,
+      recovery: Math.round((recovery.byDay.get(day) as number) * 10) / 10
+    }))
+    const heavy = points.filter((p) => p.commits >= DEV_RECOVERY_BUSY_COMMITS).length
+    const quiet = points.filter((p) => p.commits <= DEV_RECOVERY_QUIET_COMMITS).length
+    if (heavy < DEV_RECOVERY_MIN_GROUP || quiet < DEV_RECOVERY_MIN_GROUP) return null
+    return { axis: recovery.axis, betterIsHigher: recovery.betterIsHigher, points }
+  })
+
+  const calendarVsHabits = safeSection(() => {
+    const activeCount = activeHabitCount(db)
+    if (activeCount <= 0) return null
+    const since = new Date(now.getTime() - (CAL_HABITS_MIN_WEEKS + 2) * 7 * 24 * 3600 * 1000)
+    const eventsByWeek = readCalendarByWeek(db, since)
+    const rateByWeek = readHabitRateByWeek(db, since, activeCount)
+    const weeks = [...eventsByWeek.keys()].filter((k) => rateByWeek.has(k)).sort()
+    if (weeks.length < CAL_HABITS_MIN_WEEKS) return null
+    return {
+      points: weeks.map((week) => ({
+        week,
+        events: eventsByWeek.get(week) as number,
+        completionRate: Math.round((rateByWeek.get(week) as number) * 100) / 100
+      }))
+    }
+  })
+
+  return { generatedAt: now.toISOString(), sleepVsSpend, devVsRecovery, calendarVsHabits }
+}
+
 // ── Aggregator ───────────────────────────────────────────────────────────────
 
 export function buildInsights(db: Db, now: Date = new Date()): InsightsResult {
@@ -761,7 +1134,9 @@ export function buildInsights(db: Db, now: Date = new Date()): InsightsResult {
     ...safeDetect(() => detectUnusedSubscriptions(db, now)),
     ...safeDetect(() => detectSleepVsSpend(db, now)),
     ...safeDetect(() => detectSavingsRate(db, now)),
-    ...safeDetect(() => detectMedicalOutOfPocket(db, now))
+    ...safeDetect(() => detectMedicalOutOfPocket(db, now)),
+    ...safeDetect(() => detectDevProductivityVsRecovery(db, now)),
+    ...safeDetect(() => detectCalendarLoadVsHabits(db, now))
   ]
   // Warnings first, stable within severity (detector order is intentional).
   insights.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'warn' ? -1 : 1))
@@ -784,5 +1159,8 @@ function safeDetect(fn: () => Insight[]): Insight[] {
 export function registerInsightsHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('insights:get', (): InsightsResult => {
     return buildInsights(getDb())
+  })
+  ipcMain.handle('insights:correlations', (): CorrelationsResult => {
+    return buildCorrelations(getDb())
   })
 }

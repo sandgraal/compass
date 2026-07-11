@@ -178,6 +178,20 @@ function ymdMs(ymd: string): number {
   return new Date(`${ymd}T00:00:00`).getTime()
 }
 
+/** 'YYYY-MM-DD' for `anchor` minus `days` (local). */
+function ymdMinus(anchor: string, days: number): string {
+  const d = new Date(`${anchor}T00:00:00`)
+  d.setDate(d.getDate() - days)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** Monday-anchored 'YYYY-MM-DD' for `w` weeks before a fixed anchor (weekKey normalizes it). */
+function weekYmd(w: number): string {
+  const monday = new Date('2026-06-08T00:00:00')
+  monday.setDate(monday.getDate() - w * 7)
+  return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`
+}
+
 afterEach(() => {
   sqlite.close()
 })
@@ -616,6 +630,148 @@ describe('medical out-of-pocket (medical records × finance)', () => {
   })
 })
 
+describe('dev productivity vs recovery (github × recovery, daily)', () => {
+  beforeEach(() => createRecordsTable())
+  // 24 days: even days = heavy coding (6 commits), odd days = quiet (0 commits).
+  function seedDev(axis: (ymd: string, heavy: boolean) => void): void {
+    for (let i = 0; i < 24; i++) {
+      const ymd = ymdMinus('2026-06-14', i)
+      const heavy = i % 2 === 0
+      axis(ymd, heavy)
+      if (heavy) for (let c = 0; c < 6; c++) addRecord('github', 'commit', ymdMs(ymd), {})
+    }
+  }
+
+  it('fires when heavy commit days track worse Oura readiness', async () => {
+    const { buildInsights } = await import('./insights')
+    seedDev((ymd, heavy) =>
+      addRecord('oura', 'wellness', ymdMs(ymd), { payload: { readinessScore: heavy ? 60 : 80 } })
+    )
+    const hit = buildInsights(db(), NOW).insights.filter(
+      (i) => i.kind === 'dev-productivity-vs-recovery'
+    )
+    expect(hit).toHaveLength(1)
+    expect(hit[0].detail).toMatch(/Oura readiness/)
+  })
+
+  it('falls back to Apple Health HRV when Oura is absent', async () => {
+    const { buildInsights } = await import('./insights')
+    seedDev((ymd, heavy) =>
+      addRecord('apple-health', 'hrv', ymdMs(ymd), { payload: { value: heavy ? 40 : 60 } })
+    )
+    const hit = buildInsights(db(), NOW).insights.filter(
+      (i) => i.kind === 'dev-productivity-vs-recovery'
+    )
+    expect(hit).toHaveLength(1)
+    expect(hit[0].detail).toMatch(/HRV/)
+  })
+
+  it('stays quiet when recovery barely differs between heavy and quiet days', async () => {
+    const { buildInsights } = await import('./insights')
+    seedDev((ymd, heavy) =>
+      addRecord('oura', 'wellness', ymdMs(ymd), { payload: { readinessScore: heavy ? 78 : 80 } })
+    )
+    expect(
+      buildInsights(db(), NOW).insights.filter((i) => i.kind === 'dev-productivity-vs-recovery')
+    ).toHaveLength(0)
+  })
+})
+
+describe('sleep vs spend — Oura fallback + Apple Health precedence', () => {
+  beforeEach(() => createRecordsTable())
+
+  it('fires from Oura sleepScore when Apple Health sleep is absent', async () => {
+    const { buildInsights } = await import('./insights')
+    for (let w = 0; w < 8; w++) {
+      const md = weekYmd(w)
+      const lowSleep = w % 2 === 0
+      addRecord('oura', 'wellness', ymdMs(md), { payload: { sleepScore: lowSleep ? 50 : 85 } })
+      addTxn(md, lowSleep ? -180 : -60, 'Dining')
+    }
+    const hit = buildInsights(db(), NOW).insights.filter((i) => i.kind === 'sleep-vs-spend')
+    expect(hit).toHaveLength(1)
+    expect(hit[0].detail).toMatch(/discretionary spend/)
+  })
+
+  it('prefers Apple Health over Oura when both are present', async () => {
+    const { buildCorrelations } = await import('./insights')
+    for (let w = 0; w < 8; w++) {
+      const md = weekYmd(w)
+      addRecord('apple-health', 'sleep', ymdMs(md), { payload: { ms: 7 * 3_600_000 } })
+      addRecord('oura', 'wellness', ymdMs(md), { payload: { sleepScore: 70 } })
+      addTxn(md, -80, 'Dining')
+    }
+    expect(buildCorrelations(db(), NOW).sleepVsSpend?.source).toBe('apple-health')
+  })
+})
+
+describe('calendar load vs habits (gcal × habits, weekly)', () => {
+  beforeEach(() => createRecordsTable())
+  // 8 weeks: even = busy (8 events, 1 habit check), odd = light (2 events, 6 checks).
+  function seedCalWeeks(habitId: number): void {
+    for (let w = 0; w < 8; w++) {
+      const md = weekYmd(w)
+      const heavy = w % 2 === 0
+      for (let e = 0; e < (heavy ? 8 : 2); e++)
+        addRecord('gcal', 'event', ymdMs(md), { title: 'mtg' })
+      for (let c = 0; c < (heavy ? 1 : 6); c++) addEntry(habitId, md, 1)
+    }
+  }
+
+  it('fires when busy calendar weeks track lower habit completion', async () => {
+    const { buildInsights } = await import('./insights')
+    seedCalWeeks(addHabit('Meditate'))
+    const hit = buildInsights(db(), NOW).insights.filter(
+      (i) => i.kind === 'calendar-load-vs-habits'
+    )
+    expect(hit).toHaveLength(1)
+    expect(hit[0].route).toBe('/insights')
+  })
+
+  it('stays silent when there are no active habits', async () => {
+    const { buildInsights } = await import('./insights')
+    seedCalWeeks(addHabit('Meditate', 0)) // inactive → no habit signal
+    expect(
+      buildInsights(db(), NOW).insights.filter((i) => i.kind === 'calendar-load-vs-habits')
+    ).toHaveLength(0)
+  })
+})
+
+describe('correlations (chart data for /insights)', () => {
+  beforeEach(() => createRecordsTable())
+
+  it('returns all-null sections on an empty DB', async () => {
+    const { buildCorrelations } = await import('./insights')
+    const c = buildCorrelations(db(), NOW)
+    expect(c.sleepVsSpend).toBeNull()
+    expect(c.devVsRecovery).toBeNull()
+    expect(c.calendarVsHabits).toBeNull()
+  })
+
+  it('builds a dev-vs-recovery series and registers insights:correlations', async () => {
+    const mod = await import('./insights')
+    for (let i = 0; i < 24; i++) {
+      const ymd = ymdMinus('2026-06-14', i)
+      const heavy = i % 2 === 0
+      addRecord('oura', 'wellness', ymdMs(ymd), { payload: { readinessScore: heavy ? 60 : 80 } })
+      if (heavy) for (let c = 0; c < 6; c++) addRecord('github', 'commit', ymdMs(ymd), {})
+    }
+    const c = mod.buildCorrelations(db(), NOW)
+    expect(c.devVsRecovery).not.toBeNull()
+    expect(c.devVsRecovery?.axis).toBe('Oura readiness')
+    expect(c.devVsRecovery?.points).toHaveLength(24)
+
+    const handlers: Record<string, (...args: unknown[]) => unknown> = {}
+    mod.registerInsightsHandlers({
+      handle: (channel: string, h: (...args: unknown[]) => unknown) => {
+        handlers[channel] = h
+      }
+    } as unknown as IpcMain)
+    const viaIpc = (await handlers['insights:correlations']({})) as { devVsRecovery: unknown }
+    expect(viaIpc.devVsRecovery).not.toBeNull()
+  })
+})
+
 describe('cross-domain detectors survive a missing table', () => {
   it('does not throw when records/subscriptions/paystubs tables are absent', async () => {
     // The shared beforeEach creates none of them — this is the default state.
@@ -623,6 +779,12 @@ describe('cross-domain detectors survive a missing table', () => {
     expect(() => buildInsights(db(), NOW)).not.toThrow()
     expect(
       buildInsights(db(), NOW).insights.filter((i) => i.kind === 'unused-subscription')
+    ).toEqual([])
+    expect(
+      buildInsights(db(), NOW).insights.filter((i) => i.kind === 'dev-productivity-vs-recovery')
+    ).toEqual([])
+    expect(
+      buildInsights(db(), NOW).insights.filter((i) => i.kind === 'calendar-load-vs-habits')
     ).toEqual([])
   })
 })
