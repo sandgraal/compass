@@ -149,30 +149,28 @@ function addRecord(
     )
 }
 
+let subSeq = 0
 function addSubscription(
   name: string,
   cost: number,
   opts: { cadence?: string; status?: string } = {}
 ): void {
+  subSeq++
   sqlite
     .prepare(
       'INSERT INTO subscriptions (external_id, name, cost, cadence, status) VALUES (?,?,?,?,?)'
     )
-    .run(
-      `sub-${name}-${Math.random()}`,
-      name,
-      cost,
-      opts.cadence ?? 'monthly',
-      opts.status ?? 'active'
-    )
+    .run(`sub-${name}-${subSeq}`, name, cost, opts.cadence ?? 'monthly', opts.status ?? 'active')
 }
 
+let paystubSeq = 0
 function addPaystub(paidAt: string, netPay: number, employer = 'Initech'): void {
+  paystubSeq++
   sqlite
     .prepare(
       'INSERT INTO argyle_paystubs (external_id, employer, net_pay, paid_at) VALUES (?,?,?,?)'
     )
-    .run(`ps-${paidAt}-${Math.random()}`, employer, netPay, paidAt)
+    .run(`ps-${paidAt}-${paystubSeq}`, employer, netPay, paidAt)
 }
 
 /** epoch ms for a local 'YYYY-MM-DD' at midnight (matches the projectors' idiom). */

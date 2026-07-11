@@ -854,6 +854,9 @@ export async function syncGitHub(
         .onConflictDoUpdate({
           target: githubItems.externalId,
           set: {
+            type: row.type,
+            repo: row.repo,
+            url: row.url,
             title: row.title,
             state: row.state,
             author: row.author,
@@ -916,7 +919,8 @@ export async function syncGitHub(
           }>
           for (const ev of events) {
             if (ev.type !== 'PushEvent') continue
-            const repo = ev.repo?.name ?? ''
+            const repo = ev.repo?.name
+            if (!repo) continue
             for (const c of ev.payload?.commits ?? []) {
               if (!c.sha) continue
               upsertGh({

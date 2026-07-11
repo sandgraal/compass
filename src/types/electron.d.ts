@@ -1060,7 +1060,19 @@ declare global {
         get(): Promise<{
           generatedAt: string
           insights: Array<{
-            kind: 'spending-anomaly' | 'uncategorized-spend' | 'habit-slippage' | 'stale-notes'
+            kind:
+              | 'spending-anomaly'
+              | 'uncategorized-spend'
+              | 'habit-slippage'
+              | 'stale-notes'
+              | 'goal-off-track'
+              | 'renewal-due'
+              | 'paycheck-anomaly'
+              | 'utility-spike'
+              | 'unused-subscription'
+              | 'sleep-vs-spend'
+              | 'savings-rate'
+              | 'medical-out-of-pocket'
             severity: 'info' | 'warn'
             title: string
             detail: string
