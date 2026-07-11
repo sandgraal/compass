@@ -64,9 +64,12 @@ function Bars({ data }: { data: Array<{ date: string; value: number }> }): JSX.E
   )
 }
 
+type MedicalDirectory = Awaited<ReturnType<Window['api']['medical']['getDirectory']>>
+
 export default function Health(): JSX.Element {
   const [summary, setSummary] = useState<HealthSummary | null>(null)
   const [medical, setMedical] = useState<MedicalSummary | null>(null)
+  const [directory, setDirectory] = useState<MedicalDirectory | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -86,6 +89,14 @@ export default function Health(): JSX.Element {
         .getSummary()
         .then((m) => setMedical(m))
         .catch(() => setMedical(null))
+    }
+    // The deduped medications/conditions directory (falls back to the flat list
+    // if the newer handler isn't present).
+    if (window.api.medical?.getDirectory) {
+      window.api.medical
+        .getDirectory()
+        .then((d) => setDirectory(d))
+        .catch(() => setDirectory(null))
     }
   }, [])
 
@@ -284,43 +295,69 @@ export default function Health(): JSX.Element {
               value={fmtInt(medical.byCategory.lab ?? 0)}
             />
           </div>
-          {medical.conditions.length > 0 && (
-            <div className="mb-3">
-              <div className="text-xs font-medium text-muted-foreground mb-1.5">Conditions</div>
-              <ul className="space-y-1">
-                {medical.conditions.slice(0, 8).map((c, i) => (
-                  <li
-                    key={`${c.description}-${c.date ?? ''}-${i}`}
-                    className="flex items-center justify-between text-sm gap-3"
-                  >
-                    <span className="text-foreground min-w-0 truncate">{c.description}</span>
-                    <span className="text-xs text-muted-foreground shrink-0">
-                      {c.status ?? ''}
-                      {c.date ? ` · ${c.date}` : ''}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {medical.medications.length > 0 && (
-            <div>
-              <div className="text-xs font-medium text-muted-foreground mb-1.5">Medications</div>
-              <ul className="space-y-1">
-                {medical.medications.slice(0, 8).map((m, i) => (
-                  <li
-                    key={`${m.description}-${m.date ?? ''}-${i}`}
-                    className="flex items-center justify-between text-sm gap-3"
-                  >
-                    <span className="text-foreground min-w-0 truncate">{m.description}</span>
-                    <span className="text-xs text-muted-foreground shrink-0">{m.status ?? ''}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <MedicalDirectoryList
+            title="Conditions"
+            entries={directory?.conditions ?? medicalFallback(medical.conditions)}
+          />
+          <MedicalDirectoryList
+            title="Medications"
+            entries={directory?.medications ?? medicalFallback(medical.medications)}
+          />
         </div>
       )}
+    </div>
+  )
+}
+
+/** Adapt the flat summary list to directory entries when the directory handler is absent. */
+function medicalFallback(
+  items: Array<{ description: string; status: string | null; date: string | null }>
+): MedicalDirectoryEntry[] {
+  return items.map((i) => ({
+    name: i.description,
+    code: null,
+    count: 1,
+    status: i.status,
+    firstDate: i.date,
+    lastDate: i.date
+  }))
+}
+
+/** A deduped medical directory section (each name once, with count + date span). */
+function MedicalDirectoryList({
+  title,
+  entries
+}: {
+  title: string
+  entries: MedicalDirectoryEntry[]
+}): JSX.Element | null {
+  if (entries.length === 0) return null
+  return (
+    <div className="mb-3 last:mb-0">
+      <div className="text-xs font-medium text-muted-foreground mb-1.5">
+        {title} <span className="text-muted-foreground/60">· {entries.length}</span>
+      </div>
+      <ul className="space-y-1">
+        {entries.slice(0, 12).map((e) => {
+          const span =
+            e.firstDate && e.lastDate && e.firstDate !== e.lastDate
+              ? `${e.firstDate} → ${e.lastDate}`
+              : (e.lastDate ?? '')
+          return (
+            <li key={e.name} className="flex items-center justify-between text-sm gap-3">
+              <span className="text-foreground min-w-0 truncate">
+                {e.name}
+                {e.count > 1 && (
+                  <span className="text-xs text-muted-foreground ml-1.5">×{e.count}</span>
+                )}
+              </span>
+              <span className="text-xs text-muted-foreground shrink-0">
+                {[e.status, span].filter((p): p is string => Boolean(p)).join(' · ')}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }
