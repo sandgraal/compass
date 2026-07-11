@@ -463,8 +463,12 @@ function listTransactions(sqlite: RawSqlite, input: Record<string, unknown>): un
   const limit = clampInt(input.limit, 1, 50, 20)
   const month = str(input.month)
   if (month && !/^\d{4}-\d{2}$/.test(month)) return { error: 'month must be YYYY-MM' }
-  const from = str(input.from)
-  const to = str(input.to)
+  let from = str(input.from)
+  let to = str(input.to)
+  if (month) {
+    from = ''
+    to = ''
+  }
   if (from && !isRealYmd(from)) return { error: 'from must be a real YYYY-MM-DD date' }
   if (to && !isRealYmd(to)) return { error: 'to must be a real YYYY-MM-DD date' }
   const q = str(input.q)
