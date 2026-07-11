@@ -16,6 +16,7 @@ import { readAppleCalendars } from '../integrations/apple-calendar'
 import { syncArcadia } from '../integrations/arcadia'
 import { syncArgyle } from '../integrations/argyle'
 import { syncCanopy } from '../integrations/canopy'
+import { syncEmailReceipts } from '../integrations/email-receipts'
 import {
   ContactsScopeError,
   buildGoogleContactInputs,
@@ -1003,6 +1004,7 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('sync:trigger', async (_event, service: string) => {
     const win = BrowserWindow.getAllWindows()[0]
     if (service === 'google') return syncGoogle(win)
+    if (service === 'email-receipts') return syncEmailReceipts(win)
     if (service === 'github') return toPublicSyncResult(await syncGitHub(win))
     if (service === 'apple-calendar') return syncAppleCalendar(win)
     if (service === 'obsidian') return syncObsidian(win)
