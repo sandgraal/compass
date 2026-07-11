@@ -341,29 +341,13 @@ function reconcileLiveRecords(source: string, inputs: RecordInput[]): number {
 }
 
 /**
- * Project every domain table into `records` (no entity refresh). Idempotent —
- * safe to run on every sync, on every debounced domain write, and on demand.
+ * Project the user-edited domain tables (habits, tasks, medical, travel, goals,
+ * comps, paystubs, utility bills, snapshot facts) into `records`. Does NOT touch
+ * connector-sourced tables (finance/gmail/gcal/github/linear/oura). Idempotent.
  */
-function projectDomainsToRecords(): number {
+function projectUserEditedDomainsToRecords(): number {
   const now = Date.now()
   let imported = 0
-  // Finance uses the plain (occurredAt-inclusive) insert: a transaction's date is
-  // IMMUTABLE, so its hash is stable and re-projection is already a no-op — and this
-  // keeps the dedup hash identical to what v0.17.0 shipped, so an upgrade doesn't
-  // duplicate the 394 finance records already on disk.
-  imported += insertRecords(
-    projectFinanceTransactions(readFinanceTxns()),
-    `live:finance:${now}`
-  ).imported
-  // Gmail/Calendar/GitHub/Linear/Oura carry a MUTABLE occurredAt (received_at /
-  // start / updated_at / the day's scores being revised), so they UPSERT on a
-  // stable per-domain-row key (occurredAt excluded): a changed timestamp or a
-  // rescored day re-projects in place instead of spamming a new timeline row.
-  imported += upsertLiveRecords(projectGmail(readGmail()), `live:gmail:${now}`).imported
-  imported += upsertLiveRecords(projectCalendar(readCalendar()), `live:gcal:${now}`).imported
-  imported += upsertLiveRecords(projectGithub(readGithub()), `live:github:${now}`).imported
-  imported += upsertLiveRecords(projectLinear(readLinear()), `live:linear:${now}`).imported
-  imported += upsertLiveRecords(projectOuraMetrics(readOura()), `live:oura:${now}`).imported
   // Spine-expansion domains (data-access policy): same mutable-row upsert, plus a
   // reconcile-delete for the delete-capable ones so unchecked/removed rows leave
   // the timeline. DEDUP KEYS ARE FROZEN — changing a source/type/naturalKey here
@@ -398,6 +382,35 @@ function projectDomainsToRecords(): number {
 }
 
 /**
+ * Project every domain table into `records` (no entity refresh). Idempotent —
+ * safe to run on every sync and on demand. Includes both connector sources
+ * (finance/gmail/gcal/github/linear/oura) and user-edited domains.
+ */
+function projectDomainsToRecords(): number {
+  const now = Date.now()
+  let imported = 0
+  // Finance uses the plain (occurredAt-inclusive) insert: a transaction's date is
+  // IMMUTABLE, so its hash is stable and re-projection is already a no-op — and this
+  // keeps the dedup hash identical to what v0.17.0 shipped, so an upgrade doesn't
+  // duplicate the 394 finance records already on disk.
+  imported += insertRecords(
+    projectFinanceTransactions(readFinanceTxns()),
+    `live:finance:${now}`
+  ).imported
+  // Gmail/Calendar/GitHub/Linear/Oura carry a MUTABLE occurredAt (received_at /
+  // start / updated_at / the day's scores being revised), so they UPSERT on a
+  // stable per-domain-row key (occurredAt excluded): a changed timestamp or a
+  // rescored day re-projects in place instead of spamming a new timeline row.
+  imported += upsertLiveRecords(projectGmail(readGmail()), `live:gmail:${now}`).imported
+  imported += upsertLiveRecords(projectCalendar(readCalendar()), `live:gcal:${now}`).imported
+  imported += upsertLiveRecords(projectGithub(readGithub()), `live:github:${now}`).imported
+  imported += upsertLiveRecords(projectLinear(readLinear()), `live:linear:${now}`).imported
+  imported += upsertLiveRecords(projectOuraMetrics(readOura()), `live:oura:${now}`).imported
+  imported += projectUserEditedDomainsToRecords()
+  return imported
+}
+
+/**
  * Project all domain tables into `records`, then rebuild the derived-entity
  * cache ONCE. Idempotent — safe to run on every sync and on demand.
  */
@@ -411,8 +424,10 @@ export function projectAllToRecords(): BackfillResult {
  * Debounced post-write hook for the user-edited domains that now live on the
  * spine (habits, tasks, goals, travel segments, rental comps). Call it after
  * any write handler mutates one of those tables; 3 s later (resetting on each
- * new write) the whole projection re-runs, so a burst of habit toggles costs
- * one projection, not ten. Same never-throws contract as `afterConnectorSync`.
+ * new write) only the user-edited domain projection re-runs (connector sources
+ * such as finance/gmail/gcal/github/linear/oura are intentionally skipped to
+ * keep routine habit/task churn cheap), so a burst of habit toggles costs one
+ * projection, not ten. Same never-throws contract as `afterConnectorSync`.
  * Pass `{ entities: true }` when the write can change derived entities (e.g.
  * travel → Places); routine habit/task churn skips the entity rebuild.
  */
@@ -426,7 +441,7 @@ export function afterDomainWrite(opts?: { entities?: boolean }): void {
     const wantEntities = domainWriteWantsEntities
     domainWriteWantsEntities = false
     try {
-      projectDomainsToRecords()
+      projectUserEditedDomainsToRecords()
       if (wantEntities) refreshDerivedEntities(getDb())
     } catch (err) {
       console.warn('[storehouse-sync] domain-write projection failed (non-fatal):', err)
