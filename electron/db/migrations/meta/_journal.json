@@ -260,6 +260,13 @@
       "when": 1783700000000,
       "tag": "0036_curation_exclusions",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1783805613880,
+      "tag": "0037_parched_the_captain",
+      "breakpoints": true
     }
   ]
 }

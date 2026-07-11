@@ -40,7 +40,8 @@ vi.mock('../db/client', () => ({
 
 import { _internal } from './search'
 
-const { scoreMatch, searchVault, searchRecordsSpine, searchContacts } = _internal
+const { scoreMatch, searchVault, searchRecordsSpine, searchContacts, searchDocumentsHits } =
+  _internal
 
 function writeVaultCategory(category: string, entries: Array<Record<string, unknown>>): void {
   writeFileSync(join(dirs.vault, `${category}.enc`), JSON.stringify(entries))
@@ -67,12 +68,38 @@ beforeEach(() => {
       photo TEXT, source TEXT NOT NULL DEFAULT 'manual', search_blob TEXT, enrichment TEXT,
       created_at INTEGER, updated_at INTEGER
     );
+    CREATE TABLE documents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, file_name TEXT NOT NULL,
+      mime_type TEXT, byte_size INTEGER, sha256 TEXT NOT NULL, stored_path TEXT NOT NULL,
+      extracted_text TEXT, page_count INTEGER, doc_date TEXT, category TEXT, notes TEXT,
+      source TEXT, created_at INTEGER, updated_at INTEGER
+    );
+    CREATE VIRTUAL TABLE documents_fts USING fts5(title, extracted_text, content='documents', content_rowid='id', tokenize='unicode61 remove_diacritics 2');
+    CREATE TRIGGER documents_ai AFTER INSERT ON documents BEGIN INSERT INTO documents_fts(rowid,title,extracted_text) VALUES (new.id,new.title,new.extracted_text); END;
   `)
 })
 
 afterEach(() => {
   sqlite.close()
   rmSync(dirs.base, { recursive: true, force: true })
+})
+
+describe('searchDocumentsHits — documents store is body-searchable', () => {
+  it('finds a document by a word only in its extracted text', () => {
+    sqlite
+      .prepare(
+        'INSERT INTO documents (title, file_name, sha256, stored_path, extracted_text) VALUES (?,?,?,?,?)'
+      )
+      .run('Lease 2026', 'lease.pdf', 'sha-1', '1.pdf', 'tenant obligations at Umbrella Plaza')
+    const hits = searchDocumentsHits('umbrella')
+    expect(hits).toHaveLength(1)
+    expect(hits[0]).toMatchObject({ kind: 'document', title: 'Lease 2026', fileName: 'lease.pdf' })
+  })
+
+  it('returns [] when documents_fts is absent (odd/old DB)', () => {
+    sqlite.exec('DROP TRIGGER documents_ai; DROP TABLE documents_fts;')
+    expect(searchDocumentsHits('anything')).toEqual([])
+  })
 })
 
 describe('scoreMatch', () => {

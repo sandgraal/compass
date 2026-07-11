@@ -169,6 +169,14 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       keywords: ['storehouse', 'overview', 'everything', 'all my info', 'summary']
     },
     {
+      id: 'documents',
+      label: 'Documents',
+      description: 'Your files — searchable, attachable',
+      icon: <FileText size={15} />,
+      action: () => nav('/documents'),
+      keywords: ['documents', 'files', 'pdf', 'upload', 'attachments', 'papers', 'receipts']
+    },
+    {
       id: 'timeline',
       label: 'Timeline',
       description: 'Import data exports onto your timeline',
@@ -498,6 +506,18 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
         action: () => {
           onClose()
           navigate('/contacts')
+        }
+      }
+    }
+    if (hit.kind === 'document') {
+      return {
+        id: `document:${hit.id}`,
+        label: hit.title,
+        description: `Document · ${hit.fileName}${hit.snippet ? ` · ${hit.snippet}` : ''}`,
+        icon: <FileText size={15} />,
+        action: () => {
+          onClose()
+          navigate('/documents')
         }
       }
     }

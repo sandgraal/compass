@@ -24,6 +24,7 @@ import type { IpcMain } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
 import { checklistItems, contacts, knowledgeFiles as knowledgeFilesTable } from '../db/schema'
 import { decryptBlob, getOrCreateKey } from '../lib/crypto-vault'
+import { searchDocuments } from '../lib/documents-search'
 import { searchRecords } from '../lib/records-search'
 import { KNOWLEDGE_DIR, VAULT_DIR } from '../paths'
 
@@ -71,6 +72,15 @@ export type GlobalSearchHit =
       displayName: string
       org: string | null
       relationship: string | null
+      score: number
+    }
+  | {
+      kind: 'document'
+      id: number
+      title: string
+      fileName: string
+      /** ±window around a match in the extracted PDF / text body. */
+      snippet: string
       score: number
     }
 
@@ -363,6 +373,32 @@ function searchContacts(query: string): GlobalSearchHit[] {
   return hits.slice(0, MAX_PER_KIND)
 }
 
+/**
+ * The documents store via FTS — finds a document by a word inside the file
+ * (extracted PDF / text), not just its title. try/catch yields [] when
+ * documents_fts is absent (odd/old DB), matching `searchRecordsSpine`.
+ */
+function searchDocumentsHits(query: string): GlobalSearchHit[] {
+  const lq = query.toLowerCase()
+  let rows: ReturnType<typeof searchDocuments>
+  try {
+    rows = searchDocuments(getRawSqlite(), { q: query, limit: MAX_PER_KIND })
+  } catch {
+    return []
+  }
+  return rows.map((r, i) => {
+    const titleScore = scoreMatch(r.title, lq)
+    return {
+      kind: 'document' as const,
+      id: r.id,
+      title: r.title,
+      fileName: r.fileName,
+      snippet: (r.snippet ?? '').replace(/\s+/g, ' ').trim().slice(0, 120),
+      score: titleScore > 0 ? titleScore + 10 : Math.max(10, 40 - i * 3)
+    }
+  })
+}
+
 export function registerSearchHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('search:global', (_event, query: unknown) => {
     if (typeof query !== 'string') return { hits: [] as GlobalSearchHit[] }
@@ -378,8 +414,9 @@ export function registerSearchHandlers(ipcMain: IpcMain): void {
     const tasks = searchTasks(trimmed)
     const records = searchRecordsSpine(trimmed)
     const contactHits = searchContacts(trimmed)
+    const docs = searchDocumentsHits(trimmed)
 
-    const all = [...knowledge, ...vault, ...tasks, ...records, ...contactHits]
+    const all = [...knowledge, ...vault, ...tasks, ...records, ...contactHits, ...docs]
     all.sort((a, b) => b.score - a.score)
     return {
       hits: all.slice(0, MAX_RESULTS),
@@ -388,7 +425,8 @@ export function registerSearchHandlers(ipcMain: IpcMain): void {
         vault: vault.length,
         tasks: tasks.length,
         records: records.length,
-        contacts: contactHits.length
+        contacts: contactHits.length,
+        documents: docs.length
       }
     }
   })
@@ -410,5 +448,6 @@ export const _internal = {
   searchTasks,
   searchRecordsSpine,
   searchContacts,
+  searchDocumentsHits,
   scoreMatch
 }

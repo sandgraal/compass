@@ -11,6 +11,7 @@ import {
   Clock,
   CreditCard,
   Download,
+  FileText,
   HeartPulse,
   Home,
   IdCard,
@@ -151,6 +152,7 @@ export function Sidebar(): JSX.Element {
       title: 'Your Data',
       items: [
         { label: 'Storehouse', to: '/storehouse', icon: <Layers size={18} /> },
+        { label: 'Documents', to: '/documents', icon: <FileText size={18} /> },
         { label: 'Ad Profile', to: '/ad-profile', icon: <Target size={18} /> },
         { label: 'Profile', to: '/profile', icon: <IdCard size={18} /> },
         { label: 'Apps & Websites', to: '/apps', icon: <Blocks size={18} /> },

@@ -75,6 +75,18 @@ declare global {
     models?: string[]
   }
 
+  type DocumentsImportResult = {
+    imported: number
+    duplicates: number
+    skipped: number
+    perFile: Array<{
+      fileName: string
+      status: 'imported' | 'duplicate' | 'skipped'
+      reason?: string
+      id?: number
+    }>
+  }
+
   type GlobalSearchHit =
     | {
         kind: 'knowledge'
@@ -117,6 +129,14 @@ declare global {
         displayName: string
         org: string | null
         relationship: string | null
+        score: number
+      }
+    | {
+        kind: 'document'
+        id: number
+        title: string
+        fileName: string
+        snippet: string
         score: number
       }
 
@@ -832,6 +852,7 @@ declare global {
             tasks: number
             records: number
             contacts: number
+            documents: number
           }
         }>
       }
@@ -1132,6 +1153,46 @@ declare global {
             points: Array<{ week: string; events: number; completionRate: number }>
           } | null
         }>
+      }
+      documents: {
+        import(): Promise<DocumentsImportResult>
+        importPaths(paths: string[]): Promise<DocumentsImportResult>
+        list(opts?: { category?: string }): Promise<
+          Array<{
+            id: number
+            title: string
+            fileName: string
+            mimeType: string | null
+            byteSize: number
+            pageCount: number | null
+            docDate: string | null
+            category: string | null
+            hasText: boolean
+            createdAt: number | null
+          }>
+        >
+        get(id: number): Promise<{
+          id: number
+          title: string
+          fileName: string
+          mimeType: string | null
+          byteSize: number
+          pageCount: number | null
+          docDate: string | null
+          category: string | null
+          notes: string | null
+          extractedText: string | null
+          createdAt: number | null
+          links: Array<{ id: number; targetKind: string; targetId: string }>
+        } | null>
+        attach(args: {
+          documentId: number
+          targetKind: string
+          targetId: string
+        }): Promise<{ success: boolean; error?: string }>
+        detach(linkId: number): Promise<{ success: boolean; error?: string }>
+        open(id: number): Promise<{ success: boolean; error?: string }>
+        delete(id: number): Promise<{ success: boolean; error?: string }>
       }
       plaid: {
         getStatus(): Promise<{
