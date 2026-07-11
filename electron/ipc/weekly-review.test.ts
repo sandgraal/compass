@@ -58,9 +58,53 @@ beforeEach(() => {
       source_id TEXT,
       created_at INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE finance_transactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, date TEXT NOT NULL,
+      amount REAL NOT NULL, currency TEXT DEFAULT 'USD', description TEXT NOT NULL DEFAULT '', category TEXT
+    );
+    CREATE TABLE habits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, active INTEGER DEFAULT 1,
+      icon TEXT, color TEXT, created_at INTEGER, auto_link_source TEXT, auto_link_threshold REAL
+    );
+    CREATE TABLE habit_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, habit_id INTEGER, date TEXT NOT NULL, completed INTEGER DEFAULT 0, source TEXT
+    );
+    CREATE TABLE records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, type TEXT NOT NULL, occurred_at INTEGER,
+      title TEXT NOT NULL, body TEXT, payload TEXT, dedup_hash TEXT NOT NULL UNIQUE, provenance TEXT, ingested_at INTEGER
+    );
   `)
   for (const k of Object.keys(handlers)) delete handlers[k]
 })
+
+let recN = 0
+function seedRecord(
+  source: string,
+  type: string,
+  ymd: string,
+  opts: { title?: string; payload?: unknown } = {}
+): void {
+  recN++
+  sqlite
+    .prepare(
+      'INSERT INTO records (source, type, occurred_at, title, payload, dedup_hash) VALUES (?,?,?,?,?,?)'
+    )
+    .run(
+      source,
+      type,
+      new Date(`${ymd}T12:00:00`).getTime(),
+      opts.title ?? `${source} ${type}`,
+      opts.payload === undefined ? null : JSON.stringify(opts.payload),
+      `wr-rec-${recN}`
+    )
+}
+let txnN = 0
+function seedTxn(date: string, amount: number, category: string): void {
+  txnN++
+  sqlite
+    .prepare('INSERT INTO finance_transactions (hash, date, amount, category) VALUES (?,?,?,?)')
+    .run(`wr-${date}-${amount}-${category}-${txnN}`, date, amount, category)
+}
 
 afterEach(() => {
   sqlite.close()
@@ -168,6 +212,69 @@ describe('buildWeeklyReview', () => {
     expect(r.totalTasks).toBe(0)
     expect(r.completionPct).toBe(0)
     expect(r.carryOver.count).toBe(0)
+  })
+
+  it('leaves the cross-domain sections empty/null when no data', async () => {
+    const r = await build(WEEK)
+    expect(r.crossDomain).toEqual({ spend: null, habits: [], health: null, highlights: [] })
+  })
+})
+
+// ── cross-domain sections (spend / habits / health / highlights) ─────────────
+
+describe('buildWeeklyReview — cross-domain', () => {
+  it('summarizes spend (with prior-week delta + top categories) for the week', async () => {
+    // This week (2026-05-11..17).
+    seedTxn('2026-05-12', -80, 'Dining')
+    seedTxn('2026-05-14', -40, 'Dining')
+    seedTxn('2026-05-15', -30, 'Groceries')
+    seedTxn('2026-05-13', -1000, 'Transfers') // excluded
+    seedTxn('2026-05-13', 5000, 'Salary') // income (positive) excluded
+    // Prior week (2026-05-04..10).
+    seedTxn('2026-05-06', -50, 'Dining')
+
+    const r = await build(WEEK)
+    expect(r.crossDomain.spend?.total).toBe(150) // 80+40+30, transfer + income excluded
+    expect(r.crossDomain.spend?.prevTotal).toBe(50)
+    expect(r.crossDomain.spend?.topCategories[0]).toEqual({ category: 'Dining', amount: 120 })
+  })
+
+  it('counts active-habit completions in the week', async () => {
+    sqlite.prepare("INSERT INTO habits (id, name, active) VALUES (1, 'Meditate', 1)").run()
+    sqlite.prepare("INSERT INTO habits (id, name, active) VALUES (2, 'Retired', 0)").run()
+    for (const d of ['2026-05-11', '2026-05-12', '2026-05-13']) {
+      sqlite
+        .prepare('INSERT INTO habit_entries (habit_id, date, completed) VALUES (1, ?, 1)')
+        .run(d)
+    }
+    sqlite
+      .prepare("INSERT INTO habit_entries (habit_id, date, completed) VALUES (1, '2026-05-04', 1)")
+      .run() // prior week
+    const r = await build(WEEK)
+    expect(r.crossDomain.habits).toEqual([{ name: 'Meditate', done: 3 }])
+  })
+
+  it('sums health metrics from apple-health records vs the prior week', async () => {
+    seedRecord('apple-health', 'steps', '2026-05-12', { payload: { value: 8000 } })
+    seedRecord('apple-health', 'steps', '2026-05-13', { payload: { value: 6000 } })
+    seedRecord('apple-health', 'sleep', '2026-05-12', { payload: { ms: 7 * 3_600_000 } })
+    seedRecord('apple-health', 'steps', '2026-05-05', { payload: { value: 5000 } }) // prior week
+    const r = await build(WEEK)
+    expect(r.crossDomain.health?.steps).toBe(14000)
+    expect(r.crossDomain.health?.prevSteps).toBe(5000)
+    expect(r.crossDomain.health?.sleepHours).toBe(7)
+  })
+
+  it('ranks the week’s biggest timeline events as highlights', async () => {
+    seedRecord('linkedin', 'job', '2026-05-12', { title: 'Started at Initech' })
+    for (let i = 0; i < 8; i++) {
+      seedRecord('spotify', 'listen', '2026-05-13', { title: `Track ${i}` })
+    }
+    const r = await build(WEEK)
+    expect(r.crossDomain.highlights.length).toBeGreaterThan(0)
+    expect(r.crossDomain.highlights.length).toBeLessThanOrEqual(5)
+    // The career event outranks shuffle-play listens.
+    expect(r.crossDomain.highlights[0].title).toBe('Started at Initech')
   })
 })
 
