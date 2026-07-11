@@ -542,6 +542,9 @@ declare global {
     payload: string | null
     provenance: string | null
     ingestedAt: number | null
+    /** 0–100 memory-worthiness (Timeline 2.1) — present on on-this-day feeds
+     * (where rankMemories computes it); absent on plain browse/day lists. */
+    memoryScore?: number
   }
 
   // --- Year in Review (Timeline 2.0 PR 7) ---

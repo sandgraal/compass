@@ -135,11 +135,13 @@ export function muteKey(source: string, type: string): string {
  * The resurfacing pipeline: drop muted + sensitive records, rank the rest by
  * memory score (recency as the tiebreak), cap. Pure — used by both on-this-day
  * handlers so the Timeline hero and the Dashboard card agree on what a memory is.
+ * Attaches the 0–100 `memoryScore` to each returned record so the UI can size
+ * cards by it (Timeline 2.1) — the score used to be dropped here.
  */
 export function rankMemories<T extends MemoryCandidate>(
   records: T[],
   opts: { mutes?: MuteSet; cap: number }
-): T[] {
+): Array<T & { memoryScore: number }> {
   const peers = new Map<string, number>()
   const peerKey = (r: MemoryCandidate): string => {
     const base = muteKey(r.source, r.type)
@@ -167,5 +169,5 @@ export function rankMemories<T extends MemoryCandidate>(
         (b.r.occurredAt ?? Number.NEGATIVE_INFINITY) - (a.r.occurredAt ?? Number.NEGATIVE_INFINITY)
     )
     .slice(0, opts.cap)
-    .map((x) => x.r)
+    .map((x) => ({ ...x.r, memoryScore: x.score }))
 }

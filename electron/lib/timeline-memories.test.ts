@@ -110,6 +110,13 @@ describe('rankMemories', () => {
     expect(ranked.map((r) => r.id)).not.toContain(sensitive.id)
     expect(ranked.map((r) => r.id)).not.toContain(mutedWatch.id)
     expect(ranked).toHaveLength(5)
+    // Timeline 2.1: the score is now surfaced (was dropped) so the UI can weight
+    // cards — highest first, in [0, 100].
+    expect(ranked[0].memoryScore).toBeGreaterThan(ranked[4].memoryScore)
+    for (const r of ranked) {
+      expect(r.memoryScore).toBeGreaterThanOrEqual(0)
+      expect(r.memoryScore).toBeLessThanOrEqual(100)
+    }
   })
 
   it('mutes whole source|type pairs', () => {
