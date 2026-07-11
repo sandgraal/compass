@@ -5,14 +5,14 @@
  * `timeline/overview.md` so the knowledge base (and Ask Compass) reflects what's
  * on the unified timeline.
  *
- * SECURITY: this is a SUMMARY only — counts by source/type/year, the date span,
- * a few recent titles, and an "on this day" recap. A unified life-timeline can
- * hold sensitive events, so the full per-record detail is deliberately NOT dumped
- * into the knowledge base (which would mirror it into every markdown export).
- * Per-record retrieval is instead served on demand by the Converse search path
- * (Phase 10.7 — `records:search` and the `search_records` / `compass_search_timeline`
- * tools), which the user opted into; that covers `records` only (vault + raw
- * finance stay aggregates-only).
+ * SCOPE: this is a SUMMARY only — counts by source/type/year, the date span,
+ * a few recent titles, and an "on this day" recap. The full per-record detail is
+ * deliberately NOT dumped into the knowledge base, because knowledge files get
+ * mirrored into every markdown EXPORT (a plaintext artifact that leaves the app);
+ * keeping the timeline detail out of them keeps exports lean. This is about what
+ * lands in exportable markdown, not about AI access — per-record detail is fully
+ * readable in-app and by AI via the search path (`records:search` /
+ * `search_records` / `compass_search_timeline`). See docs/data-access-policy.md.
  */
 
 import { getDb } from '../db/client'

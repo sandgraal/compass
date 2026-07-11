@@ -9,8 +9,8 @@
  * that ever writes owned data — nothing is auto-created. `entities:refresh`
  * rebuilds the cache on demand (e.g. after the user edits contacts).
  *
- * Read-only toward the vault + raw finance rows: this reads `records` (the
- * deliberate Phase-10.7 relaxation) + owned tables only.
+ * Reads `records` (the cross-domain spine) + owned tables only — never the
+ * vault. See docs/data-access-policy.md.
  */
 
 import { type SQL, and, asc, desc, eq, like } from 'drizzle-orm'

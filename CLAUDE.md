@@ -23,6 +23,7 @@ tokens (Google/GitHub), SimpleFIN/Plaid API credentials for bank sync, optional 
 - Knowledge auto-update pipeline → [`docs/knowledge-extractor.md`](docs/knowledge-extractor.md)
 - Agent orchestration / worktrees → [`docs/agent-orchestration.md`](docs/agent-orchestration.md)
 - Claude/MCP integration + security model → [`docs/claude-integration.md`](docs/claude-integration.md)
+- Data-access policy (what every surface / the AI can see) → [`docs/data-access-policy.md`](docs/data-access-policy.md)
 - Finance module overview (ingest, net worth, forecast, tax tagging) → [`docs/finance.md`](docs/finance.md)
 
 ## Hard constraints (Lefthook + hooks enforce these — failure ≠ "try harder")

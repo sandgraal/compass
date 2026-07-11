@@ -1,4 +1,3 @@
-import { eq } from 'drizzle-orm'
 /**
  * Storehouse live-sync bridge — projects LIVE-integration data into the `records`
  * timeline so People / Merchants / Places / Subscriptions / Timeline / Search light
@@ -19,6 +18,7 @@ import { eq } from 'drizzle-orm'
  * in full detail. The one exclusion is raw GPS coordinates (`location_points`),
  * which never enter the spine.
  */
+import { eq } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
 import {
