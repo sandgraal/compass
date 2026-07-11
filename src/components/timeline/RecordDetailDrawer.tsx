@@ -9,7 +9,7 @@
 import { Copy, EyeOff, Search, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useToast } from '../ui/Toast'
-import { fmtDay, fmtTime, sourceMeta, typeLabel } from './timeline-meta'
+import { fmtDay, fmtTime, payloadFacts, sourceColor, sourceMeta, typeLabel } from './timeline-meta'
 
 export function RecordDetailDrawer({
   record,
@@ -45,6 +45,9 @@ export function RecordDetailDrawer({
       payloadPretty = record.payload
     }
   }
+  // Structured facts parsed from that payload, shown above the raw dump.
+  const facts = payloadFacts(record.payload)
+  const color = sourceColor(record.source)
 
   async function copyDetails(): Promise<void> {
     const lines = [
@@ -77,8 +80,16 @@ export function RecordDetailDrawer({
         aria-label="Record details"
         className="absolute right-0 top-0 h-full w-full max-w-md bg-background border-l border-border shadow-2xl overflow-y-auto animate-fade-in"
       >
-        <div className="flex items-center gap-2.5 px-5 py-4 border-b border-border sticky top-0 bg-background">
-          <span className="text-muted-foreground">{meta.icon}</span>
+        <div
+          className="flex items-center gap-2.5 px-5 py-4 border-b border-border sticky top-0 bg-background"
+          style={color ? { boxShadow: `inset 3px 0 0 ${color}` } : undefined}
+        >
+          <span
+            className={color ? '' : 'text-muted-foreground'}
+            style={color ? { color } : undefined}
+          >
+            {meta.icon}
+          </span>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-foreground">
               {meta.label} · {typeLabel(record.type)}
@@ -157,6 +168,22 @@ export function RecordDetailDrawer({
                   <EyeOff size={13} /> Mute {meta.label} · {typeLabel(record.type)}
                 </button>
               </div>
+            </div>
+          )}
+
+          {facts.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+                Details
+              </p>
+              <dl className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-x-3 gap-y-1.5">
+                {facts.map((f) => (
+                  <div key={f.label} className="contents">
+                    <dt className="text-xs text-muted-foreground truncate">{f.label}</dt>
+                    <dd className="text-xs text-foreground break-words">{f.value}</dd>
+                  </div>
+                ))}
+              </dl>
             </div>
           )}
 

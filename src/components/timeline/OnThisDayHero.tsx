@@ -18,7 +18,7 @@ import {
   UserPlus
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import { RecordRow, sourceMeta } from './timeline-meta'
+import { RecordRow, memoryTier, sourceMeta } from './timeline-meta'
 
 const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
 
@@ -225,15 +225,23 @@ export function OnThisDayHero({
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
+        // Timeline spine down the years, memory cards hanging off each node.
+        <div className="relative space-y-4 pl-6">
+          <span aria-hidden className="absolute left-[7px] top-3 bottom-3 w-px bg-border" />
           {years.map((g) => (
             <div
               key={g.year}
-              className="rounded-xl border border-primary/25 bg-gradient-to-br from-primary/5 to-transparent px-4 py-3"
+              className="relative rounded-xl border border-primary/25 bg-gradient-to-br from-primary/5 to-transparent px-4 py-3"
             >
-              <div className="flex items-baseline gap-2 mb-2">
-                <span className="text-sm font-semibold text-foreground">{g.year}</span>
-                <span className="text-xs text-muted-foreground">
+              <span
+                aria-hidden
+                className="absolute top-5 -left-[1.35rem] w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-background"
+              />
+              <div className="flex items-baseline gap-2.5 mb-2.5">
+                <span className="text-3xl font-bold text-foreground tabular-nums leading-none">
+                  {g.year}
+                </span>
+                <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                   {yearsAgoLabel(currentYear - g.year)}
                 </span>
                 <span className="ml-auto text-xs text-muted-foreground tabular-nums">
@@ -246,6 +254,7 @@ export function OnThisDayHero({
                     key={r.id}
                     record={r}
                     onOpen={onOpenRecord}
+                    tier={memoryTier(r.memoryScore)}
                     trailing={
                       <span
                         className="text-xs text-muted-foreground/70 shrink-0"

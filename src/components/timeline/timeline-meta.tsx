@@ -39,6 +39,7 @@ import {
   Youtube,
   Zap
 } from 'lucide-react'
+import { type MemoryTier, memoryTier, payloadFacts, sourceColor } from '../../lib/timeline-facts'
 import { cn } from '../../lib/utils'
 
 const SOURCE_META: Record<string, { label: string; icon: JSX.Element }> = {
@@ -89,6 +90,10 @@ const SOURCE_META: Record<string, { label: string; icon: JSX.Element }> = {
 export function sourceMeta(s: string): { label: string; icon: JSX.Element } {
   return SOURCE_META[s] ?? { label: s, icon: <FileText size={13} /> }
 }
+
+// Pure helpers live in the plain-.ts lib (JSX-free so they unit-test in the
+// node env); re-exported here so components import from one place.
+export { type MemoryTier, memoryTier, payloadFacts, sourceColor }
 
 // Friendly labels for record kinds (the `type` column); unknown kinds fall back
 // to a title-cased version of the raw value ("credit-report" → "Credit Report").
@@ -222,30 +227,59 @@ export function Chip({
   )
 }
 
-/** One record card — clickable everywhere so the detail drawer is one tap away. */
+/**
+ * One record card — clickable everywhere so the detail drawer is one tap away.
+ * Carries a per-source color (icon + left accent rail) so the wall of gray
+ * becomes scannable, and an optional `tier` so the hero can make big memories
+ * literally bigger (browse/day lists pass nothing → uniform 'mid' weight).
+ */
 export function RecordRow({
   record,
   onOpen,
-  trailing
+  trailing,
+  tier = 'mid'
 }: {
   record: TimelineRecord
   onOpen: (record: TimelineRecord) => void
   trailing?: React.ReactNode
+  tier?: MemoryTier
 }): JSX.Element {
+  const meta = sourceMeta(record.source)
+  const color = sourceColor(record.source)
+  const high = tier === 'high'
+  const low = tier === 'low'
   return (
     <button
       type="button"
       onClick={() => onOpen(record)}
-      className="w-full text-left flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-2.5 hover:border-primary/40 transition-colors group"
+      style={color ? { boxShadow: `inset 3px 0 0 ${color}` } : undefined}
+      className={cn(
+        'w-full text-left flex items-center gap-3 rounded-xl border bg-card transition-colors group',
+        high ? 'px-4 py-3 border-primary/30' : low ? 'px-4 py-1.5' : 'px-4 py-2.5 border-border',
+        !high && 'border-border',
+        'hover:border-primary/40'
+      )}
     >
-      <span className="text-muted-foreground shrink-0" title={sourceMeta(record.source).label}>
-        {sourceMeta(record.source).icon}
+      <span
+        className={cn('shrink-0', color ? '' : 'text-muted-foreground', high && '[&_svg]:size-4')}
+        style={color ? { color } : undefined}
+        title={meta.label}
+      >
+        {meta.icon}
       </span>
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-foreground truncate transition-colors group-hover:text-primary">
+        <p
+          className={cn(
+            'truncate transition-colors group-hover:text-primary',
+            high ? 'text-base font-medium text-foreground' : 'text-sm text-foreground',
+            low && 'text-muted-foreground'
+          )}
+        >
           {record.title}
         </p>
-        {record.body && <p className="text-xs text-muted-foreground truncate">{record.body}</p>}
+        {record.body && !low && (
+          <p className="text-xs text-muted-foreground truncate">{record.body}</p>
+        )}
       </div>
       {trailing ?? (
         <span className="text-xs text-muted-foreground/70 shrink-0 tabular-nums">
