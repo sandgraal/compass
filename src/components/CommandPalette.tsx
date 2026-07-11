@@ -7,12 +7,13 @@ import {
   CalendarRange,
   CheckSquare,
   Clock,
+  Contact,
   CreditCard,
-  DollarSign,
   Download,
   FileText,
   FolderOpen,
   HeartPulse,
+  History,
   Home,
   Inbox,
   Layers,
@@ -434,7 +435,11 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       return {
         id: `vault:${hit.category}:${hit.id}`,
         label: hit.title,
-        description: `Vault · ${hit.category}`,
+        // Body matches carry the matched field + a snippet window; title
+        // matches keep the plain category line.
+        description: hit.snippet
+          ? `Vault · ${hit.category} · ${hit.matchedField}: ${hit.snippet}`
+          : `Vault · ${hit.category}`,
         icon: <ShieldCheck size={15} />,
         action: () => {
           onClose()
@@ -463,15 +468,31 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
         }
       }
     }
+    if (hit.kind === 'contact') {
+      return {
+        id: `contact:${hit.id}`,
+        label: hit.displayName,
+        description: `Contact${hit.org ? ` · ${hit.org}` : ''}${
+          hit.relationship ? ` · ${hit.relationship}` : ''
+        }`,
+        icon: <Contact size={15} />,
+        action: () => {
+          onClose()
+          navigate('/contacts')
+        }
+      }
+    }
+    // Records spine (timeline, finance, medical, habits, trips, paystubs, facts…)
+    const when = hit.occurredAt != null ? ` · ${new Date(hit.occurredAt).toLocaleDateString()}` : ''
     return {
-      id: `txn:${hit.id}`,
-      label: hit.description,
-      description: `Transaction · ${hit.date} · ${hit.amount.toFixed(2)}`,
-      icon: <DollarSign size={15} />,
+      id: `record:${hit.id}`,
+      label: hit.title,
+      description: `${hit.source}${when}${hit.snippet ? ` · ${hit.snippet}` : ''}`,
+      icon: <History size={15} />,
       action: () => {
         onClose()
-        sessionStorage.setItem(FINANCE_TAB_STORAGE_KEY, 'transactions')
-        navigate('/finance')
+        // Timeline reads ?q= — land with the same search pre-run.
+        navigate(`/timeline?q=${encodeURIComponent(query.trim())}`)
       }
     }
   })
@@ -496,9 +517,9 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
     }
   }, [open])
 
-  // Debounced global search (knowledge bodies, vault titles, tasks,
-  // transactions). The lastSearchTokenRef guard makes sure an older,
-  // slower response can't overwrite a newer one when the user types
+  // Debounced global search (knowledge bodies, vault entries, tasks, the
+  // records spine, contacts). The lastSearchTokenRef guard makes sure an
+  // older, slower response can't overwrite a newer one when the user types
   // quickly.
   useEffect(() => {
     if (!open) return
@@ -586,7 +607,7 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
               setQuery(e.target.value)
               setSelectedIdx(0)
             }}
-            placeholder="Search notes, vault, tasks, transactions… or go to page"
+            placeholder="Search everything — notes, timeline, vault, contacts… or go to page"
             className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
           />
           <kbd className="text-xs text-muted-foreground bg-secondary px-1.5 py-0.5 rounded border border-border">

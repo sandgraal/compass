@@ -2,15 +2,15 @@
  * Tests for the global-search handlers + per-domain search helpers in
  * `electron/ipc/search.ts` (Phase 0.7 coverage backfill).
  *
- * The existing `search.test.ts` covers the `scoreMatch` scoring math only.
+ * `search.test.ts` covers the scoring math + the vault body-search policy.
  * This file exercises the parts that actually touch data:
  *
- *   - searchTasks / searchTransactions → real in-memory SQLite: match,
+ *   - searchTasks / searchRecordsSpine → real in-memory SQLite (+FTS): match,
  *     score-filter, MAX_PER_KIND cap, empty result
  *   - searchKnowledge → a real temp knowledge dir: title + body match,
  *     snippet extraction, missing-dir early return
- *   - searchVault → title-only projection (NEVER leaks secret fields),
- *     allowlist-miss skip, no-key early return  [crypto mocked]
+ *   - searchVault → title hits carry no snippet; credentials allowlist-miss
+ *     skip; no-key early return  [crypto mocked]
  *   - search:global handler → input guards (non-string, over-long, <2 chars)
  *     and cross-domain aggregation + per-kind counts
  *   - knowledge:list-file-index handler → returns the cached file index
@@ -48,7 +48,8 @@ const { TEST_ROOT, KB_DIR, VAULT_DIR_PATH } = vi.hoisted(() => {
 let sqlite: Database.Database
 
 vi.mock('../db/client', () => ({
-  getDb: () => drizzle(sqlite, { schema })
+  getDb: () => drizzle(sqlite, { schema }),
+  getRawSqlite: () => sqlite
 }))
 
 vi.mock('../paths', () => ({
@@ -133,6 +134,16 @@ beforeEach(() => {
       word_count INTEGER DEFAULT 0,
       auto_updated INTEGER DEFAULT 0
     );
+    CREATE TABLE records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, type TEXT NOT NULL, occurred_at INTEGER,
+      title TEXT NOT NULL, body TEXT, payload TEXT, dedup_hash TEXT NOT NULL UNIQUE, provenance TEXT, ingested_at INTEGER
+    );
+    CREATE VIRTUAL TABLE records_fts USING fts5(title, body, payload, content='records', content_rowid='id', tokenize='unicode61 remove_diacritics 2');
+    CREATE TRIGGER records_ai AFTER INSERT ON records BEGIN INSERT INTO records_fts(rowid,title,body,payload) VALUES (new.id,new.title,new.body,new.payload); END;
+    CREATE TABLE contacts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
+      org TEXT, relationship TEXT, search_blob TEXT
+    );
   `)
   for (const k of Object.keys(handlers)) delete handlers[k]
   // Fresh temp dirs for the knowledge-walk + vault-file tests.
@@ -159,18 +170,18 @@ function seedTask(title: string, opts: { checked?: boolean } = {}): void {
     .run(title, opts.checked ? 1 : 0)
 }
 
-let txnSeq = 0
-function seedTxn(description: string, amount = -10): void {
-  txnSeq++
+let recSeq = 0
+function seedRecord(source: string, type: string, title: string, body: string | null = null): void {
+  recSeq++
   sqlite
     .prepare(
-      "INSERT INTO finance_transactions (hash, date, amount, description) VALUES (?, '2026-05-01', ?, ?)"
+      'INSERT INTO records (source, type, occurred_at, title, body, dedup_hash) VALUES (?,?,1750000000000,?,?,?)'
     )
-    .run(`hash-${txnSeq}`, amount, description)
+    .run(source, type, title, body, `rec-${recSeq}`)
 }
 
 beforeEach(() => {
-  txnSeq = 0
+  recSeq = 0
 })
 
 // ── searchTasks ──────────────────────────────────────────────────────────────
@@ -205,30 +216,38 @@ describe('searchTasks', () => {
   })
 })
 
-// ── searchTransactions ───────────────────────────────────────────────────────
+// ── searchRecordsSpine ───────────────────────────────────────────────────────
 
-describe('searchTransactions', () => {
-  it('matches on description and returns transaction shape', async () => {
-    seedTxn('STARBUCKS COFFEE', -6.5)
-    seedTxn('SHELL GAS', -40)
-    const { searchTransactions } = await internal()
-    const hits = searchTransactions('coffee') as Array<{
+describe('searchRecordsSpine', () => {
+  it('matches spine records via FTS (finance txns arrive here now, not a LIKE-scan)', async () => {
+    seedRecord('finance', 'txn', 'STARBUCKS COFFEE', '-6.50 USD · Dining')
+    seedRecord('finance', 'txn', 'SHELL GAS', '-40.00 USD · Auto')
+    const { searchRecordsSpine } = await internal()
+    const hits = searchRecordsSpine('coffee') as Array<{
       kind: string
-      description: string
-      amount: number
+      source: string
+      title: string
+      snippet: string
     }>
     expect(hits).toHaveLength(1)
     expect(hits[0]).toMatchObject({
-      kind: 'transaction',
-      description: 'STARBUCKS COFFEE',
-      amount: -6.5
+      kind: 'record',
+      source: 'finance',
+      title: 'STARBUCKS COFFEE'
     })
+    expect(hits[0].snippet).toContain('-6.50 USD')
   })
 
-  it('returns nothing when no description matches', async () => {
-    seedTxn('SHELL GAS')
-    const { searchTransactions } = await internal()
-    expect(searchTransactions('coffee')).toEqual([])
+  it('caps results at MAX_PER_KIND (12)', async () => {
+    for (let i = 0; i < 20; i++) seedRecord('habit', 'habit-check', `coffee habit ${i}`)
+    const { searchRecordsSpine } = await internal()
+    expect(searchRecordsSpine('coffee')).toHaveLength(12)
+  })
+
+  it('returns nothing when no record matches', async () => {
+    seedRecord('finance', 'txn', 'SHELL GAS')
+    const { searchRecordsSpine } = await internal()
+    expect(searchRecordsSpine('coffee')).toEqual([])
   })
 })
 
@@ -278,7 +297,7 @@ describe('searchVault', () => {
     writeFileSync(join(VAULT_DIR_PATH, `${category}.enc`), Buffer.from('ciphertext'))
   }
 
-  it('projects ONLY the allowlisted title field — never secret-bearing fields', async () => {
+  it('a title match projects the label only — other fields stay out of that hit', async () => {
     writeVaultFile('financial')
     decryptBlobMock.mockReturnValue(
       JSON.stringify([
@@ -295,7 +314,7 @@ describe('searchVault', () => {
       title: 'Chase Sapphire',
       score: expect.any(Number)
     })
-    // The secret must not appear anywhere in the projected hit.
+    // A label match must not drag other field values along with it.
     expect(JSON.stringify(hits[0])).not.toContain('4111')
   })
 
@@ -338,19 +357,32 @@ describe('search:global handler', () => {
 
   it('aggregates across domains and reports per-kind counts', async () => {
     seedTask('coffee with Sam')
-    seedTxn('COFFEE SHOP')
+    seedRecord('finance', 'txn', 'COFFEE SHOP', '-6.50 USD · Dining')
+    sqlite
+      .prepare(
+        "INSERT INTO contacts (external_id, display_name, org, search_blob) VALUES ('c1', 'Coffee Roasters Co', NULL, 'coffee roasters co')"
+      )
+      .run()
     writeFileSync(join(KB_DIR, 'cafe.md'), '# Coffee places\n\nBest cafes in town.')
     const h = await registerAndGet('search:global')
     const res = (await invoke(h, 'coffee')) as {
       hits: Array<{ kind: string; score: number }>
-      counts: { knowledge: number; vault: number; tasks: number; transactions: number }
+      counts: {
+        knowledge: number
+        vault: number
+        tasks: number
+        records: number
+        contacts: number
+      }
     }
     const kinds = new Set(res.hits.map((x) => x.kind))
     expect(kinds.has('task')).toBe(true)
-    expect(kinds.has('transaction')).toBe(true)
+    expect(kinds.has('record')).toBe(true)
+    expect(kinds.has('contact')).toBe(true)
     expect(kinds.has('knowledge')).toBe(true)
     expect(res.counts.tasks).toBe(1)
-    expect(res.counts.transactions).toBe(1)
+    expect(res.counts.records).toBe(1)
+    expect(res.counts.contacts).toBe(1)
     expect(res.counts.knowledge).toBe(1)
     // Sorted by descending score.
     for (let i = 1; i < res.hits.length; i++) {

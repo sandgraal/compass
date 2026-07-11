@@ -88,6 +88,8 @@ declare global {
         category: string
         id: string
         title: string
+        snippet?: string
+        matchedField?: string
         score: number
       }
     | {
@@ -100,11 +102,21 @@ declare global {
         score: number
       }
     | {
-        kind: 'transaction'
+        kind: 'record'
         id: number
-        date: string
-        amount: number
-        description: string
+        source: string
+        type: string
+        occurredAt: number | null
+        title: string
+        snippet: string
+        score: number
+      }
+    | {
+        kind: 'contact'
+        id: number
+        displayName: string
+        org: string | null
+        relationship: string | null
         score: number
       }
 
@@ -783,7 +795,13 @@ declare global {
       search: {
         global(query: string): Promise<{
           hits: GlobalSearchHit[]
-          counts?: { knowledge: number; vault: number; tasks: number; transactions: number }
+          counts?: {
+            knowledge: number
+            vault: number
+            tasks: number
+            records: number
+            contacts: number
+          }
         }>
       }
       assistant: {
