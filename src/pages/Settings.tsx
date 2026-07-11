@@ -600,8 +600,22 @@ function YearReviewNarrationSetting(): JSX.Element {
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.api) return
-    void window.api.settings.get('yearReviewNarrationEnabled').then((v) => setEnabled(v === 'true'))
-    void window.api.assistant.getStatus().then((s) => setHasKey(s.activeProvider != null))
+    let cancelled = false
+    const refresh = async (): Promise<void> => {
+      const [v, s] = await Promise.all([
+        window.api.settings.get('yearReviewNarrationEnabled'),
+        window.api.assistant.getStatus()
+      ])
+      if (cancelled) return
+      setEnabled(v === 'true')
+      setHasKey(s.activeProvider != null)
+    }
+    void refresh()
+    const id = window.setInterval(() => void refresh(), 2000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
   }, [])
 
   return (
