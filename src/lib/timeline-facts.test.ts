@@ -70,6 +70,24 @@ describe('payloadFacts', () => {
     expect(long.value.endsWith('…')).toBe(true)
   })
 
+  it('keeps ordinary words ending in "id" and drops real id keys', () => {
+    const facts = payloadFacts(
+      JSON.stringify({
+        paid: 'yes',
+        valid: 'true',
+        liquid: 'no',
+        order_id: 'X-99', // dropped
+        userId: 'u_1', // dropped (camelCase)
+        'Session ID': 'abc' // dropped
+      })
+    )
+    const labels = facts.map((f) => f.label)
+    expect(labels).toEqual(expect.arrayContaining(['Paid', 'Valid', 'Liquid']))
+    expect(labels).not.toContain('Order Id')
+    expect(labels).not.toContain('User Id')
+    expect(labels).not.toContain('Session ID')
+  })
+
   it('returns [] for null, non-JSON, or a JSON array', () => {
     expect(payloadFacts(null)).toEqual([])
     expect(payloadFacts('not json')).toEqual([])

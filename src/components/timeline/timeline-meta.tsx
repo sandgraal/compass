@@ -39,7 +39,7 @@ import {
   Youtube,
   Zap
 } from 'lucide-react'
-import { type MemoryTier, memoryTier, sourceColor } from '../../lib/timeline-facts'
+import { type MemoryTier, memoryTier, payloadFacts, sourceColor } from '../../lib/timeline-facts'
 import { cn } from '../../lib/utils'
 
 const SOURCE_META: Record<string, { label: string; icon: JSX.Element }> = {
@@ -91,9 +91,9 @@ export function sourceMeta(s: string): { label: string; icon: JSX.Element } {
   return SOURCE_META[s] ?? { label: s, icon: <FileText size={13} /> }
 }
 
-// Pure color/tier helpers live in the plain-.ts lib (JSX-free so they unit-test
-// in the node env); re-exported here so components import from one place.
-export { type MemoryTier, memoryTier, sourceColor }
+// Pure helpers live in the plain-.ts lib (JSX-free so they unit-test in the
+// node env); re-exported here so components import from one place.
+export { type MemoryTier, memoryTier, payloadFacts, sourceColor }
 
 // Friendly labels for record kinds (the `type` column); unknown kinds fall back
 // to a title-cased version of the raw value ("credit-report" → "Credit Report").

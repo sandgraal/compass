@@ -8,9 +8,8 @@
 
 import { Copy, EyeOff, Search, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { payloadFacts } from '../../lib/timeline-facts'
 import { useToast } from '../ui/Toast'
-import { fmtDay, fmtTime, sourceColor, sourceMeta, typeLabel } from './timeline-meta'
+import { fmtDay, fmtTime, payloadFacts, sourceColor, sourceMeta, typeLabel } from './timeline-meta'
 
 export function RecordDetailDrawer({
   record,
@@ -81,7 +80,10 @@ export function RecordDetailDrawer({
         aria-label="Record details"
         className="absolute right-0 top-0 h-full w-full max-w-md bg-background border-l border-border shadow-2xl overflow-y-auto animate-fade-in"
       >
-        <div className="flex items-center gap-2.5 px-5 py-4 border-b border-border sticky top-0 bg-background">
+        <div
+          className="flex items-center gap-2.5 px-5 py-4 border-b border-border sticky top-0 bg-background"
+          style={color ? { boxShadow: `inset 3px 0 0 ${color}` } : undefined}
+        >
           <span
             className={color ? '' : 'text-muted-foreground'}
             style={color ? { color } : undefined}

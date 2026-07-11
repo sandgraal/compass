@@ -81,9 +81,16 @@ const NOT_AVAILABLE = /^(not|data not) available$/i
 
 /** Keys that are plumbing (dedup / internal ids), never worth showing. */
 function isNoiseKey(key: string): boolean {
-  const norm = key.trim().toLowerCase().replace(/[_-]+/g, ' ')
+  // Split camelCase and normalize separators to spaces so `id` sits as its own
+  // word — this way `userId` / `order_id` / `Album ASIN` are caught but
+  // ordinary words that merely END in "id" (paid, valid, liquid) are NOT.
+  const norm = key
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
   if (/\b(asin|guid|uuid|dedup|hash)\b/.test(norm)) return true
-  if (/id$/.test(norm.replace(/\s+/g, ''))) return true // ...Id / ..._id
+  if (/\bid$/.test(norm)) return true // trailing standalone "id" token
   return false
 }
 
