@@ -307,8 +307,8 @@ export function readTransactions(
   const month = opts.month?.trim() || null
   if (month && !YM_RE.test(month))
     return { count: 0, transactions: [], error: 'month must be YYYY-MM' }
-  const from = opts.from?.trim() || null
-  const to = opts.to?.trim() || null
+  const from = month ? null : opts.from?.trim() || null
+  const to = month ? null : opts.to?.trim() || null
   if (from && !YMD_RE.test(from))
     return { count: 0, transactions: [], error: 'from must be YYYY-MM-DD' }
   if (to && !YMD_RE.test(to)) return { count: 0, transactions: [], error: 'to must be YYYY-MM-DD' }
@@ -350,6 +350,7 @@ export interface ContactHit {
 }
 
 export const CONTACTS_MAX = 25
+export const CONTACT_QUERY_MAX = 200
 
 /**
  * Address-book search over the precomputed search blob (name/org/email/phone/
@@ -357,7 +358,7 @@ export const CONTACTS_MAX = 25
  */
 export function readContacts(db: Database.Database, q: string, limit = 10): ContactHit[] {
   if (!hasObject(db, 'contacts')) return []
-  const needle = q.trim().toLowerCase()
+  const needle = q.trim().toLowerCase().slice(0, CONTACT_QUERY_MAX)
   if (!needle) return []
   const capped = Math.max(1, Math.min(Math.floor(limit), CONTACTS_MAX))
   return db

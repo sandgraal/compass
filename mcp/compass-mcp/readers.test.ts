@@ -6,6 +6,7 @@
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  CONTACT_QUERY_MAX,
   MAX_RECENT_NOTES,
   MAX_TASK_RANGE_DAYS,
   TIMELINE_SEARCH_MAX,
@@ -278,6 +279,15 @@ describe('readTransactions', () => {
     expect(readTransactions(db, { from: '2026-06-10' }).count).toBe(1)
   })
 
+  it('ignores from/to when month is provided', () => {
+    createTxns()
+    add('2026-06-01', -6.5, 'STARBUCKS')
+    add('2026-06-15', -42, 'WHOLE FOODS', 'Groceries')
+    expect(
+      readTransactions(db, { month: '2026-06', from: '2026-06-10', to: '2026-06-12' }).count
+    ).toBe(2)
+  })
+
   it('rejects malformed month/date filters', () => {
     createTxns()
     expect(readTransactions(db, { month: 'June' }).error).toBeTruthy()
@@ -320,6 +330,15 @@ describe('readContacts', () => {
     expect(readContacts(db, 'jane')).toEqual([])
     createContacts()
     expect(readContacts(db, '   ')).toEqual([])
+  })
+
+  it('caps search query length', () => {
+    createContacts()
+    const cappedNeedle = 'a'.repeat(CONTACT_QUERY_MAX)
+    db.prepare(
+      'INSERT INTO contacts (external_id, display_name, search_blob) VALUES (?, ?, ?)'
+    ).run('c2', 'Cap Test', cappedNeedle)
+    expect(readContacts(db, 'a'.repeat(CONTACT_QUERY_MAX + 200))).toHaveLength(1)
   })
 })
 
