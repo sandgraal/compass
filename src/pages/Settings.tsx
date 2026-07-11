@@ -609,9 +609,8 @@ function YearReviewNarrationSetting(): JSX.Element {
       label="Narrate Year in Review with your cloud AI"
       description={
         hasKey
-          ? 'Sends that year’s summary (counts, top titles, spend, net-worth change) to your configured provider to write a warm recap. Off = the built-in template.'
-          : 'Add a cloud AI key above first. Then this sends that year’s summary out to write a warm recap.'
-      }
+          ? 'Sends that year’s aggregate (counts, top sources, most-repeated titles, firsts, countries, habits, spend, net-worth change) to your configured provider to write a warm recap. Off = the built-in template.'
+          : 'Add a cloud AI key above first. Then this sends that year’s aggregate (counts, top sources, most-repeated titles, firsts, countries, habits, spend, net-worth change) out to write a warm recap.'
     >
       <Toggle
         enabled={enabled && hasKey}
