@@ -32,7 +32,7 @@ import * as schema from '../db/schema'
 
 // Unique temp root per worker (portable + parallel-safe), shared with the
 // ../paths mock via vi.hoisted.
-const { TEST_ROOT, KB_DIR, VAULT_DIR_PATH, DOWNLOADS_DIR } = vi.hoisted(() => {
+const { TEST_ROOT, KB_DIR, VAULT_DIR_PATH, DOWNLOADS_DIR, DOCS_DIR } = vi.hoisted(() => {
   const os = require('node:os') as typeof import('node:os')
   const path = require('node:path') as typeof import('node:path')
   const fs = require('node:fs') as typeof import('node:fs')
@@ -41,7 +41,8 @@ const { TEST_ROOT, KB_DIR, VAULT_DIR_PATH, DOWNLOADS_DIR } = vi.hoisted(() => {
     TEST_ROOT: root,
     KB_DIR: path.join(root, 'kb'),
     VAULT_DIR_PATH: path.join(root, 'vault'),
-    DOWNLOADS_DIR: path.join(root, 'downloads')
+    DOWNLOADS_DIR: path.join(root, 'downloads'),
+    DOCS_DIR: path.join(root, 'documents')
   }
 })
 
@@ -55,7 +56,8 @@ vi.mock('../db/client', () => ({
 vi.mock('../paths', () => ({
   KNOWLEDGE_DIR: KB_DIR,
   VAULT_DIR: VAULT_DIR_PATH,
-  DATA_DIR: TEST_ROOT
+  DATA_DIR: TEST_ROOT,
+  DOCUMENTS_DIR: DOCS_DIR
 }))
 
 // Master key: fixed 32 bytes → valid 64-char hex (decryptBundle validates this).
@@ -116,6 +118,7 @@ beforeEach(() => {
   mkdirSync(KB_DIR, { recursive: true })
   mkdirSync(VAULT_DIR_PATH, { recursive: true })
   mkdirSync(DOWNLOADS_DIR, { recursive: true })
+  mkdirSync(DOCS_DIR, { recursive: true })
   getOrCreateKeyMock.mockReturnValue(Buffer.alloc(32, 7))
   isEncryptionAvailableMock.mockReturnValue(true)
 })
@@ -150,15 +153,71 @@ describe('collectBundle → applyRestore round-trip', () => {
     const { collectBundle } = await internal()
     const bundle = collectBundle()
 
-    expect(bundle.version).toBe(2)
+    expect(bundle.version).toBe(3)
     expect(bundle.appVersion).toBe('9.9.9')
     expect(bundle.masterKeyHex).toBe(Buffer.alloc(32, 7).toString('hex'))
-    expect(bundle.tables.integrations).toHaveLength(1)
-    expect(bundle.tables.financeTransactions).toHaveLength(1)
+    expect(bundle.allTables?.integrations).toHaveLength(1)
+    expect(bundle.allTables?.finance_transactions).toHaveLength(1)
     expect(bundle.knowledge['note.md']).toContain('Original content')
     // Vault blobs are carried base64; key.enc is deliberately excluded.
     expect(bundle.vault['financial.enc']).toBe(Buffer.from([1, 2, 3, 4]).toString('base64'))
     expect(bundle.vault['key.enc']).toBeUndefined()
+  })
+
+  it('captures the whole live schema drift-proof, skipping FTS + migration tables', async () => {
+    const { collectBundle } = await internal()
+    const keys = Object.keys(collectBundle().allTables ?? {})
+    // These were all silently OMITTED by the old curated v2 list — the whole
+    // reason for v3 (a backup that dropped the timeline + documents + contacts).
+    for (const t of ['records', 'documents', 'document_links', 'contacts', 'subscriptions']) {
+      expect(keys, `backup must include ${t}`).toContain(t)
+    }
+    // Derived / internal tables must never be backed up.
+    expect(keys.some((k) => k.includes('_fts'))).toBe(false)
+    expect(keys).not.toContain('__drizzle_migrations')
+  })
+
+  it('backs up and restores the documents store files + rows', async () => {
+    const { collectBundle, applyRestore } = await internal()
+    sqlite
+      .prepare(
+        "INSERT INTO documents (title, file_name, sha256, stored_path) VALUES ('Lease', 'lease.pdf', 'abc123', 'abc123.pdf')"
+      )
+      .run()
+    writeFileSync(join(DOCS_DIR, 'abc123.pdf'), Buffer.from('PDFBYTES'))
+
+    const bundle = collectBundle()
+    expect(bundle.allTables?.documents).toHaveLength(1)
+    expect(bundle.documentsFiles?.['abc123.pdf']).toBe(Buffer.from('PDFBYTES').toString('base64'))
+
+    // Wipe both, then restore.
+    sqlite.prepare('DELETE FROM documents').run()
+    rmSync(join(DOCS_DIR, 'abc123.pdf'), { force: true })
+    const stats = applyRestore(bundle)
+
+    expect(stats.documentFiles).toBe(1)
+    expect(sqlite.prepare('SELECT title FROM documents').all()).toEqual([{ title: 'Lease' }])
+    expect(readFileSync(join(DOCS_DIR, 'abc123.pdf')).toString()).toBe('PDFBYTES')
+  })
+
+  it('is a full replace — a table absent from an older bundle is still wiped', async () => {
+    const { collectBundle, applyRestore } = await internal()
+    const bundle = collectBundle()
+    // Simulate an OLDER backup taken before the `documents` table existed.
+    if (bundle.allTables) {
+      bundle.allTables = Object.fromEntries(
+        Object.entries(bundle.allTables).filter(([k]) => k !== 'documents')
+      )
+    }
+    // The live DB has a document row that must NOT survive a restore to that snapshot.
+    sqlite
+      .prepare(
+        "INSERT INTO documents (title, file_name, sha256, stored_path) VALUES ('Ghost','g.pdf','g','g.pdf')"
+      )
+      .run()
+
+    applyRestore(bundle)
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM documents').get()).toEqual({ n: 0 })
   })
 
   it('restores DB rows, knowledge markdown, vault blobs, and rewraps key.enc', async () => {
@@ -192,19 +251,23 @@ describe('collectBundle → applyRestore round-trip', () => {
     )
   })
 
-  it('skips unsafe vault filenames and path-traversal knowledge keys on restore', async () => {
+  it('skips unsafe vault / knowledge / document filenames on restore', async () => {
     seedBaseline()
     const { collectBundle, applyRestore } = await internal()
     const bundle = collectBundle()
     // Inject hostile entries the staging filters must drop.
     bundle.vault['../escape.enc'] = Buffer.from([0]).toString('base64')
     bundle.knowledge['../../etc/passwd.md'] = 'nope'
+    bundle.documentsFiles = { '../escape.bin': Buffer.from([0]).toString('base64') }
 
     const stats = applyRestore(bundle)
-    // Only the one legit vault blob + one legit md survive.
+    // Only the one legit vault blob + one legit md survive; the hostile document
+    // filename is dropped and nothing lands outside its directory.
     expect(stats.vaultFiles).toBe(1)
     expect(stats.knowledgeFiles).toBe(1)
+    expect(stats.documentFiles).toBe(0)
     expect(existsSync(join(TEST_ROOT, 'escape.enc'))).toBe(false)
+    expect(existsSync(join(TEST_ROOT, 'escape.bin'))).toBe(false)
   })
 
   it('rolls back (throws) when safeStorage is unavailable, after DB commit', async () => {
@@ -248,7 +311,7 @@ describe('backup:create handler', () => {
     expect(res.success).toBe(true)
     expect(res.path).toBe(outPath)
     expect(res.size).toBeGreaterThan(0)
-    expect(res.stats.tables).toBe(21)
+    expect(res.stats.tables).toBeGreaterThan(21) // v3 captures the whole schema, not the old curated 21
     expect(res.stats.knowledgeFiles).toBe(1)
     expect(res.stats.vaultFiles).toBe(1)
     // File actually exists with the v2 magic header.

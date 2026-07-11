@@ -2,10 +2,11 @@
  * Encrypted backup/restore — Tier 1 from the May 2026 strategic review.
  *
  * Produces a single passphrase-encrypted `.compass-backup` file containing
- * everything a fresh machine needs to come back online: the SQLite tables
- * as JSON, every knowledge-base markdown file, every `.vault/*.enc` blob
- * EXCEPT `key.enc`, and the master AES-256 key as plaintext hex inside
- * the bundle.
+ * everything a fresh machine needs to come back online: EVERY SQLite table as
+ * JSON (v3 `allTables`, read drift-proof from the live schema so a new table is
+ * never silently dropped), the documents-store originals (`documentsFiles`),
+ * every knowledge-base markdown file, every `.vault/*.enc` blob EXCEPT
+ * `key.enc`, and the master AES-256 key as plaintext hex inside the bundle.
  *
  * Why bundle the plaintext master key (and NOT `key.enc`): `key.enc` is
  * wrapped with Electron `safeStorage`, which is keyed by the OS Keychain
@@ -33,9 +34,12 @@
  *   - 0x01 (pre-public): shipped `key.enc` verbatim and used the host
  *     path separator. Never released — no compat shim needed.
  *   - 0x02 (current):    plaintext master key inside bundle, POSIX paths,
- *     atomic restore (DB succeeds before filesystem is touched).
+ *     atomic restore (DB succeeds before filesystem is touched). The JSON
+ *     PAYLOAD carries its own `version`: 2 = curated table subset (legacy, still
+ *     restorable); 3 = every table via `allTables` + the documents-store files.
  */
 
+import { constants as bufferConstants } from 'node:buffer'
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
 import {
   existsSync,
@@ -48,7 +52,7 @@ import {
 } from 'node:fs'
 import { sep as PATH_SEP, join, relative } from 'node:path'
 import { type IpcMain, app, dialog, safeStorage } from 'electron'
-import { getDb } from '../db/client'
+import { getDb, getRawSqlite } from '../db/client'
 import {
   appSettings,
   budgetRules,
@@ -73,7 +77,7 @@ import {
   syncEvents
 } from '../db/schema'
 import { getOrCreateKey } from '../lib/crypto-vault'
-import { KNOWLEDGE_DIR, VAULT_DIR } from '../paths'
+import { DOCUMENTS_DIR, KNOWLEDGE_DIR, VAULT_DIR } from '../paths'
 
 const MAGIC = Buffer.from('COMPASSB', 'utf8') // 8 bytes
 const VERSION = 0x02
@@ -86,12 +90,25 @@ const SCRYPT_R = 8
 const SCRYPT_P = 1
 
 const HEADER_SIZE = MAGIC.length + 1 + SALT_SIZE + IV_SIZE + TAG_SIZE
+// Upper bound on a restore file we read fully into memory + decrypt before the
+// passphrase is even verified (threat-model item #5 — bound user-picked input).
+// Pinned to the runtime's real Buffer ceiling: `readFileSync` loads the whole
+// file into ONE Buffer, so a larger cap couldn't be honored anyway (it would
+// throw ERR_FS_FILE_TOO_LARGE). A real "all tables + documents" backup is well
+// within this. (Memory pressure below the ceiling is a separate, softer risk.)
+const MAX_RESTORE_BYTES = bufferConstants.MAX_LENGTH
 
 interface Bundle {
-  version: 2
+  version: 2 | 3
   exportedAt: string
   appVersion: string
-  tables: Record<string, unknown[]>
+  // v2 (legacy): a curated subset of tables, drizzle-serialized (dates → ISO).
+  // v3+: `allTables` below supersedes it (kept optional so old bundles restore).
+  tables?: Record<string, unknown[]>
+  // v3+: EVERY user table, raw sqlite rows. Drift-proof — a newly-added table
+  // is captured with no code change (the v2 curated list had silently drifted
+  // to omit the `records` spine, `documents`, `contacts`, and ~18 more).
+  allTables?: Record<string, Record<string, unknown>[]>
   // Bundle keys are ALWAYS POSIX-slashed regardless of the source OS, so
   // a Windows-created backup with `work\projects.md` round-trips cleanly
   // onto macOS/Linux.
@@ -99,6 +116,10 @@ interface Bundle {
   // filename → base64 of the encrypted blob bytes. `key.enc` is
   // deliberately NOT included here — see masterKeyHex below.
   vault: Record<string, string>
+  // v3+: the documents store originals (filename → base64), restored to
+  // DOCUMENTS_DIR. The `documents` DB rows travel in `allTables`; without the
+  // files a restore would leave dangling rows pointing at missing originals.
+  documentsFiles?: Record<string, string>
   // The raw 64-char hex of the AES-256 master key. Sensitive in clear,
   // but the whole bundle is passphrase-encrypted so it's protected by
   // scrypt + AES-256-GCM. Required for cross-machine restore: the
@@ -145,32 +166,50 @@ function walkMarkdown(dir: string, base: string): string[] {
   return out
 }
 
-function collectBundle(): Bundle {
-  const db = getDb()
+/** FTS virtual tables + their fts5 shadow tables + drizzle's migration ledger
+ *  are derived/internal — never backed up (records_fts etc. rebuild from their
+ *  content tables on next launch). */
+export function isBackupTable(name: string): boolean {
+  if (name.startsWith('sqlite_')) return false
+  if (name === '__drizzle_migrations') return false
+  if (name.includes('_fts')) return false // fts5 virtual + _data/_idx/_docsize/_config/_content shadows
+  return true
+}
 
-  const tables: Bundle['tables'] = {
-    integrations: db.select().from(integrations).all(),
-    syncEvents: db.select().from(syncEvents).all(),
-    checklistItems: db.select().from(checklistItems).all(),
-    checklistTemplates: db.select().from(checklistTemplates).all(),
-    calendarEvents: db.select().from(calendarEvents).all(),
-    githubItems: db.select().from(githubItems).all(),
-    gmailActions: db.select().from(gmailActions).all(),
-    driveFiles: db.select().from(driveFiles).all(),
-    knowledgeFiles: db.select().from(knowledgeFiles).all(),
-    knowledgeSuggestions: db.select().from(knowledgeSuggestions).all(),
-    appSettings: db.select().from(appSettings).all(),
-    financeAccounts: db.select().from(financeAccounts).all(),
-    financeTransactions: db.select().from(financeTransactions).all(),
-    financeBalanceSnapshots: db.select().from(financeBalanceSnapshots).all(),
-    forecastOverrides: db.select().from(forecastOverrides).all(),
-    plaidItems: db.select().from(plaidItems).all(),
-    simplefinConnections: db.select().from(simplefinConnections).all(),
-    budgetRules: db.select().from(budgetRules).all(),
-    categorizationRules: db.select().from(categorizationRules).all(),
-    habits: db.select().from(habits).all(),
-    habitEntries: db.select().from(habitEntries).all()
+/** Every user table → its rows (raw sqlite values). Reads the LIVE schema from
+ *  sqlite_master, so a newly-added table is captured with zero code change —
+ *  the whole point, since the old curated list silently omitted the `records`
+ *  spine, `documents`, `contacts`, and most domain tables. */
+function collectAllTables(
+  sqlite: ReturnType<typeof getRawSqlite>
+): Record<string, Record<string, unknown>[]> {
+  const names = (
+    sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
+  )
+    .map((r) => r.name)
+    .filter(isBackupTable)
+    .sort()
+  const out: Record<string, Record<string, unknown>[]> = {}
+  for (const name of names) {
+    out[name] = sqlite.prepare(`SELECT * FROM "${name}"`).all() as Record<string, unknown>[]
   }
+  return out
+}
+
+/** The documents-store originals (a flat dir of content-hash-named files) →
+ *  base64. No nesting, no traversal — filenames only. */
+function collectDocumentsFiles(): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (!existsSync(DOCUMENTS_DIR)) return out
+  for (const entry of readdirSync(DOCUMENTS_DIR, { withFileTypes: true })) {
+    if (!entry.isFile()) continue
+    out[entry.name] = readFileSync(join(DOCUMENTS_DIR, entry.name)).toString('base64')
+  }
+  return out
+}
+
+function collectBundle(): Bundle {
+  const allTables = collectAllTables(getRawSqlite())
 
   const knowledge: Record<string, string> = {}
   for (const rel of walkMarkdown(KNOWLEDGE_DIR, KNOWLEDGE_DIR)) {
@@ -197,12 +236,13 @@ function collectBundle(): Bundle {
   const masterKeyHex = masterKey.toString('hex')
 
   return {
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
     appVersion: app.getVersion(),
-    tables,
+    allTables,
     knowledge,
     vault,
+    documentsFiles: collectDocumentsFiles(),
     masterKeyHex
   }
 }
@@ -254,15 +294,17 @@ function decryptBundle(blob: Buffer, passphrase: string): Bundle {
   if (
     !parsed ||
     typeof parsed !== 'object' ||
-    parsed.version !== 2 ||
+    (parsed.version !== 2 && parsed.version !== 3) ||
     typeof parsed.masterKeyHex !== 'string' ||
     !/^[0-9a-fA-F]{64}$/.test(parsed.masterKeyHex) ||
-    !parsed.tables ||
-    typeof parsed.tables !== 'object' ||
     !parsed.knowledge ||
     typeof parsed.knowledge !== 'object' ||
     !parsed.vault ||
-    typeof parsed.vault !== 'object'
+    typeof parsed.vault !== 'object' ||
+    // v3 carries every table in `allTables`; legacy v2 carries a curated `tables`.
+    (parsed.version === 3
+      ? !parsed.allTables || typeof parsed.allTables !== 'object'
+      : !parsed.tables || typeof parsed.tables !== 'object')
   ) {
     throw new Error('Backup payload structure is invalid')
   }
@@ -290,36 +332,65 @@ function decryptBundle(blob: Buffer, passphrase: string): Bundle {
  * until a re-restore. That's a far smaller blast radius than "passphrase
  * was wrong → vault is gone."
  */
-function applyRestore(bundle: Bundle): {
-  vaultFiles: number
-  knowledgeFiles: number
-  rows: number
-} {
-  // --- Stage 1: materialise vault writes (decode + sanity-check filenames) ---
-  const vaultWrites: Array<[string, Buffer]> = []
-  for (const [name, b64] of Object.entries(bundle.vault)) {
-    if (name.includes('/') || name.includes('\\') || name.includes('..')) continue
-    if (!name.endsWith('.enc')) continue
-    if (name === 'key.enc') continue // rebuilt locally from masterKeyHex
-    try {
-      vaultWrites.push([name, Buffer.from(b64, 'base64')])
-    } catch {
-      // a malformed base64 string would surface as an empty buffer; the
-      // explicit catch is a belt-and-suspenders guard.
+/** v3+ DB restore: wipe + re-insert EVERY table from the bundle via raw sqlite.
+ *  `defer_foreign_keys` moves FK enforcement to COMMIT so wipe/insert order is
+ *  irrelevant (the snapshot is self-consistent). Tables absent from the current
+ *  schema are skipped (forward/backward drift tolerance). */
+function restoreAllTablesRaw(allTables: Record<string, Record<string, unknown>[]>): number {
+  const sqlite = getRawSqlite()
+  const existing = new Set(
+    (
+      sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as {
+        name: string
+      }[]
+    ).map((r) => r.name)
+  )
+  let rows = 0
+  const txn = sqlite.transaction(() => {
+    sqlite.pragma('defer_foreign_keys = ON')
+    // Wipe EVERY live backup-eligible table — not just those present in the
+    // bundle — so a restore is a true full replace. A table that didn't exist
+    // when the backup was made (older bundle) ends up empty rather than keeping
+    // its pre-restore rows.
+    for (const name of existing) {
+      if (isBackupTable(name)) sqlite.prepare(`DELETE FROM "${name}"`).run()
     }
-  }
+    for (const [name, tableRows] of Object.entries(allTables)) {
+      if (!existing.has(name) || !isBackupTable(name)) continue
+      if (!Array.isArray(tableRows) || tableRows.length === 0) continue
+      // Intersect the bundle's columns with the destination table's real columns
+      // (PRAGMA on an already-validated table name). This tolerates schema drift
+      // (a dropped/renamed column in an old bundle) AND ensures only genuine
+      // column identifiers are interpolated into the INSERT — a crafted backup
+      // can't smuggle a column name into the SQL.
+      const destCols = new Set(
+        (sqlite.prepare(`PRAGMA table_info("${name}")`).all() as { name: string }[]).map(
+          (c) => c.name
+        )
+      )
+      const cols = Object.keys(tableRows[0]).filter((c) => destCols.has(c))
+      if (cols.length === 0) continue
+      const stmt = sqlite.prepare(
+        `INSERT INTO "${name}" (${cols.map((c) => `"${c}"`).join(',')}) VALUES (${cols
+          .map(() => '?')
+          .join(',')})`
+      )
+      for (const row of tableRows) {
+        if (!row || typeof row !== 'object') continue
+        stmt.run(...cols.map((c) => (row as Record<string, unknown>)[c] ?? null))
+        rows++
+      }
+    }
+  })
+  // A throw here rolls the transaction back before any FS write — user keeps state.
+  txn()
+  return rows
+}
 
-  // --- Stage 2: materialise knowledge writes (path normalize + safety) ---
-  const knowledgeWrites: Array<[string[], string]> = []
-  for (const [rel, content] of Object.entries(bundle.knowledge)) {
-    if (!isSafeRelativePath(rel)) continue
-    // Bundle keys are POSIX, but old v0.1-pre Windows backups (if any)
-    // used `\\`. Split on either so we re-join with the host separator.
-    const parts = rel.split(/[/\\]+/)
-    knowledgeWrites.push([parts, content])
-  }
-
-  // --- Stage 3: DB restore inside a single transaction ---
+/** Legacy v2 DB restore: the curated drizzle table list with per-column
+ *  timestamp rehydration + hand-maintained FK wipe/insert order. Kept verbatim
+ *  so backups made before v3 still restore. */
+function restoreCuratedV2(bundle: Bundle): number {
   const db = getDb()
   const drizzleSession = (
     db as unknown as {
@@ -443,7 +514,7 @@ function applyRestore(bundle: Bundle): {
       'habitEntries'
     ]
     for (const name of insertOrder) {
-      const data = bundle.tables[name]
+      const data = bundle.tables?.[name]
       if (!Array.isArray(data) || data.length === 0) continue
       const table = TABLES[name]
       for (const rawRow of data) {
@@ -456,9 +527,51 @@ function applyRestore(bundle: Bundle): {
       }
     }
   })
-  // If this throws, the sqlite transaction rolls back AND no FS writes have
-  // happened yet. The user keeps their pre-restore state.
   txn()
+  return rows
+}
+
+/** Dispatch to the raw (v3+) or curated (v2) DB restore by bundle version. */
+function restoreDbTables(bundle: Bundle): number {
+  return bundle.version >= 3 && bundle.allTables
+    ? restoreAllTablesRaw(bundle.allTables)
+    : restoreCuratedV2(bundle)
+}
+
+function applyRestore(bundle: Bundle): {
+  vaultFiles: number
+  knowledgeFiles: number
+  rows: number
+  documentFiles: number
+} {
+  // --- Stage 1: materialise vault writes (decode + sanity-check filenames) ---
+  const vaultWrites: Array<[string, Buffer]> = []
+  for (const [name, b64] of Object.entries(bundle.vault)) {
+    if (name.includes('/') || name.includes('\\') || name.includes('..')) continue
+    if (!name.endsWith('.enc')) continue
+    if (name === 'key.enc') continue // rebuilt locally from masterKeyHex
+    try {
+      vaultWrites.push([name, Buffer.from(b64, 'base64')])
+    } catch {
+      // a malformed base64 string would surface as an empty buffer; the
+      // explicit catch is a belt-and-suspenders guard.
+    }
+  }
+
+  // --- Stage 2: materialise knowledge writes (path normalize + safety) ---
+  const knowledgeWrites: Array<[string[], string]> = []
+  for (const [rel, content] of Object.entries(bundle.knowledge)) {
+    if (!isSafeRelativePath(rel)) continue
+    // Bundle keys are POSIX, but old v0.1-pre Windows backups (if any)
+    // used `\\`. Split on either so we re-join with the host separator.
+    const parts = rel.split(/[/\\]+/)
+    knowledgeWrites.push([parts, content])
+  }
+
+  // --- Stage 3: DB restore. Raw all-tables for v3+ bundles, curated drizzle
+  // for legacy v2. A throw rolls the transaction back before any filesystem
+  // write happens, so the user keeps their pre-restore state on failure.
+  const rows = restoreDbTables(bundle)
 
   // --- Stage 4: FS writes — only reached if DB restore committed. ---
   // 4a. Vault: wipe existing .enc files, write the bundle's, then rewrap
@@ -506,7 +619,29 @@ function applyRestore(bundle: Bundle): {
     knowledgeFilesWritten++
   }
 
-  return { vaultFiles: vaultWrites.length, knowledgeFiles: knowledgeFilesWritten, rows }
+  // 4c. Documents (v3+): wipe + rewrite the DOCUMENTS_DIR originals (the files
+  // behind the `documents` rows). Filenames only — no separators / traversal.
+  let documentFiles = 0
+  if (bundle.documentsFiles) {
+    if (!existsSync(DOCUMENTS_DIR)) mkdirSync(DOCUMENTS_DIR, { recursive: true })
+    for (const existing of readdirSync(DOCUMENTS_DIR)) {
+      // recursive so a stray subdirectory can't throw EISDIR after the DB txn
+      // has already committed (which would leave a partial restore).
+      rmSync(join(DOCUMENTS_DIR, existing), { force: true, recursive: true })
+    }
+    for (const [name, b64] of Object.entries(bundle.documentsFiles)) {
+      if (name.includes('/') || name.includes('\\') || name.includes('..')) continue
+      writeFileSync(join(DOCUMENTS_DIR, name), Buffer.from(b64, 'base64'))
+      documentFiles++
+    }
+  }
+
+  return {
+    vaultFiles: vaultWrites.length,
+    knowledgeFiles: knowledgeFilesWritten,
+    rows,
+    documentFiles
+  }
 }
 
 export function registerBackupHandlers(ipcMain: IpcMain): void {
@@ -531,9 +666,10 @@ export function registerBackupHandlers(ipcMain: IpcMain): void {
         path: filePath,
         size: blob.length,
         stats: {
-          tables: Object.keys(bundle.tables).length,
+          tables: Object.keys(bundle.allTables ?? {}).length,
           knowledgeFiles: Object.keys(bundle.knowledge).length,
-          vaultFiles: Object.keys(bundle.vault).length
+          vaultFiles: Object.keys(bundle.vault).length,
+          documentFiles: Object.keys(bundle.documentsFiles ?? {}).length
         }
       }
     } catch (err) {
@@ -552,6 +688,9 @@ export function registerBackupHandlers(ipcMain: IpcMain): void {
         properties: ['openFile']
       })
       if (canceled || filePaths.length === 0) return { success: false, canceled: true }
+      if (statSync(filePaths[0]).size > MAX_RESTORE_BYTES) {
+        return { success: false, error: 'Backup file is too large to restore safely' }
+      }
       const blob = readFileSync(filePaths[0])
       const bundle = decryptBundle(blob, passphrase)
       const stats = applyRestore(bundle)
