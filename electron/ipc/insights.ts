@@ -3,16 +3,19 @@
  * cross-domain wiring.
  *
  * One read-only aggregator (`insights:get`) that scans local data for things
- * worth surfacing before the user goes looking: category spending anomalies,
- * uncategorized-spend buildup, habit slippage, stale notes, off-track savings
- * goals, upcoming renewals (assets + subscriptions), paycheck anomalies, and
- * utility-bill spikes. Pure detectors over the DB — no network, no LLM, no
- * writes.
+ * worth surfacing before the user goes looking. Two families:
+ *  - SINGLE-DOMAIN nudges: spending anomalies, uncategorized buildup, habit
+ *    slippage, stale notes, off-track goals, renewals, paycheck/utility spikes.
+ *  - CROSS-DOMAIN correlations (the leverage layer the unified `records` spine
+ *    unlocked): unused subscriptions (subs × media-usage records), sleep vs.
+ *    discretionary spend (apple-health × finance), savings rate (paystubs ×
+ *    finance), and medical out-of-pocket (medical records × finance).
+ * Pure detectors over the DB — no network, no LLM, no writes.
  *
  * `buildInsights(db, now)` is exported for tests (same pattern as
  * `buildMorningBrief`). Thresholds are exported consts so tests pin them.
  */
-import { and, asc, eq, gte, isNotNull, isNull, lt, lte, or } from 'drizzle-orm'
+import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, lte, or } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
 import {
@@ -23,6 +26,7 @@ import {
   habitEntries,
   habits,
   knowledgeFiles,
+  records,
   subscriptions,
   utilityBills
 } from '../db/schema'
@@ -38,6 +42,11 @@ export interface Insight {
     | 'renewal-due'
     | 'paycheck-anomaly'
     | 'utility-spike'
+    // Cross-domain (leverage layer) — each joins ≥2 domains on the spine.
+    | 'unused-subscription'
+    | 'sleep-vs-spend'
+    | 'savings-rate'
+    | 'medical-out-of-pocket'
   severity: 'info' | 'warn'
   title: string
   detail: string
@@ -78,7 +87,55 @@ export const PAYCHECK_MIN_DELTA = 100
 export const UTILITY_SPIKE_RATIO = 1.5
 export const UTILITY_MIN_DELTA = 25
 
+// ── Cross-domain thresholds ─────────────────────────────────────────────────
+/** Unused subscription: an active streaming sub with 0 usage records in N days. */
+export const UNUSED_SUB_DAYS = 60
+export const UNUSED_SUB_MAX = 4
+/** Sleep vs spend: need ≥ N full weeks of overlap; low-sleep weeks must average
+ *  ≥ this much MORE discretionary spend than high-sleep weeks to surface. */
+export const SLEEP_SPEND_MIN_WEEKS = 6
+export const SLEEP_SPEND_MIN_DELTA = 40
+/** Savings rate: need ≥ N prior months; latest rate must drop this many points
+ *  below the trailing average to flag. Rates are fractions (0.2 = 20%). */
+export const SAVINGS_MIN_MONTHS = 3
+export const SAVINGS_DROP_POINTS = 0.1
+/** Medical out-of-pocket: health spend within this window after an encounter. */
+export const MEDICAL_OOP_LOOKBACK_DAYS = 90
+export const MEDICAL_OOP_WINDOW_DAYS = 14
+export const MEDICAL_OOP_MIN_TOTAL = 40
+export const MEDICAL_OOP_MAX = 3
+
 const EXCLUDED_ANOMALY_CATEGORIES = new Set(['Transfers', 'Transfer', 'Uncategorized'])
+
+/** Discretionary categories the sleep×spend detector watches (impulse-sensitive). */
+const DISCRETIONARY_CATEGORIES = new Set([
+  'Dining',
+  'Restaurants',
+  'Food & Drink',
+  'Entertainment',
+  'Shopping',
+  'Coffee',
+  'Bars',
+  'Alcohol'
+])
+
+/** Health-spend match for the medical out-of-pocket detector (category OR description). */
+const HEALTH_SPEND_RE =
+  /\b(pharmacy|medical|health|clinic|doctor|hospital|dental|dentist|optom|vision|rx|drug\s?store|walgreens|cvs|labcorp|quest)\b/i
+
+/**
+ * Which media-usage records "count" as using a subscription. Keyed by a
+ * name-match against the subscription — only sources we actually recognize on
+ * the spine, so a match is meaningful (no false "unused" on data we never see).
+ */
+const STREAMING_USAGE: Array<{ match: RegExp; sources: string[]; types: string[] }> = [
+  { match: /netflix/i, sources: ['netflix'], types: ['watch'] },
+  { match: /spotify/i, sources: ['spotify'], types: ['listen'] },
+  { match: /you\s?tube/i, sources: ['youtube'], types: ['watch'] },
+  { match: /prime\s?video|amazon\s?prime/i, sources: ['prime-video'], types: ['watch'] },
+  { match: /kindle|prime\s?reading/i, sources: ['kindle'], types: ['read'] },
+  { match: /amazon\s?music/i, sources: ['amazon-music'], types: ['listen', 'like', 'save'] }
+]
 /** Mirror namespaces (Notion/Obsidian imports) aren't user-authored notes. */
 const MIRROR_PREFIXES = ['notion/', 'obsidian/']
 
@@ -418,6 +475,252 @@ function detectUtilitySpikes(db: Db): Insight[] {
   return insights
 }
 
+// ── Cross-domain detectors (the leverage layer) ─────────────────────────────
+
+/** Monday (local) of the week containing `d`, as 'YYYY-MM-DD' — the week bucket key. */
+function weekKey(d: Date): string {
+  const m = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  m.setDate(m.getDate() - ((m.getDay() + 6) % 7)) // back up to Monday
+  return localYmd(m)
+}
+
+/**
+ * Active streaming subscriptions the user pays for but hasn't USED in the
+ * window — subscriptions × the media-usage records now on the spine. Only
+ * checks services we actually recognize (STREAMING_USAGE), so "0 uses" means
+ * "we'd have seen it and didn't," not "we're blind to this one."
+ */
+function detectUnusedSubscriptions(db: Db, now: Date): Insight[] {
+  const subs = db
+    .select({ name: subscriptions.name, cost: subscriptions.cost, cadence: subscriptions.cadence })
+    .from(subscriptions)
+    .where(eq(subscriptions.status, 'active'))
+    .all()
+  if (subs.length === 0) return []
+  const since = new Date(now.getTime() - UNUSED_SUB_DAYS * 24 * 3600 * 1000)
+  const out: Insight[] = []
+  for (const sub of subs) {
+    const map = STREAMING_USAGE.find((m) => m.match.test(sub.name))
+    if (!map) continue // not a service we can verify usage for → don't guess
+    const used = db
+      .select({ id: records.id })
+      .from(records)
+      .where(
+        and(
+          inArray(records.source, map.sources),
+          inArray(records.type, map.types),
+          gte(records.occurredAt, since)
+        )
+      )
+      .limit(1)
+      .all()
+    if (used.length > 0) continue
+    out.push({
+      kind: 'unused-subscription',
+      severity: 'info',
+      title: `Paying for ${sub.name} but not using it`,
+      detail: `${money(sub.cost)}/${sub.cadence} — no activity in the last ${UNUSED_SUB_DAYS} days. Worth a cancel or a pause.`,
+      route: '/subscriptions'
+    })
+    if (out.length >= UNUSED_SUB_MAX) break
+  }
+  return out
+}
+
+/**
+ * Sleep (apple-health) vs discretionary spend (finance), bucketed by week:
+ * do the weeks you sleep least line up with heavier impulse spending? A
+ * correlation nudge, not a causal claim — surfaces only with enough overlap.
+ */
+function detectSleepVsSpend(db: Db, now: Date): Insight[] {
+  const since = new Date(now.getTime() - (SLEEP_SPEND_MIN_WEEKS + 2) * 7 * 24 * 3600 * 1000)
+  const sinceYmd = localYmd(since)
+  // Sleep hours per week (payload.ms → hours), from the apple-health sleep records.
+  const sleepRows = db
+    .select({ occurredAt: records.occurredAt, payload: records.payload })
+    .from(records)
+    .where(
+      and(
+        eq(records.source, 'apple-health'),
+        eq(records.type, 'sleep'),
+        gte(records.occurredAt, since)
+      )
+    )
+    .all()
+  const sleepByWeek = new Map<string, number>()
+  for (const r of sleepRows) {
+    if (!r.occurredAt) continue
+    let ms = 0
+    try {
+      ms = Number((JSON.parse(r.payload ?? '{}') as { ms?: number }).ms) || 0
+    } catch {
+      ms = 0
+    }
+    const k = weekKey(r.occurredAt)
+    sleepByWeek.set(k, (sleepByWeek.get(k) ?? 0) + ms / 3_600_000)
+  }
+  // Discretionary spend per week.
+  const txns = db
+    .select({
+      date: financeTransactions.date,
+      amount: financeTransactions.amount,
+      category: financeTransactions.category
+    })
+    .from(financeTransactions)
+    .where(and(gte(financeTransactions.date, sinceYmd), lt(financeTransactions.amount, 0)))
+    .all()
+  const spendByWeek = new Map<string, number>()
+  for (const t of txns) {
+    if (!DISCRETIONARY_CATEGORIES.has(t.category ?? '')) continue
+    const d = new Date(`${t.date}T00:00:00`)
+    if (Number.isNaN(d.getTime())) continue
+    const k = weekKey(d)
+    spendByWeek.set(k, (spendByWeek.get(k) ?? 0) + Math.abs(t.amount))
+  }
+  // Weeks present in BOTH series.
+  const weeks = [...sleepByWeek.keys()].filter((k) => spendByWeek.has(k))
+  if (weeks.length < SLEEP_SPEND_MIN_WEEKS) return []
+  const paired = weeks.map((k) => ({
+    sleep: sleepByWeek.get(k) as number,
+    spend: spendByWeek.get(k) as number
+  }))
+  const avg = (xs: number[]): number => xs.reduce((s, x) => s + x, 0) / xs.length
+  // Split on the MEAN, not the median: sleep is often bimodal (good weeks vs
+  // bad weeks), and a median can land exactly on the low cluster and empty one
+  // side. The mean sits between the clusters and separates them cleanly.
+  const meanSleep = avg(paired.map((p) => p.sleep))
+  const low = paired.filter((p) => p.sleep < meanSleep)
+  const high = paired.filter((p) => p.sleep >= meanSleep)
+  if (low.length === 0 || high.length === 0) return []
+  const lowSpend = avg(low.map((p) => p.spend))
+  const highSpend = avg(high.map((p) => p.spend))
+  const delta = lowSpend - highSpend
+  if (delta < SLEEP_SPEND_MIN_DELTA) return []
+  return [
+    {
+      kind: 'sleep-vs-spend',
+      severity: 'info',
+      title: `Your low-sleep weeks cost you ${money(delta)} more`,
+      detail: `Across ${weeks.length} weeks, the ones you slept least averaged ${money(lowSpend)} in discretionary spend vs ${money(highSpend)} on your better-rested weeks.`,
+      route: '/health'
+    }
+  ]
+}
+
+/**
+ * Savings rate = (net income − expenses) / net income, per month, from
+ * paystubs × finance. Flags when the latest complete month drops materially
+ * below the trailing average.
+ */
+function detectSavingsRate(db: Db, now: Date): Insight[] {
+  const thisMonth = localYm(now)
+  const stubs = db
+    .select({ netPay: argylePaystubs.netPay, paidAt: argylePaystubs.paidAt })
+    .from(argylePaystubs)
+    .where(and(isNotNull(argylePaystubs.netPay), isNotNull(argylePaystubs.paidAt)))
+    .all()
+  if (stubs.length === 0) return []
+  const incomeByMonth = new Map<string, number>()
+  for (const s of stubs) {
+    const ym = (s.paidAt as string).slice(0, 7)
+    incomeByMonth.set(ym, (incomeByMonth.get(ym) ?? 0) + (s.netPay as number))
+  }
+  const txns = db
+    .select({
+      date: financeTransactions.date,
+      amount: financeTransactions.amount,
+      category: financeTransactions.category
+    })
+    .from(financeTransactions)
+    .where(lt(financeTransactions.amount, 0))
+    .all()
+  const expenseByMonth = new Map<string, number>()
+  for (const t of txns) {
+    if (EXCLUDED_ANOMALY_CATEGORIES.has(t.category ?? 'Uncategorized')) continue
+    const ym = t.date.slice(0, 7)
+    expenseByMonth.set(ym, (expenseByMonth.get(ym) ?? 0) + Math.abs(t.amount))
+  }
+  // Rate per month that has income, EXCLUDING the current (incomplete) month.
+  const rates = [...incomeByMonth.keys()]
+    .filter((ym) => ym < thisMonth && (incomeByMonth.get(ym) as number) > 0)
+    .sort()
+    .map((ym) => ({
+      ym,
+      rate: 1 - (expenseByMonth.get(ym) ?? 0) / (incomeByMonth.get(ym) as number)
+    }))
+  if (rates.length < SAVINGS_MIN_MONTHS + 1) return []
+  const latest = rates[rates.length - 1]
+  const prior = rates.slice(0, -1)
+  const trailing = prior.reduce((s, r) => s + r.rate, 0) / prior.length
+  if (latest.rate >= trailing - SAVINGS_DROP_POINTS) return []
+  const pct = (x: number): string => `${Math.round(x * 100)}%`
+  return [
+    {
+      kind: 'savings-rate',
+      severity: 'warn',
+      title: `You saved ${pct(latest.rate)} of income last month`,
+      detail: `Down from a ${pct(trailing)} trailing average over the prior ${prior.length} months — expenses are eating more of your take-home.`,
+      route: '/finance'
+    }
+  ]
+}
+
+/**
+ * Medical encounters (now on the spine) followed by health-category spend —
+ * the out-of-pocket cost of a visit, which no single domain could show.
+ */
+function detectMedicalOutOfPocket(db: Db, now: Date): Insight[] {
+  const since = new Date(now.getTime() - MEDICAL_OOP_LOOKBACK_DAYS * 24 * 3600 * 1000)
+  const events = db
+    .select({ occurredAt: records.occurredAt, title: records.title, type: records.type })
+    .from(records)
+    .where(
+      and(
+        eq(records.source, 'medical'),
+        inArray(records.type, ['encounter', 'procedure', 'condition']),
+        gte(records.occurredAt, since)
+      )
+    )
+    .orderBy(asc(records.occurredAt))
+    .all()
+  if (events.length === 0) return []
+  const spend = db
+    .select({
+      date: financeTransactions.date,
+      amount: financeTransactions.amount,
+      category: financeTransactions.category,
+      description: financeTransactions.description
+    })
+    .from(financeTransactions)
+    .where(and(gte(financeTransactions.date, localYmd(since)), lt(financeTransactions.amount, 0)))
+    .all()
+    .filter(
+      (t) => HEALTH_SPEND_RE.test(t.category ?? '') || HEALTH_SPEND_RE.test(t.description ?? '')
+    )
+  if (spend.length === 0) return []
+  const out: Insight[] = []
+  for (const ev of events) {
+    if (!ev.occurredAt) continue
+    const start = ev.occurredAt.getTime()
+    const end = start + MEDICAL_OOP_WINDOW_DAYS * 24 * 3600 * 1000
+    let total = 0
+    for (const t of spend) {
+      const td = new Date(`${t.date}T00:00:00`).getTime()
+      if (td >= start && td <= end) total += Math.abs(t.amount)
+    }
+    if (total < MEDICAL_OOP_MIN_TOTAL) continue
+    out.push({
+      kind: 'medical-out-of-pocket',
+      severity: 'info',
+      title: `${money(total)} in health charges after "${ev.title}"`,
+      detail: `Your ${localYmd(ev.occurredAt)} ${ev.type} was followed by ${money(total)} in pharmacy/medical spend within ${MEDICAL_OOP_WINDOW_DAYS} days.`,
+      route: '/health'
+    })
+    if (out.length >= MEDICAL_OOP_MAX) break
+  }
+  return out
+}
+
 // ── Aggregator ───────────────────────────────────────────────────────────────
 
 export function buildInsights(db: Db, now: Date = new Date()): InsightsResult {
@@ -429,7 +732,13 @@ export function buildInsights(db: Db, now: Date = new Date()): InsightsResult {
     ...safeDetect(() => detectGoalsOffTrack(db, now)),
     ...safeDetect(() => detectRenewalsDue(db, now)),
     ...safeDetect(() => detectPaycheckAnomaly(db)),
-    ...safeDetect(() => detectUtilitySpikes(db))
+    ...safeDetect(() => detectUtilitySpikes(db)),
+    // Cross-domain — each reads the spine + a domain table, so safeDetect guards
+    // an older DB missing `records`/`subscriptions`/`argyle_paystubs`.
+    ...safeDetect(() => detectUnusedSubscriptions(db, now)),
+    ...safeDetect(() => detectSleepVsSpend(db, now)),
+    ...safeDetect(() => detectSavingsRate(db, now)),
+    ...safeDetect(() => detectMedicalOutOfPocket(db, now))
   ]
   // Warnings first, stable within severity (detector order is intentional).
   insights.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'warn' ? -1 : 1))
