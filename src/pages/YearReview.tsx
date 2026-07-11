@@ -82,11 +82,12 @@ export default function YearReview(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year])
 
-  async function narrate(showErrors: boolean): Promise<void> {
+  async function narrate(showErrors: boolean, isStale?: () => boolean): Promise<void> {
     if (!isElectron()) return
     setNarrating(true)
     try {
       const res = await window.api.records.narrateYearReview({ year })
+      if (isStale?.()) return
       if (res.ok) {
         setNarrated({ text: res.narrative, provider: res.provider })
       } else if (showErrors) {
@@ -99,7 +100,7 @@ export default function YearReview(): JSX.Element {
         }
       }
     } finally {
-      setNarrating(false)
+      if (!isStale?.()) setNarrating(false)
     }
   }
 
