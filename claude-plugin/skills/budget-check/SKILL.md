@@ -6,8 +6,9 @@ description: Check my budget in Compass — review spending by category, flag ov
 # Budget check
 
 Reviews Compass finances and **proposes** tags/recategorizations the user
-approves in the Claude Inbox. Finance is exposed as **summaries only** — you will
-never see individual transactions here.
+approves in the Claude Inbox. Start from the summary rollup; drill into
+individual transactions with `compass_transactions` when a category needs
+explaining.
 
 ## 1. Read
 
@@ -15,6 +16,8 @@ never see individual transactions here.
   - `netWorth` (assets / liabilities / net),
   - `monthly` income/expense/net for the window,
   - `currentMonth.byCategory` — this month's spend per category.
+- **`compass_transactions`** for the detail behind a number — filter by
+  `month`/`category`/`q` (merchant substring) to see the actual rows.
 
 ## 2. Analyze
 

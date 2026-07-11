@@ -16,7 +16,7 @@ user approves in the Compass Claude Inbox. Never write directly.
   coverage; review today's open items + the week's events.
 - **`compass_habit_streaks`** — current vs. longest streak per habit.
 - **`compass_finance_summary`** (`months: 2`) — net worth + this month's spend by
-  category (aggregates only; no raw transactions).
+  category (use `compass_transactions` if a category needs the row-level detail).
 - Optional: **`compass_search_knowledge`** for any "weekly goals" / "OKR" note the
   user keeps, to ground the review.
 
@@ -43,4 +43,5 @@ Suggest 3–6 concrete tasks for next week. For each one the user accepts, call
 - Confirm the list of tasks with the user **before** proposing, then propose only
   what they accept.
 - One `compass_propose_task` call per task.
-- Never expose or ask for vault data; finance stays at the summary level.
+- The vault is not reachable from MCP (vault documents are in-app-assistant-only;
+  credentials are sealed everywhere) — never claim otherwise.

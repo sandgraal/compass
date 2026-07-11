@@ -27,8 +27,12 @@ Claude can **read** your Compass data directly, but it can **never write to it**
 When a skill needs to change something it calls a `compass_propose_*` tool, which
 appends a **proposal** to an append-only inbox. Nothing happens until you open
 the **Claude Inbox** in the Compass app and click **Approve** — which applies the
-change through Compass's own validated code. The **vault is never exposed**, and
-finance is shared as **summaries only** (never raw transactions).
+change through Compass's own validated code. Per the data-access policy, every
+domain is readable in **full detail** (timeline, transactions, medical records,
+contacts, paystubs). The **vault is never exposed** here — it isn't reachable
+from the MCP process at all (vault documents are readable only by the in-app
+Ask Compass assistant, and credentials are sealed everywhere) — and raw GPS
+coordinates never appear.
 
 ```
 Claude (skill) ──compass_propose_*──▶ Claude Inbox (Compass app) ──you approve──▶ change applied

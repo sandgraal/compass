@@ -6,14 +6,20 @@
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  CONTACT_QUERY_MAX,
   MAX_RECENT_NOTES,
   MAX_TASK_RANGE_DAYS,
   TIMELINE_SEARCH_MAX,
+  TRANSACTIONS_MAX,
   normalizeTaskRange,
+  readContacts,
+  readMedicalRecords,
+  readPaystubs,
   readRecentNotes,
   readTasksRange,
   readTimelineSearch,
-  readTimelineSummary
+  readTimelineSummary,
+  readTransactions
 } from './readers.js'
 
 let db: Database.Database
@@ -236,5 +242,161 @@ describe('readTimelineSearch (raw timeline retrieval — Phase 10.7)', () => {
   it('returns nothing for an empty query (no FTS syntax error)', () => {
     createFts()
     expect(readTimelineSearch(db, { q: '   ' })).toMatchObject({ count: 0, records: [] })
+  })
+})
+
+// ── Full-detail readers (data-access policy) ─────────────────────────────────
+
+describe('readTransactions', () => {
+  function createTxns(): void {
+    db.exec(`
+      CREATE TABLE finance_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT, date TEXT NOT NULL, amount REAL NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'USD', description TEXT NOT NULL DEFAULT '', category TEXT
+      );
+    `)
+  }
+  function add(date: string, amount: number, description: string, category = 'Dining'): void {
+    db.prepare(
+      'INSERT INTO finance_transactions (date, amount, description, category) VALUES (?,?,?,?)'
+    ).run(date, amount, description, category)
+  }
+
+  it('returns individual rows newest-first with filters', () => {
+    createTxns()
+    add('2026-06-01', -6.5, 'STARBUCKS')
+    add('2026-06-15', -42, 'WHOLE FOODS', 'Groceries')
+    add('2026-05-20', -9, 'STARBUCKS RESERVE')
+    const all = readTransactions(db, {})
+    expect(all.transactions.map((t) => t.description)).toEqual([
+      'WHOLE FOODS',
+      'STARBUCKS',
+      'STARBUCKS RESERVE'
+    ])
+    expect(readTransactions(db, { month: '2026-06' }).count).toBe(2)
+    expect(readTransactions(db, { q: 'starbucks' }).count).toBe(2)
+    expect(readTransactions(db, { category: 'Groceries' }).count).toBe(1)
+    expect(readTransactions(db, { from: '2026-06-10' }).count).toBe(1)
+  })
+
+  it('ignores from/to when month is provided', () => {
+    createTxns()
+    add('2026-06-01', -6.5, 'STARBUCKS')
+    add('2026-06-15', -42, 'WHOLE FOODS', 'Groceries')
+    const result = readTransactions(db, { month: '2026-06', from: '2026-06-10', to: '2026-06-12' })
+    expect(result.count).toBe(2)
+    expect(result.transactions.map((t) => t.date)).toEqual(['2026-06-15', '2026-06-01'])
+  })
+
+  it('rejects malformed month/date filters', () => {
+    createTxns()
+    expect(readTransactions(db, { month: 'June' }).error).toBeTruthy()
+    expect(readTransactions(db, { from: 'nope' }).error).toBeTruthy()
+  })
+
+  it(`caps at ${TRANSACTIONS_MAX} and guards the absent table (older DB)`, () => {
+    expect(readTransactions(db, {})).toMatchObject({ count: 0, transactions: [] })
+    createTxns()
+    for (let i = 0; i < 60; i++) add('2026-06-01', -1, `txn ${i}`)
+    const res = readTransactions(db, { limit: 999 })
+    expect(res.count).toBe(TRANSACTIONS_MAX)
+    expect(res.note).toBeTruthy()
+  })
+})
+
+describe('readContacts', () => {
+  function createContacts(): void {
+    db.exec(`
+      CREATE TABLE contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
+        org TEXT, job_title TEXT, relationship TEXT, search_blob TEXT, photo TEXT, enrichment TEXT
+      );
+    `)
+  }
+
+  it('matches on the search blob and returns the light shape (never photo/enrichment)', () => {
+    createContacts()
+    db.prepare(
+      `INSERT INTO contacts (external_id, display_name, org, job_title, relationship, search_blob, photo)
+       VALUES ('c1', 'Jane Doe', 'Acme', 'CTO', 'colleague', 'jane doe acme jane@example.com', 'data:image/png;base64,xxx')`
+    ).run()
+    const hits = readContacts(db, 'jane')
+    expect(hits).toEqual([
+      { id: 1, displayName: 'Jane Doe', org: 'Acme', jobTitle: 'CTO', relationship: 'colleague' }
+    ])
+  })
+
+  it('guards the absent table and empty queries', () => {
+    expect(readContacts(db, 'jane')).toEqual([])
+    createContacts()
+    expect(readContacts(db, '   ')).toEqual([])
+  })
+
+  it('caps search query length', () => {
+    createContacts()
+    const cappedNeedle = 'a'.repeat(CONTACT_QUERY_MAX)
+    db.prepare(
+      'INSERT INTO contacts (external_id, display_name, search_blob) VALUES (?, ?, ?)'
+    ).run('c2', 'Cap Test', cappedNeedle)
+    expect(readContacts(db, 'a'.repeat(CONTACT_QUERY_MAX + 200))).toHaveLength(1)
+  })
+})
+
+describe('readMedicalRecords', () => {
+  function createMedical(): void {
+    db.exec(`
+      CREATE TABLE medical_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, category TEXT NOT NULL,
+        description TEXT, code TEXT, status TEXT, recorded_at TEXT
+      );
+    `)
+  }
+
+  it('returns FULL clinical rows with filters (the counts-only wall is gone)', () => {
+    createMedical()
+    db.prepare(
+      "INSERT INTO medical_records (external_id, category, description, code, status, recorded_at) VALUES ('m1','medication','Aspirin 81mg','RxNorm:243670','active','2026-03-10')"
+    ).run()
+    db.prepare(
+      "INSERT INTO medical_records (external_id, category, description, status) VALUES ('m2','condition','Migraine','resolved')"
+    ).run()
+    const all = readMedicalRecords(db, {})
+    expect(all.count).toBe(2)
+    expect(all.records[0]).toMatchObject({
+      category: 'medication',
+      description: 'Aspirin 81mg',
+      code: 'RxNorm:243670',
+      status: 'active',
+      recordedAt: '2026-03-10'
+    })
+    expect(readMedicalRecords(db, { category: 'condition' }).count).toBe(1)
+    expect(readMedicalRecords(db, { status: 'ACTIVE' }).count).toBe(1)
+    expect(readMedicalRecords(db, { category: 'surgery' }).error).toBeTruthy()
+  })
+
+  it('guards the absent table (older DB)', () => {
+    expect(readMedicalRecords(db, {})).toMatchObject({ count: 0, records: [] })
+  })
+})
+
+describe('readPaystubs', () => {
+  it('returns per-stub rows newest-first plus totals, guarding the absent table', () => {
+    expect(readPaystubs(db)).toMatchObject({ paystubs: [], totals: null })
+    db.exec(`
+      CREATE TABLE argyle_paystubs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, employer TEXT,
+        gross_pay REAL, net_pay REAL, withholding REAL, deductions REAL,
+        currency TEXT NOT NULL DEFAULT 'USD', period_start TEXT, period_end TEXT, paid_at TEXT
+      );
+    `)
+    db.prepare(
+      "INSERT INTO argyle_paystubs (external_id, employer, gross_pay, net_pay, paid_at) VALUES ('p1','Initech',4000,3000,'2026-06-16')"
+    ).run()
+    db.prepare(
+      "INSERT INTO argyle_paystubs (external_id, employer, gross_pay, net_pay, paid_at) VALUES ('p2','Initech',4000,3010,'2026-06-30')"
+    ).run()
+    const res = readPaystubs(db)
+    expect(res.paystubs.map((p) => p.netPay)).toEqual([3010, 3000])
+    expect(res.totals).toMatchObject({ count: 2, totalNet: 6010, totalGross: 8000 })
   })
 })
