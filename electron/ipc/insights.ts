@@ -625,6 +625,11 @@ function detectSavingsRate(db: Db, now: Date): Insight[] {
     const ym = (s.paidAt as string).slice(0, 7)
     incomeByMonth.set(ym, (incomeByMonth.get(ym) ?? 0) + (s.netPay as number))
   }
+  const months = [...incomeByMonth.keys()].filter((ym) => ym < thisMonth).sort()
+  if (months.length === 0) return []
+  const startDate = `${months[0]}-01`
+  const endDate = `${thisMonth}-01`
+
   const txns = db
     .select({
       date: financeTransactions.date,
@@ -632,7 +637,13 @@ function detectSavingsRate(db: Db, now: Date): Insight[] {
       category: financeTransactions.category
     })
     .from(financeTransactions)
-    .where(lt(financeTransactions.amount, 0))
+    .where(
+      and(
+        gte(financeTransactions.date, startDate),
+        lt(financeTransactions.date, endDate),
+        lt(financeTransactions.amount, 0)
+      )
+    )
     .all()
   const expenseByMonth = new Map<string, number>()
   for (const t of txns) {
