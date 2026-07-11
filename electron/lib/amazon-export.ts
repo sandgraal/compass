@@ -42,6 +42,18 @@ function firstField(row: Record<string, unknown>, keys: string[]): string {
   return ''
 }
 
+/**
+ * Does the payload carry one of these DISTINCTIVE columns? The fresh-import
+ * `detect()` gate checks the CSV header, but the reclassifier (records-reclassify.ts)
+ * only matches the provenance FILENAME and then runs the mapper on a stored
+ * generic-row payload — so without this guard a generic row from any file whose
+ * name merely contains "review"/"return"/… could be misclassified. Requiring the
+ * distinctive column here makes reclassification exactly as safe as fresh import.
+ */
+function hasKey(row: Record<string, unknown>, keys: string[]): boolean {
+  return keys.some((k) => k in row)
+}
+
 function minutesBody(label: string, ms: number): string | undefined {
   const mins = Math.floor(ms / 60_000)
   return mins >= 1 ? `${label} · ${mins} min` : label || undefined
@@ -143,8 +155,13 @@ export function mapAlexaUtterance(row: Record<string, unknown>): RecordInput | n
 // improve the odds; if none match a given export the recognizer simply stays
 // inert (rows fall through to generic — no misclassification). Confirm the
 // headers against a real archive before claiming coverage.
+//
+// Each mapper first requires its DISTINCTIVE column via `hasKey` — the same
+// column the fresh-import recognizer detects on — so the reclassifier (which
+// only matches provenance FILENAMES) can't misclassify unrelated generic rows.
 
 export function mapAmazonReturn(row: Record<string, unknown>): RecordInput | null {
+  if (!hasKey(row, ['ReturnReason', 'Return Reason'])) return null
   const title = firstField(row, ['ProductName', 'Product Name', 'Title', 'Item Name'])
   if (!title) return null
   const when = firstField(row, [
@@ -170,6 +187,7 @@ export function mapAmazonReturn(row: Record<string, unknown>): RecordInput | nul
 }
 
 export function mapAmazonReview(row: Record<string, unknown>): RecordInput | null {
+  if (!hasKey(row, ['ReviewText', 'Review Text'])) return null
   const product = firstField(row, ['ProductName', 'Product Name', 'Product Title', 'Title'])
   if (!product) return null
   const when = firstField(row, [
@@ -195,6 +213,7 @@ export function mapAmazonReview(row: Record<string, unknown>): RecordInput | nul
 }
 
 export function mapAmazonWishlist(row: Record<string, unknown>): RecordInput | null {
+  if (!hasKey(row, ['ListName', 'List Name', 'Wishlist Name', 'WishlistName'])) return null
   const title = firstField(row, [
     'ItemName',
     'Item Name',
@@ -218,6 +237,8 @@ export function mapAmazonWishlist(row: Record<string, unknown>): RecordInput | n
 }
 
 export function mapAmazonSearch(row: Record<string, unknown>): RecordInput | null {
+  // 'Keyword'/'Query' are too generic to be distinctive — require a search-specific header.
+  if (!hasKey(row, ['Search Query', 'SearchQuery', 'First Search Query'])) return null
   const query = firstField(row, [
     'Search Query',
     'SearchQuery',

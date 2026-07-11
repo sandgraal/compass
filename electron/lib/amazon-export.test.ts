@@ -256,10 +256,33 @@ describe('mapAmazonReturn', () => {
     const r = mapAmazonReturn({
       'Product Name': 'Book',
       'Return Date': '2026-01-01',
-      Reason: 'Wrong item'
+      'Return Reason': 'Wrong item'
     })
     expect(r?.title).toBe('Returned: Book')
+    expect(r?.body).toBe('Wrong item')
+    // Distinctive column present but no title → still skipped.
     expect(mapAmazonReturn({ ReturnReason: 'x' })).toBeNull()
+  })
+})
+
+describe('reclassification safety — distinctive-column guard', () => {
+  // The reclassifier matches provenance FILENAMES (broad regexes), then runs the
+  // mapper on a stored generic payload. Without a column guard, a generic row from
+  // a file merely named "…review…" could be misclassified. Each mapper must return
+  // null unless its DISTINCTIVE column is present in the payload.
+  it('declines a generic-shaped payload lacking the distinctive column', () => {
+    const generic = { Title: 'Some Thing', Date: '2026-01-01', Name: 'x', Query: 'shoes' }
+    expect(mapAmazonReturn(generic)).toBeNull() // no ReturnReason
+    expect(mapAmazonReview(generic)).toBeNull() // no ReviewText
+    expect(mapAmazonWishlist(generic)).toBeNull() // no ListName
+    expect(mapAmazonSearch(generic)).toBeNull() // 'Query' is not a distinctive search header
+  })
+
+  it('accepts the same payload once the distinctive column is added', () => {
+    expect(mapAmazonReturn({ Title: 'T', ReturnReason: 'Defective' })).not.toBeNull()
+    expect(mapAmazonReview({ Title: 'T', ReviewText: 'good' })).not.toBeNull()
+    expect(mapAmazonWishlist({ Title: 'T', ListName: 'Camping' })).not.toBeNull()
+    expect(mapAmazonSearch({ 'Search Query': 'shoes' })).not.toBeNull()
   })
 })
 
