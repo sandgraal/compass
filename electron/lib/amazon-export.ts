@@ -33,6 +33,15 @@ function field(row: Record<string, unknown>, key: string): string {
   return /^(data )?not available$/i.test(s) ? '' : s
 }
 
+/** First non-empty value across candidate column names (header naming varies by export vintage). */
+function firstField(row: Record<string, unknown>, keys: string[]): string {
+  for (const k of keys) {
+    const v = field(row, k)
+    if (v) return v
+  }
+  return ''
+}
+
 function minutesBody(label: string, ms: number): string | undefined {
   const mins = Math.floor(ms / 60_000)
   return mins >= 1 ? `${label} · ${mins} min` : label || undefined
@@ -124,6 +133,115 @@ export function mapAlexaUtterance(row: Record<string, unknown>): RecordInput | n
     title: text,
     payload: row,
     naturalKey: `${when}|${text}`
+  }
+}
+
+// ── Additional archive families (returns / reviews / wishlists / searches) ────
+// CAVEAT: unlike the mappers above (validated against a real export), these four
+// are written to the DOCUMENTED / best-guess column names and are UNVALIDATED
+// against a real Amazon archive. `firstField` tries several header spellings to
+// improve the odds; if none match a given export the recognizer simply stays
+// inert (rows fall through to generic — no misclassification). Confirm the
+// headers against a real archive before claiming coverage.
+
+export function mapAmazonReturn(row: Record<string, unknown>): RecordInput | null {
+  const title = firstField(row, ['ProductName', 'Product Name', 'Title', 'Item Name'])
+  if (!title) return null
+  const when = firstField(row, [
+    'ReturnRequestDate',
+    'ReturnDate',
+    'Return Date',
+    'DateOfReturn',
+    'OrderDate'
+  ])
+  const reason = firstField(row, ['ReturnReason', 'Return Reason', 'Reason'])
+  const refund = firstField(row, ['RefundAmount', 'Refund Amount', 'AmountRefunded'])
+  const orderId = firstField(row, ['OrderID', 'Order ID', 'OrderId'])
+  const bodyBits = [reason, refund ? `refunded ${refund}` : ''].filter(Boolean)
+  return {
+    source: 'amazon',
+    type: 'return',
+    occurredAt: parseWhen(when),
+    title: `Returned: ${title}`,
+    body: bodyBits.length > 0 ? bodyBits.join(' · ') : undefined,
+    payload: row,
+    naturalKey: `${when}|${orderId || title}`
+  }
+}
+
+export function mapAmazonReview(row: Record<string, unknown>): RecordInput | null {
+  const product = firstField(row, ['ProductName', 'Product Name', 'Product Title', 'Title'])
+  if (!product) return null
+  const when = firstField(row, [
+    'SubmissionDate',
+    'Submission Date',
+    'ReviewDate',
+    'Date',
+    'Last Modified Date'
+  ])
+  const rating = firstField(row, ['Rating', 'StarRating', 'Star Rating', 'Overall Rating'])
+  const headline = firstField(row, ['ReviewHeadline', 'Headline', 'ReviewTitle', 'Review Title'])
+  const text = firstField(row, ['ReviewText', 'Review Text', 'Body', 'Content', 'Review'])
+  const bodyBits = [rating ? `${rating}★` : '', (headline || text).slice(0, 160)].filter(Boolean)
+  return {
+    source: 'amazon',
+    type: 'review',
+    occurredAt: parseWhen(when),
+    title: `Reviewed: ${product}`,
+    body: bodyBits.length > 0 ? bodyBits.join(' · ') : undefined,
+    payload: row,
+    naturalKey: `${when}|${product}`
+  }
+}
+
+export function mapAmazonWishlist(row: Record<string, unknown>): RecordInput | null {
+  const title = firstField(row, [
+    'ItemName',
+    'Item Name',
+    'ProductName',
+    'Product Name',
+    'Title',
+    'Name'
+  ])
+  if (!title) return null
+  const when = firstField(row, ['DateAdded', 'Date Added', 'AddedDate', 'CreatedDate', 'Date'])
+  const list = firstField(row, ['ListName', 'List Name', 'Wishlist Name', 'WishlistName'])
+  return {
+    source: 'amazon',
+    type: 'wishlist',
+    occurredAt: parseWhen(when),
+    title: `Wishlisted: ${title}`,
+    body: list ? `List: ${list}` : undefined,
+    payload: row,
+    naturalKey: `${when}|${list || 'list'}|${title}`
+  }
+}
+
+export function mapAmazonSearch(row: Record<string, unknown>): RecordInput | null {
+  const query = firstField(row, [
+    'Search Query',
+    'SearchQuery',
+    'Keyword',
+    'Query',
+    'First Search Query'
+  ])
+  if (!query) return null
+  const when = firstField(row, [
+    'First Search Time',
+    'Search Time',
+    'SearchTime',
+    'Date',
+    'Timestamp'
+  ])
+  const dept = firstField(row, ['Department', 'Site Variant', 'Category', 'Marketplace'])
+  return {
+    source: 'amazon',
+    type: 'search',
+    occurredAt: parseWhen(when),
+    title: `Searched "${query}"`,
+    body: dept || undefined,
+    payload: row,
+    naturalKey: `${when}|${query}`
   }
 }
 
@@ -230,6 +348,37 @@ export const AMAZON_LOCATION_RECOGNIZER = csvRecognizer(
   mapAmazonGeolocation
 )
 
+// Best-guess header detection for the four unvalidated families. Each requires a
+// distinctive column so they don't steal generic dated CSVs; if the real archive
+// spells the header differently, the file falls through to generic (safe).
+export const AMAZON_RETURNS_RECOGNIZER = csvRecognizer(
+  'amazon-returns',
+  'Amazon returns & refunds',
+  ['ReturnReason'],
+  mapAmazonReturn
+)
+
+export const AMAZON_REVIEWS_RECOGNIZER = csvRecognizer(
+  'amazon-reviews',
+  'Amazon product reviews',
+  ['ReviewText'],
+  mapAmazonReview
+)
+
+export const AMAZON_WISHLIST_RECOGNIZER = csvRecognizer(
+  'amazon-wishlist',
+  'Amazon wishlists',
+  ['ListName'],
+  mapAmazonWishlist
+)
+
+export const AMAZON_SEARCH_RECOGNIZER = csvRecognizer(
+  'amazon-search',
+  'Amazon search history',
+  ['Search Query'],
+  mapAmazonSearch
+)
+
 // ── Reclassification registry (already-imported generic rows) ─────────────────
 
 export type RefileFamily = {
@@ -249,5 +398,10 @@ export const AMAZON_REFILE_FAMILIES: readonly RefileFamily[] = [
   { matches: (p) => p.includes('Followed Artists and Accounts'), map: mapAmazonMusicLike },
   { matches: (p) => p.includes('Saved Music'), map: mapAmazonMusicSave },
   { matches: (p) => /^Intent-\d/.test(p), map: mapAlexaUtterance },
-  { matches: (p) => /^Geolocation-\d/.test(p), map: mapAmazonGeolocation, location: true }
+  { matches: (p) => /^Geolocation-\d/.test(p), map: mapAmazonGeolocation, location: true },
+  // Unvalidated families — filename patterns are best-guess (see caveat above).
+  { matches: (p) => /return/i.test(p), map: mapAmazonReturn },
+  { matches: (p) => /review/i.test(p), map: mapAmazonReview },
+  { matches: (p) => /wishlist|wish[\s_-]?list/i.test(p), map: mapAmazonWishlist },
+  { matches: (p) => /search[\s_-]?(query|data|history)/i.test(p), map: mapAmazonSearch }
 ]

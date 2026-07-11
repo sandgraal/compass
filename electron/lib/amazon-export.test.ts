@@ -12,12 +12,20 @@ import {
   AMAZON_LOCATION_RECOGNIZER,
   AMAZON_MUSIC_LIBRARY_RECOGNIZER,
   AMAZON_MUSIC_LIKES_RECOGNIZER,
+  AMAZON_RETURNS_RECOGNIZER,
+  AMAZON_REVIEWS_RECOGNIZER,
+  AMAZON_SEARCH_RECOGNIZER,
+  AMAZON_WISHLIST_RECOGNIZER,
   KINDLE_READING_RECOGNIZER,
   PRIME_VIDEO_RECOGNIZER,
   mapAlexaUtterance,
   mapAmazonGeolocation,
   mapAmazonMusicLike,
   mapAmazonMusicSave,
+  mapAmazonReturn,
+  mapAmazonReview,
+  mapAmazonSearch,
+  mapAmazonWishlist,
   mapKindleReadingSession,
   mapPrimeVideoWatch
 } from './amazon-export'
@@ -220,6 +228,99 @@ describe('recognizers (fresh imports)', () => {
       AMAZON_MUSIC_LIBRARY_RECOGNIZER,
       ALEXA_UTTERANCE_RECOGNIZER,
       AMAZON_LOCATION_RECOGNIZER
+    ]) {
+      expect(r.detect(netflix)).toBe(false)
+    }
+  })
+})
+
+// Best-guess families (UNVALIDATED against a real archive — headers may differ).
+describe('mapAmazonReturn', () => {
+  it('maps a return with reason + refund into a timeline record', () => {
+    const r = mapAmazonReturn({
+      ProductName: 'USB-C Cable',
+      ReturnRequestDate: '2026-05-02',
+      ReturnReason: 'Defective',
+      RefundAmount: '$12.99',
+      OrderID: '111-222'
+    })
+    expect(r).not.toBeNull()
+    expect(r?.source).toBe('amazon')
+    expect(r?.type).toBe('return')
+    expect(r?.title).toBe('Returned: USB-C Cable')
+    expect(r?.body).toBe('Defective · refunded $12.99')
+    expect(r?.naturalKey).toBe('2026-05-02|111-222')
+  })
+
+  it('tolerates alternate header spellings and skips a titleless row', () => {
+    const r = mapAmazonReturn({
+      'Product Name': 'Book',
+      'Return Date': '2026-01-01',
+      Reason: 'Wrong item'
+    })
+    expect(r?.title).toBe('Returned: Book')
+    expect(mapAmazonReturn({ ReturnReason: 'x' })).toBeNull()
+  })
+})
+
+describe('mapAmazonReview', () => {
+  it('maps a review with rating + headline', () => {
+    const r = mapAmazonReview({
+      ProductName: 'Headphones',
+      SubmissionDate: '2026-03-10',
+      Rating: '5',
+      ReviewHeadline: 'Great sound',
+      ReviewText: 'Loved them.'
+    })
+    expect(r?.type).toBe('review')
+    expect(r?.title).toBe('Reviewed: Headphones')
+    expect(r?.body).toBe('5★ · Great sound')
+  })
+})
+
+describe('mapAmazonWishlist', () => {
+  it('maps a wishlist item with its list name', () => {
+    const r = mapAmazonWishlist({ ItemName: 'Tent', ListName: 'Camping', DateAdded: '2026-04-01' })
+    expect(r?.type).toBe('wishlist')
+    expect(r?.title).toBe('Wishlisted: Tent')
+    expect(r?.body).toBe('List: Camping')
+  })
+})
+
+describe('mapAmazonSearch', () => {
+  it('maps a search query with department', () => {
+    const r = mapAmazonSearch({
+      'Search Query': 'running shoes',
+      'First Search Time': '2026-06-01T10:00:00Z',
+      Department: 'Shoes'
+    })
+    expect(r?.type).toBe('search')
+    expect(r?.title).toBe('Searched "running shoes"')
+    expect(r?.body).toBe('Shoes')
+    expect(r?.occurredAt).toBe(Date.parse('2026-06-01T10:00:00Z'))
+  })
+})
+
+describe('additional-family recognizers detect on distinctive headers only', () => {
+  it('claims their own shapes and not a Netflix CSV', () => {
+    expect(
+      AMAZON_RETURNS_RECOGNIZER.detect(file('Returns.csv', 'OrderID,ReturnReason,RefundAmount\n'))
+    ).toBe(true)
+    expect(
+      AMAZON_REVIEWS_RECOGNIZER.detect(file('Reviews.csv', 'ProductName,Rating,ReviewText\n'))
+    ).toBe(true)
+    expect(
+      AMAZON_WISHLIST_RECOGNIZER.detect(file('Wishlist.csv', 'ListName,ItemName,DateAdded\n'))
+    ).toBe(true)
+    expect(
+      AMAZON_SEARCH_RECOGNIZER.detect(file('Search-Data.csv', 'Search Query,First Search Time\n'))
+    ).toBe(true)
+    const netflix = file('NetflixViewingHistory.csv', 'Title,Date\nThe Matrix,1/2/26\n')
+    for (const r of [
+      AMAZON_RETURNS_RECOGNIZER,
+      AMAZON_REVIEWS_RECOGNIZER,
+      AMAZON_WISHLIST_RECOGNIZER,
+      AMAZON_SEARCH_RECOGNIZER
     ]) {
       expect(r.detect(netflix)).toBe(false)
     }
