@@ -98,6 +98,86 @@ beforeEach(() => {
   `)
 })
 
+// The cross-domain domain tables are created PER-DESCRIBE (matching the
+// goal/renewal/paycheck/utility convention above) — the shared beforeEach
+// deliberately omits them so each detector's safeDetect guard is exercised by
+// the empty-DB test.
+function createRecordsTable(): void {
+  sqlite.exec(`CREATE TABLE records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, type TEXT NOT NULL,
+    occurred_at INTEGER, title TEXT NOT NULL, body TEXT, payload TEXT,
+    dedup_hash TEXT NOT NULL UNIQUE, provenance TEXT, ingested_at INTEGER
+  );`)
+}
+function createSubscriptionsTable(): void {
+  sqlite.exec(`CREATE TABLE subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+    cost REAL NOT NULL DEFAULT 0, cadence TEXT NOT NULL DEFAULT 'monthly', category TEXT,
+    status TEXT NOT NULL DEFAULT 'active', next_renewal TEXT, payment_account TEXT,
+    cancel_url TEXT, notes TEXT, source TEXT NOT NULL DEFAULT 'manual',
+    created_at INTEGER, updated_at INTEGER
+  );`)
+}
+function createPaystubsTable(): void {
+  sqlite.exec(`CREATE TABLE argyle_paystubs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, employer TEXT,
+    gross_pay REAL, net_pay REAL, withholding REAL, deductions REAL,
+    currency TEXT NOT NULL DEFAULT 'USD', period_start TEXT, period_end TEXT, paid_at TEXT,
+    pay_cycle TEXT, ingested_at INTEGER
+  );`)
+}
+
+let recSeq = 0
+function addRecord(
+  source: string,
+  type: string,
+  occurredAt: number | null,
+  opts: { title?: string; payload?: unknown } = {}
+): void {
+  recSeq++
+  sqlite
+    .prepare(
+      'INSERT INTO records (source, type, occurred_at, title, payload, dedup_hash) VALUES (?,?,?,?,?,?)'
+    )
+    .run(
+      source,
+      type,
+      occurredAt,
+      opts.title ?? `${source} ${type}`,
+      opts.payload === undefined ? null : JSON.stringify(opts.payload),
+      `rec-${recSeq}`
+    )
+}
+
+let subSeq = 0
+function addSubscription(
+  name: string,
+  cost: number,
+  opts: { cadence?: string; status?: string } = {}
+): void {
+  subSeq++
+  sqlite
+    .prepare(
+      'INSERT INTO subscriptions (external_id, name, cost, cadence, status) VALUES (?,?,?,?,?)'
+    )
+    .run(`sub-${name}-${subSeq}`, name, cost, opts.cadence ?? 'monthly', opts.status ?? 'active')
+}
+
+let paystubSeq = 0
+function addPaystub(paidAt: string, netPay: number, employer = 'Initech'): void {
+  paystubSeq++
+  sqlite
+    .prepare(
+      'INSERT INTO argyle_paystubs (external_id, employer, net_pay, paid_at) VALUES (?,?,?,?)'
+    )
+    .run(`ps-${paidAt}-${paystubSeq}`, employer, netPay, paidAt)
+}
+
+/** epoch ms for a local 'YYYY-MM-DD' at midnight (matches the projectors' idiom). */
+function ymdMs(ymd: string): number {
+  return new Date(`${ymd}T00:00:00`).getTime()
+}
+
 afterEach(() => {
   sqlite.close()
 })
@@ -403,6 +483,147 @@ describe('utility spike', () => {
     const hit = buildInsights(db(), NOW).insights.find((i) => i.kind === 'utility-spike')
     expect(hit).toBeTruthy()
     expect(hit?.title).toContain('CNFL')
+  })
+})
+
+// ── Cross-domain detectors (leverage layer) ─────────────────────────────────
+
+describe('unused subscriptions (subs × media-usage records)', () => {
+  beforeEach(() => {
+    createRecordsTable()
+    createSubscriptionsTable()
+  })
+  it('flags an active streaming sub with zero usage in the window', async () => {
+    const { buildInsights } = await import('./insights')
+    addSubscription('Netflix', 15.99)
+    // Spotify HAS a recent play → not flagged; Netflix has none → flagged.
+    addSubscription('Spotify', 11.99)
+    addRecord('spotify', 'listen', ymdMs('2026-06-10'))
+    const r = buildInsights(db(), NOW)
+    const unused = r.insights.filter((i) => i.kind === 'unused-subscription')
+    expect(unused).toHaveLength(1)
+    expect(unused[0].title).toContain('Netflix')
+  })
+
+  it('does not flag a sub with usage inside the window, nor an unrecognized service', async () => {
+    const { buildInsights } = await import('./insights')
+    addSubscription('Netflix', 15.99)
+    addRecord('netflix', 'watch', ymdMs('2026-06-01')) // used recently
+    addSubscription('Adobe Creative Cloud', 54.99) // not in STREAMING_USAGE → never guessed
+    const r = buildInsights(db(), NOW)
+    expect(r.insights.filter((i) => i.kind === 'unused-subscription')).toHaveLength(0)
+  })
+
+  it('ignores a paused subscription', async () => {
+    const { buildInsights } = await import('./insights')
+    addSubscription('Netflix', 15.99, { status: 'paused' })
+    const r = buildInsights(db(), NOW)
+    expect(r.insights.filter((i) => i.kind === 'unused-subscription')).toHaveLength(0)
+  })
+})
+
+describe('sleep vs spend (apple-health × finance, weekly)', () => {
+  beforeEach(() => createRecordsTable())
+  // 8 weeks: alternate low-sleep+high-spend vs high-sleep+low-spend.
+  function seedWeeks(): void {
+    for (let w = 0; w < 8; w++) {
+      // Mondays walking back from a fixed anchor before NOW.
+      const monday = new Date('2026-06-08T00:00:00')
+      monday.setDate(monday.getDate() - w * 7)
+      const ymd = `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`
+      const lowSleep = w % 2 === 0
+      addRecord('apple-health', 'sleep', ymdMs(ymd), {
+        payload: { day: ymd, ms: (lowSleep ? 5 : 8) * 3_600_000 }
+      })
+      addTxn(ymd, lowSleep ? -180 : -60, 'Dining')
+    }
+  }
+
+  it('surfaces when low-sleep weeks average materially more discretionary spend', async () => {
+    const { buildInsights } = await import('./insights')
+    seedWeeks()
+    const r = buildInsights(db(), NOW)
+    const hit = r.insights.filter((i) => i.kind === 'sleep-vs-spend')
+    expect(hit).toHaveLength(1)
+    expect(hit[0].detail).toMatch(/discretionary spend/)
+  })
+
+  it('stays quiet with too few overlapping weeks', async () => {
+    const { buildInsights } = await import('./insights')
+    for (let w = 0; w < 3; w++) {
+      const ymd = `2026-05-${String(4 + w * 7).padStart(2, '0')}`
+      addRecord('apple-health', 'sleep', ymdMs(ymd), { payload: { ms: 5 * 3_600_000 } })
+      addTxn(ymd, -180, 'Dining')
+    }
+    expect(
+      buildInsights(db(), NOW).insights.filter((i) => i.kind === 'sleep-vs-spend')
+    ).toHaveLength(0)
+  })
+})
+
+describe('savings rate (paystubs × finance)', () => {
+  beforeEach(() => createPaystubsTable())
+  it('flags a materially worse latest completed month vs the trailing average', async () => {
+    const { buildInsights } = await import('./insights')
+    // Need ≥ SAVINGS_MIN_MONTHS(3) prior + 1 latest = 4 completed months (all < June).
+    for (const m of ['2026-02', '2026-03', '2026-04', '2026-05']) addPaystub(`${m}-15`, 4000)
+    // Feb–Apr save ~70% (expense 1200/4000); May crashes to ~10% (expense 3600).
+    addTxn('2026-02-10', -1200, 'Dining')
+    addTxn('2026-03-10', -1200, 'Dining')
+    addTxn('2026-04-10', -1200, 'Dining')
+    addTxn('2026-05-10', -3600, 'Dining')
+    const r = buildInsights(db(), NOW)
+    const hit = r.insights.filter((i) => i.kind === 'savings-rate')
+    expect(hit).toHaveLength(1)
+    expect(hit[0].severity).toBe('warn')
+  })
+
+  it('stays quiet when the latest month holds its trailing rate', async () => {
+    const { buildInsights } = await import('./insights')
+    for (const m of ['2026-02', '2026-03', '2026-04', '2026-05']) {
+      addPaystub(`${m}-15`, 4000)
+      addTxn(`${m}-10`, -1200, 'Dining')
+    }
+    expect(buildInsights(db(), NOW).insights.filter((i) => i.kind === 'savings-rate')).toHaveLength(
+      0
+    )
+  })
+})
+
+describe('medical out-of-pocket (medical records × finance)', () => {
+  beforeEach(() => createRecordsTable())
+  it('ties an encounter to health-category spend in the following window', async () => {
+    const { buildInsights } = await import('./insights')
+    addRecord('medical', 'encounter', ymdMs('2026-06-03'), { title: 'Cardiology visit' })
+    addTxn('2026-06-05', -140, 'Pharmacy')
+    addTxn('2026-06-08', -100, 'Medical')
+    // An unrelated dining charge in the window must NOT count.
+    addTxn('2026-06-06', -50, 'Dining')
+    const r = buildInsights(db(), NOW)
+    const hit = r.insights.filter((i) => i.kind === 'medical-out-of-pocket')
+    expect(hit).toHaveLength(1)
+    expect(hit[0].title).toContain('Cardiology visit')
+    expect(hit[0].title).toContain('$240')
+  })
+
+  it('stays quiet when health spend falls outside the window or below the floor', async () => {
+    const { buildInsights } = await import('./insights')
+    addRecord('medical', 'encounter', ymdMs('2026-06-03'), { title: 'Checkup' })
+    addTxn('2026-06-25', -140, 'Pharmacy') // 22 days later → outside the 14-day window
+    expect(
+      buildInsights(db(), NOW).insights.filter((i) => i.kind === 'medical-out-of-pocket')
+    ).toHaveLength(0)
+  })
+})
+
+describe('cross-domain detectors survive a missing table', () => {
+  it('does not throw when records/subscriptions/paystubs tables are absent', async () => {
+    // The shared beforeEach creates none of them — this is the default state.
+    const { buildInsights } = await import('./insights')
+    expect(() => buildInsights(db(), NOW)).not.toThrow()
+    expect(
+      buildInsights(db(), NOW).insights.filter((i) => i.kind === 'unused-subscription')
+    ).toEqual([])
   })
 })
 

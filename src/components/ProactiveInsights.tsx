@@ -1,10 +1,39 @@
-import { Archive, Flame, Lightbulb, Tag, TrendingUp } from 'lucide-react'
+import {
+  Archive,
+  BellRing,
+  CalendarClock,
+  Flame,
+  Lightbulb,
+  Moon,
+  PiggyBank,
+  Repeat,
+  Stethoscope,
+  Tag,
+  Target,
+  TrendingUp,
+  Wallet
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { cn } from '../lib/utils'
 
+// Mirror of electron/ipc/insights.ts `Insight` — keep the kind union in sync
+// (a missing kind renders icon-less, which is how the cross-domain kinds shipped
+// broken before). The card is otherwise kind-agnostic.
 type Insight = {
-  kind: 'spending-anomaly' | 'uncategorized-spend' | 'habit-slippage' | 'stale-notes'
+  kind:
+    | 'spending-anomaly'
+    | 'uncategorized-spend'
+    | 'habit-slippage'
+    | 'stale-notes'
+    | 'goal-off-track'
+    | 'renewal-due'
+    | 'paycheck-anomaly'
+    | 'utility-spike'
+    | 'unused-subscription'
+    | 'sleep-vs-spend'
+    | 'savings-rate'
+    | 'medical-out-of-pocket'
   severity: 'info' | 'warn'
   title: string
   detail: string
@@ -15,14 +44,25 @@ const KIND_ICON: Record<Insight['kind'], JSX.Element> = {
   'spending-anomaly': <TrendingUp size={15} className="text-amber-400" />,
   'uncategorized-spend': <Tag size={15} className="text-sky-400" />,
   'habit-slippage': <Flame size={15} className="text-orange-400" />,
-  'stale-notes': <Archive size={15} className="text-muted-foreground" />
+  'stale-notes': <Archive size={15} className="text-muted-foreground" />,
+  'goal-off-track': <Target size={15} className="text-amber-400" />,
+  'renewal-due': <CalendarClock size={15} className="text-sky-400" />,
+  'paycheck-anomaly': <Wallet size={15} className="text-amber-400" />,
+  'utility-spike': <BellRing size={15} className="text-orange-400" />,
+  // Cross-domain (leverage layer)
+  'unused-subscription': <Repeat size={15} className="text-sky-400" />,
+  'sleep-vs-spend': <Moon size={15} className="text-indigo-400" />,
+  'savings-rate': <PiggyBank size={15} className="text-amber-400" />,
+  'medical-out-of-pocket': <Stethoscope size={15} className="text-rose-400" />
 }
 
 /**
- * Proactive insights card (Phase 7 Track E) — local-only nudges computed by
- * `insights:get` (spending anomalies, uncategorized buildup, habit slippage,
- * stale notes). Renders nothing while loading, on error, or when there is
- * nothing to surface — a quiet card is the desired steady state.
+ * Proactive insights card (Phase 7 Track E + the cross-domain leverage layer) —
+ * local-only nudges computed by `insights:get`: single-domain flags (spending
+ * anomalies, habit slippage, renewals…) and cross-domain correlations (unused
+ * subscriptions, sleep vs spend, savings rate, medical out-of-pocket). Renders
+ * nothing while loading, on error, or when there is nothing to surface — a quiet
+ * card is the desired steady state.
  */
 export function ProactiveInsights(): JSX.Element | null {
   const [insights, setInsights] = useState<Insight[] | null>(null)
