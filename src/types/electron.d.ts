@@ -576,6 +576,16 @@ declare global {
     currency?: string | null
   }
 
+  /** One deduped entry in the medical directory (a medication/condition/…). */
+  interface MedicalDirectoryEntry {
+    name: string
+    code: string | null
+    count: number
+    status: string | null
+    firstDate: string | null
+    lastDate: string | null
+  }
+
   type EntityKind = 'person' | 'merchant' | 'place' | 'subscription-candidate'
 
   interface EntityAttrs {
@@ -929,6 +939,14 @@ declare global {
           medications: Array<{ description: string; status: string | null; date: string | null }>
           immunizations: Array<{ description: string; status: string | null; date: string | null }>
           allergies: Array<{ description: string; status: string | null; date: string | null }>
+        }>
+        getDirectory(): Promise<{
+          hasData: boolean
+          medications: MedicalDirectoryEntry[]
+          conditions: MedicalDirectoryEntry[]
+          immunizations: MedicalDirectoryEntry[]
+          allergies: MedicalDirectoryEntry[]
+          providersAvailable: false
         }>
       }
       // Metriport (Phase 10.9) — relay-fronted medical aggregator → medical records.

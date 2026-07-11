@@ -139,7 +139,8 @@ const api = {
 
   // --- Medical records (Phase 10.9 — Metriport FHIR, aggregates-only) ---
   medical: {
-    getSummary: () => ipcRenderer.invoke('medical:get-summary')
+    getSummary: () => ipcRenderer.invoke('medical:get-summary'),
+    getDirectory: () => ipcRenderer.invoke('medical:get-directory')
   },
 
   // --- Metriport (Phase 10.9 — relay-fronted medical aggregator → medical records) ---

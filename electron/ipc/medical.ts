@@ -7,11 +7,14 @@
 
 import type { IpcMain } from 'electron'
 import { getRawSqlite } from '../db/client'
+import { buildMedicalDirectory } from '../integrations/medical-directory'
 import { buildMedicalSummary } from '../integrations/medical-summary'
 import { openMetriportConnect } from '../integrations/metriport'
 
 export function registerMedicalHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('medical:get-summary', () => buildMedicalSummary(getRawSqlite(), Date.now()))
+  // The deduped "your medications / your conditions" directory.
+  ipcMain.handle('medical:get-directory', () => buildMedicalDirectory(getRawSqlite()))
   // Onboard the patient with Metriport (no consent widget — a pair of relay-fronted API calls).
   ipcMain.handle('metriport:connect', () => openMetriportConnect(getRawSqlite()))
 }
