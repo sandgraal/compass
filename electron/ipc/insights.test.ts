@@ -160,13 +160,7 @@ function addSubscription(
     .prepare(
       'INSERT INTO subscriptions (external_id, name, cost, cadence, status) VALUES (?,?,?,?,?)'
     )
-    .run(
-      `sub-${name}-${subSeq}`,
-      name,
-      cost,
-      opts.cadence ?? 'monthly',
-      opts.status ?? 'active'
-    )
+    .run(`sub-${name}-${subSeq}`, name, cost, opts.cadence ?? 'monthly', opts.status ?? 'active')
 }
 
 let paystubSeq = 0
