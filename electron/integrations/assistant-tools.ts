@@ -117,7 +117,7 @@ export const ASSISTANT_TOOLS = [
   {
     name: 'list_transactions',
     description:
-      'Read individual finance transactions — date, amount, currency, description (merchant/payee), category. Filter by a date range, a single month, a category, and/or a description substring. Use for "what did I spend at X", "list my June charges over $100", "when did I last pay Y". Newest first. Read-only.',
+      'Read individual finance transactions — date, amount, currency, description (merchant/payee), category. Filter by a date range, a single month, a category, and/or a description substring. Use for "what did I spend at X", "list my June charges", "when did I last pay Y". Newest first. Read-only.',
     input_schema: {
       type: 'object',
       properties: {
