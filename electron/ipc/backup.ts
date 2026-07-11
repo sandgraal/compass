@@ -39,6 +39,7 @@
  *     restorable); 3 = every table via `allTables` + the documents-store files.
  */
 
+import { constants as bufferConstants } from 'node:buffer'
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
 import {
   existsSync,
@@ -90,10 +91,12 @@ const SCRYPT_P = 1
 
 const HEADER_SIZE = MAGIC.length + 1 + SALT_SIZE + IV_SIZE + TAG_SIZE
 // Upper bound on a restore file we read fully into memory + decrypt before the
-// passphrase is even verified. A real "all tables + documents" backup can be
-// large, but this blocks an absurd/hostile file from OOM-ing the main process
-// (Compass threat-model item #5 — bound user-picked input size).
-const MAX_RESTORE_BYTES = 4 * 1024 * 1024 * 1024 // 4 GB
+// passphrase is even verified (threat-model item #5 — bound user-picked input).
+// Pinned to the runtime's real Buffer ceiling: `readFileSync` loads the whole
+// file into ONE Buffer, so a larger cap couldn't be honored anyway (it would
+// throw ERR_FS_FILE_TOO_LARGE). A real "all tables + documents" backup is well
+// within this. (Memory pressure below the ceiling is a separate, softer risk.)
+const MAX_RESTORE_BYTES = bufferConstants.MAX_LENGTH
 
 interface Bundle {
   version: 2 | 3
@@ -345,8 +348,12 @@ function restoreAllTablesRaw(allTables: Record<string, Record<string, unknown>[]
   let rows = 0
   const txn = sqlite.transaction(() => {
     sqlite.pragma('defer_foreign_keys = ON')
-    for (const name of Object.keys(allTables)) {
-      if (existing.has(name) && isBackupTable(name)) sqlite.prepare(`DELETE FROM "${name}"`).run()
+    // Wipe EVERY live backup-eligible table — not just those present in the
+    // bundle — so a restore is a true full replace. A table that didn't exist
+    // when the backup was made (older bundle) ends up empty rather than keeping
+    // its pre-restore rows.
+    for (const name of existing) {
+      if (isBackupTable(name)) sqlite.prepare(`DELETE FROM "${name}"`).run()
     }
     for (const [name, tableRows] of Object.entries(allTables)) {
       if (!existing.has(name) || !isBackupTable(name)) continue
@@ -618,7 +625,9 @@ function applyRestore(bundle: Bundle): {
   if (bundle.documentsFiles) {
     if (!existsSync(DOCUMENTS_DIR)) mkdirSync(DOCUMENTS_DIR, { recursive: true })
     for (const existing of readdirSync(DOCUMENTS_DIR)) {
-      rmSync(join(DOCUMENTS_DIR, existing), { force: true })
+      // recursive so a stray subdirectory can't throw EISDIR after the DB txn
+      // has already committed (which would leave a partial restore).
+      rmSync(join(DOCUMENTS_DIR, existing), { force: true, recursive: true })
     }
     for (const [name, b64] of Object.entries(bundle.documentsFiles)) {
       if (name.includes('/') || name.includes('\\') || name.includes('..')) continue

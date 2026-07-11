@@ -200,6 +200,26 @@ describe('collectBundle → applyRestore round-trip', () => {
     expect(readFileSync(join(DOCS_DIR, 'abc123.pdf')).toString()).toBe('PDFBYTES')
   })
 
+  it('is a full replace — a table absent from an older bundle is still wiped', async () => {
+    const { collectBundle, applyRestore } = await internal()
+    const bundle = collectBundle()
+    // Simulate an OLDER backup taken before the `documents` table existed.
+    if (bundle.allTables) {
+      bundle.allTables = Object.fromEntries(
+        Object.entries(bundle.allTables).filter(([k]) => k !== 'documents')
+      )
+    }
+    // The live DB has a document row that must NOT survive a restore to that snapshot.
+    sqlite
+      .prepare(
+        "INSERT INTO documents (title, file_name, sha256, stored_path) VALUES ('Ghost','g.pdf','g','g.pdf')"
+      )
+      .run()
+
+    applyRestore(bundle)
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM documents').get()).toEqual({ n: 0 })
+  })
+
   it('restores DB rows, knowledge markdown, vault blobs, and rewraps key.enc', async () => {
     seedBaseline()
     const { collectBundle, applyRestore } = await internal()
