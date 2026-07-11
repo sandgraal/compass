@@ -63,7 +63,7 @@ export default function YearReview(): JSX.Element {
     }
     setLoading(true)
     setNarrated(null)
-    let stale = false
+    setNarrating(false)
     void window.api.records
       .yearReview({ year })
       .then((r) => {
