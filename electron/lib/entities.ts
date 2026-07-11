@@ -242,8 +242,9 @@ export const ENTITY_EXTRACTORS: EntityExtractor[] = [
       const t = r.title.trim()
       if (!t || t === 'PayPal transaction') return []
       const money = parseMoney(r.body)
-      // Attach the amount to the PERSON ref too (not just merchants) so the
-      // engine rolls up "who you spend money with" — the P2P counterparty.
+      // Attach the amount to the PERSON ref too (not just merchants) so the engine
+      // rolls up the money EXCHANGED with a P2P counterparty (|amount| summed —
+      // both sent and received; the sign/direction isn't distinguished here).
       if (isLikelyPerson(t))
         return [
           { kind: 'person', name: t, amount: money?.amount, currency: money?.currency ?? null }
@@ -261,6 +262,10 @@ export const ENTITY_EXTRACTORS: EntityExtractor[] = [
       const money = parseMoney(r.body)
       const refs: ExtractedRef[] = []
       for (const who of venmoCounterparties(r.body)) {
+        // Skip the account-holder placeholder ("… → me"/"you") — it's not a
+        // counterparty, and with amounts now threaded it would otherwise roll up
+        // spend onto a bogus person named "me".
+        if (/^(me|you|yourself)$/i.test(who)) continue
         if (isLikelyPerson(who))
           refs.push({
             kind: 'person',

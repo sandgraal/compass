@@ -86,12 +86,13 @@ describe('deriveEntities — people', () => {
       rec({ source: 'venmo', type: 'payment', title: 'Rent', body: '- $600.00 · Jane Doe → me' }),
       rec({ source: 'paypal', type: 'payment', title: 'Jane Doe', body: '-40.00 USD · Money Sent' })
     ]
-    const jane = deriveEntities(rows, NO_OWNED).find(
-      (e) => e.kind === 'person' && e.name === 'Jane Doe'
-    )
+    const out = deriveEntities(rows, NO_OWNED)
+    const jane = out.find((e) => e.kind === 'person' && e.name === 'Jane Doe')
     expect(jane?.attrs.totalSpend).toBe(640) // |600| + |40|, summed across sources
     expect(jane?.attrs.currency).toBe('USD')
     expect(jane?.sources).toEqual(['paypal', 'venmo'])
+    // The "me" self-placeholder must NOT become a derived person with spend.
+    expect(out.some((e) => e.kind === 'person' && /^me$/i.test(e.name))).toBe(false)
   })
 
   it('leaves totalSpend undefined for a person seen only through non-money sources', () => {
