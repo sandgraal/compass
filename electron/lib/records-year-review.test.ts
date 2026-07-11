@@ -7,7 +7,12 @@
 
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { buildYearReview, yearReviewMarkdown, yearReviewNarrative } from './records-year-review'
+import {
+  buildYearReview,
+  yearReviewMarkdown,
+  yearReviewNarrationPrompt,
+  yearReviewNarrative
+} from './records-year-review'
 
 let sqlite: Database.Database
 let seq = 0
@@ -134,5 +139,37 @@ describe('narrative + markdown', () => {
     expect(md).toContain('# 2024 in Review')
     expect(md).toContain('## On repeat')
     expect(md).toContain('- Severance S1E1 — 2× (netflix)')
+  })
+
+  it('honors a narrative override in the markdown export (LLM prose)', () => {
+    rec('netflix', 'watch', 'Severance S1E1', '2024-02-11T20:00:00Z')
+    const r = buildYearReview(sqlite, 2024)
+    const md = yearReviewMarkdown(r, 'A year of quiet Tuesdays and one great show.')
+    expect(md).toContain('A year of quiet Tuesdays and one great show.')
+    expect(md).not.toContain(yearReviewNarrative(r)) // template replaced, not appended
+    // Empty/whitespace override falls back to the template.
+    expect(yearReviewMarkdown(r, '   ')).toContain(yearReviewNarrative(r))
+  })
+})
+
+describe('yearReviewNarrationPrompt', () => {
+  it('builds a fact-only prompt and forbids invention', () => {
+    rec('netflix', 'watch', 'Severance S1E1', '2024-02-11T20:00:00Z')
+    rec('netflix', 'watch', 'Severance S1E1', '2024-02-12T20:00:00Z')
+    sqlite
+      .prepare(
+        "INSERT INTO travel_segments (country, start_date, end_date) VALUES ('ES', '2024-05-01', '2024-05-20')"
+      )
+      .run()
+    const prompt = yearReviewNarrationPrompt(buildYearReview(sqlite, 2024))
+    expect(prompt).not.toBeNull()
+    expect(prompt?.system).toMatch(/only the facts|never invent/i)
+    expect(prompt?.user).toContain('Year: 2024')
+    expect(prompt?.user).toContain('Severance S1E1')
+    expect(prompt?.user).toContain('ES')
+  })
+
+  it('returns null for an empty year (nothing to narrate)', () => {
+    expect(yearReviewNarrationPrompt(buildYearReview(sqlite, 2024))).toBeNull()
   })
 })
