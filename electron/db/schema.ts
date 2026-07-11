@@ -430,6 +430,49 @@ export const records = sqliteTable('records', {
   ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
+// ---- Documents & files store (Phase 9.2 "Storehouse") ----
+// A real documents domain: import a file, keep the original on disk under
+// DOCUMENTS_DIR, extract PDF text into `documents_fts` so it's searchable, and
+// attach the doc to any record/entity via `document_links`. Content stays
+// on-device plaintext (matches how imported records store content) — the vault
+// remains the home for anything that must be encrypted.
+export const documents = sqliteTable('documents', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  title: text('title').notNull(), // display name (defaults to the filename stem)
+  fileName: text('file_name').notNull(), // original filename as imported
+  mimeType: text('mime_type'), // detected MIME (allowlisted at import)
+  byteSize: integer('byte_size'),
+  sha256: text('sha256').notNull().unique(), // content hash → dedup key + stored filename base
+  storedPath: text('stored_path').notNull(), // RELATIVE to DOCUMENTS_DIR (never absolute / user path)
+  extractedText: text('extracted_text'), // PDF text for FTS; null for non-PDF
+  pageCount: integer('page_count'),
+  docDate: text('doc_date'), // ISO 'YYYY-MM-DD'; null = unknown
+  category: text('category'),
+  notes: text('notes'),
+  source: text('source').notNull().default('manual'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
+// A document can attach to many targets (a records-spine row or a derived
+// entity) — a join table keeps that many-to-many clean.
+export const documentLinks = sqliteTable(
+  'document_links',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    documentId: integer('document_id')
+      .notNull()
+      .references(() => documents.id),
+    // 'record' | 'contact' | 'merchant' | 'place' | 'asset' | 'subscription'
+    targetKind: text('target_kind').notNull(),
+    targetId: text('target_id').notNull(), // record id (as string) or entity external id
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+  },
+  (t) => ({
+    linkUnique: uniqueIndex('document_links_doc_target').on(t.documentId, t.targetKind, t.targetId)
+  })
+)
+
 // Static, NON-timeline snapshot facts from a data export — the parts of an archive
 // that describe *who you are / what's set* rather than *what happened*: your ad-
 // interest profile, the apps sharing data off-Meta, profile identity fields, account

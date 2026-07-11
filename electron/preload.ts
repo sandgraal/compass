@@ -221,6 +221,19 @@ const api = {
     correlations: () => ipcRenderer.invoke('insights:correlations')
   },
 
+  // --- Documents & files store (Phase 9.2) ---
+  documents: {
+    import: () => ipcRenderer.invoke('documents:import'),
+    importPaths: (paths: string[]) => ipcRenderer.invoke('documents:import-paths', paths),
+    list: (opts?: { category?: string }) => ipcRenderer.invoke('documents:list', opts),
+    get: (id: number) => ipcRenderer.invoke('documents:get', id),
+    attach: (args: { documentId: number; targetKind: string; targetId: string }) =>
+      ipcRenderer.invoke('documents:attach', args),
+    detach: (linkId: number) => ipcRenderer.invoke('documents:detach', linkId),
+    open: (id: number) => ipcRenderer.invoke('documents:open', id),
+    delete: (id: number) => ipcRenderer.invoke('documents:delete', id)
+  },
+
   // --- Plaid (Phase 4.6 — bank Link flow) ---
   plaid: {
     getStatus: () => ipcRenderer.invoke('plaid:get-status'),

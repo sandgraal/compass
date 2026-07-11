@@ -18,6 +18,7 @@ import { registerContactsHandlers } from './ipc/contacts'
 import { registerCredHandlers } from './ipc/cred'
 import { registerCurationHandlers } from './ipc/curation'
 import { registerDataRightsHandlers } from './ipc/data-rights'
+import { registerDocumentsHandlers } from './ipc/documents'
 import { registerEntitiesHandlers } from './ipc/entities'
 import { registerExportHandlers } from './ipc/export'
 import { registerFinanceHandlers } from './ipc/finance'
@@ -222,6 +223,7 @@ app.whenReady().then(async () => {
   registerStorehouseHandlers(ipcMain)
   registerStorehouseSyncHandlers(ipcMain)
   registerRecordsHandlers(ipcMain)
+  registerDocumentsHandlers(ipcMain)
   registerDataRightsHandlers(ipcMain)
   registerPeopleHandlers(ipcMain)
   registerEntitiesHandlers(ipcMain)

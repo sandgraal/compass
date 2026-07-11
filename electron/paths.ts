@@ -12,3 +12,6 @@ export const APP_DATA_DIR = join(HOME_BASE, 'Library', 'Application Support', 'C
 export const DATA_DIR = join(APP_DATA_DIR, '.data')
 export const VAULT_DIR = join(APP_DATA_DIR, '.vault')
 export const KNOWLEDGE_DIR = join(APP_DATA_DIR, 'knowledge-base')
+// Original files for the documents store (Phase 9.2). Imported files are copied
+// here under a content-hash name; the DB keeps only the RELATIVE stored path.
+export const DOCUMENTS_DIR = join(DATA_DIR, 'documents')

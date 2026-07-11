@@ -12,6 +12,7 @@ import Contacts from './pages/Contacts'
 import Daily from './pages/Daily'
 import Dashboard from './pages/Dashboard'
 import DataRights from './pages/DataRights'
+import Documents from './pages/Documents'
 import Export from './pages/Export'
 import Finance from './pages/Finance'
 import GoogleSaved from './pages/GoogleSaved'
@@ -111,6 +112,7 @@ export default function App(): JSX.Element {
           <Route path="apps" element={<Apps />} />
           <Route path="google-saved" element={<GoogleSaved />} />
           <Route path="data-rights" element={<DataRights />} />
+          <Route path="documents" element={<Documents />} />
           <Route path="export" element={<Export />} />
           <Route path="integrations" element={<Integrations />} />
           <Route path="settings" element={<Settings />} />

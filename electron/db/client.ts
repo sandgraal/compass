@@ -98,6 +98,25 @@ function syncRecordsFts(sqlite: Database.Database): void {
   }
 }
 
+/** Rebuild `documents_fts` from `documents` (mirrors `rebuildRecordsFts`). */
+export function rebuildDocumentsFts(sqlite: Database.Database): void {
+  sqlite.exec("INSERT INTO documents_fts(documents_fts) VALUES('rebuild')")
+}
+
+/** Backfill `documents_fts` only when it's drifted from `documents` (same
+ *  external-content `_docsize` detection as `syncRecordsFts`). */
+function syncDocumentsFts(sqlite: Database.Database): void {
+  try {
+    const base = sqlite.prepare('SELECT COUNT(*) AS n FROM documents').get() as { n: number }
+    const indexed = sqlite.prepare('SELECT COUNT(*) AS n FROM documents_fts_docsize').get() as {
+      n: number
+    }
+    if (base.n !== indexed.n) rebuildDocumentsFts(sqlite)
+  } catch {
+    /* documents_fts not present on an old DB — recreated next launch */
+  }
+}
+
 function ensureNewTables(sqlite: Database.Database): void {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS finance_accounts (
@@ -406,12 +425,57 @@ function ensureNewTables(sqlite: Database.Database): void {
       INSERT INTO records_fts(records_fts, rowid, title, body, payload) VALUES('delete', old.id, old.title, old.body, old.payload);
       INSERT INTO records_fts(rowid, title, body, payload) VALUES (new.id, new.title, new.body, new.payload);
     END;
+    -- Documents & files store (Phase 9.2). Mirrors migration 0037 here (the
+    -- always-run fallback) since packaged builds skip migrations. documents_fts
+    -- is an external-content FTS5 over documents(title, extracted_text).
+    CREATE TABLE IF NOT EXISTS documents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      mime_type TEXT,
+      byte_size INTEGER,
+      sha256 TEXT NOT NULL,
+      stored_path TEXT NOT NULL,
+      extracted_text TEXT,
+      page_count INTEGER,
+      doc_date TEXT,
+      category TEXT,
+      notes TEXT,
+      source TEXT NOT NULL DEFAULT 'manual',
+      created_at INTEGER,
+      updated_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS documents_sha256_unique ON documents (sha256);
+    CREATE TABLE IF NOT EXISTS document_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      document_id INTEGER NOT NULL REFERENCES documents(id),
+      target_kind TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      created_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS document_links_doc_target ON document_links (document_id, target_kind, target_id);
+    CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+      title, extracted_text,
+      content='documents', content_rowid='id',
+      tokenize='unicode61 remove_diacritics 2'
+    );
+    CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
+      INSERT INTO documents_fts(rowid, title, extracted_text) VALUES (new.id, new.title, new.extracted_text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
+      INSERT INTO documents_fts(documents_fts, rowid, title, extracted_text) VALUES('delete', old.id, old.title, old.extracted_text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
+      INSERT INTO documents_fts(documents_fts, rowid, title, extracted_text) VALUES('delete', old.id, old.title, old.extracted_text);
+      INSERT INTO documents_fts(rowid, title, extracted_text) VALUES (new.id, new.title, new.extracted_text);
+    END;
   `)
 
   // Backfill the FTS index for rows that predate it (the triggers only fire on
   // writes AFTER the table exists, so an upgrade leaves existing records unindexed).
   // Cheap on every launch: rebuilds only when the counts diverge.
   syncRecordsFts(sqlite)
+  syncDocumentsFts(sqlite)
 
   // Backfill new columns on pre-existing tables (safe no-op when columns already exist).
   const addedSyncInterval = ensureColumn(
