@@ -651,6 +651,7 @@ const api = {
 
     // Days-in-country & residency (Phase 11.5)
     getResidencySummary: () => ipcRenderer.invoke('finance:get-residency-summary'),
+    getTripBundles: () => ipcRenderer.invoke('finance:get-trip-bundles'),
     addTravelSegment: (seg: {
       country: string
       startDate: string

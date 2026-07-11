@@ -2464,8 +2464,17 @@ function ExpatTaxTab(): JSX.Element {
 
 type ResidencySummary = Awaited<ReturnType<Window['api']['finance']['getResidencySummary']>>
 
+type TripBundle = Awaited<ReturnType<Window['api']['finance']['getTripBundles']>>[number]
+
+/** Format a trip amount in its currency: USD gets a '$' prefix, else an ISO-code suffix. */
+function fmtTripMoney(amount: number, currency: string | null): string {
+  const n = Math.round(amount).toLocaleString('en-US')
+  return currency && currency !== 'USD' ? `${n} ${currency}` : `$${n}`
+}
+
 function ResidencyTab(): JSX.Element {
   const [summary, setSummary] = useState<ResidencySummary | null>(null)
+  const [bundles, setBundles] = useState<Record<number, TripBundle>>({})
   const [loading, setLoading] = useState(true)
   const [segCountry, setSegCountry] = useState('CR')
   const [segStart, setSegStart] = useState('')
@@ -2480,6 +2489,14 @@ function ResidencyTab(): JSX.Element {
     setLoading(true)
     try {
       setSummary(await window.api.finance.getResidencySummary())
+      // Per-trip cost bundles (spend + timeline activity during each trip). Best-
+      // effort — a failure here shouldn't blank the residency summary.
+      try {
+        const tb = (await window.api.finance.getTripBundles?.()) ?? []
+        setBundles(Object.fromEntries(tb.map((b) => [b.id, b])))
+      } catch {
+        setBundles({})
+      }
     } catch (err) {
       console.error('[residency] refresh failed', err)
       showToast('Failed to load residency summary.', 'error')
@@ -2677,11 +2694,39 @@ function ResidencyTab(): JSX.Element {
             <tbody>
               {summary.segments.map((s) => {
                 const auto = s.source === 'location'
+                const b = bundles[s.id]
+                const spendLabel = b && b.spend > 0 ? fmtTripMoney(b.spend, b.currency) : null
                 return (
                   <tr key={s.id} className="border-t border-border">
-                    <td className="py-1.5">{s.country}</td>
+                    <td className="py-1.5">{b?.countryName ?? s.country}</td>
                     <td className="text-muted-foreground">
                       {s.startDate} → {s.endDate}
+                      {b && b.days > 0 && (
+                        <span className="text-muted-foreground/60"> · {b.days}d</span>
+                      )}
+                    </td>
+                    {/* Cost + timeline activity during the trip. */}
+                    <td className="text-muted-foreground tabular-nums">
+                      {spendLabel && (
+                        <span
+                          className="text-emerald-500"
+                          title={
+                            b?.topCategories.length
+                              ? b.topCategories
+                                  .map((c) => `${c.category} ${fmtTripMoney(c.amount, b.currency)}`)
+                                  .join(' · ')
+                              : 'Spend during this trip'
+                          }
+                        >
+                          {spendLabel}
+                        </span>
+                      )}
+                      {b && b.recordCount > 0 && (
+                        <span className="text-muted-foreground/60">
+                          {spendLabel ? ' · ' : ''}
+                          {b.recordCount} events
+                        </span>
+                      )}
                     </td>
                     <td>
                       <span
