@@ -146,6 +146,9 @@ const TYPE_LABEL: Record<string, string> = {
   like: 'Liked',
   save: 'Saved to Library',
   ask: 'Asked Alexa',
+  return: 'Returns',
+  review: 'Reviews',
+  wishlist: 'Wishlist',
   // Spine-expansion kinds
   'habit-check': 'Habit Checks',
   task: 'Tasks',
