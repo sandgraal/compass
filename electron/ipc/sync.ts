@@ -854,6 +854,9 @@ export async function syncGitHub(
         .onConflictDoUpdate({
           target: githubItems.externalId,
           set: {
+            type: row.type,
+            repo: row.repo,
+            url: row.url,
             title: row.title,
             state: row.state,
             author: row.author,
