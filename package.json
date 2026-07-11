@@ -54,7 +54,7 @@
     "drizzle-orm": "^0.45.2",
     "electron-updater": "^6.8.3",
     "exceljs": "^4.4.0",
-    "lucide-react": "^0.462.0",
+    "lucide-react": "^0.463.0",
     "node-cron": "^3.0.3",
     "pdf-parse": "^2.4.5",
     "plaid": "^42.2.0",
