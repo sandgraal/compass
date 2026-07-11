@@ -371,6 +371,8 @@ describe('readMedicalRecords', () => {
     })
     expect(readMedicalRecords(db, { category: 'condition' }).count).toBe(1)
     expect(readMedicalRecords(db, { status: 'ACTIVE' }).count).toBe(1)
+    const filtered = readMedicalRecords(db, { category: 'medication', status: 'active' })
+    expect(filtered.count).toBe(filtered.records.length)
     expect(readMedicalRecords(db, { category: 'surgery' }).error).toBeTruthy()
   })
 

@@ -927,7 +927,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               activeConditions,
               firstDate: dates[0] ?? null,
               lastDate: dates.length ? dates[dates.length - 1] : null,
-              records: detail.records
+              records: rows
             },
             null,
             2
