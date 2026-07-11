@@ -8,7 +8,7 @@
  * DB missing a table yields empty/zeroed bundles rather than throwing.
  */
 
-import type { SqliteForFx } from './finance-fx'
+import { type SqliteForFx, convert, getBaseCurrency, loadFxRates } from './finance-fx'
 
 const NON_SPEND_CATEGORIES = new Set(['Transfers', 'Transfer'])
 
@@ -22,8 +22,9 @@ export interface TripBundle {
   days: number
   notes: string | null
   source: string
-  /** Total discretionary spend during the trip (|negative amounts|, transfers excluded). */
+  /** Total discretionary spend during the trip, in the base currency (transfers excluded). */
   spend: number
+  /** The base currency the `spend`/`topCategories` amounts are expressed in. */
   currency: string | null
   /** Timeline records that fell within the trip window. */
   recordCount: number
@@ -67,10 +68,17 @@ export function buildTripBundles(sqlite: SqliteForFx): TripBundle[] {
     return [] // travel_segments absent → no trips
   }
 
+  // Multi-currency (Phase 11.1): each txn `amount` is in its OWN currency, so we
+  // convert every row to the user's BASE currency at the transaction-date rate
+  // before summing (mirrors finance-property.ts). The bundle total/categories are
+  // therefore all in one unit — the base currency.
+  const base = getBaseCurrency(sqlite)
+  const rates = loadFxRates(sqlite)
+
   // Prepared once, reused per segment.
   const spendStmt = safePrepare(
     sqlite,
-    'SELECT amount, category, currency FROM finance_transactions WHERE date >= ? AND date <= ? AND amount < 0'
+    'SELECT amount, category, currency, date FROM finance_transactions WHERE date >= ? AND date <= ? AND amount < 0'
   )
   const recordStmt = safePrepare(
     sqlite,
@@ -79,21 +87,24 @@ export function buildTripBundles(sqlite: SqliteForFx): TripBundle[] {
 
   return segments.map((s) => {
     let spend = 0
-    let currency: string | null = null
     const byCategory = new Map<string, number>()
     if (spendStmt) {
       const rows = spendStmt.all(s.startDate, s.endDate) as Array<{
         amount: number
         category: string | null
         currency: string | null
+        date: string
       }>
       for (const r of rows) {
         const cat = r.category ?? 'Uncategorized'
         if (NON_SPEND_CATEGORIES.has(cat)) continue
-        const v = Math.abs(r.amount)
-        spend += v
-        byCategory.set(cat, (byCategory.get(cat) ?? 0) + v)
-        if (!currency && r.currency) currency = r.currency
+        const from = r.currency || base
+        const magnitude = Math.abs(r.amount)
+        // No rate available → fall back to the raw magnitude (best-effort) rather
+        // than dropping the row; single-currency users (from === base) hit rate 1.
+        const inBase = convert(magnitude, from, base, rates, r.date) ?? magnitude
+        spend += inBase
+        byCategory.set(cat, (byCategory.get(cat) ?? 0) + inBase)
       }
     }
 
@@ -119,7 +130,8 @@ export function buildTripBundles(sqlite: SqliteForFx): TripBundle[] {
       notes: s.notes,
       source: s.source,
       spend: Math.round(spend * 100) / 100,
-      currency,
+      // Everything above is now expressed in the base currency.
+      currency: base,
       recordCount,
       topCategories
     }

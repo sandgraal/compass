@@ -2466,6 +2466,12 @@ type ResidencySummary = Awaited<ReturnType<Window['api']['finance']['getResidenc
 
 type TripBundle = Awaited<ReturnType<Window['api']['finance']['getTripBundles']>>[number]
 
+/** Format a trip amount in its currency: USD gets a '$' prefix, else an ISO-code suffix. */
+function fmtTripMoney(amount: number, currency: string | null): string {
+  const n = Math.round(amount).toLocaleString('en-US')
+  return currency && currency !== 'USD' ? `${n} ${currency}` : `$${n}`
+}
+
 function ResidencyTab(): JSX.Element {
   const [summary, setSummary] = useState<ResidencySummary | null>(null)
   const [bundles, setBundles] = useState<Record<number, TripBundle>>({})
@@ -2689,10 +2695,7 @@ function ResidencyTab(): JSX.Element {
               {summary.segments.map((s) => {
                 const auto = s.source === 'location'
                 const b = bundles[s.id]
-                const spendLabel =
-                  b && b.spend > 0
-                    ? `${b.currency && b.currency !== 'USD' ? '' : '$'}${Math.round(b.spend).toLocaleString('en-US')}${b.currency && b.currency !== 'USD' ? ` ${b.currency}` : ''}`
-                    : null
+                const spendLabel = b && b.spend > 0 ? fmtTripMoney(b.spend, b.currency) : null
                 return (
                   <tr key={s.id} className="border-t border-border">
                     <td className="py-1.5">{b?.countryName ?? s.country}</td>
@@ -2710,7 +2713,7 @@ function ResidencyTab(): JSX.Element {
                           title={
                             b?.topCategories.length
                               ? b.topCategories
-                                  .map((c) => `${c.category} $${Math.round(c.amount)}`)
+                                  .map((c) => `${c.category} ${fmtTripMoney(c.amount, b.currency)}`)
                                   .join(' · ')
                               : 'Spend during this trip'
                           }

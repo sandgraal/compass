@@ -23,9 +23,25 @@ beforeEach(() => {
       id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, type TEXT NOT NULL, occurred_at INTEGER,
       title TEXT NOT NULL, body TEXT, payload TEXT, dedup_hash TEXT NOT NULL UNIQUE, provenance TEXT, ingested_at INTEGER
     );
+    CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER);
+    CREATE TABLE fx_rates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, base TEXT NOT NULL, quote TEXT NOT NULL, rate REAL NOT NULL
+    );
   `)
 })
 afterEach(() => db.close())
+
+function setBaseCurrency(code: string): void {
+  db.prepare("INSERT INTO app_settings (key, value) VALUES ('baseCurrency', ?)").run(code)
+}
+function setRate(date: string, base: string, quote: string, rate: number): void {
+  db.prepare('INSERT INTO fx_rates (date, base, quote, rate) VALUES (?,?,?,?)').run(
+    date,
+    base,
+    quote,
+    rate
+  )
+}
 
 function trip(country: string, startDate: string, endDate: string, source = 'manual'): void {
   db.prepare(
@@ -62,6 +78,27 @@ describe('buildTripBundles', () => {
     expect(b.spend).toBe(350) // 200 + 150; transfer + pre-trip excluded
     expect(b.recordCount).toBe(2)
     expect(b.topCategories[0]).toEqual({ category: 'Dining', amount: 200 })
+  })
+
+  it('converts multi-currency spend to the base currency at the transaction-date rate', () => {
+    setBaseCurrency('USD')
+    setRate('2026-02-01', 'CRC', 'USD', 0.002) // 1 CRC = 0.002 USD → 50 000 CRC = $100
+    trip('CR', '2026-02-01', '2026-02-14')
+    txn('2026-02-03', -100, 'Dining', 'USD')
+    txn('2026-02-05', -50000, 'Lodging', 'CRC')
+
+    const [b] = buildTripBundles(db)
+    expect(b.currency).toBe('USD')
+    expect(b.spend).toBe(200) // 100 USD + (50 000 CRC → 100 USD), not a mixed-unit 50 100
+    expect(b.topCategories).toContainEqual({ category: 'Lodging', amount: 100 })
+  })
+
+  it('falls back to the raw magnitude when no FX rate is available (best-effort)', () => {
+    setBaseCurrency('USD')
+    trip('CR', '2026-02-01', '2026-02-14')
+    txn('2026-02-05', -30000, 'Lodging', 'CRC') // no CRC→USD rate on file
+    const [b] = buildTripBundles(db)
+    expect(b.spend).toBe(30000) // kept, not dropped
   })
 
   it('returns a zeroed bundle for a trip with no spend or activity', () => {
