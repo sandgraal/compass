@@ -218,11 +218,11 @@ export function yearReviewNarrative(r: YearReview): string {
 }
 
 /** Markdown export for the knowledge base ("Save to Knowledge"). */
-export function yearReviewMarkdown(r: YearReview): string {
+export function yearReviewMarkdown(r: YearReview, narrativeOverride?: string): string {
   const lines: string[] = [
     `# ${r.year} in Review`,
     '',
-    yearReviewNarrative(r),
+    narrativeOverride?.trim() || yearReviewNarrative(r),
     '',
     `- **Records:** ${r.totalRecords.toLocaleString()}`,
     `- **Top sources:** ${r.topSources.map((s) => `${s.source} (${s.count})`).join(', ') || '—'}`
@@ -249,4 +249,58 @@ export function yearReviewMarkdown(r: YearReview): string {
     for (const h of r.habits) lines.push(`- ${h.name}: ${h.completions} completions`)
   }
   return `${lines.join('\n')}\n`
+}
+
+/**
+ * Prompt for the optional LLM narration (Timeline 2.1). Pure + colocated with
+ * the template so it's testable and the fact set stays in one place. The user
+ * opts into cloud egress explicitly (Settings), so the aggregate goes verbatim
+ * — but the system prompt hard-forbids invention and any fact not listed here,
+ * because a "warm recap" that hallucinates a trip or a purchase is worse than
+ * the deterministic template. Returns null when there's nothing to narrate
+ * (caller keeps the template).
+ */
+export function yearReviewNarrationPrompt(r: YearReview): { system: string; user: string } | null {
+  if (r.totalRecords === 0) return null
+  const busiest = r.monthCounts.indexOf(Math.max(...r.monthCounts))
+  const facts: string[] = [
+    `Year: ${r.year}`,
+    `Total records: ${r.totalRecords}`,
+    `Busiest month: ${new Date(Date.UTC(2000, busiest, 1)).toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' })}`
+  ]
+  if (r.topSources.length > 0) {
+    facts.push(`Top sources: ${r.topSources.map((s) => `${s.source} (${s.count})`).join(', ')}`)
+  }
+  if (r.topTitles.length > 0) {
+    facts.push(
+      `Most-repeated: ${r.topTitles
+        .slice(0, 5)
+        .map((t) => `"${t.title}" ×${t.count}`)
+        .join(', ')}`
+    )
+  }
+  if (r.firsts.length > 0) {
+    facts.push(`New in your life this year: ${r.firsts.map((f) => f.name).join(', ')}`)
+  }
+  if (r.countries.length > 0) facts.push(`Countries: ${r.countries.join(', ')}`)
+  if (r.spend?.biggest) {
+    facts.push(
+      `Biggest expense: ${r.spend.biggest.description} ($${Math.round(r.spend.biggest.amount).toLocaleString()})`
+    )
+  }
+  if (r.netWorth?.start != null && r.netWorth.end != null) {
+    const delta = r.netWorth.end - r.netWorth.start
+    facts.push(
+      `Net worth ${delta >= 0 ? 'grew' : 'fell'} by $${Math.abs(Math.round(delta)).toLocaleString()}`
+    )
+  }
+  if (r.habits.length > 0) {
+    facts.push(`Habits kept: ${r.habits.map((h) => `${h.name} (${h.completions})`).join(', ')}`)
+  }
+  const system =
+    'You write a warm, vivid, second-person year-in-review for one person, in 2–3 sentences. ' +
+    'Use ONLY the facts provided — never invent an event, place, purchase, person, or number that is not listed. ' +
+    'No bullet points, no headings, no markdown, no preamble. Just the prose.'
+  const user = `Write the recap for this year using only these facts:\n\n${facts.join('\n')}`
+  return { system, user }
 }
