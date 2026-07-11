@@ -361,8 +361,7 @@ function detectPaycheckAnomaly(db: Db): Insight[] {
     .map((s) => s.netPay as number)
     .sort((a, b) => a - b)
   const mid = Math.floor(trailing.length / 2)
-  const median =
-    trailing.length % 2 === 0 ? (trailing[mid - 1] + trailing[mid]) / 2 : trailing[mid]
+  const median = trailing.length % 2 === 0 ? (trailing[mid - 1] + trailing[mid]) / 2 : trailing[mid]
   const latestNet = latest.netPay as number
   const delta = latestNet - median
   if (Math.abs(delta) < PAYCHECK_MIN_DELTA || Math.abs(delta) < median * PAYCHECK_DEVIATION_RATIO) {
