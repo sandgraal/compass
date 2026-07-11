@@ -1,5 +1,5 @@
 /**
- * Storehouse projectors — turn LIVE-integration data into `records` rows.
+ * Storehouse projectors — turn domain-table data into `records` rows.
  *
  * Compass's cross-reference engine (People / Merchants / Places / Subscriptions /
  * Timeline / Search / On-this-day) is driven entirely by the append-only `records`
@@ -8,6 +8,11 @@
  * entered the spine. These projectors close that gap: each `project<Source>(rows)`
  * maps a domain table into `RecordInput[]`, so a synced transaction behaves exactly
  * like an imported one.
+ *
+ * Per the data-access policy (docs/data-access-policy.md): EVERY domain projects
+ * onto the spine — habits, tasks, medical, travel, paystubs, utility bills, goals,
+ * rental comps, snapshot facts — with ONE exception: raw GPS coordinates
+ * (`location_points`) never enter `records` (see electron/ipc/records.ts).
  *
  * Every projector is PURE (no DB, no Electron) and individually testable against
  * plain row arrays. The impure read-insert-refresh orchestration lives in
@@ -257,6 +262,331 @@ export function projectLinear(rows: LinearRow[]): RecordInput[] {
       body: r.team ? `${r.team} · ${r.state}` : r.state,
       payload: r,
       naturalKey: r.externalId
+    })
+  }
+  return out
+}
+
+// ── Spine expansion (data-access policy: every domain flows onto the spine) ──
+
+/** A completed habit check joined with its habit (`habit_entries` ⋈ `habits`). */
+export interface HabitCheckRow {
+  habitId: number
+  habitName: string
+  date: string // ISO 'YYYY-MM-DD'
+  source: string | null // 'oura' (etc.) when auto-filled; null = user-toggled
+}
+
+/**
+ * Project completed habit checks → records (`source:'habit'`, `type:'habit-check'`).
+ *
+ * Only COMPLETED entries project (an unchecked day is a non-event); unchecking
+ * later removes the spine row via the reconcile-delete in storehouse-sync. The
+ * naturalKey `habitId|date` is stable across renames, so renaming a habit
+ * re-titles the existing timeline rows in place instead of duplicating them.
+ */
+export function projectHabitChecks(rows: HabitCheckRow[]): RecordInput[] {
+  const out: RecordInput[] = []
+  for (const r of rows) {
+    if (!r.habitId || !r.date) continue
+    out.push({
+      source: 'habit',
+      type: 'habit-check',
+      occurredAt: localDayMs(r.date),
+      title: r.habitName?.trim() || 'Habit',
+      body: r.source ? `auto-filled · ${r.source}` : 'checked',
+      payload: r,
+      naturalKey: `${r.habitId}|${r.date}`
+    })
+  }
+  return out
+}
+
+/** A checklist item reduced to the projector's fields (`checklist_items`). */
+export interface TaskRow {
+  id: number
+  listType: string // 'daily' | 'weekly' | 'monthly'
+  listDate: string // ISO 'YYYY-MM-DD'
+  title: string
+  body: string | null
+  status: string | null // 'unchecked' | 'in_progress' | 'done' | 'snoozed'
+  checked: boolean | null
+  category: string | null
+}
+
+/**
+ * Project `checklist_items` → records (`source:'task'`, `type:'task'`). One row
+ * per task on its list day; status rides in the body so search finds "done"
+ * tasks. naturalKey = the table's autoincrement id (deletes reconcile away).
+ */
+export function projectTasks(rows: TaskRow[]): RecordInput[] {
+  const out: RecordInput[] = []
+  for (const r of rows) {
+    if (!r.id || !r.listDate) continue
+    const status = r.status?.trim() || (r.checked ? 'done' : 'unchecked')
+    const parts = [r.listType, status, r.category?.trim() || 'personal']
+    if (r.body?.trim()) parts.push(r.body.trim().slice(0, 200))
+    out.push({
+      source: 'task',
+      type: 'task',
+      occurredAt: localDayMs(r.listDate),
+      title: r.title?.trim() || '(untitled task)',
+      body: parts.join(' · '),
+      payload: r,
+      naturalKey: String(r.id)
+    })
+  }
+  return out
+}
+
+/** A clinical record reduced to the projector's fields (`medical_records`). */
+export interface MedicalRow {
+  externalId: string
+  category: string // 'condition' | 'medication' | 'lab' | 'immunization' | 'allergy' | 'encounter' | 'procedure'
+  description: string | null
+  code: string | null
+  status: string | null
+  recordedAt: string | null // 'YYYY-MM-DD'
+}
+
+/**
+ * Project `medical_records` → records (`source:'medical'`, `type:` the clinical
+ * category). Per the data-access policy, medical detail IS on the spine (full-
+ * detail searchable); the on-this-day sensitivity guard (timeline-memories.ts)
+ * keeps it from ever auto-resurfacing unprompted.
+ */
+export function projectMedicalRecords(rows: MedicalRow[]): RecordInput[] {
+  const out: RecordInput[] = []
+  for (const r of rows) {
+    if (!r.externalId || !r.category) continue
+    const parts = [r.status?.trim(), r.code?.trim()].filter((p): p is string => !!p)
+    out.push({
+      source: 'medical',
+      type: r.category,
+      occurredAt: r.recordedAt ? localDayMs(r.recordedAt) : null,
+      title: r.description?.trim() || r.category,
+      body: parts.length > 0 ? parts.join(' · ') : undefined,
+      payload: r,
+      naturalKey: r.externalId
+    })
+  }
+  return out
+}
+
+/** A logged trip reduced to the projector's fields (`travel_segments`). */
+export interface TravelSegmentRow {
+  id: number
+  country: string // ISO-3166 alpha-2
+  startDate: string // 'YYYY-MM-DD' (inclusive)
+  endDate: string // 'YYYY-MM-DD' (inclusive)
+  notes: string | null
+}
+
+/** 'CR' → 'Costa Rica' (falls back to the raw code on anything unmappable). */
+function countryName(code: string): string {
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'region' }).of(code.toUpperCase()) ?? code
+  } catch {
+    return code
+  }
+}
+
+/**
+ * Project `travel_segments` → records (`source:'travel'`, `type:'trip'`). This is
+ * the ONLY location-flavored stream on the spine — country + date window, the
+ * coarse derived layer; raw GPS points stay in `location_points`, off the spine
+ * and off every AI surface (the one exclusion in the data-access policy).
+ */
+export function projectTravelSegments(rows: TravelSegmentRow[]): RecordInput[] {
+  const out: RecordInput[] = []
+  for (const r of rows) {
+    if (!r.id || !r.country || !r.startDate) continue
+    const window =
+      r.endDate && r.endDate !== r.startDate ? `${r.startDate} → ${r.endDate}` : r.startDate
+    out.push({
+      source: 'travel',
+      type: 'trip',
+      occurredAt: localDayMs(r.startDate),
+      title: `Trip to ${countryName(r.country)}`,
+      body: r.notes?.trim() ? `${window} · ${r.notes.trim().slice(0, 200)}` : window,
+      payload: r,
+      naturalKey: String(r.id)
+    })
+  }
+  return out
+}
+
+/** A paystub reduced to the projector's fields (`argyle_paystubs`). */
+export interface PaystubRow {
+  externalId: string
+  employer: string | null
+  grossPay: number | null
+  netPay: number | null
+  currency: string
+  periodStart: string | null // 'YYYY-MM-DD'
+  periodEnd: string | null
+  paidAt: string | null // 'YYYY-MM-DD'
+}
+
+/**
+ * Project `argyle_paystubs` → records (`source:'paystub'`, `type:'paycheck'`).
+ * The net-pay amount rides in the FIRST body segment (money-first, like finance
+ * txns) so `parseMoney`-style consumers read it back.
+ */
+export function projectPaystubs(rows: PaystubRow[]): RecordInput[] {
+  const out: RecordInput[] = []
+  for (const r of rows) {
+    if (!r.externalId) continue
+    const parts: string[] = []
+    const amount = r.netPay ?? r.grossPay
+    if (amount != null) parts.push(moneySegment(amount, r.currency))
+    if (r.netPay != null && r.grossPay != null)
+      parts.push(`gross ${moneySegment(r.grossPay, r.currency)}`)
+    if (r.periodStart && r.periodEnd) parts.push(`${r.periodStart}–${r.periodEnd}`)
+    out.push({
+      source: 'paystub',
+      type: 'paycheck',
+      occurredAt: r.paidAt ? localDayMs(r.paidAt) : null,
+      title: r.employer?.trim() ? `Paycheck — ${r.employer.trim()}` : 'Paycheck',
+      body: parts.length > 0 ? parts.join(' · ') : undefined,
+      payload: r,
+      naturalKey: r.externalId
+    })
+  }
+  return out
+}
+
+/** A utility statement reduced to the projector's fields (`utility_bills`). */
+export interface UtilityBillRow {
+  externalId: string
+  provider: string | null
+  serviceAddress: string | null
+  statementDate: string | null // 'YYYY-MM-DD'
+  amount: number | null
+  currency: string
+}
+
+/**
+ * Project `utility_bills` → records (`source:'utility'`, `type:'bill'`). The
+ * STATEMENT is what's on the timeline; the bank payment stays a separate
+ * `finance|txn` row (two records, one expense — spend math reads
+ * `finance_transactions` only, so nothing double-counts).
+ */
+export function projectUtilityBills(rows: UtilityBillRow[]): RecordInput[] {
+  const out: RecordInput[] = []
+  for (const r of rows) {
+    if (!r.externalId) continue
+    const parts: string[] = []
+    if (r.amount != null) parts.push(moneySegment(r.amount, r.currency))
+    if (r.serviceAddress?.trim()) parts.push(r.serviceAddress.trim())
+    out.push({
+      source: 'utility',
+      type: 'bill',
+      occurredAt: r.statementDate ? localDayMs(r.statementDate) : null,
+      title: r.provider?.trim() ? `${r.provider.trim()} bill` : 'Utility bill',
+      body: parts.length > 0 ? parts.join(' · ') : undefined,
+      payload: r,
+      naturalKey: r.externalId
+    })
+  }
+  return out
+}
+
+/** A savings goal reduced to the projector's fields (`financial_goals`). */
+export interface FinancialGoalRow {
+  id: number
+  name: string
+  category: string
+  targetAmount: number
+  targetDate: string | null // 'YYYY-MM-DD'
+  createdAt: number | null // epoch ms
+}
+
+/**
+ * Project `financial_goals` → records (`source:'goal'`, `type:'financial-goal'`).
+ * Dated at creation (that's when the intention became real); edits re-project in
+ * place via the stable row-id key.
+ */
+export function projectFinancialGoals(rows: FinancialGoalRow[]): RecordInput[] {
+  const out: RecordInput[] = []
+  for (const r of rows) {
+    if (!r.id || !r.name?.trim()) continue
+    const parts = [r.category, `target ${moneySegment(r.targetAmount, null)}`]
+    if (r.targetDate) parts.push(`by ${r.targetDate}`)
+    out.push({
+      source: 'goal',
+      type: 'financial-goal',
+      occurredAt: r.createdAt,
+      title: r.name.trim(),
+      body: parts.join(' · '),
+      payload: r,
+      naturalKey: String(r.id)
+    })
+  }
+  return out
+}
+
+/** A rental comp reduced to the projector's fields (`rental_comps`). */
+export interface RentalCompRow {
+  id: number
+  name: string
+  zone: string
+  bedrooms: number
+  nightlyUsd: number | null
+  savedAt: string | null // 'YYYY-MM-DD'
+  createdAt: number | null // epoch ms
+}
+
+/**
+ * Project `rental_comps` → records (`source:'rental-comp'`, `type:'comp'`).
+ * Dated at capture (`savedAt`, falling back to the row's createdAt).
+ */
+export function projectRentalComps(rows: RentalCompRow[]): RecordInput[] {
+  const out: RecordInput[] = []
+  for (const r of rows) {
+    if (!r.id) continue
+    const parts = [r.zone, `${r.bedrooms}bd`]
+    if (r.nightlyUsd != null) parts.push(`$${r.nightlyUsd}/nt`)
+    out.push({
+      source: 'rental-comp',
+      type: 'comp',
+      occurredAt: r.savedAt ? localDayMs(r.savedAt) : r.createdAt,
+      title: r.name?.trim() || 'Rental comp',
+      body: parts.join(' · '),
+      payload: r,
+      naturalKey: String(r.id)
+    })
+  }
+  return out
+}
+
+/** A snapshot fact reduced to the projector's fields (`snapshot_facts`). */
+export interface SnapshotFactRow {
+  source: string // 'facebook' (etc.)
+  category: string // 'ad-profile' | 'profile' | 'off-meta-apps' | 'security'
+  label: string | null
+  value: string
+  dedupHash: string
+}
+
+/**
+ * Project `snapshot_facts` → records (`type:'fact'`, source = the fact's own
+ * source). UNDATED (`occurredAt: null`) — these describe *who you are*, not
+ * *what happened*, so they're searchable but never sit on the dated timeline.
+ * naturalKey reuses the fact's own content-addressed dedup hash.
+ */
+export function projectSnapshotFacts(rows: SnapshotFactRow[]): RecordInput[] {
+  const out: RecordInput[] = []
+  for (const r of rows) {
+    if (!r.dedupHash || !r.value?.trim()) continue
+    out.push({
+      source: r.source,
+      type: 'fact',
+      occurredAt: null,
+      title: r.label?.trim() ? `${r.label.trim()}` : r.category,
+      body: r.value.trim().slice(0, 500),
+      payload: r,
+      naturalKey: r.dedupHash
     })
   }
   return out

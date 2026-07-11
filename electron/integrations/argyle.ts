@@ -19,6 +19,7 @@ import { BrowserWindow } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
 import { argylePaystubs, integrations, syncEvents } from '../db/schema'
 import { loadToken, saveToken } from '../ipc/auth'
+import { afterConnectorSync } from '../ipc/storehouse-sync'
 import type { SqliteForFx } from './finance-fx'
 import { relayFetch, resolveRelayConfig } from './relay-client'
 
@@ -200,6 +201,8 @@ export async function syncArgyle(mainWindow?: BrowserWindow | null): Promise<Syn
       status: 'done',
       recordsUpdated
     })
+    // Paystubs live on the records spine (data-access policy) — project them.
+    afterConnectorSync()
     return { service: 'argyle', success: true, recordsUpdated }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

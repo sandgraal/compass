@@ -18,6 +18,7 @@ import { BrowserWindow } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
 import { integrations, syncEvents, utilityBills } from '../db/schema'
 import { loadToken, saveToken } from '../ipc/auth'
+import { afterConnectorSync } from '../ipc/storehouse-sync'
 import type { SqliteForFx } from './finance-fx'
 import { relayFetch, resolveRelayConfig } from './relay-client'
 
@@ -202,6 +203,8 @@ export async function syncArcadia(mainWindow?: BrowserWindow | null): Promise<Sy
       status: 'done',
       recordsUpdated
     })
+    // Utility bills live on the records spine (data-access policy) — project them.
+    afterConnectorSync()
     return { service: 'arcadia', success: true, recordsUpdated }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

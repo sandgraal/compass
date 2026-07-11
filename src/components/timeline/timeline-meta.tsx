@@ -8,27 +8,36 @@
 import {
   Activity,
   ArrowLeftRight,
+  Banknote,
   Book,
   BookOpen,
   CalendarDays,
+  CheckSquare,
   Clapperboard,
   CreditCard,
   Facebook,
   FileText,
   Film,
   Footprints,
+  Github,
   Globe,
+  Home,
   Landmark,
   Linkedin,
+  ListTodo,
   Mail,
   MessageSquare,
   Mic,
   Music,
   Package,
   Phone,
+  Plane,
   Receipt,
+  Stethoscope,
+  Target,
   Wallet,
-  Youtube
+  Youtube,
+  Zap
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
@@ -60,6 +69,20 @@ const SOURCE_META: Record<string, { label: string; icon: JSX.Element }> = {
   kindle: { label: 'Kindle', icon: <Book size={13} /> },
   'amazon-music': { label: 'Amazon Music', icon: <Music size={13} /> },
   alexa: { label: 'Alexa', icon: <Mic size={13} /> },
+  // Live-projected sources (storehouse projectors + the spine expansion)
+  finance: { label: 'Finance', icon: <Wallet size={13} /> },
+  gmail: { label: 'Gmail', icon: <Mail size={13} /> },
+  github: { label: 'GitHub', icon: <Github size={13} /> },
+  linear: { label: 'Linear', icon: <CheckSquare size={13} /> },
+  oura: { label: 'Oura', icon: <Activity size={13} /> },
+  habit: { label: 'Habit', icon: <CheckSquare size={13} /> },
+  task: { label: 'Task', icon: <ListTodo size={13} /> },
+  medical: { label: 'Medical', icon: <Stethoscope size={13} /> },
+  travel: { label: 'Travel', icon: <Plane size={13} /> },
+  paystub: { label: 'Paycheck', icon: <Banknote size={13} /> },
+  utility: { label: 'Utilities', icon: <Zap size={13} /> },
+  goal: { label: 'Goal', icon: <Target size={13} /> },
+  'rental-comp': { label: 'Rental Comp', icon: <Home size={13} /> },
   generic: { label: 'Imported', icon: <FileText size={13} /> }
 }
 
@@ -117,7 +140,27 @@ const TYPE_LABEL: Record<string, string> = {
   read: 'Read',
   like: 'Liked',
   save: 'Saved to Library',
-  ask: 'Asked Alexa'
+  ask: 'Asked Alexa',
+  // Spine-expansion kinds
+  'habit-check': 'Habit Checks',
+  task: 'Tasks',
+  condition: 'Conditions',
+  medication: 'Medications',
+  lab: 'Labs',
+  immunization: 'Immunizations',
+  allergy: 'Allergies',
+  encounter: 'Encounters',
+  procedure: 'Procedures',
+  trip: 'Trips',
+  paycheck: 'Paychecks',
+  bill: 'Bills',
+  'financial-goal': 'Goals',
+  comp: 'Rental Comps',
+  fact: 'Facts',
+  wellness: 'Wellness',
+  txn: 'Transactions',
+  issue: 'Issues',
+  pr: 'Pull Requests'
 }
 
 export function typeLabel(t: string): string {

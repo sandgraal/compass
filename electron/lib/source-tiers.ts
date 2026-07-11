@@ -20,8 +20,18 @@ export type SourceTier = 'firehose' | 'signal'
  * families were promoted to real sources, what remains under 'generic' is
  * device telemetry / impressions / notification metadata — kept on disk,
  * hidden by default.
+ * 'habit'/'task' joined with the spine expansion (data-access policy): a
+ * habit checked 365×/yr and every day's checklist are routine, not memories —
+ * collapsed on the timeline (still fully searchable), and conveniently
+ * excluded from the records-based year-review counts, whose habit section
+ * reads `habit_entries` directly (no double count).
  */
-export const FIREHOSE_SOURCES: ReadonlySet<string> = new Set(['browser', 'generic'])
+export const FIREHOSE_SOURCES: ReadonlySet<string> = new Set([
+  'browser',
+  'generic',
+  'habit',
+  'task'
+])
 
 export function sourceTier(source: string): SourceTier {
   return FIREHOSE_SOURCES.has(source) ? 'firehose' : 'signal'
