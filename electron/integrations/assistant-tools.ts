@@ -495,7 +495,7 @@ function listTransactions(sqlite: RawSqlite, input: Record<string, unknown>): un
 }
 
 function searchContactsTool(db: Db, input: Record<string, unknown>): unknown {
-  const q = str(input.q).toLowerCase()
+  const q = str(input.q).slice(0, 200).toLowerCase()
   if (!q) return { error: 'q (search text) is required' }
   const limit = clampInt(input.limit, 1, 25, 10)
   // Same searchBlob LIKE idiom as contacts:list / ⌘K — never photo/enrichment
