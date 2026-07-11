@@ -92,7 +92,8 @@ async function extractText(
   try {
     if (mime === 'application/pdf') {
       const r = await extractPdfText(abs)
-      return { text: r.text || null, pages: r.pages || null }
+      const clipped = (r.text ?? '').slice(0, 500_000).trim()
+      return { text: clipped || null, pages: r.pages || null }
     }
     if (TEXT_EXTS.has(ext)) {
       const t = readFileSync(abs, 'utf-8').slice(0, 500_000).trim()
