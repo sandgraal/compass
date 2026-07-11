@@ -167,12 +167,14 @@ function addSubscription(
     )
 }
 
+let paystubSeq = 0
 function addPaystub(paidAt: string, netPay: number, employer = 'Initech'): void {
+  paystubSeq++
   sqlite
     .prepare(
       'INSERT INTO argyle_paystubs (external_id, employer, net_pay, paid_at) VALUES (?,?,?,?)'
     )
-    .run(`ps-${paidAt}-${Math.random()}`, employer, netPay, paidAt)
+    .run(`ps-${paidAt}-${paystubSeq}`, employer, netPay, paidAt)
 }
 
 /** epoch ms for a local 'YYYY-MM-DD' at midnight (matches the projectors' idiom). */
