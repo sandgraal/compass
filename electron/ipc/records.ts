@@ -21,6 +21,8 @@ import { type SQL, and, desc, eq, inArray, like, notInArray, or, sql } from 'dri
 import { type IpcMain, dialog } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
 import { appSettings, locationPoints, records, snapshotFacts, timelineMutes } from '../db/schema'
+import { readActiveKeyInternal } from '../integrations/assistant-vault'
+import { LlmAbortError, callLlm } from '../integrations/llm-client'
 import { afterLocationImport } from '../integrations/location-residency'
 import { DEFAULT_EMBED_MODEL } from '../knowledge/embeddings'
 import {
@@ -58,6 +60,7 @@ import { type RecordSearchOpts, type TimelineSearchHit, searchRecords } from '..
 import {
   buildYearReview,
   yearReviewMarkdown,
+  yearReviewNarrationPrompt,
   yearReviewNarrative
 } from '../lib/records-year-review'
 import { FIREHOSE_SOURCE_LIST } from '../lib/source-tiers'
@@ -450,6 +453,11 @@ async function ingestPath(fp: string, name: string, ctx: IngestCtx, depth: numbe
 // lock serializes the (incremental) rebuilds so an import-triggered refresh and a
 // manual rebuild can't race on the JSON store.
 let semanticBuildInFlight: Promise<unknown> | null = null
+
+/** app_settings gate for the opt-in Year-in-Review LLM narration (Timeline 2.1). */
+export const YEAR_REVIEW_NARRATION_KEY = 'yearReviewNarrationEnabled'
+/** Separate from assistant:ask's controller so narration never cancels a live Ask. */
+let yearReviewNarrateController: AbortController | null = null
 
 /** The embedding model the user configured (shared with the knowledge index). */
 function embeddingModel(): string {
@@ -1012,10 +1020,64 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
     return { ...review, narrative: yearReviewNarrative(review) }
   })
 
-  ipcMain.handle('records:year-review-markdown', (_event, opts?: { year?: number }) => {
+  ipcMain.handle(
+    'records:year-review-markdown',
+    (_event, opts?: { year?: number; narrative?: string }) => {
+      const year = Math.trunc(opts?.year ?? new Date().getUTCFullYear())
+      if (!Number.isInteger(year) || year < 1970 || year > 2100) return null
+      // The renderer passes the DISPLAYED narrative (LLM prose when present) so
+      // the export matches what the user is looking at; else the template.
+      const override = typeof opts?.narrative === 'string' ? opts.narrative.trim() : ''
+      return yearReviewMarkdown(buildYearReview(getRawSqlite(), year), override || undefined)
+    }
+  )
+
+  // Optional LLM narration for Year in Review (Timeline 2.1). Separate async
+  // handler so records:year-review stays instant with the template; this only
+  // runs when the user has opted into cloud narration AND a BYO key is set.
+  // Uses its OWN AbortController so it never cancels an in-flight assistant:ask.
+  ipcMain.handle('records:year-review-narrate', async (_event, opts?: { year?: number }) => {
     const year = Math.trunc(opts?.year ?? new Date().getUTCFullYear())
-    if (!Number.isInteger(year) || year < 1970 || year > 2100) return null
-    return yearReviewMarkdown(buildYearReview(getRawSqlite(), year))
+    if (!Number.isInteger(year) || year < 1970 || year > 2100)
+      return { ok: false, reason: 'bad-year' }
+    // Opt-in gate — narration egress is off unless the user turned it on.
+    let enabled = false
+    try {
+      const row = getDb()
+        .select()
+        .from(appSettings)
+        .where(eq(appSettings.key, YEAR_REVIEW_NARRATION_KEY))
+        .get()
+      enabled = row?.value === 'true'
+    } catch {
+      /* setting absent → disabled */
+    }
+    if (!enabled) return { ok: false, reason: 'off' }
+    const auth = readActiveKeyInternal()
+    if (!auth) return { ok: false, reason: 'no-key' }
+    const prompt = yearReviewNarrationPrompt(buildYearReview(getRawSqlite(), year))
+    if (!prompt) return { ok: false, reason: 'empty' }
+    const controller = new AbortController()
+    yearReviewNarrateController = controller
+    try {
+      const res = await callLlm({
+        provider: auth.provider,
+        apiKey: auth.key,
+        model: auth.model,
+        system: prompt.system,
+        messages: [{ role: 'user', content: prompt.user }],
+        maxTokens: 300,
+        signal: controller.signal
+      })
+      const narrative = res.text.trim().slice(0, 1200)
+      if (!narrative) return { ok: false, reason: 'empty' }
+      return { ok: true, narrative, provider: auth.provider }
+    } catch (err) {
+      if (err instanceof LlmAbortError) return { ok: false, reason: 'cancelled' }
+      return { ok: false, reason: 'error', error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      if (yearReviewNarrateController === controller) yearReviewNarrateController = null
+    }
   })
 
   // ── Memory mutes (PR 6): "never resurface this" — reversible, never deletion.

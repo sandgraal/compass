@@ -469,6 +469,9 @@ export default function Settings(): JSX.Element {
 
         {/* Ask Compass — BYO Claude/OpenAI API key (Tier 2 #7) */}
         <AskCompassSettings />
+
+        {/* Year in Review narration — reuses the BYO key; explicit egress opt-in */}
+        <YearReviewNarrationSetting />
       </SettingsSection>
 
       <SettingsSection icon={<RefreshCw size={16} />} title="Updates">
@@ -582,6 +585,45 @@ function SettingsSection({
         {children}
       </div>
     </div>
+  )
+}
+
+/**
+ * Year in Review narration toggle (Timeline 2.1). Reuses the BYO cloud key from
+ * Ask Compass — narration sends that year's aggregate summary (counts, top
+ * titles, spend, net-worth change) to the configured provider, so it's an
+ * explicit egress opt-in, disabled until a key exists.
+ */
+function YearReviewNarrationSetting(): JSX.Element {
+  const [enabled, setEnabled] = useState(false)
+  const [hasKey, setHasKey] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.api) return
+    void window.api.settings.get('yearReviewNarrationEnabled').then((v) => setEnabled(v === 'true'))
+    void window.api.assistant.getStatus().then((s) => setHasKey(s.activeProvider != null))
+  }, [])
+
+  return (
+    <SettingsRow
+      label="Narrate Year in Review with your cloud AI"
+      description={
+        hasKey
+          ? 'Sends that year’s summary (counts, top titles, spend, net-worth change) to your configured provider to write a warm recap. Off = the built-in template.'
+          : 'Add a cloud AI key above first. Then this sends that year’s summary out to write a warm recap.'
+      }
+    >
+      <Toggle
+        enabled={enabled && hasKey}
+        disabled={!hasKey}
+        onChange={(v) => {
+          setEnabled(v)
+          if (typeof window !== 'undefined' && window.api) {
+            void window.api.settings.set('yearReviewNarrationEnabled', String(v))
+          }
+        }}
+      />
+    </SettingsRow>
   )
 }
 
@@ -830,15 +872,18 @@ function RestoreRow(): JSX.Element {
 
 function Toggle({
   enabled,
-  onChange
-}: { enabled: boolean; onChange: (v: boolean) => void }): JSX.Element {
+  onChange,
+  disabled
+}: { enabled: boolean; onChange: (v: boolean) => void; disabled?: boolean }): JSX.Element {
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={() => onChange(!enabled)}
       className={cn(
         'w-10 h-5 rounded-full transition-colors relative',
-        enabled ? 'bg-primary' : 'bg-secondary'
+        enabled ? 'bg-primary' : 'bg-secondary',
+        disabled && 'opacity-40 cursor-not-allowed'
       )}
     >
       <span

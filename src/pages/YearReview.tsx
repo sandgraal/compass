@@ -6,7 +6,14 @@
  * knowledge base. Data: records:year-review (pure records-year-review.ts).
  */
 
-import { BookmarkPlus, ChevronLeft, ChevronRight, PartyPopper } from 'lucide-react'
+import {
+  BookmarkPlus,
+  ChevronLeft,
+  ChevronRight,
+  PartyPopper,
+  RefreshCw,
+  Sparkles
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
@@ -42,6 +49,10 @@ export default function YearReview(): JSX.Element {
   )
   const [review, setReview] = useState<YearReviewSummary | null>(null)
   const [loading, setLoading] = useState(true)
+  // LLM narration (Timeline 2.1): overrides the template when the user opted in
+  // and a BYO key is set. null = showing the template; the handler gates egress.
+  const [narrated, setNarrated] = useState<{ text: string; provider: string } | null>(null)
+  const [narrating, setNarrating] = useState(false)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -51,11 +62,15 @@ export default function YearReview(): JSX.Element {
       return
     }
     setLoading(true)
+    setNarrated(null)
     let stale = false
     void window.api.records
       .yearReview({ year })
       .then((r) => {
         if (!stale) setReview(r)
+        // Fire narration after the (instant) template render. The handler is a
+        // cheap no-op when narration is off / no key — no egress in that case.
+        if (!stale && r && r.totalRecords > 0) void narrate(false)
       })
       .finally(() => {
         if (!stale) setLoading(false)
@@ -63,11 +78,41 @@ export default function YearReview(): JSX.Element {
     return () => {
       stale = true
     }
+    // narrate is stable enough for this effect; year is the real trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year])
+
+  async function narrate(showErrors: boolean): Promise<void> {
+    if (!isElectron()) return
+    setNarrating(true)
+    try {
+      const res = await window.api.records.narrateYearReview({ year })
+      if (res.ok) {
+        setNarrated({ text: res.narrative, provider: res.provider })
+      } else if (showErrors) {
+        if (res.reason === 'no-key') {
+          toast('Add a cloud AI key in Settings to narrate', 'error')
+        } else if (res.reason === 'off') {
+          toast('Turn on narration in Settings → AI assist', 'error')
+        } else {
+          toast('Could not reach your AI — showing the template', 'error')
+        }
+      }
+    } finally {
+      setNarrating(false)
+    }
+  }
+
+  // The prose actually on screen (LLM when present, else the template).
+  const shownNarrative = narrated?.text ?? review?.narrative ?? ''
 
   async function saveToKnowledge(): Promise<void> {
     if (!isElectron()) return
-    const md = await window.api.records.yearReviewMarkdown({ year })
+    // Export what's displayed — the LLM prose if we narrated, else the template.
+    const md = await window.api.records.yearReviewMarkdown({
+      year,
+      narrative: narrated?.text
+    })
     if (!md) {
       toast('Nothing to save for this year', 'error')
       return
@@ -145,9 +190,38 @@ export default function YearReview(): JSX.Element {
         </p>
       ) : (
         <div className="space-y-6">
-          {/* Narrative */}
+          {/* Narrative — template by default, LLM prose when narration is on */}
           <div className="rounded-xl border border-primary/30 bg-primary/5 px-5 py-4">
-            <p className="text-sm text-foreground leading-relaxed">{review.narrative}</p>
+            <p className="text-sm text-foreground leading-relaxed">{shownNarrative}</p>
+            <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+              {narrating ? (
+                <span className="flex items-center gap-1.5 text-primary">
+                  <Sparkles size={12} className="animate-pulse" /> Narrating…
+                </span>
+              ) : narrated ? (
+                <>
+                  <span className="flex items-center gap-1">
+                    <Sparkles size={12} className="text-primary" /> Written by your{' '}
+                    {narrated.provider === 'anthropic' ? 'Claude' : 'OpenAI'} key
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void narrate(true)}
+                    className="flex items-center gap-1 text-primary hover:underline"
+                  >
+                    <RefreshCw size={11} /> Regenerate
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void narrate(true)}
+                  className="flex items-center gap-1 hover:text-foreground transition-colors"
+                >
+                  <Sparkles size={12} /> Narrate with AI
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Stat tiles */}
