@@ -905,14 +905,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return errorResult(detail.error)
         }
         type MedRow = { category: string; status: string | null; recordedAt: string | null }
-        let rows: MedRow[] = []
-        try {
-          rows = db
-            .prepare('SELECT category, status, recorded_at AS recordedAt FROM medical_records')
-            .all() as MedRow[]
-        } catch {
-          /* table absent → no records */
-        }
+        const rows = detail.records as MedRow[]
         const byCategory: Record<string, number> = {}
         const dates: string[] = []
         let activeConditions = 0

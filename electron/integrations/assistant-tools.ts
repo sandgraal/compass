@@ -117,7 +117,7 @@ export const ASSISTANT_TOOLS = [
   {
     name: 'list_transactions',
     description:
-      'Read individual finance transactions — date, amount, currency, description (merchant/payee), category. Filter by a date range, a single month, a category, and/or a description substring. Use for "what did I spend at X", "list my June charges over $100", "when did I last pay Y". Newest first. Read-only.',
+      'Read individual finance transactions — date, amount, currency, description (merchant/payee), category. Filter by a date range, a single month, a category, and/or a description substring. Use for "what did I spend at X", "list my June charges", "when did I last pay Y". Newest first. Read-only.',
     input_schema: {
       type: 'object',
       properties: {
@@ -463,8 +463,12 @@ function listTransactions(sqlite: RawSqlite, input: Record<string, unknown>): un
   const limit = clampInt(input.limit, 1, 50, 20)
   const month = str(input.month)
   if (month && !/^\d{4}-\d{2}$/.test(month)) return { error: 'month must be YYYY-MM' }
-  const from = str(input.from)
-  const to = str(input.to)
+  let from = str(input.from)
+  let to = str(input.to)
+  if (month) {
+    from = ''
+    to = ''
+  }
   if (from && !isRealYmd(from)) return { error: 'from must be a real YYYY-MM-DD date' }
   if (to && !isRealYmd(to)) return { error: 'to must be a real YYYY-MM-DD date' }
   const q = str(input.q)
@@ -495,7 +499,7 @@ function listTransactions(sqlite: RawSqlite, input: Record<string, unknown>): un
 }
 
 function searchContactsTool(db: Db, input: Record<string, unknown>): unknown {
-  const q = str(input.q).toLowerCase()
+  const q = str(input.q).slice(0, 200).toLowerCase()
   if (!q) return { error: 'q (search text) is required' }
   const limit = clampInt(input.limit, 1, 25, 10)
   // Same searchBlob LIKE idiom as contacts:list / ⌘K — never photo/enrichment
@@ -616,7 +620,7 @@ const VAULT_SEARCH_MAX = 20
 
 function searchVaultTool(deps: AssistantToolDeps, input: Record<string, unknown>): unknown {
   if (!deps.vault) return { error: 'Vault unavailable in this context.' }
-  const q = str(input.q).toLowerCase()
+  const q = str(input.q).slice(0, 200).toLowerCase()
   if (!q) return { error: 'q (search text) is required' }
   const catFilter = str(input.category)
   if (catFilter === 'credentials') {
