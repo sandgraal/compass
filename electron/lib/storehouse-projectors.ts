@@ -158,23 +158,26 @@ export function projectCalendar(rows: CalendarRow[]): RecordInput[] {
   return out
 }
 
-/** A GitHub issue/PR reduced to the projector's fields (`github_items`). */
+/** A GitHub issue/PR/commit reduced to the projector's fields (`github_items`). */
 export interface GithubRow {
   externalId: string
-  type: string // 'issue' | 'pr'
+  type: string // 'issue' | 'pr' | 'commit'
   repo: string
   title: string
   state: string
-  author: string | null // opener login; may carry a "[bot]" suffix
+  author: string | null // opener/author login; may carry a "[bot]" suffix
   updatedAt: string | null // ISO
 }
 
+const GITHUB_TYPES = new Set(['issue', 'pr', 'commit'])
+
 /**
- * Project `github_items` → records (`source:'github'`, `type:'issue'|'pr'`).
+ * Project `github_items` → records (`source:'github'`, `type:'issue'|'pr'|'commit'`).
  *
- * The opener login is appended as `· @<login>` so the `github-person` extractor can
- * parse it (and detect a `[bot]` suffix); title = the issue/PR title; occurredAt is
- * the item's own last-updated time so it sits at the right point on the timeline.
+ * The author login is appended as `· @<login>` so the `github-person` extractor can
+ * parse it (and detect a `[bot]` suffix); title = the issue/PR/commit subject;
+ * occurredAt is the item's own last-updated / commit time so it sits at the right
+ * point on the timeline. Commits carry the developer-productivity signal.
  */
 export function projectGithub(rows: GithubRow[]): RecordInput[] {
   const out: RecordInput[] = []
@@ -183,7 +186,7 @@ export function projectGithub(rows: GithubRow[]): RecordInput[] {
     const author = r.author?.trim()
     out.push({
       source: 'github',
-      type: r.type === 'pr' ? 'pr' : 'issue',
+      type: GITHUB_TYPES.has(r.type) ? r.type : 'issue',
       occurredAt: isoMs(r.updatedAt),
       title: r.title?.trim() || '(untitled)',
       body: `${r.repo} · ${r.state}${author ? ` · @${author}` : ''}`,
