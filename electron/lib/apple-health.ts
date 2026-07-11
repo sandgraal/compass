@@ -61,7 +61,7 @@ const DAILY: Record<string, { type: string; rollup: Rollup; label: (v: number) =
     type: 'vo2max',
     rollup: 'last',
     label: (v) => `${v.toFixed(1)} VO₂max`
-  },
+  }
   // Blood pressure (systolic + diastolic) needs pairing two Record types on the
   // left out here; add it when a correlation-aware pass is worth the complexity.
 }
