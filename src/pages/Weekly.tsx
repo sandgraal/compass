@@ -99,11 +99,11 @@ function WeekAcrossLife({ x }: { x: WeeklyReview['crossDomain'] }): JSX.Element 
               <Flame size={13} className="text-orange-400" /> Habits
             </div>
             <div className="text-xs text-foreground flex flex-wrap gap-x-3 gap-y-0.5">
-              {x.habits.slice(0, 6).map((h) => (
-                <span key={h.name}>
-                  {h.name} <span className="text-muted-foreground">{h.done}/7</span>
-                </span>
-              ))}
+{x.habits.slice(0, 6).map((h, i) => (
+  <span key={`${h.name}-${i}`}>
+    {h.name} <span className="text-muted-foreground">{h.done}/7</span>
+  </span>
+))}
             </div>
           </div>
         )}
