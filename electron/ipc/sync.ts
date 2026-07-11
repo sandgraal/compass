@@ -822,6 +822,122 @@ export async function syncGitHub(
       await updateGitHubKnowledge(items)
     }
 
+    // Developer-productivity stream (beyond assigned issues): the user's own PRs
+    // and recent commits → github_items → the spine, so the timeline and the
+    // cross-domain insights see real activity. Each fetch is best-effort — a
+    // token missing a scope, or an empty events feed, must not fail the sync.
+    const upsertGh = (row: {
+      type: string
+      repo: string
+      externalId: string
+      title: string
+      url: string
+      state: string
+      body?: string | null
+      author: string | null
+      updatedAt: string | null
+    }): void => {
+      db.insert(githubItems)
+        .values({
+          type: row.type,
+          repo: row.repo,
+          externalId: row.externalId,
+          title: row.title,
+          url: row.url,
+          state: row.state,
+          body: row.body?.slice(0, 500) ?? null,
+          labels: '[]',
+          author: row.author,
+          updatedAt: row.updatedAt,
+          syncedAt: new Date()
+        })
+        .onConflictDoUpdate({
+          target: githubItems.externalId,
+          set: {
+            title: row.title,
+            state: row.state,
+            author: row.author,
+            updatedAt: row.updatedAt,
+            syncedAt: new Date()
+          }
+        })
+        .run()
+      recordsUpdated++
+    }
+
+    let login: string | null = null
+    try {
+      const meResp = await fetch('https://api.github.com/user', { headers })
+      if (meResp.ok) login = ((await meResp.json()) as { login?: string }).login ?? null
+    } catch {
+      /* best-effort — no login means we skip the author-scoped pulls below */
+    }
+
+    if (login) {
+      // Authored PRs (open + recently updated/closed/merged).
+      try {
+        const prResp = await fetch(
+          `https://api.github.com/search/issues?q=author:${encodeURIComponent(login)}+type:pr&sort=updated&per_page=30`,
+          { headers }
+        )
+        if (prResp.ok) {
+          const { items: prs = [] } = (await prResp.json()) as { items?: GitHubIssue[] }
+          for (const pr of prs) {
+            const repo = pr.repository?.full_name || pr.html_url.split('/').slice(3, 5).join('/')
+            upsertGh({
+              type: 'pr',
+              repo,
+              externalId: String(pr.id),
+              title: pr.title,
+              url: pr.html_url,
+              state: pr.state,
+              body: pr.body ?? null,
+              author: pr.user?.login ?? login,
+              updatedAt: pr.updated_at ?? null
+            })
+          }
+        }
+      } catch {
+        /* best-effort */
+      }
+
+      // Recent commits from the events feed (PushEvents carry the commit list).
+      try {
+        const evResp = await fetch(
+          `https://api.github.com/users/${encodeURIComponent(login)}/events?per_page=100`,
+          { headers }
+        )
+        if (evResp.ok) {
+          const events = (await evResp.json()) as Array<{
+            type: string
+            created_at?: string
+            repo?: { name?: string }
+            payload?: { commits?: Array<{ sha?: string; message?: string }> }
+          }>
+          for (const ev of events) {
+            if (ev.type !== 'PushEvent') continue
+            const repo = ev.repo?.name ?? ''
+            for (const c of ev.payload?.commits ?? []) {
+              if (!c.sha) continue
+              upsertGh({
+                type: 'commit',
+                repo,
+                externalId: c.sha,
+                title: (c.message ?? '').split('\n')[0].slice(0, 200) || '(no message)',
+                url: `https://github.com/${repo}/commit/${c.sha}`,
+                state: 'committed',
+                body: c.message ?? null,
+                author: login,
+                updatedAt: ev.created_at ?? null
+              })
+            }
+          }
+        }
+      } catch {
+        /* best-effort */
+      }
+    }
+
     db.update(integrations)
       .set({ lastSyncedAt: new Date(), status: 'connected', errorMessage: null })
       .where(eq(integrations.service, 'github'))

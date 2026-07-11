@@ -179,6 +179,26 @@ describe('projectGithub', () => {
   it('skips rows without an external id', () => {
     expect(projectGithub([gh({ externalId: '' })])).toHaveLength(0)
   })
+
+  it('projects a commit as type "commit" (the dev-productivity stream)', () => {
+    const [r] = projectGithub([
+      gh({
+        externalId: 'abc123sha',
+        type: 'commit',
+        title: 'fix: null guard',
+        state: 'committed'
+      })
+    ])
+    expect(r.type).toBe('commit')
+    expect(r.title).toBe('fix: null guard')
+    expect(r.body).toBe('acme/app · committed · @jane-doe')
+    expect(r.naturalKey).toBe('abc123sha')
+  })
+
+  it('falls back to issue for an unknown type', () => {
+    const [r] = projectGithub([gh({ externalId: 'g9', type: 'discussion' })])
+    expect(r.type).toBe('issue')
+  })
 })
 
 describe('projectLinear', () => {
