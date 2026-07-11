@@ -712,7 +712,7 @@ function detectMedicalOutOfPocket(db: Db, now: Date): Insight[] {
   const out: Insight[] = []
   for (const ev of events) {
     if (!ev.occurredAt) continue
-    const start = ev.occurredAt.getTime()
+    const start = new Date(`${localYmd(ev.occurredAt)}T00:00:00`).getTime()
     const end = start + MEDICAL_OOP_WINDOW_DAYS * 24 * 3600 * 1000
     let total = 0
     for (const t of spend) {
