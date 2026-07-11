@@ -14,7 +14,7 @@
  * `location_points` off the spine. See docs/data-access-policy.md.
  */
 
-import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
+import { closeSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname } from 'node:path'
 import Database from 'better-sqlite3'
 import { type SQL, and, desc, eq, inArray, like, notInArray, or, sql } from 'drizzle-orm'
@@ -1029,6 +1029,34 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
       // the export matches what the user is looking at; else the template.
       const override = typeof opts?.narrative === 'string' ? opts.narrative.trim() : ''
       return yearReviewMarkdown(buildYearReview(getRawSqlite(), year), override || undefined)
+    }
+  )
+
+  // Save a shareable Year-in-Review PNG (Timeline 2.1). The renderer rasterizes
+  // the SVG card to a base64 PNG (local, no network) and hands the bytes here;
+  // this shows a save dialog and writes them. Purely local file I/O.
+  ipcMain.handle(
+    'records:export-year-review-image',
+    async (_event, opts?: { year?: number; pngBase64?: string }) => {
+      const year = Math.trunc(opts?.year ?? new Date().getUTCFullYear())
+      const b64 = typeof opts?.pngBase64 === 'string' ? opts.pngBase64 : ''
+      // Guard: base64 only, and cap at ~8 MB decoded so a bad renderer payload
+      // can't write an arbitrarily large file.
+      if (!/^[A-Za-z0-9+/=]+$/.test(b64) || b64.length > 11_000_000) {
+        return { saved: false, error: 'bad-image' }
+      }
+      const { canceled, filePath } = await dialog.showSaveDialog({
+        title: `Save ${year} in Review`,
+        defaultPath: `year-review-${year}.png`,
+        filters: [{ name: 'PNG image', extensions: ['png'] }]
+      })
+      if (canceled || !filePath) return { saved: false, canceled: true }
+      try {
+        writeFileSync(filePath, Buffer.from(b64, 'base64'))
+        return { saved: true, path: filePath }
+      } catch (err) {
+        return { saved: false, error: err instanceof Error ? err.message : String(err) }
+      }
     }
   )
 

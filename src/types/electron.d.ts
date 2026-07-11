@@ -1263,6 +1263,12 @@ declare global {
           | { ok: true; narrative: string; provider: 'anthropic' | 'openai' }
           | { ok: false; reason: string; error?: string }
         >
+        exportYearReviewImage(opts: { year: number; pngBase64: string }): Promise<{
+          saved: boolean
+          path?: string
+          canceled?: boolean
+          error?: string
+        }>
         mute(opts: {
           kind: 'record' | 'source-type'
           target: string | number

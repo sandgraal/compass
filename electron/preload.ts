@@ -424,6 +424,8 @@ const api = {
       ipcRenderer.invoke('records:year-review-markdown', opts),
     narrateYearReview: (opts?: { year?: number }) =>
       ipcRenderer.invoke('records:year-review-narrate', opts),
+    exportYearReviewImage: (opts: { year: number; pngBase64: string }) =>
+      ipcRenderer.invoke('records:export-year-review-image', opts),
     mute: (opts: { kind: 'record' | 'source-type'; target: string | number }) =>
       ipcRenderer.invoke('records:mute', opts),
     mutes: () => ipcRenderer.invoke('records:mutes'),

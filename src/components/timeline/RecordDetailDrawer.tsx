@@ -15,11 +15,14 @@ export function RecordDetailDrawer({
   record,
   onClose,
   onFindSimilar,
+  onPivotSource,
   onMute
 }: {
   record: TimelineRecord
   onClose: () => void
   onFindSimilar: (query: string) => void
+  /** "See all <source>" pivot — jump to Browse filtered to this record's source. */
+  onPivotSource?: (source: string) => void
   /** "Never resurface" (memory mutes) — omit to hide the mute actions. */
   onMute?: (kind: 'record' | 'source-type', target: string) => void
 }): JSX.Element {
@@ -128,7 +131,7 @@ export function RecordDetailDrawer({
             </div>
           )}
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => onFindSimilar(record.title)}
@@ -136,6 +139,16 @@ export function RecordDetailDrawer({
             >
               <Search size={13} /> Find similar
             </button>
+            {onPivotSource && (
+              <button
+                type="button"
+                onClick={() => onPivotSource(record.source)}
+                title={`Browse everything from ${meta.label}`}
+                className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border hover:bg-secondary text-foreground transition-colors"
+              >
+                <span style={color ? { color } : undefined}>{meta.icon}</span> All {meta.label}
+              </button>
+            )}
             <button
               type="button"
               onClick={copyDetails}

@@ -57,6 +57,45 @@ function yearsAgoLabel(yearsAgo: number): string {
   return yearsAgo === 1 ? '1 year ago' : `${yearsAgo} years ago`
 }
 
+/**
+ * A compact "this date across the years" bar strip above the memory cards —
+ * one bar per year that has records on this day, height ∝ count, chronological
+ * left→right. Clicking scrolls to that year's card. Only shown once there are
+ * enough years to read as a shape.
+ */
+function YearSparkline({
+  years,
+  onJump
+}: {
+  years: YearGroup[]
+  onJump: (year: number) => void
+}): JSX.Element | null {
+  if (years.length < 3) return null
+  const chrono = [...years].sort((a, b) => a.year - b.year)
+  const max = Math.max(...chrono.map((y) => y.count), 1)
+  return (
+    <div className="mb-4 flex items-end gap-1" aria-label="Records on this date across the years">
+      {chrono.map((y) => (
+        <button
+          key={y.year}
+          type="button"
+          onClick={() => onJump(y.year)}
+          title={`${y.year} · ${y.count} record${y.count === 1 ? '' : 's'}`}
+          className="group flex-1 flex flex-col items-center gap-1 min-w-0"
+        >
+          <span
+            className="w-full rounded-sm bg-primary/40 group-hover:bg-primary transition-colors"
+            style={{ height: `${Math.max(4, Math.round((y.count / max) * 36))}px` }}
+          />
+          <span className="text-[9px] text-muted-foreground tabular-nums">
+            {String(y.year).slice(2)}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export function OnThisDayHero({
   onOpenRecord,
   onOpenDay,
@@ -225,63 +264,75 @@ export function OnThisDayHero({
           </p>
         </div>
       ) : (
-        // Timeline spine down the years, memory cards hanging off each node.
-        <div className="relative space-y-4 pl-6">
-          <span aria-hidden className="absolute left-[7px] top-3 bottom-3 w-px bg-border" />
-          {years.map((g) => (
-            <div
-              key={g.year}
-              className="relative rounded-xl border border-primary/25 bg-gradient-to-br from-primary/5 to-transparent px-4 py-3"
-            >
-              <span
-                aria-hidden
-                className="absolute top-5 -left-[1.35rem] w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-background"
-              />
-              <div className="flex items-baseline gap-2.5 mb-2.5">
-                <span className="text-3xl font-bold text-foreground tabular-nums leading-none">
-                  {g.year}
-                </span>
-                <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                  {yearsAgoLabel(currentYear - g.year)}
-                </span>
-                <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-                  {g.count} record{g.count === 1 ? '' : 's'}
-                </span>
-              </div>
-              <div className="space-y-1.5">
-                {g.records.map((r) => (
-                  <RecordRow
-                    key={r.id}
-                    record={r}
-                    onOpen={onOpenRecord}
-                    tier={memoryTier(r.memoryScore)}
-                    trailing={
-                      <span
-                        className="text-xs text-muted-foreground/70 shrink-0"
-                        title={sourceMeta(r.source).label}
-                      >
-                        {sourceMeta(r.source).label}
-                      </span>
+        <>
+          <YearSparkline
+            years={years}
+            onJump={(y) =>
+              document
+                .getElementById(`otd-year-${y}`)
+                ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            }
+          />
+          {/* Timeline spine down the years, memory cards hanging off each node. */}
+          <div className="relative space-y-4 pl-6">
+            <span aria-hidden className="absolute left-[7px] top-3 bottom-3 w-px bg-border" />
+            {years.map((g, gi) => (
+              <div
+                key={g.year}
+                id={`otd-year-${g.year}`}
+                style={{ animationDelay: `${Math.min(gi, 8) * 45}ms` }}
+                className="relative rounded-xl border border-primary/25 bg-gradient-to-br from-primary/5 to-transparent px-4 py-3 animate-fade-in"
+              >
+                <span
+                  aria-hidden
+                  className="absolute top-5 -left-[1.35rem] w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-background"
+                />
+                <div className="flex items-baseline gap-2.5 mb-2.5">
+                  <span className="text-3xl font-bold text-foreground tabular-nums leading-none">
+                    {g.year}
+                  </span>
+                  <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    {yearsAgoLabel(currentYear - g.year)}
+                  </span>
+                  <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+                    {g.count} record{g.count === 1 ? '' : 's'}
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {g.records.map((r) => (
+                    <RecordRow
+                      key={r.id}
+                      record={r}
+                      onOpen={onOpenRecord}
+                      tier={memoryTier(r.memoryScore)}
+                      trailing={
+                        <span
+                          className="text-xs text-muted-foreground/70 shrink-0"
+                          title={sourceMeta(r.source).label}
+                        >
+                          {sourceMeta(r.source).label}
+                        </span>
+                      }
+                    />
+                  ))}
+                </div>
+                {g.count > g.records.length && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onOpenDay(
+                        `${g.year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+                      )
                     }
-                  />
-                ))}
+                    className="mt-2 text-xs text-primary hover:underline"
+                  >
+                    See all {g.count} from this day →
+                  </button>
+                )}
               </div>
-              {g.count > g.records.length && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    onOpenDay(
-                      `${g.year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-                    )
-                  }
-                  className="mt-2 text-xs text-primary hover:underline"
-                >
-                  See all {g.count} from this day →
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </>
       )}
 
       {/* Mutes are reversible — surface the escape hatch wherever they apply. */}
