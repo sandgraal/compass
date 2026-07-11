@@ -64,6 +64,7 @@ export default function YearReview(): JSX.Element {
     setLoading(true)
     setNarrated(null)
     setNarrating(false)
+    let stale = false
     void window.api.records
       .yearReview({ year })
       .then((r) => {
@@ -71,6 +72,7 @@ export default function YearReview(): JSX.Element {
         // Fire narration after the (instant) template render. The handler is a
         // cheap no-op when narration is off / no key — no egress in that case.
         if (!stale && r && r.totalRecords > 0) void narrate(false, () => stale)
+      })
       .finally(() => {
         if (!stale) setLoading(false)
       })

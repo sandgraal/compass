@@ -1060,6 +1060,7 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
     yearReviewNarrateController?.abort()
     const controller = new AbortController()
     yearReviewNarrateController = controller
+    try {
       const res = await callLlm({
         provider: auth.provider,
         apiKey: auth.key,
