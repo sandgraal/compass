@@ -76,7 +76,8 @@ export type DocumentsImportResult = {
  *  escapes DOCUMENTS_DIR (defense-in-depth against a tampered row). */
 function resolveStored(storedPath: string): string {
   const abs = resolve(DOCUMENTS_DIR, storedPath)
-  if (abs !== DOCUMENTS_DIR && !abs.startsWith(DOCUMENTS_DIR + sep)) {
+  // Reject the base directory itself (e.g. storedPath '' or '.') and any escape.
+  if (abs === DOCUMENTS_DIR || !abs.startsWith(DOCUMENTS_DIR + sep)) {
     throw new Error('stored path escapes the documents directory')
   }
   return abs
