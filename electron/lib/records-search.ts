@@ -17,6 +17,15 @@ export interface RecordSearchOpts {
   q: string
   source?: string
   type?: string
+  /**
+   * Multi-select filters, pushed server-side like `records:list`'s — so a
+   * multi-chip Timeline selection filters INSIDE the ranked query instead of
+   * client-side after the hit cap (which both dropped firehose sources the
+   * user explicitly chip-selected and let unwanted rows starve the cap).
+   * Merged with the singular `source`/`type` when both are given.
+   */
+  sources?: string[]
+  types?: string[]
   from?: number | null // epoch ms inclusive
   to?: number | null // epoch ms inclusive
   limit?: number
@@ -26,10 +35,22 @@ export interface RecordSearchOpts {
    * Include firehose-tier sources (browser history, habit checks, …) in the
    * hits. Default FALSE — high-volume telemetry otherwise buries the
    * meaningful rows for every search surface (in-app, Ask-Compass, MCP).
-   * Ignored (treated as true) when `source` itself names a firehose source,
-   * so an explicit `source:'browser'` search still works.
+   * Ignored (treated as true) when any selected source is itself a firehose
+   * source, so an explicit `source:'browser'` (or a browser+amazon
+   * multi-select) still returns browser rows.
    */
   includeFirehose?: boolean
+}
+
+/** The effective source/type selections: singular + plural forms merged. */
+function selections(opts: RecordSearchOpts): { sources: string[]; types: string[] } {
+  const clean = (list: Array<string | undefined>): string[] => [
+    ...new Set(list.filter((v): v is string => typeof v === 'string' && v.length > 0))
+  ]
+  return {
+    sources: clean([opts.source, ...(opts.sources ?? [])]),
+    types: clean([opts.type, ...(opts.types ?? [])])
+  }
 }
 
 export interface TimelineSearchHit {
@@ -74,12 +95,25 @@ export function searchRecords(
   if (!match) return []
   const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 50), 1), 200)
   const offset = Math.max(Math.trunc(opts.offset ?? 0), 0)
+  const { sources, types } = selections(opts)
   // Curate (source-tiers): firehose rows are excluded unless asked for — or
-  // unless the caller explicitly filters to a firehose source.
-  const excludeFirehose = !opts.includeFirehose && !(opts.source != null && isFirehose(opts.source))
+  // unless the caller's source selection itself names a firehose source.
+  const excludeFirehose = !opts.includeFirehose && !sources.some(isFirehose)
   const firehoseClause = excludeFirehose
     ? `AND r.source NOT IN (${FIREHOSE_SOURCE_LIST.map((s) => `'${s}'`).join(', ')})`
     : ''
+  // Selection values come from the renderer — always bound, never inlined.
+  const params: Record<string, unknown> = { match, from: opts.from ?? null, to: opts.to ?? null }
+  sources.forEach((s, i) => {
+    params[`src${i}`] = s
+  })
+  types.forEach((t, i) => {
+    params[`typ${i}`] = t
+  })
+  const sourceClause =
+    sources.length > 0 ? `AND r.source IN (${sources.map((_, i) => `@src${i}`).join(', ')})` : ''
+  const typeClause =
+    types.length > 0 ? `AND r.type IN (${types.map((_, i) => `@typ${i}`).join(', ')})` : ''
   return sqlite
     .prepare(
       `SELECT r.id AS id, r.source AS source, r.type AS type, r.occurred_at AS occurredAt,
@@ -90,21 +124,13 @@ export function searchRecords(
          FROM records_fts
          JOIN records r ON r.id = records_fts.rowid
         WHERE records_fts MATCH @match
-          AND (@source IS NULL OR r.source = @source)
-          AND (@type   IS NULL OR r.type   = @type)
+          ${sourceClause}
+          ${typeClause}
           AND (@from   IS NULL OR r.occurred_at >= @from)
           AND (@to     IS NULL OR r.occurred_at <= @to)
           ${firehoseClause}
         ORDER BY rank
         LIMIT @limit OFFSET @offset`
     )
-    .all({
-      match,
-      source: opts.source ?? null,
-      type: opts.type ?? null,
-      from: opts.from ?? null,
-      to: opts.to ?? null,
-      limit,
-      offset
-    }) as TimelineSearchHit[]
+    .all({ ...params, limit, offset }) as TimelineSearchHit[]
 }
