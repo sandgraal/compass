@@ -93,7 +93,7 @@ describe('runRecordsDateRepairIfNeeded', () => {
 
     insert('another bad row after the gate', Date.UTC(10801, 4, 13))
     const second = runRecordsDateRepairIfNeeded(sqlite, NOW)
-    expect(second).toEqual({ ran: false, repaired: 0 })
+    expect(second).toEqual({ ran: false })
     // The gate means later corruption is the guardrail's job, not the repair's.
     expect(occurredAtOf('another bad row after the gate')).not.toBeNull()
 
@@ -176,7 +176,7 @@ describe('runGcalDedupeIfNeeded', () => {
     expect(runGcalDedupeIfNeeded(sqlite, NOW)).toEqual({ ran: true, removed: 0 })
     // A duplicate arriving after the gate is consumed stays (one-shot repair).
     insertGcal('A', when, 'a2')
-    expect(runGcalDedupeIfNeeded(sqlite, NOW)).toEqual({ ran: false, removed: 0 })
+    expect(runGcalDedupeIfNeeded(sqlite, NOW)).toEqual({ ran: false })
     const gate = sqlite
       .prepare('SELECT value FROM app_settings WHERE key = ?')
       .get(GCAL_DEDUPE_KEY) as { value: string } | undefined
@@ -233,7 +233,7 @@ describe('runDocumentSpineDatesIfNeeded', () => {
 
   it('runs once and then gates', () => {
     expect(runDocumentSpineDatesIfNeeded(sqlite, NOW)).toEqual({ ran: true, dated: 0 })
-    expect(runDocumentSpineDatesIfNeeded(sqlite, NOW)).toEqual({ ran: false, dated: 0 })
+    expect(runDocumentSpineDatesIfNeeded(sqlite, NOW)).toEqual({ ran: false })
     const gate = sqlite
       .prepare('SELECT value FROM app_settings WHERE key = ?')
       .get(DOCUMENT_SPINE_DATES_KEY) as { value: string } | undefined

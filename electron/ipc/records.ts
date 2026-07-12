@@ -39,6 +39,7 @@ import { isPlausibleEpochMs } from '../lib/dates'
 import { refreshDerivedEntities } from '../lib/entities-projection'
 import { LOCATION_RECOGNIZER_IDS, type LocationPayload } from '../lib/location'
 import { planNetflixRefile } from '../lib/netflix-refile'
+import { runOnceGated } from '../lib/one-shot-repair'
 import { extractPdfText } from '../lib/pdf'
 import {
   type RecordInput,
@@ -686,22 +687,15 @@ export function reclassifyGenericRecords(): ReclassifyResult {
 }
 
 /**
- * App-launch wrapper: run the reclassification exactly once per install, gated
- * on an app_settings key written only AFTER success (crash → retried next
- * launch; the reclassify is dedup-safe so retries are safe). Same pattern as
- * `recordsDateRepairV1` / `financeSnapshotRepairV1`. The gate key is a
- * parameter so each expansion of `AMAZON_REFILE_FAMILIES` ships as a new key
+ * App-launch wrapper: run the reclassification exactly once per install (the
+ * reclassify is dedup-safe so retries after a crash are safe). The gate key is
+ * a parameter so each expansion of `AMAZON_REFILE_FAMILIES` ships as a new key
  * (V2, …) that re-runs over installs whose earlier key is already consumed.
  */
 export function runRecordsReclassifyIfNeeded(
   gateKey: string = RECORDS_RECLASSIFY_V2_KEY
 ): { ran: boolean } & Partial<ReclassifyResult> {
-  const db = getDb()
-  const existing = db.select().from(appSettings).where(eq(appSettings.key, gateKey)).get()
-  if (existing) return { ran: false }
-  const res = reclassifyGenericRecords()
-  db.insert(appSettings).values({ key: gateKey, value: new Date().toISOString() }).run()
-  return { ran: true, ...res }
+  return runOnceGated(getRawSqlite(), gateKey, reclassifyGenericRecords)
 }
 
 export const NETFLIX_REFILE_KEY = 'netflixRefileV1'
@@ -775,16 +769,7 @@ export function refileNetflixRecords(): NetflixRefileResult {
 
 /** One-shot launch wrapper for the netflix refile, same gate pattern as reclassify. */
 export function runNetflixRefileIfNeeded(): { ran: boolean } & Partial<NetflixRefileResult> {
-  const db = getDb()
-  const existing = db
-    .select()
-    .from(appSettings)
-    .where(eq(appSettings.key, NETFLIX_REFILE_KEY))
-    .get()
-  if (existing) return { ran: false }
-  const res = refileNetflixRecords()
-  db.insert(appSettings).values({ key: NETFLIX_REFILE_KEY, value: new Date().toISOString() }).run()
-  return { ran: true, ...res }
+  return runOnceGated(getRawSqlite(), NETFLIX_REFILE_KEY, refileNetflixRecords)
 }
 
 export const GENERIC_TELEMETRY_PURGE_KEY = 'genericTelemetryPurgeV1'
@@ -806,45 +791,35 @@ export const GENERIC_TELEMETRY_PURGE_KEY = 'genericTelemetryPurgeV1'
  * destroy the GPS/order/gift-card rows V2 exists to promote.
  */
 export function runGenericTelemetryPurgeIfNeeded(): { ran: boolean; deleted?: number } {
-  const db = getDb()
-  const reclassified = db
-    .select()
-    .from(appSettings)
-    .where(eq(appSettings.key, RECORDS_RECLASSIFY_V2_KEY))
-    .get()
-  if (!reclassified) return { ran: false }
-  const existing = db
-    .select()
-    .from(appSettings)
-    .where(eq(appSettings.key, GENERIC_TELEMETRY_PURGE_KEY))
-    .get()
-  if (existing) return { ran: false }
-
   const sqlite = getRawSqlite()
-  const selectChunk = sqlite.prepare(
-    "SELECT id, provenance FROM records WHERE source = 'generic' AND id > ? ORDER BY id LIMIT 5000"
-  )
-  const deleteById = sqlite.prepare('DELETE FROM records WHERE id = ?')
-  const deleteChunk = sqlite.transaction((ids: number[]) => {
-    for (const id of ids) deleteById.run(id)
-  })
-  let deleted = 0
-  let lastId = 0
-  for (;;) {
-    const chunk = selectChunk.all(lastId) as Array<{ id: number; provenance: string | null }>
-    if (chunk.length === 0) break
-    lastId = chunk[chunk.length - 1].id
-    const ids = chunk.filter((r) => isAmazonTelemetryProvenance(r.provenance)).map((r) => r.id)
-    if (ids.length > 0) {
-      deleteChunk(ids)
-      deleted += ids.length
+  const reclassified = sqlite
+    .prepare('SELECT value FROM app_settings WHERE key = ?')
+    .get(RECORDS_RECLASSIFY_V2_KEY)
+  if (!reclassified) return { ran: false }
+
+  return runOnceGated(sqlite, GENERIC_TELEMETRY_PURGE_KEY, () => {
+    const selectChunk = sqlite.prepare(
+      "SELECT id, provenance FROM records WHERE source = 'generic' AND id > ? ORDER BY id LIMIT 5000"
+    )
+    const deleteById = sqlite.prepare('DELETE FROM records WHERE id = ?')
+    const deleteChunk = sqlite.transaction((ids: number[]) => {
+      for (const id of ids) deleteById.run(id)
+    })
+    let deleted = 0
+    let lastId = 0
+    for (;;) {
+      const chunk = selectChunk.all(lastId) as Array<{ id: number; provenance: string | null }>
+      if (chunk.length === 0) break
+      lastId = chunk[chunk.length - 1].id
+      const ids = chunk.filter((r) => isAmazonTelemetryProvenance(r.provenance)).map((r) => r.id)
+      if (ids.length > 0) {
+        deleteChunk(ids)
+        deleted += ids.length
+      }
     }
-  }
-  if (deleted > 0) void refreshRecordsSemanticIndex()
-  db.insert(appSettings)
-    .values({ key: GENERIC_TELEMETRY_PURGE_KEY, value: new Date().toISOString() })
-    .run()
-  return { ran: true, deleted }
+    if (deleted > 0) void refreshRecordsSemanticIndex()
+    return { deleted }
+  })
 }
 
 const EMPTY: Omit<RecordsImportResult, 'success'> = {
