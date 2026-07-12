@@ -18,6 +18,7 @@ import { registerContactsHandlers } from './ipc/contacts'
 import { registerCredHandlers } from './ipc/cred'
 import { registerCurationHandlers } from './ipc/curation'
 import { registerDataRightsHandlers } from './ipc/data-rights'
+import { registerDeviceSyncHandlers } from './ipc/device-sync'
 import { registerDocumentsHandlers } from './ipc/documents'
 import { registerEntitiesHandlers } from './ipc/entities'
 import { registerExportHandlers } from './ipc/export'
@@ -234,6 +235,7 @@ app.whenReady().then(async () => {
   registerClaudeHandlers(ipcMain)
   registerUpdaterHandlers(ipcMain)
   registerBackupHandlers(ipcMain)
+  registerDeviceSyncHandlers(ipcMain)
   registerSearchHandlers(ipcMain)
   registerSpotlightHandlers(ipcMain)
   registerPlaidHandlers(ipcMain)

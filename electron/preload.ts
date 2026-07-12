@@ -200,6 +200,16 @@ const api = {
     restore: (passphrase: string) => ipcRenderer.invoke('backup:restore', passphrase)
   },
 
+  // --- Device sync (Phase 4b — E2E snapshot sync via the relay) ---
+  deviceSync: {
+    status: () => ipcRenderer.invoke('device-sync:status'),
+    configure: (passphrase: string) => ipcRenderer.invoke('device-sync:configure', passphrase),
+    disable: () => ipcRenderer.invoke('device-sync:disable'),
+    check: () => ipcRenderer.invoke('device-sync:check'),
+    push: () => ipcRenderer.invoke('device-sync:push'),
+    pull: () => ipcRenderer.invoke('device-sync:pull')
+  },
+
   // --- Spotlight-friendly knowledge mirror (Phase 5.14) ---
   spotlight: {
     getStatus: () => ipcRenderer.invoke('spotlight:get-status'),

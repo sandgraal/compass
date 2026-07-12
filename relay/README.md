@@ -44,6 +44,8 @@ Requires Node ≥ 18 (global `fetch`).
 | `RELAY_MONTHLY_COST` | no (1000) | per-user monthly cost-unit ceiling |
 | `RELAY_BURST_PER_MIN` | no (60) | anomaly breaker: max calls in a rolling 60s |
 | `RELAY_MAX_ACCOUNTS` | no (10) | max connected aggregator accounts per user |
+| `RELAY_SYNC_DIR` | no (off) | **device sync (Phase 4b):** directory for the encrypted snapshot mailbox. Unset = `/sync/*` disabled. The one deliberate exception to "stores no user data" — and a narrow one: blobs are passphrase-encrypted on-device (AES-256-GCM); the relay can read none of it |
+| `RELAY_SYNC_MAX_BYTES` | no (268435456) | max DECODED snapshot size accepted on a sync PUT |
 
 ## Client contract
 
@@ -53,6 +55,18 @@ headers injected. Examples (Terra):
 
 - `POST /terra/auth/generateWidgetSession` — start a connect session (counts as an account)
 - `GET  /terra/daily?user_id=…&start_date=…&end_date=…` — pull normalized daily metrics
+
+Device sync (only when `RELAY_SYNC_DIR` is set; same bearer auth — see [`src/sync.ts`](src/sync.ts)):
+
+- `PUT /sync/blob/<groupId>` — upload an encrypted snapshot (`{blob, exportedAt, deviceId}` envelope, blob base64)
+- `GET /sync/blob/<groupId>` — download it (`{blob, meta}`)
+- `GET /sync/meta/<groupId>` — metadata only (the cheap "is remote newer?" check)
+
+Sync auth caveat: **any allowlisted token can read/write any groupId** — passphrase pairing
+requires different device tokens to reach the same group, so there's no token↔group binding.
+Reads yield only ciphertext; the write side means allowlisted devices can overwrite each
+other's snapshots (an availability, not confidentiality, concern — keep `RELAY_CLIENT_TOKENS`
+scoped to devices you trust, and note the store keeps one `.prev` generation).
 
 The Compass client is [`electron/integrations/relay-client.ts`](../electron/integrations/relay-client.ts),
 which also implements the **BYO-direct** bypass (a user's own key → call the upstream directly,

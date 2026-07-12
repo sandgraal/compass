@@ -709,6 +709,28 @@ export function registerBackupHandlers(ipcMain: IpcMain): void {
 
 // Exported for unit tests so the round-trip can be exercised without
 // dialog / disk I/O.
+// ── Snapshot façade (Phase 4b device sync) ──────────────────────────────────
+// Device sync reuses the exact backup pipeline: the encrypted snapshot IS a
+// `.compass-backup` bundle, so the sync payload inherits the comprehensive v3
+// capture, the crypto (scrypt + AES-256-GCM), and the atomic restore.
+
+/** Build a passphrase-encrypted snapshot of everything (the v3 bundle). */
+export function buildEncryptedSnapshot(passphrase: string): {
+  blob: Buffer
+  exportedAt: string
+} {
+  const bundle = collectBundle()
+  return { blob: encryptBundle(bundle, passphrase), exportedAt: bundle.exportedAt }
+}
+
+/** Decrypt + fully apply a snapshot (destructive full replace — see applyRestore). */
+export function restoreEncryptedSnapshot(
+  blob: Buffer,
+  passphrase: string
+): { rows: number; vaultFiles: number; knowledgeFiles: number; documentFiles: number } {
+  return applyRestore(decryptBundle(blob, passphrase))
+}
+
 export const _internal = {
   collectBundle,
   encryptBundle,

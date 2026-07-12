@@ -508,6 +508,11 @@ export default function Settings(): JSX.Element {
         <RestoreRow />
       </SettingsSection>
 
+      {/* Device sync (Phase 4b — E2E snapshot sync via the relay) */}
+      <SettingsSection icon={<RefreshCw size={16} />} title="Device Sync">
+        <DeviceSyncRows />
+      </SettingsSection>
+
       {/* Danger zone */}
       <div className="border border-destructive/30 rounded-xl p-5 bg-destructive/5">
         <h3 className="text-sm font-semibold text-destructive mb-1 flex items-center gap-2">
@@ -881,6 +886,227 @@ function RestoreRow(): JSX.Element {
         </button>
       </div>
     </SettingsRow>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Device sync rows (Phase 4b) — snapshot + last-writer-wins between installs,
+// via the relay's ciphertext mailbox. Pairing = the same sync passphrase on
+// each device; the relay sees only a one-way group id + an encrypted blob.
+// Pull is a destructive full replace, so it's gated behind an explicit
+// confirm, mirroring RestoreRow.
+// ---------------------------------------------------------------------------
+
+function DeviceSyncRows(): JSX.Element {
+  const { toast } = useToast()
+  const confirm = useConfirm()
+  const [status, setStatus] = useState<{
+    configured: boolean
+    relayUrl: string
+    lastSeenExportedAt: string | null
+  } | null>(null)
+  const [passphrase, setPassphrase] = useState('')
+  const [confirmPass, setConfirmPass] = useState('')
+  const [busy, setBusy] = useState<null | 'configure' | 'push' | 'pull' | 'disable'>(null)
+
+  async function refresh(): Promise<void> {
+    try {
+      setStatus(await window.api.deviceSync.status())
+    } catch {
+      /* main process unavailable (web preview) — section stays inert */
+    }
+  }
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.api?.deviceSync) return
+    window.api.deviceSync
+      .status()
+      .then(setStatus)
+      .catch(() => {
+        /* main process unavailable — section stays inert */
+      })
+  }, [])
+
+  async function configure(): Promise<void> {
+    if (passphrase.length < 12 || passphrase !== confirmPass || busy) return
+    setBusy('configure')
+    try {
+      const r = await window.api.deviceSync.configure(passphrase)
+      if (r.success) {
+        toast('Device sync configured — enter the same passphrase on your other device', 'success')
+        setPassphrase('')
+        setConfirmPass('')
+        await refresh()
+      } else {
+        toast(r.error ?? 'Could not configure sync', 'error')
+      }
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function push(): Promise<void> {
+    if (busy) return
+    setBusy('push')
+    try {
+      const r = await window.api.deviceSync.push()
+      if (r.success) {
+        toast(`Snapshot pushed (${Math.round(r.bytes / 1024)} KB)`, 'success')
+        await refresh()
+      } else {
+        toast(r.error ?? 'Push failed', 'error')
+      }
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function pull(): Promise<void> {
+    if (busy) return
+    const check = await window.api.deviceSync.check()
+    if (!check.success) {
+      toast(check.error ?? 'Could not reach the relay', 'error')
+      return
+    }
+    if (!check.exists) {
+      toast('No snapshot on the relay yet — push from your other device first', 'info')
+      return
+    }
+    if (!check.newer) {
+      toast('Already up to date with the newest snapshot', 'info')
+      return
+    }
+    const ok = await confirm({
+      title: 'Pull and replace this device?',
+      description: `The relay has a newer snapshot (from ${check.meta?.exportedAt?.slice(0, 16).replace('T', ' ') ?? 'another device'}). Pulling REPLACES everything on this device with it — changes made here since your last push will be lost.`,
+      confirmLabel: 'Pull & replace',
+      destructive: true
+    })
+    if (!ok) return
+    setBusy('pull')
+    try {
+      const r = await window.api.deviceSync.pull()
+      if (r.success && !r.upToDate) {
+        toast(
+          `Synced — this device now matches the ${r.exportedAt.slice(0, 10)} snapshot (${r.rows} rows)`,
+          'success'
+        )
+        await refresh()
+      } else if (r.success) {
+        toast('Already up to date', 'info')
+      } else {
+        toast(r.error ?? 'Pull failed', 'error')
+      }
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function disable(): Promise<void> {
+    if (busy) return
+    const ok = await confirm({
+      title: 'Disable device sync?',
+      description:
+        'Stops syncing from this device and forgets the sync passphrase here. Snapshots already on the relay are unaffected.',
+      confirmLabel: 'Disable',
+      destructive: true
+    })
+    if (!ok) return
+    setBusy('disable')
+    try {
+      await window.api.deviceSync.disable()
+      await refresh()
+      toast('Device sync disabled on this device', 'success')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (!status?.configured) {
+    return (
+      <SettingsRow
+        label="Pair this device"
+        description="Sync an encrypted snapshot of everything between your Compass installs via the relay — it stores only ciphertext it can't read. Enter the SAME passphrase on each device to pair them. Last writer wins."
+      >
+        <div className="flex flex-col items-end gap-1.5">
+          <input
+            type="password"
+            autoComplete="new-password"
+            placeholder="Sync passphrase (min 12 chars — longer is better)"
+            value={passphrase}
+            onChange={(e) => setPassphrase(e.target.value)}
+            className="bg-secondary border border-border rounded-lg px-3 py-1.5 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary w-56"
+          />
+          <input
+            type="password"
+            autoComplete="new-password"
+            placeholder="Confirm passphrase"
+            value={confirmPass}
+            onChange={(e) => setConfirmPass(e.target.value)}
+            className={cn(
+              'bg-secondary border rounded-lg px-3 py-1.5 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary w-56',
+              confirmPass && confirmPass !== passphrase ? 'border-destructive/70' : 'border-border'
+            )}
+          />
+          <button
+            type="button"
+            onClick={configure}
+            disabled={passphrase.length < 12 || passphrase !== confirmPass || busy != null}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={12} />
+            {busy === 'configure' ? 'Configuring…' : 'Enable sync'}
+          </button>
+        </div>
+      </SettingsRow>
+    )
+  }
+
+  return (
+    <>
+      <SettingsRow
+        label="Push snapshot"
+        description={`Upload an encrypted snapshot of this device to ${status.relayUrl}. Last pushed/pulled: ${status.lastSeenExportedAt ? status.lastSeenExportedAt.slice(0, 16).replace('T', ' ') : 'never'}.`}
+      >
+        <button
+          type="button"
+          onClick={push}
+          disabled={busy != null}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
+        >
+          <Upload size={12} />
+          {busy === 'push' ? 'Pushing…' : 'Push now'}
+        </button>
+      </SettingsRow>
+      <SettingsRow
+        label="Pull latest"
+        description="Fetch the newest snapshot from the relay and REPLACE everything on this device with it (last writer wins). You'll be asked to confirm."
+      >
+        <button
+          type="button"
+          onClick={pull}
+          disabled={busy != null}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-border text-foreground hover:bg-secondary/60 rounded-lg transition-colors disabled:opacity-50"
+        >
+          <Download size={12} />
+          {busy === 'pull' ? 'Pulling…' : 'Check & pull…'}
+        </button>
+      </SettingsRow>
+      <SettingsRow
+        label="Disable sync"
+        description="Forget the sync passphrase on this device and stop syncing."
+      >
+        <button
+          type="button"
+          onClick={disable}
+          disabled={busy != null}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-destructive/40 text-destructive hover:bg-destructive/10 rounded-lg transition-colors disabled:opacity-50"
+        >
+          <Trash2 size={12} />
+          {busy === 'disable' ? 'Disabling…' : 'Disable'}
+        </button>
+      </SettingsRow>
+    </>
   )
 }
 
