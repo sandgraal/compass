@@ -211,3 +211,60 @@ describe('subscription price-hike enrichment', () => {
     expect(hulu!.priceHike).toBe(false)
   })
 })
+
+describe('false-positive gates (data cleanup pass, 2026-07)', () => {
+  it('drops regular-rhythm merchants whose amounts scatter (groceries, gas, bank branches)', () => {
+    // Weekly grocery runs: steady cadence, wildly varying amounts.
+    const grocery: MockRow[] = [
+      ['2026-03-07', -105.76],
+      ['2026-03-14', -88.4],
+      ['2026-03-21', -122.13],
+      ['2026-03-28', -95.02],
+      ['2026-04-04', -140.55],
+      ['2026-04-11', -76.31]
+    ].map(([date, amount]) => ({
+      date: date as string,
+      amount: amount as number,
+      description: 'MAXIPALI TURRIALBA',
+      account: 1,
+      category: 'Fees', // a sub-like category so only the amount gate can save us
+      subcategory: null
+    }))
+    const db = buildMockDb(grocery)
+    const result = auditSubscriptions(db, { today: new Date('2026-04-20') })
+    expect(result.active.find((s) => s.merchant.includes('maxipali'))).toBeUndefined()
+  })
+
+  it('keeps scatter-amount merchants the user explicitly categorized as Subscriptions', () => {
+    const rows: MockRow[] = [
+      ['2026-01-15', -10.0],
+      ['2026-02-15', -14.5],
+      ['2026-03-15', -19.0],
+      ['2026-04-15', -12.0]
+    ].map(([date, amount]) => ({
+      date: date as string,
+      amount: amount as number,
+      description: 'USAGE BILLED SAAS',
+      account: 1,
+      category: 'Subscriptions',
+      subcategory: null
+    }))
+    const db = buildMockDb(rows)
+    const result = auditSubscriptions(db, { today: new Date('2026-05-01') })
+    expect(result.active.find((s) => s.merchant.includes('usage'))).toBeDefined()
+  })
+
+  it('skips bank plumbing like PAYPAL INST XFER entirely', () => {
+    const rows: MockRow[] = Array.from({ length: 4 }, (_, i) => ({
+      date: `2026-0${i + 1}-15`,
+      amount: -30.0,
+      description: 'PAYPAL INST XFER',
+      account: 1,
+      category: 'Fees',
+      subcategory: null
+    }))
+    const db = buildMockDb(rows)
+    const result = auditSubscriptions(db, { today: new Date('2026-05-01') })
+    expect(result.active).toHaveLength(0)
+  })
+})

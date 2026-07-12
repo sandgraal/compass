@@ -24,6 +24,8 @@ export const EXCLUSION_KINDS = [
   'entity:person',
   'entity:merchant',
   'entity:place',
+  'entity:subscription-candidate',
+  'subscription-dismissed',
   'dedupe-dismissed'
 ] as const
 export type ExclusionKind = (typeof EXCLUSION_KINDS)[number]

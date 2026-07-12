@@ -81,6 +81,13 @@ beforeEach(async () => {
       source TEXT NOT NULL DEFAULT 'manual',
       created_at INTEGER, updated_at INTEGER
     );
+    CREATE TABLE curation_exclusions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      target TEXT NOT NULL,
+      created_at INTEGER
+    );
+    CREATE UNIQUE INDEX curation_exclusions_kind_target ON curation_exclusions (kind, target);
   `)
   for (const k of Object.keys(handlers)) delete handlers[k]
   mockAudit.mockReset()
@@ -209,3 +216,51 @@ type SubRec = {
   annualCost: number
 }
 type Detected = { active: Array<{ merchant: string; tracked: boolean }> }
+
+describe('subscriptions:dismiss-detected ("Not a subscription")', () => {
+  it('durably hides the dismissed charge from every later audit', async () => {
+    mockAudit.mockReturnValue({
+      totalActiveAnnual: 0,
+      active: [detected('scotiabank turrialba', 'Chris Checking (0991)', 454.2)],
+      zombies: [],
+      expired: [],
+      duplicates: []
+    })
+    let det = (await invoke('subscriptions:get-detected')) as { active: unknown[] }
+    expect(det.active).toHaveLength(1)
+
+    await invoke('subscriptions:dismiss-detected', {
+      merchant: 'scotiabank turrialba',
+      account: 'Chris Checking (0991)'
+    })
+    det = (await invoke('subscriptions:get-detected')) as { active: unknown[] }
+    expect(det.active).toHaveLength(0)
+
+    // Idempotent: dismissing again is a no-op, not an error.
+    await invoke('subscriptions:dismiss-detected', {
+      merchant: 'scotiabank turrialba',
+      account: 'Chris Checking (0991)'
+    })
+    det = (await invoke('subscriptions:get-detected')) as { active: unknown[] }
+    expect(det.active).toHaveLength(0)
+  })
+
+  it('a different account for the same merchant is NOT dismissed', async () => {
+    mockAudit.mockReturnValue({
+      totalActiveAnnual: 0,
+      active: [detected('netflix', 'Card A', 15.49), detected('netflix', 'Card B', 15.49)],
+      zombies: [],
+      expired: [],
+      duplicates: []
+    })
+    await invoke('subscriptions:dismiss-detected', { merchant: 'netflix', account: 'Card A' })
+    const det = (await invoke('subscriptions:get-detected')) as {
+      active: Array<{ account: string }>
+    }
+    expect(det.active.map((d) => d.account)).toEqual(['Card B'])
+  })
+
+  it('rejects a missing merchant', async () => {
+    await expect(invoke('subscriptions:dismiss-detected', {})).rejects.toThrow(/merchant/)
+  })
+})

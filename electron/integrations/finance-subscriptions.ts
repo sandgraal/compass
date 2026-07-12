@@ -10,6 +10,7 @@
 
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
+import { isBankNoise } from '../lib/entities'
 import { type Cadence, PER_YEAR, detectCadence, median, normalizeMerchant } from '../lib/normalize'
 
 export type { Cadence }
@@ -96,6 +97,7 @@ export function auditSubscriptions(
     const cat = r.category ?? 'Uncategorized'
     if (!SUB_CATEGORIES.has(cat)) continue
     if ((r.subcategory ?? '') === 'Interest') continue // CC interest, not a sub
+    if (isBankNoise(r.description)) continue // transfers / card payments, not merchants
     const m = normalizeMerchant(r.description)
     if (!m) continue
     const acctName = (r.account != null && accountById.get(r.account)) || '—'
@@ -140,11 +142,26 @@ export function auditSubscriptions(
       priceHikePct > 8 &&
       historicalMedian > 1
 
+    // Amount-consistency gate (data cleanup pass, 2026-07): real subscriptions
+    // charge one or two price LEVELS (constant, or a step across a hike) while
+    // groceries / gas / bank branches on a regular shopping rhythm scatter.
+    // Require most charges to sit near the recent or historical median —
+    // unless the user already categorized the merchant as Subscriptions.
+    const category = sorted[0].category ?? 'Uncategorized'
+    if (category !== 'Subscriptions') {
+      const near = (a: number, level: number): boolean =>
+        Math.abs(a - level) <= Math.max(0.5, level * 0.1)
+      const onLevel = amounts.filter(
+        (a) => near(a, recentMedian) || near(a, historicalMedian)
+      ).length
+      if (onLevel / amounts.length < 0.8) continue
+    }
+
     const [merchant, account] = key.split('::')
     subs.push({
       merchant,
       account,
-      category: sorted[0].category ?? 'Uncategorized',
+      category,
       subcategory: sorted[0].subcategory ?? '',
       cadence,
       medianAmount: Math.round(med * 100) / 100,

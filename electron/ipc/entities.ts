@@ -172,11 +172,7 @@ export function registerEntitiesHandlers(ipcMain: IpcMain): void {
       const valid = items
         .filter(
           (i): i is { kind: EntityKind; key: string } =>
-            !!i &&
-            KINDS.includes(i.kind) &&
-            i.kind !== 'subscription-candidate' &&
-            typeof i.key === 'string' &&
-            i.key.trim().length > 0
+            !!i && KINDS.includes(i.kind) && typeof i.key === 'string' && i.key.trim().length > 0
         )
         .map((i) => ({ kind: i.kind, key: i.key.trim() }))
 

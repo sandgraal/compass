@@ -170,7 +170,7 @@ const VOICE_VERB = /^(Text with|Voicemail from|Missed call from|Call to|Call fro
  * These rows still land in the searchable timeline; they just don't derive an entity.
  */
 const BANK_NOISE =
-  /\b(funds?\s+transfer|balance\s+transfer|wire\s+transfer|transfer\s+(to|from)|e-?payment|ach\s+(pmt|payment|debit|credit)|online\s+payment|(credit\s+)?card\s+payment|bill\s*pay(ment)?|auto\s*pay|thank\s+you|interest\s+(paid|charge)|finance\s+charge|overdraft|atm\s+rebate|icpayment)\b/i
+  /\b(funds?\s+transfer|balance\s+transfer|wire\s+transfer|transfer\s+(to|from)|e-?payment|ach\s+(pmt|payment|debit|credit)|online\s+payment|(credit\s+)?card\s+payment|bill\s*pay(ment)?|auto\s*pay|inst\s+xfer|thank\s+you|interest\s+(paid|charge)|finance\s+charge|overdraft|atm\s+rebate|icpayment)\b/i
 /** Embedded tokens where a `\b` boundary fails (e.g. "AMZ_STORECRD_PMT"). */
 const BANK_NOISE_EMBED = /store_?crd|_pmt\b/i
 /** Single-word statement memos that are never merchants. */
@@ -624,7 +624,23 @@ export function deriveEntities(records: EntityRecordRow[], owned: OwnedRefs): De
     if (kind === 'merchant' && e.dates.length >= 3) {
       const sorted = [...e.dates].sort((a, b) => a - b)
       const cadence = detectCadence(sorted.map((d) => new Date(d)))
-      if (cadence) {
+      // Amount-consistency gate: real subscriptions charge a near-constant
+      // amount; groceries/gas on a regular shopping rhythm don't. Sources
+      // without amounts (Netflix watches, etc.) pass on cadence alone.
+      // Min/max via a loop — spreading a big amounts array into Math.max
+      // blows the engine's argument limit on high-volume merchants.
+      const amountsSteady = (): boolean => {
+        if (e.amounts.length < 3) return true
+        let min = Number.POSITIVE_INFINITY
+        let max = Number.NEGATIVE_INFINITY
+        for (const a of e.amounts) {
+          if (a < min) min = a
+          if (a > max) max = a
+        }
+        const med = median(e.amounts)
+        return med > 0 && max - min <= 0.35 * med
+      }
+      if (cadence && amountsSteady()) {
         const medAmount = e.amounts.length > 0 ? Math.round(median(e.amounts) * 100) / 100 : 0
         out.push({
           kind: 'subscription-candidate',

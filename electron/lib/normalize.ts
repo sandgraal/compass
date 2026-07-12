@@ -68,6 +68,14 @@ export function detectCadence(dates: Date[]): Cadence | null {
     gaps.push(Math.round(ms / 86400000))
   }
   const med = median(gaps)
+  // Regularity gate (data cleanup pass, 2026-07): a median inside a band isn't
+  // enough — grocery runs / gas fill-ups / bank visits produce medians that
+  // land in the weekly/biweekly bands while individual gaps scatter. Real
+  // subscriptions bill ON schedule, so most gaps must sit near the median
+  // (±25%, floored at ±2 days for weekday drift on short cadences).
+  const tolerance = Math.max(2, med * 0.25)
+  const inBand = gaps.filter((g) => Math.abs(g - med) <= tolerance).length
+  if (inBand / gaps.length < 0.6) return null
   if (med >= 25 && med <= 35) return 'monthly'
   if (med >= 6 && med <= 9) return 'weekly'
   if (med >= 12 && med <= 16) return 'biweekly'
