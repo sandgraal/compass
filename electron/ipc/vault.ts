@@ -225,9 +225,19 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
     // Genetics entries point at a standalone raw-genotype blob (see
     // `vault:import-genetics-file`) that lives outside the category array —
     // clean it up too, or it'd be an orphaned encrypted file on disk forever.
-    if (category === 'genetics' && typeof deleted?.rawBlobName === 'string') {
-      const rawPath = join(VAULT_DIR, `${deleted.rawBlobName}.enc`)
-      if (existsSync(rawPath)) unlinkSync(rawPath)
+    const rawBlobName = typeof deleted?.rawBlobName === 'string' ? deleted.rawBlobName : null
+    if (
+      category === 'genetics' &&
+      rawBlobName &&
+      rawBlobName.startsWith('genetics_raw_') &&
+      /^[A-Za-z0-9_-]{1,64}$/.test(rawBlobName)
+    ) {
+      const rawPath = join(VAULT_DIR, `${rawBlobName}.enc`)
+      try {
+        if (existsSync(rawPath)) unlinkSync(rawPath)
+      } catch {
+        /* ignore */
+      }
     }
 
     return { success: true }
