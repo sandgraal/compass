@@ -143,14 +143,18 @@ function readPassphrase(): string | null {
 // ── public surface ────────────────────────────────────────────────────────────
 
 export function configureDeviceSync(passphrase: string): { success: boolean; error?: string } {
+  // Normalize: avoid accidental leading/trailing whitespace creating a different
+  // effective passphrase than what push/pull use (readPassphrase() trims).
+  const normalized = passphrase.trim()
+
   // 12-char floor (vs the backup's 8): the group id derived from this
   // passphrase is visible in URLs, so it faces an offline-guessing surface a
   // local backup file never does. Length is the defense that scales.
-  if (typeof passphrase !== 'string' || passphrase.length < 12) {
+  if (normalized.length < 12) {
     return { success: false, error: 'Sync passphrase must be at least 12 characters' }
   }
-  writeEncryptedJson(VAULT_NAME, { passphrase }, getOrCreateKey())
-  writeSetting(GROUP_ID_SETTING, syncGroupId(passphrase))
+  writeEncryptedJson(VAULT_NAME, { passphrase: normalized }, getOrCreateKey())
+  writeSetting(GROUP_ID_SETTING, syncGroupId(normalized))
   deviceId() // ensure a stable local identity exists before the first push/pull
   return { success: true }
 }
