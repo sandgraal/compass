@@ -76,6 +76,13 @@ vi.mock('../integrations/things', () => ({
   syncThings: (...args: unknown[]) => syncThingsMock(...args)
 }))
 
+// Apple Reminders sync — local importer via the JXA bridge; mocked so the
+// dispatch/gate is exercised without shelling out to osascript on the host.
+const syncAppleRemindersMock = vi.fn()
+vi.mock('../integrations/apple-reminders', () => ({
+  syncAppleReminders: (...args: unknown[]) => syncAppleRemindersMock(...args)
+}))
+
 // cron — lazy-imported by `sync:set-interval`; harmless stub.
 vi.mock('../cron', () => ({ restartCronJobs: vi.fn() }))
 
@@ -819,6 +826,22 @@ describe('sync:trigger — provider branches', () => {
     // a 'disconnected' row).
     expect(
       sqlite.prepare("SELECT status FROM integrations WHERE service='things'").get()
+    ).toMatchObject({ status: 'connected' })
+  })
+
+  it('dispatches "apple-reminders" to syncAppleReminders and flips the opt-in flag to connected', async () => {
+    syncAppleRemindersMock.mockResolvedValue({
+      service: 'apple-reminders',
+      success: true,
+      recordsUpdated: 3
+    })
+    const h = await registerAndGet('sync:trigger')
+    const result = await invoke(h, 'apple-reminders')
+    expect(result).toEqual({ service: 'apple-reminders', success: true, recordsUpdated: 3 })
+    expect(syncAppleRemindersMock).toHaveBeenCalledOnce()
+    // Same opt-in flip as Things — reconnect re-enables the self-gated sync.
+    expect(
+      sqlite.prepare("SELECT status FROM integrations WHERE service='apple-reminders'").get()
     ).toMatchObject({ status: 'connected' })
   })
 })
