@@ -108,18 +108,21 @@ describe('runGcalDedupeIfNeeded', () => {
     title: string,
     occurredAt: number | null,
     hash: string,
-    provenance = 'Work.ics'
+    provenance = 'Work.ics',
+    body: string | null = null,
+    payload: string | null = null
   ): void {
     sqlite
       .prepare(
-        "INSERT INTO records (source, type, occurred_at, title, dedup_hash, provenance) VALUES ('gcal', 'event', ?, ?, ?, ?)"
+        "INSERT INTO records (source, type, occurred_at, title, body, payload, dedup_hash, provenance) VALUES ('gcal', 'event', ?, ?, ?, ?, ?, ?)"
       )
-      .run(occurredAt, title, hash, provenance)
+      .run(occurredAt, title, body, payload, hash, provenance)
   }
 
   it('keeps the oldest of each duplicate group and leaves distinct events alone', () => {
     const when = Date.parse('2026-05-01T09:00:00Z')
-    // Duplicate pair from payload-drift across re-imports (different hashes).
+    // Duplicate pair from UID-drift across re-imports (different hashes,
+    // identical user-visible fields).
     insertGcal('Harvest Kale - Lacinato', when, 'h1')
     insertGcal('Harvest Kale - Lacinato', when, 'h2')
     // Same title+time but a DIFFERENT calendar file — not a duplicate.
@@ -137,6 +140,27 @@ describe('runGcalDedupeIfNeeded', () => {
     expect(
       sqlite.prepare("SELECT count(*) AS n FROM records WHERE source='generic'").get()
     ).toEqual({ n: 1 })
+  })
+
+  it('never collapses real events that share title+time+file but differ in visible fields', () => {
+    const when = Date.parse('2026-06-01T15:00:00Z')
+    // Same SUMMARY + DTSTART in the same .ics, different LOCATION (body):
+    // two real overlapping bookings, not an export drift.
+    insertGcal('Team sync', when, 'a1', 'Work.ics', 'Room 4')
+    insertGcal('Team sync', when, 'a2', 'Work.ics', 'Room 9')
+    // Live-synced rows (payload present): same title+time, different payloads.
+    insertGcal('1:1', when, 'b1', 'live:gcal', null, '{"eventId":"x"}')
+    insertGcal('1:1', when, 'b2', 'live:gcal', null, '{"eventId":"y"}')
+    // …and a true UID-drift pair, identical in every visible field.
+    insertGcal('Standup', when, 'c1', 'Work.ics', 'Zoom', '{"uid":"old"}')
+    insertGcal('Standup', when, 'c2', 'Work.ics', 'Zoom', '{"uid":"old"}')
+
+    const res = runGcalDedupeIfNeeded(sqlite, NOW)
+    expect(res).toEqual({ ran: true, removed: 1 })
+    const kept = sqlite
+      .prepare("SELECT dedup_hash AS h FROM records WHERE source='gcal' ORDER BY id")
+      .all() as Array<{ h: string }>
+    expect(kept.map((k) => k.h)).toEqual(['a1', 'a2', 'b1', 'b2', 'c1'])
   })
 
   it('runs once and then gates', () => {
