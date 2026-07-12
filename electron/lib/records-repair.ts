@@ -46,3 +46,44 @@ export function runRecordsDateRepairIfNeeded(
     .run(RECORDS_DATE_REPAIR_KEY, new Date(now).toISOString(), now)
   return { ran: true, repaired: res.changes }
 }
+
+export const GCAL_DEDUPE_KEY = 'gcalDedupeV1'
+
+/**
+ * One-shot dedupe of gcal events (data cleanup pass, 2026-07). The gcal
+ * naturalKey is `uid|when`, but some exporters REGENERATE event UIDs on every
+ * export, so re-importing a refreshed .ics hashes the same event to a
+ * different `dedup_hash` — the live-DB audit found 65 duplicate rows (same
+ * title, time, location, and provenance file). Rows must be identical in
+ * every user-visible field (title, time, body/location, payload) within the
+ * same import file to collapse — two REAL events that merely share a title
+ * and start time survive. Keep the OLDEST row of each group; the FTS delete
+ * trigger keeps the index consistent. Same gate pattern as the date repair.
+ */
+export function runGcalDedupeIfNeeded(
+  sqlite: SqliteForRepair,
+  now: number = Date.now()
+): { ran: boolean; removed: number } {
+  const existing = sqlite
+    .prepare('SELECT value FROM app_settings WHERE key = ?')
+    .get(GCAL_DEDUPE_KEY) as { value: string } | undefined
+  if (existing) return { ran: false, removed: 0 }
+
+  const res = sqlite
+    .prepare(
+      `DELETE FROM records
+        WHERE source = 'gcal' AND type = 'event'
+          AND id NOT IN (
+            SELECT MIN(id) FROM records
+             WHERE source = 'gcal' AND type = 'event'
+             GROUP BY title, occurred_at, COALESCE(provenance, ''),
+                      COALESCE(body, ''), COALESCE(payload, '')
+          )`
+    )
+    .run()
+
+  sqlite
+    .prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)')
+    .run(GCAL_DEDUPE_KEY, new Date(now).toISOString(), now)
+  return { ran: true, removed: res.changes }
+}
