@@ -146,7 +146,7 @@ function defaultOsascriptRun(script: string): Promise<string> {
       ['-l', 'JavaScript', '-e', script],
       { encoding: 'utf8', timeout: JXA_TIMEOUT_MS, maxBuffer: MAX_JXA_OUTPUT_BYTES },
       (err, stdout) => {
-        if (err) reject(err)
+        if (err) reject(new Error(`Reminders access failed: ${err.message}`))
         else resolve(stdout)
       }
     )
