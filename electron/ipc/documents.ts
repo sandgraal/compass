@@ -157,9 +157,11 @@ async function importOne(srcPath: string): Promise<PerFile> {
   const id = Number(res.lastInsertRowid)
 
   // Project a lightweight timeline row (title, NO body text) so the document
-  // shows on the Timeline; naturalKey = sha256 dedupes re-imports. Dated at the
-  // import moment — the content date (doc_date) is unknown at import, and an
-  // undated row never surfaces on any date lens at all.
+  // shows on the Timeline. Re-import dedupe happens ABOVE on documents.sha256
+  // (the early 'duplicate' return) — not via the spine's dedup hash, which
+  // encodes occurred_at and therefore varies with the import moment. Dated at
+  // the import moment — the content date (doc_date) is unknown at import, and
+  // an undated row never surfaces on any date lens at all.
   const spine: RecordInput = {
     source: 'document',
     type: 'file',
