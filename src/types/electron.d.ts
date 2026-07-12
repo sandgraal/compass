@@ -1305,6 +1305,13 @@ declare global {
           canceled?: boolean
           error?: string
         }>
+        importGeneticsFile(): Promise<{
+          success: boolean
+          imported?: number
+          canceled?: boolean
+          error?: string
+          entry?: VaultEntry
+        }>
       }
       habits: {
         list(includeInactive?: boolean): Promise<Habit[]>
