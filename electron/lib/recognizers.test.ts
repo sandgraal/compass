@@ -80,6 +80,25 @@ describe('netflix recognizer', () => {
     expect(out[0]).toMatchObject({ source: 'netflix', type: 'watch', title: 'The Matrix' })
     expect(out[0].occurredAt).toBe(new Date(2026, 0, 2).getTime())
   })
+
+  it('no longer claims other Title,* CSVs or "viewing" filenames (data-cleanup fix)', () => {
+    // Prime Video sessions — matched the old /viewing/i filename test.
+    const pv = file(
+      'PrimeVideo.ViewingHistory.csv',
+      '"Playback Start Datetime (UTC)","Playback End Datetime (UTC)","Title","Seconds Viewed"\n' +
+        '"2024-12-19T18:18:47Z","2024-12-19T18:18:50Z","""Red One""","0.00000"\n'
+    )
+    expect(recognize(pv)?.id).toBe('prime-video-sessions')
+    // Google Maps saved list — matched the old loose header test.
+    const list = file('Want to go.csv', 'Title,Note,URL,Tags,Comment\nVilla Bosque,,,,\n')
+    expect(recognize(list)?.id).not.toBe('netflix')
+    // Notes export — routed to the notes recognizer.
+    const notes = file(
+      'Notes Details.csv',
+      'Title, Created On, Modified On, Pinned, Deleted, Drawing/Handwriting\nA,11-02-2025 11:21:42,,,No,No\n'
+    )
+    expect(recognize(notes)?.id).toBe('notes-details')
+  })
 })
 
 describe('spotify recognizer', () => {

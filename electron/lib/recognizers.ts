@@ -28,7 +28,8 @@ import {
   AMAZON_SEARCH_RECOGNIZER,
   AMAZON_WISHLIST_RECOGNIZER,
   KINDLE_READING_RECOGNIZER,
-  PRIME_VIDEO_RECOGNIZER
+  PRIME_VIDEO_RECOGNIZER,
+  PRIME_VIDEO_SESSIONS_RECOGNIZER
 } from './amazon-export'
 import { parseAppleHealth } from './apple-health'
 import { BROWSER_RECOGNIZERS } from './browser-history'
@@ -77,6 +78,11 @@ import {
 } from './linkedin'
 import { GOOGLE_LOCATION_STREAM, GPX_RECOGNIZER, OWNTRACKS_RECOGNIZER } from './location'
 import { parseMbox } from './mbox'
+import {
+  CSV_BOOKMARKS_RECOGNIZER,
+  GOOGLE_SAVED_LIST_RECOGNIZER,
+  NOTES_DETAILS_RECOGNIZER
+} from './netflix-refile'
 import { PAYPAL_RECOGNIZER } from './paypal'
 import {
   CREDIT_REPORT_RECOGNIZER,
@@ -145,10 +151,21 @@ function safeJsonArray(text: string): unknown[] {
 }
 
 // ── Netflix viewing history (CSV: "Title","Date") ─────────────────────────────
+// detect() is deliberately STRICT: the pre-cleanup version claimed any csv whose
+// filename contained "viewing" (→ swallowed PrimeVideo.ViewingHistory) or whose
+// header merely began with "Title," (→ swallowed Google Maps saved lists,
+// bookmark CSVs, note exports). Require the Netflix filename or the exact
+// two-column Title,Date header; `netflix-refile.ts` repairs the misfiled rows.
 const netflix: Recognizer = {
   id: 'netflix',
   label: 'Netflix viewing history',
-  detect: (f) => f.ext === 'csv' && (/viewing/i.test(f.name) || /^"?title"?\s*,/i.test(f.text)),
+  detect: (f) => {
+    if (f.ext !== 'csv') return false
+    if (/netflix/i.test(f.name)) return true
+    const nl = f.text.indexOf('\n')
+    const header = (nl === -1 ? f.text : f.text.slice(0, nl)).trim()
+    return /^"?title"?\s*,\s*"?date"?$/i.test(header)
+  },
   parse: (f) => {
     const out: RecordInput[] = []
     for (const r of parseCSV(f.text)) {
@@ -319,6 +336,8 @@ export const RECOGNIZERS: Recognizer[] = [
   youtube,
   AMAZON_RECOGNIZER,
   PRIME_VIDEO_RECOGNIZER,
+  PRIME_VIDEO_SESSIONS_RECOGNIZER,
+  NOTES_DETAILS_RECOGNIZER,
   KINDLE_READING_RECOGNIZER,
   AMAZON_MUSIC_LIKES_RECOGNIZER,
   AMAZON_MUSIC_LIBRARY_RECOGNIZER,
@@ -531,7 +550,9 @@ export const SNAPSHOT_RECOGNIZERS: SnapshotRecognizer[] = [
   FACEBOOK_PROFILE_RECOGNIZER,
   FACEBOOK_APPS_RECOGNIZER,
   GOOGLE_SUBSCRIPTIONS_RECOGNIZER,
-  GOOGLE_BOOKMARKS_RECOGNIZER
+  GOOGLE_BOOKMARKS_RECOGNIZER,
+  GOOGLE_SAVED_LIST_RECOGNIZER,
+  CSV_BOOKMARKS_RECOGNIZER
 ]
 
 /** First snapshot recognizer that claims this file, or null. */

@@ -8,6 +8,7 @@
  * against the real export's payloads:
  *
  *  - `PrimeVideo.WatchEvent.*.csv`  → prime-video / watch
+ *  - `PrimeVideo.ViewingHistory*.csv` (per-playback sessions) → prime-video / watch
  *  - `Kindle.reading-insights-sessions_with_adjustments.csv` → kindle / read
  *  - `Followed Artists and Accounts.csv` (track thumbs-ups) → amazon-music / like
  *  - `Saved Music.csv` (library adds) → amazon-music / save
@@ -90,6 +91,40 @@ export function mapPrimeVideoWatch(row: Record<string, unknown>): RecordInput | 
     body,
     payload: row,
     naturalKey: `${watchDate}|${title}`
+  }
+}
+
+/** Strip one layer of literal wrapping quotes (`"Red One"` → `Red One`). */
+function unquote(s: string): string {
+  const m = s.match(/^"([\s\S]*)"$/)
+  return m ? m[1].trim() : s
+}
+
+/**
+ * Prime Video per-playback sessions (`PrimeVideo.ViewingHistory*.csv`) — one
+ * row per playback event with an exact start time. Complements
+ * `PrimeVideo.WatchEvent` (one row per TITLE, most-recent date only). Values in
+ * this CSV are double-quoted by Amazon's writer, so titles arrive as
+ * `"Red One"` — unquote before hashing. Sub-minute playbacks are channel
+ * surfing, bodied 'Browsed' so they're distinguishable from real sessions.
+ */
+export function mapPrimeVideoSession(row: Record<string, unknown>): RecordInput | null {
+  if (!hasKey(row, ['Playback Start Datetime (UTC)'])) return null
+  const title = unquote(field(row, 'Title'))
+  if (!title) return null
+  const start = field(row, 'Playback Start Datetime (UTC)')
+  const seconds = Number(field(row, 'Seconds Viewed'))
+  return {
+    source: 'prime-video',
+    type: 'watch',
+    occurredAt: parseWhen(start),
+    title,
+    body:
+      Number.isFinite(seconds) && seconds >= 60
+        ? minutesBody('Watched', seconds * 1000)
+        : 'Browsed',
+    payload: row,
+    naturalKey: `${start}|${title}`
   }
 }
 
@@ -463,6 +498,13 @@ export const AMAZON_RIDER_LOCATION_RECOGNIZER = csvRecognizer(
   'Amazon app GPS fixes',
   ['GPS Time (UTC)', 'Latitude', 'Longitude'],
   mapAmazonRiderLocation
+)
+
+export const PRIME_VIDEO_SESSIONS_RECOGNIZER = csvRecognizer(
+  'prime-video-sessions',
+  'Prime Video playback sessions',
+  ['Playback Start Datetime (UTC)', 'Title'],
+  mapPrimeVideoSession
 )
 
 // Detect on the distinctive item id alone: the mapper hedges the product-name
