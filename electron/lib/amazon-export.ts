@@ -465,10 +465,12 @@ export const AMAZON_RIDER_LOCATION_RECOGNIZER = csvRecognizer(
   mapAmazonRiderLocation
 )
 
+// Detect on the distinctive item id alone: the mapper hedges the product-name
+// header ('ProductName' vs 'Product Name'), so detection must not pin one spelling.
 export const AMAZON_DIGITAL_ITEMS_RECOGNIZER = csvRecognizer(
   'amazon-digital-items',
   'Amazon digital purchases',
-  ['DigitalOrderItemId', 'ProductName'],
+  ['DigitalOrderItemId'],
   mapAmazonDigitalItem
 )
 
@@ -544,3 +546,48 @@ export const AMAZON_REFILE_FAMILIES: readonly RefileFamily[] = [
   { matches: (p) => /wishlist|wish[\s_-]?list/i.test(p), map: mapAmazonWishlist },
   { matches: (p) => /search[\s_-]?(query|data|history)/i.test(p), map: mapAmazonSearch }
 ]
+
+// ── Telemetry provenance fingerprints (for the one-shot purge) ────────────────
+
+/**
+ * Import filenames of the archive's pure-TELEMETRY families — device-state
+ * pings, engagement/impression metrics, notification delivery metadata. The
+ * one-shot purge (`runGenericTelemetryPurgeIfNeeded`, records.ts) deletes only
+ * `generic` rows whose provenance matches one of these, so unrecognized
+ * imports from OTHER sources are never touched by it. Patterns cover the
+ * families observed in the real export (live-DB audit, 2026-07-11); telemetry
+ * from unlisted tail files simply stays generic (firehose-hidden) — the safe
+ * direction.
+ */
+export const AMAZON_TELEMETRY_PROVENANCE: readonly RegExp[] = [
+  /^DeviceState/i,
+  /^DeviceEngagement/i,
+  /^node_metadata/i,
+  /^AppEngagement/i,
+  /^recognitionData/i,
+  /^apps-and-more\./i,
+  /^Appstore\./i,
+  /^Whispered/i,
+  /^Retail\./i, // Retail.OutboundNotifications.* + rows the gift-cert mapper declined
+  /^Request All Your Data\./i,
+  /^ThreePAppUsageDataSetting/i,
+  /^TotalUsage/i,
+  /^SentimentScore/i,
+  /^Alexa and Echo Devices\./i,
+  /^rider_app_analytics/i, // rows the GPS mapper declined (missing/zero coordinates)
+  /^FireTV?\./i,
+  /^Kindle\.Devices\./i, // deliberately-unclaimed raw device logs (see header)
+  /^OutboundNotifications\./i,
+  /^Reading Progress\.csv$/i,
+  /^Digital (Items|Orders)\.csv$/i, // Orders (no product names) + Items rows the mapper declined
+  /^Digital\.PrimeVideo\./i,
+  /^PDI\.csv$/i,
+  /^Device_/i,
+  /^D2Diode/i
+]
+
+/** Whether a generic row's import filename marks it as Amazon-export telemetry. */
+export function isAmazonTelemetryProvenance(provenance: string | null): boolean {
+  if (!provenance) return false
+  return AMAZON_TELEMETRY_PROVENANCE.some((re) => re.test(provenance))
+}
