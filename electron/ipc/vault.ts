@@ -1,9 +1,10 @@
 import { randomBytes } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { type IpcMain, dialog } from 'electron'
-import { decryptBlob, encryptBlob, getOrCreateKey } from '../lib/crypto-vault'
+import { decryptBlob, encryptBlob, getOrCreateKey, writeEncryptedJson } from '../lib/crypto-vault'
 import { parseCSV } from '../lib/csv'
+import { detectGenotypeProvider, parseGenotypeSummary } from '../lib/genetics'
 import { VAULT_DIR } from '../paths'
 
 // Crypto primitives live in `electron/lib/crypto-vault.ts` so the Plaid
@@ -81,6 +82,20 @@ const VAULT_CATEGORIES = [
     label: 'Foreign Accounts',
     icon: 'globe',
     description: 'FBAR/FATCA — foreign bank/securities account numbers + institutions'
+  },
+  {
+    // Genetics is the most sensitive category in the app — immutable, family-
+    // implicating, GINA discrimination risk. It's sealed even from the in-app
+    // assistant (deliberately excluded from VAULT_DOC_CATEGORIES in
+    // electron/integrations/assistant-tools.ts, same as `credentials`) and, like
+    // every vault category, structurally unreachable by MCP. Raw genotype text
+    // never lives in this category's own entries — see
+    // `vault:import-genetics-file` below, which stores it as a separate
+    // standalone encrypted blob and keeps only a summary here.
+    id: 'genetics',
+    label: 'Genetics',
+    icon: 'dna',
+    description: 'Raw genotype data (23andMe, AncestryDNA) — sealed from AI, vault-only'
   }
 ]
 
@@ -203,8 +218,18 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('vault:delete-entry', (_event, category: string, id: string) => {
     const key = getOrCreateKey()
     const entries = readVaultCategory(category, key) as Record<string, unknown>[]
+    const deleted = entries.find((e) => (e as Record<string, unknown>).id === id)
     const filtered = entries.filter((e) => (e as Record<string, unknown>).id !== id)
     writeVaultCategory(category, filtered, key)
+
+    // Genetics entries point at a standalone raw-genotype blob (see
+    // `vault:import-genetics-file`) that lives outside the category array —
+    // clean it up too, or it'd be an orphaned encrypted file on disk forever.
+    if (category === 'genetics' && typeof deleted?.rawBlobName === 'string') {
+      const rawPath = join(VAULT_DIR, `${deleted.rawBlobName}.enc`)
+      if (existsSync(rawPath)) unlinkSync(rawPath)
+    }
+
     return { success: true }
   })
 
@@ -265,6 +290,52 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
       writeVaultCategory('financial', financialEntries, key)
 
       return { success: true, imported }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('vault:import-genetics-file', async () => {
+    const { filePaths, canceled } = await dialog.showOpenDialog({
+      title: 'Import raw genotype data (23andMe / AncestryDNA)',
+      filters: [{ name: 'Raw genotype data', extensions: ['txt'] }],
+      properties: ['openFile']
+    })
+    if (canceled || filePaths.length === 0) return { success: false, canceled: true }
+
+    try {
+      const rawText = readFileSync(filePaths[0], 'utf-8')
+      const provider = detectGenotypeProvider(rawText)
+      if (!provider) {
+        return {
+          success: false,
+          error: 'Unrecognized file — expected a 23andMe or AncestryDNA raw-data export'
+        }
+      }
+      const summary = parseGenotypeSummary(rawText, provider)
+
+      const key = getOrCreateKey()
+      const entryId = randomBytes(8).toString('hex')
+      const rawBlobName = `genetics_raw_${entryId}`
+      // The raw genotype text is a standalone encrypted blob, never a
+      // VAULT_CATEGORIES entry field — it's never parsed further or rendered.
+      writeEncryptedJson(rawBlobName, rawText, key)
+
+      const entries = readVaultCategory('genetics', key) as Record<string, unknown>[]
+      const entry = {
+        id: entryId,
+        provider: summary.provider,
+        buildAssembly: summary.buildAssembly ?? '',
+        snpCount: summary.snpCount,
+        notes: '',
+        rawBlobName,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      }
+      entries.push(entry)
+      writeVaultCategory('genetics', entries, key)
+
+      return { success: true, imported: 1, entry }
     } catch (err) {
       return { success: false, error: String(err) }
     }

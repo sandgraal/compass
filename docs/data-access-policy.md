@@ -9,7 +9,7 @@ this document disagree, this document wins — fix the comment.*
 > **Every domain flows onto the `records` spine and is readable in full detail
 > by every surface** — the Timeline, ⌘K global search, People/Places/insights,
 > the in-app Ask Compass assistant, and the Compass MCP server — **with exactly
-> three exceptions:**
+> four exceptions:**
 >
 > 1. **Raw GPS coordinates never enter `records` or any AI surface.**
 >    `location_points` is its own table, off the spine; only the derived,
@@ -22,7 +22,17 @@ this document disagree, this document wins — fix the comment.*
 >    leak risk with zero feature value. ⌘K searches credential entries by
 >    their `service` label only; the assistant's vault tools refuse the
 >    category at the tool boundary; the MCP can't reach the vault at all.
-> 3. **Vault bodies are never written to any on-disk index.** Encryption at
+> 3. **The vault `genetics` category stays sealed everywhere, like
+>    `credentials`.** Raw 23andMe/AncestryDNA genotype data is uniquely
+>    sensitive — immutable, family-implicating, and a GINA discrimination
+>    risk — so it's excluded from `VAULT_DOC_CATEGORIES`
+>    (`electron/integrations/assistant-tools.ts`) the same way `credentials`
+>    is, on top of the MCP-can't-reach-the-vault wall every category gets.
+>    The category only ever holds an import summary (provider, SNP count,
+>    reference build); the raw genotype text is a separate encrypted blob
+>    (`electron/ipc/vault.ts` `vault:import-genetics-file`), never parsed
+>    into structured data or rendered field-by-field.
+> 4. **Vault bodies are never written to any on-disk index.** Encryption at
 >    rest stays. The open document categories (`financial`, `identity`,
 >    `medical`, `legal`, `foreign-accounts`) are decrypted **per query, in
 >    memory, in the Electron main process only**. Consequence: the MCP server
@@ -77,6 +87,7 @@ unchanged: AI reads everything, writes nothing without human approval.
 | GPS off the spine | `insertLocationPoints` routes to `location_points`; no projector reads it | `electron/ipc/records-reclassify.test.ts` (asserts geolocation rows land in `location_points`, off `records`); `electron/lib/amazon-export.test.ts` |
 | Credentials sealed in ⌘K | title-field allowlist only for `credentials` in `electron/ipc/search.ts` | `electron/ipc/search.test.ts` |
 | Credentials sealed in the assistant | category refused at the tool boundary; `VaultReader` allowlist (defense in depth) in `electron/ipc/assistant.ts` | `electron/integrations/assistant-tools.test.ts` |
+| Genetics sealed everywhere | excluded from `VAULT_DOC_CATEGORIES` in `electron/integrations/assistant-tools.ts` (same allowlist as credentials); raw genotype text never enters the category's own entries — separate encrypted blob in `electron/ipc/vault.ts` | `electron/lib/genetics.test.ts` (summary never contains raw genotype calls) |
 | Vault unreachable from MCP | structural — separate process, read-only `compass.db`, no Keychain | `mcp/compass-mcp/index.ts` header |
 | No vault plaintext on disk | decrypt-per-query in `searchVault` / `VaultReader`; no FTS over vault | `electron/ipc/search.ts` comments + tests |
 

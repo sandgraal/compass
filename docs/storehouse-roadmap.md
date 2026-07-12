@@ -157,7 +157,7 @@ FILE. *(All third-party specifics — free cadences, API availability — verify
 | Lab results | values + ranges | LIVE (FHIR), CRED/FILE (Quest/LabCorp) | |
 | Insurance claims / EOBs | claims, costs | CRED (payer portal), RIGHTS/LIVE (Medicare Blue Button 2.0) | |
 | Prescriptions | fill history | LIVE (FHIR meds), CRED (pharmacy) | |
-| **Genetics** | raw genotype | EXPORT/FILE (23andMe / AncestryDNA download) | sensitive → encrypt at rest |
+| **Genetics** ✅ *shipped* | raw genotype | EXPORT/FILE (23andMe / AncestryDNA download) | sensitive → encrypted at rest in the sealed `genetics` vault category (`electron/lib/genetics.ts`, `vault:import-genetics-file`) |
 | Wearables | recovery, strain, sleep | LIVE (Oura, Whoop, Garmin, Fitbit/Google), EXPORT (Strava, Fitbit, Garmin) | **Oura first** (LIVE, PAT). **Fitbit + Garmin EXPORT recognizers shipped** (daily steps/sleep JSON + activities JSON → Timeline; no OAuth/dev-app). LIVE OAuth for Fitbit/Garmin (auto-sync + habit auto-link) **deferred** — both need a full OAuth2 app + client secret (no PAT), Garmin has an approval waitlist; do once a real export validates the shapes. Whoop still open |
 
 ### 4c. Digital footprint & communications
@@ -233,6 +233,13 @@ the aggregates-only boundary).
 
 Every item below is non-negotiable and consistent with [architecture.md](architecture.md).
 
+> **Note (2026-07):** the per-domain "health/medical/income/insurance/precise-location are aggregates-only
+> to the assistant + MCP" framing in this section predates [`data-access-policy.md`](data-access-policy.md),
+> which is now the single normative doc for the AI-access boundary and supersedes it — under that policy only
+> the vault `credentials`/`genetics` categories and raw GPS coordinates stay sealed; everything else
+> (including medical, income/paystubs, and finance) is full-detail readable. Where the two disagree below,
+> `data-access-policy.md` wins.
+
 - **Local-first preserved.** Every source lands on disk. CSP `connect-src` is extended **per source**, no
   wildcards; prefer **main-process-only** API calls (like Linear/Todoist) so the renderer CSP never widens.
   The metered aggregator relay (primitive G) is consistent with this: it's a **stateless pass-through that stores
@@ -279,8 +286,7 @@ Builds on Phase 9's shipped spine; **does not renumber 9.x**. Each wave is its o
   *Everything else hangs off this — build first.*
 - [~] **10.2 Financial & credit completeness** 🟡 *credit-report + tax-doc PDF recognizers shipped; a generic brokerage-holdings CSV importer (FILE path) shipped (PR #271 — `electron/integrations/finance-holdings.ts`, dated `records` snapshots, Net Worth holdings card); LIVE holdings feed, IRS transcripts, crypto still open (feeds Phase 11)* — credit reports (RIGHTS), brokerage/retirement holdings
   LIVE auto-feed (SnapTrade or Plaid Investments), IRS/tax transcripts, crypto. Extends Phase 4 net worth + forecast.
-- [~] **10.3 Health & medical** 🟡 *Apple Health `export.xml` recognizer shipped; **Oura (LIVE, PAT-based) shipped 2026-07-03**; **Health hub surface shipped** (pure `health-summary.ts` + `/health` page + aggregates-only `compass_health_summary` MCP tool — unifies Oura + apple-health/fitbit/garmin into step/sleep/score/workout trends); FHIR/genetics/remaining LIVE wearables (Whoop/Garmin/Fitbit OAuth) open* — Apple Health (FILE) → FHIR/Blue Button (evaluate Fasten Health) →
-  genetics → wearables. Feeds the Phase 9.4 `medical_*` tables.
+- [x] **10.3 Health & medical** ✅ **shipped** — Apple Health `export.xml` recognizer shipped; **Oura (LIVE, PAT-based) shipped 2026-07-03**; **Health hub surface shipped** (pure `health-summary.ts` + `/health` page + aggregates-only `compass_health_summary` MCP tool — unifies Oura + apple-health/fitbit/garmin into step/sleep/score/workout trends); **FHIR shipped 2026-07-06 via Metriport** (§4f below — needs a deployed relay + real credentials to run live, code is complete); **remaining LIVE wearables (incl. Whoop) covered by Terra's 500+-device integration** (§4f, same live-deployment caveat); **genetics raw-data import shipped** (23andMe/AncestryDNA `.txt` → the sealed `genetics` vault category, `electron/lib/genetics.ts` — EXPORT/FILE only, no LIVE genetics API exists). Feeds the (now superseded, see `implementation_plan.md` §9.4) `medical_records` table.
 - [~] **10.4 Digital footprint & comms** 🟡 *Google/Meta/LinkedIn/Amazon/Spotify/Netflix/YouTube + browser + iMessage + email shipped; Apple/WhatsApp/Signal/Telegram open* — the big takeouts (Google/Meta/X/LinkedIn/Amazon/Spotify) +
   browser history + iMessage + email archive. Heavy reuse of `archive-importers.ts`.
 - [~] **10.5 Government & official + Data-Rights Concierge** 🟡 *Concierge (16 sources) + tax/SSA PDF recognizers shipped; IRS/bureau portal automation open* — SSA, IRS, property/court/travel, data-broker
@@ -319,8 +325,10 @@ Builds on Phase 9's shipped spine; **does not renumber 9.x**. Each wave is its o
   (`source:'nylas'`) to broaden the owned address book beyond Google-direct, no schema/engine change (email +
   calendar are follow-ups). Plus **Metriport** — the first MEDICAL aggregator (static `x-api-key`): a patient's
   clinical records arrive as FHIR R4, and `normalizeMetriportBundle` maps them into the dedicated
-  `medical_records` table (OFF the AI spine — medical is the strictest privacy boundary), surfaced as a Medical
-  card on `/health` + an aggregates-only `compass_medical_summary` (counts + dates, never a diagnosis/lab value).
+  `medical_records` table, surfaced as a Medical card on `/health`. **Per the current `docs/data-access-policy.md`
+  (adopted 2026-07, the normative doc for this boundary — supersedes the "OFF the AI spine, aggregates-only"
+  framing this section used to have), medical records DO project onto the `records`/AI spine and
+  `compass_medical_summary` returns the actual clinical rows, not just counts + dates.**
   Plus **Knot** — merchant purchases (HTTP Basic, like Argyle): its **TransactionLink** SKU-level order history
   (`knot.ts` → `normalizeKnotTransactions`) writes one `records` row per line item through the SAME
   `upsertLiveRecords` writer Terra uses (`source:'knot'`, `type:'order'`), completing the commerce timeline the
