@@ -61,7 +61,7 @@ It's a *daily driver*: open it in the morning for your brief (calendar + tasks +
 | **📚 Knowledge** | ✅ markdown notes · ✅ `[[wikilinks]]` + backlinks · ✅ TipTap rich editor · ✅ full-text + semantic (local-embedding) search · ✅ Spotlight mirror · ✅ Obsidian vault bridge (import + export) · ✅ Notion import · 🔜 Notion export · 🔜 web clipper |
 | **🔐 Vault** | ✅ AES-256-GCM encrypted categories · ✅ OS-Keychain master key · ✅ auto-lock · ✅ 1Password CSV import · 🔜 encrypted sharing with a trusted partner |
 | **📅 Calendar** | ✅ Google Calendar · ✅ Apple Calendar (local `.ics`, RRULE expansion) · 🔜 Outlook / Office 365 · 🔜 CalDAV |
-| **✅ Tasks & habits** | ✅ daily / weekly / monthly checklists · ✅ habit streaks · ✅ tray quick-capture · ✅ multi-type capture bar (task / note / expense) · ✅ `compass://` URL scheme · ✅ Todoist sync · ✅ Things 3 import · 🔜 Reminders sync · 🔜 voice capture |
+| **✅ Tasks & habits** | ✅ daily / weekly / monthly checklists · ✅ habit streaks · ✅ tray quick-capture · ✅ multi-type capture bar (task / note / expense) · ✅ `compass://` URL scheme · ✅ Todoist sync · ✅ Things 3 import · 🟡 Reminders sync ([spike landed, notarization-gated](docs/apple-reminders.md)) · 🔜 voice capture |
 | **🤖 Assistant** | ✅ RAG over your knowledge base · ✅ BYO Anthropic/OpenAI key · ✅ local Ollama option · ✅ agentic mode (Claude tool-use over your data; proposes changes via the Claude Inbox) · ✅ proactive insights · ✅ Morning Brief digest (low-cash + price-hike alerts) |
 | **🔎 Search** | ✅ global ⌘K across notes, tasks, vault titles, transactions |
 | **🔗 Integrations** | ✅ Google · ✅ GitHub · ✅ Gmail action items · ✅ SimpleFIN · ✅ Plaid · ✅ Apple Calendar · ✅ Linear · ✅ Todoist · 🔜 Slack · 🔜 Jira · 🔜 Strava · 🔜 browser extension |
