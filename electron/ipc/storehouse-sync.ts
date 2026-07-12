@@ -41,6 +41,7 @@ import {
 } from '../db/schema'
 import { captureSnapshots } from '../integrations/finance-snapshot'
 import { refreshDerivedEntities } from '../lib/entities-projection'
+import { type SqliteForOneShot, runOnceGated } from '../lib/one-shot-repair'
 import { type RecordInput, hashRecord } from '../lib/recognizers'
 import {
   type CalendarRow,
@@ -452,37 +453,18 @@ export function afterDomainWrite(opts?: { entities?: boolean }): void {
 
 export const SPINE_EXPANSION_BACKFILL_KEY = 'spineExpansionBackfillV1'
 
-/** The narrow slice of better-sqlite3 the gate needs (keeps tests light). */
-type SqliteForGate = {
-  prepare(sql: string): {
-    get(...params: unknown[]): unknown
-    run(...params: unknown[]): unknown
-  }
-}
-
 /**
  * One-time startup backfill for the 2026-07 spine expansion: project the
  * domains that predate their projectors (habits, tasks, medical, travel,
  * paystubs, utility bills, goals, comps, facts) onto the `records` spine.
- * Gated on an app_settings key written only AFTER success (the
- * `recordsDateRepairV1` pattern): a crash retries next launch, and the
- * projection is idempotent so retries are safe. Syncs and `afterDomainWrite`
- * keep the spine fresh afterward — the gate just avoids paying a full
- * projection on every launch.
+ * Syncs and `afterDomainWrite` keep the spine fresh afterward — the gate just
+ * avoids paying a full projection on every launch.
  */
 export function runSpineExpansionBackfillIfNeeded(
-  sqlite: SqliteForGate,
+  sqlite: SqliteForOneShot,
   now: number = Date.now()
-): { ran: boolean; imported: number } {
-  const existing = sqlite
-    .prepare('SELECT value FROM app_settings WHERE key = ?')
-    .get(SPINE_EXPANSION_BACKFILL_KEY)
-  if (existing) return { ran: false, imported: 0 }
-  const { imported } = projectAllToRecords()
-  sqlite
-    .prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)')
-    .run(SPINE_EXPANSION_BACKFILL_KEY, new Date(now).toISOString(), now)
-  return { ran: true, imported }
+): { ran: boolean; imported?: number } {
+  return runOnceGated(sqlite, SPINE_EXPANSION_BACKFILL_KEY, () => projectAllToRecords(), now)
 }
 
 /**

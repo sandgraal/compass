@@ -9,42 +9,32 @@
  * original cell text survives in `payload` and a future re-import or
  * re-classification can re-derive a correct date (dedup upserts in place).
  *
- * Gated on an app_settings key written only AFTER success, mirroring
- * `runSnapshotRepairIfNeeded` (finance-snapshot.ts): a crash mid-repair
- * retries next launch; the UPDATE is idempotent so retries are safe.
+ * Gate mechanics (check app_settings, run once, write the key only after
+ * success) live in `one-shot-repair.ts`, shared by every 2026-07 repair pass.
  */
 
 import { maxPlausibleEpochMs } from './dates'
+import { type SqliteForOneShot, runOnceGated } from './one-shot-repair'
 
 export const RECORDS_DATE_REPAIR_KEY = 'recordsDateRepairV1'
 
-/** The narrow slice of better-sqlite3 the repair needs (keeps tests light). */
-type SqliteForRepair = {
-  prepare(sql: string): {
-    get(...params: unknown[]): unknown
-    run(...params: unknown[]): { changes: number }
-  }
-}
-
 export function runRecordsDateRepairIfNeeded(
-  sqlite: SqliteForRepair,
+  sqlite: SqliteForOneShot,
   now: number = Date.now()
-): { ran: boolean; repaired: number } {
-  const existing = sqlite
-    .prepare('SELECT value FROM app_settings WHERE key = ?')
-    .get(RECORDS_DATE_REPAIR_KEY) as { value: string } | undefined
-  if (existing) return { ran: false, repaired: 0 }
-
-  const res = sqlite
-    .prepare(
-      'UPDATE records SET occurred_at = NULL WHERE occurred_at IS NOT NULL AND (occurred_at < 0 OR occurred_at > ?)'
-    )
-    .run(maxPlausibleEpochMs(now))
-
-  sqlite
-    .prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)')
-    .run(RECORDS_DATE_REPAIR_KEY, new Date(now).toISOString(), now)
-  return { ran: true, repaired: res.changes }
+): { ran: boolean; repaired?: number } {
+  return runOnceGated(
+    sqlite,
+    RECORDS_DATE_REPAIR_KEY,
+    () => {
+      const res = sqlite
+        .prepare(
+          'UPDATE records SET occurred_at = NULL WHERE occurred_at IS NOT NULL AND (occurred_at < 0 OR occurred_at > ?)'
+        )
+        .run(maxPlausibleEpochMs(now))
+      return { repaired: res.changes }
+    },
+    now
+  )
 }
 
 export const GCAL_DEDUPE_KEY = 'gcalDedupeV1'
@@ -58,34 +48,32 @@ export const GCAL_DEDUPE_KEY = 'gcalDedupeV1'
  * every user-visible field (title, time, body/location, payload) within the
  * same import file to collapse — two REAL events that merely share a title
  * and start time survive. Keep the OLDEST row of each group; the FTS delete
- * trigger keeps the index consistent. Same gate pattern as the date repair.
+ * trigger keeps the index consistent.
  */
 export function runGcalDedupeIfNeeded(
-  sqlite: SqliteForRepair,
+  sqlite: SqliteForOneShot,
   now: number = Date.now()
-): { ran: boolean; removed: number } {
-  const existing = sqlite
-    .prepare('SELECT value FROM app_settings WHERE key = ?')
-    .get(GCAL_DEDUPE_KEY) as { value: string } | undefined
-  if (existing) return { ran: false, removed: 0 }
-
-  const res = sqlite
-    .prepare(
-      `DELETE FROM records
-        WHERE source = 'gcal' AND type = 'event'
-          AND id NOT IN (
-            SELECT MIN(id) FROM records
-             WHERE source = 'gcal' AND type = 'event'
-             GROUP BY title, occurred_at, COALESCE(provenance, ''),
-                      COALESCE(body, ''), COALESCE(payload, '')
-          )`
-    )
-    .run()
-
-  sqlite
-    .prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)')
-    .run(GCAL_DEDUPE_KEY, new Date(now).toISOString(), now)
-  return { ran: true, removed: res.changes }
+): { ran: boolean; removed?: number } {
+  return runOnceGated(
+    sqlite,
+    GCAL_DEDUPE_KEY,
+    () => {
+      const res = sqlite
+        .prepare(
+          `DELETE FROM records
+            WHERE source = 'gcal' AND type = 'event'
+              AND id NOT IN (
+                SELECT MIN(id) FROM records
+                 WHERE source = 'gcal' AND type = 'event'
+                 GROUP BY title, occurred_at, COALESCE(provenance, ''),
+                          COALESCE(body, ''), COALESCE(payload, '')
+              )`
+        )
+        .run()
+      return { removed: res.changes }
+    },
+    now
+  )
 }
 
 export const DOCUMENT_SPINE_DATES_KEY = 'documentSpineDatesV1'
@@ -103,39 +91,37 @@ export const DOCUMENT_SPINE_DATES_KEY = 'documentSpineDatesV1'
  * `documents` row and stay undated (their date genuinely wasn't extractable).
  */
 export function runDocumentSpineDatesIfNeeded(
-  sqlite: SqliteForRepair,
+  sqlite: SqliteForOneShot,
   now: number = Date.now()
-): { ran: boolean; dated: number } {
-  const existing = sqlite
-    .prepare('SELECT value FROM app_settings WHERE key = ?')
-    .get(DOCUMENT_SPINE_DATES_KEY) as { value: string } | undefined
-  if (existing) return { ran: false, dated: 0 }
-
-  const res = sqlite
-    .prepare(
-      `UPDATE records
-          SET occurred_at = (
-                SELECT COALESCE(CAST(strftime('%s', d.doc_date) AS INTEGER) * 1000, d.created_at)
-                  FROM documents d
-                 WHERE d.sha256 = json_extract(records.payload, '$.sha256')
-              ),
-              title = COALESCE(
-                (SELECT d.title FROM documents d
-                  WHERE d.sha256 = json_extract(records.payload, '$.sha256')),
-                title
-              )
-        WHERE source = 'document' AND type = 'file' AND occurred_at IS NULL
-          AND EXISTS (
-                SELECT 1 FROM documents d
-                 WHERE d.sha256 = json_extract(records.payload, '$.sha256')
-                   AND COALESCE(CAST(strftime('%s', d.doc_date) AS INTEGER) * 1000, d.created_at)
-                       IS NOT NULL
-              )`
-    )
-    .run()
-
-  sqlite
-    .prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)')
-    .run(DOCUMENT_SPINE_DATES_KEY, new Date(now).toISOString(), now)
-  return { ran: true, dated: res.changes }
+): { ran: boolean; dated?: number } {
+  return runOnceGated(
+    sqlite,
+    DOCUMENT_SPINE_DATES_KEY,
+    () => {
+      const res = sqlite
+        .prepare(
+          `UPDATE records
+              SET occurred_at = (
+                    SELECT COALESCE(CAST(strftime('%s', d.doc_date) AS INTEGER) * 1000, d.created_at)
+                      FROM documents d
+                     WHERE d.sha256 = json_extract(records.payload, '$.sha256')
+                  ),
+                  title = COALESCE(
+                    (SELECT d.title FROM documents d
+                      WHERE d.sha256 = json_extract(records.payload, '$.sha256')),
+                    title
+                  )
+            WHERE source = 'document' AND type = 'file' AND occurred_at IS NULL
+              AND EXISTS (
+                    SELECT 1 FROM documents d
+                     WHERE d.sha256 = json_extract(records.payload, '$.sha256')
+                       AND COALESCE(CAST(strftime('%s', d.doc_date) AS INTEGER) * 1000, d.created_at)
+                           IS NOT NULL
+                  )`
+        )
+        .run()
+      return { dated: res.changes }
+    },
+    now
+  )
 }

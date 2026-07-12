@@ -56,38 +56,42 @@ export async function initDb(): Promise<void> {
   }
   // Always ensure new tables exist for existing DBs that pre-date migrations
   ensureNewTables(sqlite)
-  // One-shot 2026-07 repair: snapshots for SimpleFIN-linked accounts were
-  // inferred from bad baselines instead of the synced balance. Rebuild their
-  // history anchored at the live balance, then capture today ('live' rows).
-  try {
-    runSnapshotRepairIfNeeded(sqlite)
-  } catch {
-    /* non-fatal — retried next launch while the gate key is unset */
-  }
-  // One-shot 2026-07 repair: pre-fix `parseWhen` let ambiguous export cells
-  // through as absurd-year timestamps (year 0…10801). Null them out (payload
-  // keeps the original cell) so year-over-year views are trustworthy.
-  try {
-    runRecordsDateRepairIfNeeded(sqlite)
-  } catch {
-    /* non-fatal — retried next launch while the gate key is unset */
-  }
-  // One-shot 2026-07 cleanup: drop duplicate gcal events left by .ics
-  // re-imports whose payload drifted (same title+time+file, different hash).
-  try {
-    runGcalDedupeIfNeeded(sqlite)
-  } catch {
-    /* non-fatal — retried next launch while the gate key is unset */
-  }
-  // One-shot 2026-07 cleanup: date undated document|file spine rows from the
-  // owned documents table (doc_date, else import time) so they surface on
-  // the timeline's date lenses.
-  try {
-    runDocumentSpineDatesIfNeeded(sqlite)
-  } catch {
-    /* non-fatal — retried next launch while the gate key is unset */
+  // One-shot 2026-07 repair/cleanup passes, run in order, each gated on its own
+  // app_settings key (see one-shot-repair.ts) so a crash retries next launch
+  // and an already-consumed repair is a no-op. Failures are non-fatal — DB init
+  // must never be blocked by a cleanup pass.
+  for (const repair of DB_INIT_REPAIRS) {
+    try {
+      repair(sqlite)
+    } catch {
+      /* non-fatal — retried next launch while the gate key is unset */
+    }
   }
 }
+
+/**
+ * One-shot repair/cleanup passes that need to run right after schema init,
+ * before any IPC handler or service is wired up. Add a new pass here (paired
+ * with a `run*IfNeeded` using `runOnceGated`) rather than hand-rolling another
+ * gate — see `docs/conventions.md` one-shot-repair pattern.
+ */
+const DB_INIT_REPAIRS: Array<(sqlite: Database.Database) => void> = [
+  // 2026-07: snapshots for SimpleFIN-linked accounts were inferred from bad
+  // baselines instead of the synced balance. Rebuild their history anchored at
+  // the live balance, then capture today ('live' rows).
+  (sqlite) => runSnapshotRepairIfNeeded(sqlite),
+  // 2026-07: pre-fix `parseWhen` let ambiguous export cells through as
+  // absurd-year timestamps (year 0…10801). Null them out (payload keeps the
+  // original cell) so year-over-year views are trustworthy.
+  (sqlite) => runRecordsDateRepairIfNeeded(sqlite),
+  // 2026-07: drop duplicate gcal events left by .ics re-imports whose payload
+  // drifted (same title+time+file, different hash).
+  (sqlite) => runGcalDedupeIfNeeded(sqlite),
+  // 2026-07: date undated document|file spine rows from the owned documents
+  // table (doc_date, else import time) so they surface on the timeline's date
+  // lenses.
+  (sqlite) => runDocumentSpineDatesIfNeeded(sqlite)
+]
 
 /**
  * Rebuild the `records_fts` full-text index from `records`. Use after the index

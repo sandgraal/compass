@@ -89,6 +89,27 @@ Note the actual file casing (`Toast.tsx`, `ConfirmDialog.tsx` — PascalCase, un
 - Renderer code handles `{ success: false }` — or a caught rejection from a GET call — with a toast (not `console.error`).
 - Never silently swallow errors that have user impact.
 
+## One-shot data-repair pattern
+
+For a data-repair/cleanup pass that must run exactly once per install (a
+backfill, a dedupe, a re-file of misclassified rows) — never hand-roll the
+gate. Use `runOnceGated` (`electron/lib/one-shot-repair.ts`): it checks an
+`app_settings` key, runs your repair function, and writes the key only AFTER
+success (so a crash mid-repair retries next launch — your repair must be
+idempotent/dedupe-safe). See `electron/lib/records-repair.ts` for the simplest
+examples.
+
+Two call sites, by when your repair needs the app to be ready:
+- **`DB_INIT_REPAIRS`** (`electron/db/client.ts`) — runs right after schema
+  init, before any IPC handler or service exists. Use this if your repair only
+  touches raw SQL (no Drizzle helpers, no other services).
+- The `setImmediate` block in **`electron/main.ts`**'s `app.whenReady` handler
+  — runs once the full app is wired up. Use this if your repair calls into
+  other services (`refreshDerivedEntities`, `afterLocationImport`, semantic
+  index rebuilds, etc.) or needs a specific ordering relative to another
+  one-shot repair (e.g. `runGenericTelemetryPurgeIfNeeded` refuses to run until
+  the reclassify gate is set — see its own prerequisite check).
+
 ## Security invariants (DO NOT BREAK)
 
 - Vault key NEVER leaves OS Keychain except via `safeStorage.decryptString()` in main process

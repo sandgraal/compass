@@ -22,6 +22,7 @@
  * `better-sqlite3` directly without going through Drizzle.
  */
 
+import { runOnceGated } from '../lib/one-shot-repair'
 import { getBaseCurrency, loadFxRates, pickRate } from './finance-fx'
 import { NET_WORTH_HOLDINGS_SOURCES, getHoldingsValueAsOf } from './finance-holdings'
 
@@ -386,18 +387,16 @@ export function runSnapshotRepairIfNeeded(
   sqlite: SqliteForSnapshot,
   now: number = Date.now()
 ): { ran: boolean } {
-  const existing = sqlite
-    .prepare('SELECT value FROM app_settings WHERE key = ?')
-    .get(SNAPSHOT_REPAIR_KEY) as { value: string } | undefined
-  if (existing) return { ran: false }
-
-  rebuildLiveSnapshotHistory(sqlite, now)
-  captureSnapshots(sqlite, now)
-
-  sqlite
-    .prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)')
-    .run(SNAPSHOT_REPAIR_KEY, new Date(now).toISOString(), now)
-  return { ran: true }
+  return runOnceGated(
+    sqlite,
+    SNAPSHOT_REPAIR_KEY,
+    () => {
+      rebuildLiveSnapshotHistory(sqlite, now)
+      captureSnapshots(sqlite, now)
+      return {}
+    },
+    now
+  )
 }
 
 export type NetWorthSnapshot = {
