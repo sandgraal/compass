@@ -709,7 +709,9 @@ export const NETFLIX_REFILE_KEY = 'netflixRefileV1'
 export type NetflixRefileResult = {
   moved: number // rows re-inserted as properly-sourced records (prime-video, notes)
   facts: number // rows converted to snapshot facts (bookmarks, saved places)
-  deleted: number // netflix rows removed (= moved + facts, minus fact dedupes)
+  // Netflix rows removed — always moved + facts: the misfiled row is deleted
+  // even when its re-insert dedupes against an already-existing record/fact.
+  deleted: number
 }
 
 /**

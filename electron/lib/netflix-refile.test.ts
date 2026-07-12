@@ -133,6 +133,19 @@ describe('planNetflixRefile', () => {
       [4, 'Bookmark']
     ])
   })
+
+  it("keeps fact positions unique across the executor's chunked planner calls", () => {
+    // The executor plans in 5,000-row chunks; a per-call counter would restart
+    // at 0 each chunk and collide. Positions come from the source record id.
+    const chunk1 = planNetflixRefile([
+      { id: 10, provenance: 'Want to go.csv', payload: JSON.stringify(SAVED_PLACE_ROW) }
+    ])
+    const chunk2 = planNetflixRefile([
+      { id: 20, provenance: 'Bookmarks_1.csv', payload: JSON.stringify(BOOKMARK_ROW) }
+    ])
+    expect(chunk1.facts[0].fact.position).toBe(10)
+    expect(chunk2.facts[0].fact.position).toBe(20)
+  })
 })
 
 describe('fresh-import recognizers', () => {
