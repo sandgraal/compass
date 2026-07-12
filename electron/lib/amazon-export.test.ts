@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   ALEXA_UTTERANCE_RECOGNIZER,
+  AMAZON_DIGITAL_ITEMS_RECOGNIZER,
   AMAZON_LOCATION_RECOGNIZER,
   AMAZON_MUSIC_LIBRARY_RECOGNIZER,
   AMAZON_MUSIC_LIKES_RECOGNIZER,
@@ -18,12 +19,16 @@ import {
   AMAZON_WISHLIST_RECOGNIZER,
   KINDLE_READING_RECOGNIZER,
   PRIME_VIDEO_RECOGNIZER,
+  isAmazonTelemetryProvenance,
   mapAlexaUtterance,
+  mapAmazonDigitalItem,
   mapAmazonGeolocation,
+  mapAmazonGiftCertificate,
   mapAmazonMusicLike,
   mapAmazonMusicSave,
   mapAmazonReturn,
   mapAmazonReview,
+  mapAmazonRiderLocation,
   mapAmazonSearch,
   mapAmazonWishlist,
   mapKindleReadingSession,
@@ -324,6 +329,105 @@ describe('mapAmazonSearch', () => {
   })
 })
 
+// V2 families — row shapes copied from the REAL export's stored payloads.
+
+describe('mapAmazonRiderLocation', () => {
+  const ROW = {
+    'Event Time (UTC)': '2026-06-09 00:15:27.887',
+    'GPS Time (UTC)': '2026-06-09 00:15:24.694',
+    'Horizontal Accuracy': '39.78507189614252',
+    Latitude: '26.07069',
+    Longitude: '-80.14414',
+    'Speed (GPS)': '-1.0',
+    City: 'miami',
+    'Device Model': 'iPhone11,2',
+    'Analytics Event Type': 'tap'
+  }
+
+  it('maps a GPS fix in UTC (never local) with accuracy, keyed on the fix time', () => {
+    const r = mapAmazonRiderLocation(ROW)
+    expect(r?.source).toBe('location')
+    expect(r?.type).toBe('location-point')
+    // The column is UTC — must parse as such, not local time.
+    expect(r?.occurredAt).toBe(Date.parse('2026-06-09T00:15:24.694Z'))
+    expect(r?.payload).toEqual({
+      lat: 26.07069,
+      lng: -80.14414,
+      acc: 39.78507189614252,
+      src: 'amazon-rider'
+    })
+  })
+
+  it('collapses repeated taps sharing one GPS fix onto one naturalKey', () => {
+    const a = mapAmazonRiderLocation(ROW)
+    const b = mapAmazonRiderLocation({ ...ROW, 'Event Time (UTC)': '2026-06-09 00:15:28.146' })
+    expect(a?.naturalKey).toBe(b?.naturalKey)
+  })
+
+  it('rejects rows without coordinates, (0,0), or without the distinctive time columns', () => {
+    expect(mapAmazonRiderLocation({ ...ROW, Latitude: '', Longitude: '' })).toBeNull()
+    expect(mapAmazonRiderLocation({ ...ROW, Latitude: '0.0', Longitude: '0.0' })).toBeNull()
+    expect(mapAmazonRiderLocation({ Latitude: '26.1', Longitude: '-80.1' })).toBeNull()
+  })
+})
+
+describe('mapAmazonDigitalItem', () => {
+  const ROW = {
+    ASIN: 'B09W897871',
+    ProductName: 'Amazon Music Unlimited',
+    OrderId: 'D01-6241216-2422661',
+    DigitalOrderItemId: 'RSMOBNVH3I8DQU27HKBJRFUV8IKKTK7EDS4EETU19HPK2IP728CG',
+    BaseCurrencyCode: 'USD',
+    FulfilledDate: '2025-09-25T00:44:00Z',
+    OrderDate: '2025-09-25T00:44:00Z',
+    OurPrice: '10.99',
+    OurPriceCurrencyCode: 'USD',
+    OurPriceTax: 'Not Applicable'
+  }
+
+  it('maps a digital purchase with product name and price', () => {
+    const r = mapAmazonDigitalItem(ROW)
+    expect(r?.source).toBe('amazon')
+    expect(r?.type).toBe('order')
+    expect(r?.title).toBe('Amazon Music Unlimited')
+    expect(r?.body).toBe('Digital · 10.99 USD')
+    expect(r?.occurredAt).toBe(Date.parse('2025-09-25T00:44:00Z'))
+  })
+
+  it("declines rows without a product name or without the distinctive item id ('Not Applicable' counts as blank)", () => {
+    expect(mapAmazonDigitalItem({ ...ROW, ProductName: 'Not Applicable' })).toBeNull()
+    expect(mapAmazonDigitalItem({ ...ROW, ProductName: '' })).toBeNull()
+    const { DigitalOrderItemId: _omit, ...withoutId } = ROW
+    expect(mapAmazonDigitalItem(withoutId)).toBeNull()
+  })
+})
+
+describe('mapAmazonGiftCertificate', () => {
+  const ROW = {
+    serialNumber: '2554883066759615',
+    transactionDate: '2026-03-09T20:46:37Z',
+    transactionType: 'MarkShipmentCompletion',
+    transactionAmount: '23.42',
+    currencyCode: 'USD'
+  }
+
+  it('maps a gift-card ledger entry with a humanized transaction type', () => {
+    const r = mapAmazonGiftCertificate(ROW)
+    expect(r?.source).toBe('amazon')
+    expect(r?.type).toBe('gift-card')
+    expect(r?.title).toBe('Gift card · 23.42 USD')
+    expect(r?.body).toBe('Mark Shipment Completion')
+    expect(r?.occurredAt).toBe(Date.parse('2026-03-09T20:46:37Z'))
+  })
+
+  it('keeps same-serial transactions distinct via type+amount in the naturalKey', () => {
+    const a = mapAmazonGiftCertificate(ROW)
+    const b = mapAmazonGiftCertificate({ ...ROW, transactionType: 'Settlement' })
+    expect(a?.naturalKey).not.toBe(b?.naturalKey)
+    expect(mapAmazonGiftCertificate({ ...ROW, transactionAmount: '' })).toBeNull()
+  })
+})
+
 describe('additional-family recognizers detect on distinctive headers only', () => {
   it('claims their own shapes and not a Netflix CSV', () => {
     expect(
@@ -346,6 +450,63 @@ describe('additional-family recognizers detect on distinctive headers only', () 
       AMAZON_SEARCH_RECOGNIZER
     ]) {
       expect(r.detect(netflix)).toBe(false)
+    }
+  })
+})
+
+describe('AMAZON_DIGITAL_ITEMS_RECOGNIZER detection', () => {
+  it('detects on the distinctive item id regardless of the product-name header spelling', () => {
+    expect(
+      AMAZON_DIGITAL_ITEMS_RECOGNIZER.detect(
+        file('Digital Items.csv', 'ASIN,ProductName,OrderId,DigitalOrderItemId,OrderDate\n')
+      )
+    ).toBe(true)
+    expect(
+      AMAZON_DIGITAL_ITEMS_RECOGNIZER.detect(
+        file('Digital Items.csv', 'ASIN,Product Name,OrderId,DigitalOrderItemId,OrderDate\n')
+      )
+    ).toBe(true)
+    expect(
+      AMAZON_DIGITAL_ITEMS_RECOGNIZER.detect(file('orders.csv', 'OrderId,ProductName,Date\n'))
+    ).toBe(false)
+  })
+})
+
+describe('isAmazonTelemetryProvenance (purge scoping)', () => {
+  it('matches the telemetry families observed in the real export', () => {
+    for (const p of [
+      'DeviceState-1-1.csv',
+      'DeviceEngagement.csv',
+      'node_metadata_na_1.csv',
+      'AppEngagement.csv',
+      'apps-and-more.app-purchase-download-install.csv',
+      'Appstore.FireTVClient.operational_metrics.csv',
+      'Whispered-1-1.csv',
+      'Retail.OutboundNotifications.notificationMetadata.1.csv',
+      'Request All Your Data.Detail Page Glance View Impressions.csv',
+      'Alexa and Echo Devices.Alexa_Device_Daily_Toggle_Acivity.csv',
+      'rider_app_analytics-0.csv',
+      'FireTv.Live.CustomerStationList.1.csv',
+      'Kindle.Devices.ReadingSession_v0.csv',
+      'Digital Orders.csv',
+      'TotalUsagePerDay.csv',
+      'Device_Artifact_Frequency_Metrics-1.csv',
+      'D2DiodeErpService.json'
+    ]) {
+      expect(isAmazonTelemetryProvenance(p), p).toBe(true)
+    }
+  })
+
+  it('never matches non-Amazon imports (the purge must not touch them)', () => {
+    for (const p of [
+      'MyBankExport.csv',
+      'NetflixViewingHistory.csv',
+      'History.json',
+      'export.csv',
+      'Want to go.csv',
+      null
+    ]) {
+      expect(isAmazonTelemetryProvenance(p), String(p)).toBe(false)
     }
   })
 })

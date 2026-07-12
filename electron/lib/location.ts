@@ -29,7 +29,8 @@ export const LOCATION_RECOGNIZER_IDS: ReadonlySet<string> = new Set([
   'owntracks',
   'gpx',
   'google-location',
-  'amazon-location'
+  'amazon-location',
+  'amazon-rider-location'
 ])
 
 /** Build one normalized location record. Title is deliberately COARSE (never surfaced). */

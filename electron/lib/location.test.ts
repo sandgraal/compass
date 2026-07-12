@@ -145,9 +145,10 @@ describe('Google Location History streaming recognizer', () => {
 // ─── Registry contract ────────────────────────────────────────────────────────
 
 describe('location recognizer registry', () => {
-  it('exposes the four ids that records.ts diverts to location_points', () => {
+  it('exposes the five ids that records.ts diverts to location_points', () => {
     expect([...LOCATION_RECOGNIZER_IDS].sort()).toEqual([
       'amazon-location',
+      'amazon-rider-location',
       'google-location',
       'gpx',
       'owntracks'

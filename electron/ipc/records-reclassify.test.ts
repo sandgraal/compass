@@ -198,4 +198,137 @@ describe('runRecordsReclassifyIfNeeded', () => {
     expect(first.moved).toBe(1)
     expect(mod.runRecordsReclassifyIfNeeded()).toEqual({ ran: false })
   })
+
+  it('V2 re-runs on installs whose V1 gate is already consumed', async () => {
+    const mod = await loadModule()
+    sqlite
+      .prepare('INSERT INTO app_settings (key, value) VALUES (?, ?)')
+      .run(mod.RECORDS_RECLASSIFY_KEY, '2026-07-09T18:48:11.149Z')
+    seedGeneric(
+      '2026-06-09 00:15:35.092',
+      'rider_app_analytics-0.csv',
+      {
+        'Event Time (UTC)': '2026-06-09 00:15:27.887',
+        'GPS Time (UTC)': '2026-06-09 00:15:24.694',
+        'Horizontal Accuracy': '39.78507189614252',
+        Latitude: '26.07069',
+        Longitude: '-80.14414'
+      },
+      null
+    )
+    const res = mod.runRecordsReclassifyIfNeeded()
+    expect(res.ran).toBe(true)
+    expect(res.located).toBe(1)
+    expect(sqlite.prepare('SELECT src FROM location_points').get()).toEqual({
+      src: 'amazon-rider'
+    })
+    // Consumed under the V2 key, not V1's.
+    expect(
+      sqlite
+        .prepare('SELECT count(*) AS n FROM app_settings WHERE key = ?')
+        .get(mod.RECORDS_RECLASSIFY_V2_KEY)
+    ).toEqual({ n: 1 })
+  })
+})
+
+describe('reclassifyGenericRecords — V2 families', () => {
+  it('promotes rider GPS, digital items and gift-card rows; Digital Orders stays generic', async () => {
+    seedGeneric(
+      'G071R209316605QG',
+      'Digital Orders.csv',
+      { OrderId: 'D01-1', BillingAddress: 'X', OrderDate: '2025-09-25T00:44:00Z' } // no product name
+    )
+    seedGeneric('Amazon Music Unlimited', 'Digital Items.csv', {
+      ASIN: 'B09W897871',
+      ProductName: 'Amazon Music Unlimited',
+      OrderId: 'D01-6241216-2422661',
+      DigitalOrderItemId: 'RSMOBNVH3I8DQU27HKBJRFUV8IKKTK7EDS4EETU19HPK2IP728CG',
+      OrderDate: '2025-09-25T00:44:00Z',
+      OurPrice: '10.99',
+      OurPriceCurrencyCode: 'USD'
+    })
+    seedGeneric('2554883066759615', 'Retail.GiftCertificates.Transaction.csv', {
+      serialNumber: '2554883066759615',
+      transactionDate: '2026-03-09T20:46:37Z',
+      transactionType: 'Settlement',
+      transactionAmount: '26.58',
+      currencyCode: 'USD'
+    })
+    seedGeneric('tap', 'rider_app_analytics-0.csv', {
+      'Event Time (UTC)': '2026-06-09 00:15:27.887',
+      'GPS Time (UTC)': '2026-06-09 00:15:24.694',
+      Latitude: '26.07069',
+      Longitude: '-80.14414'
+    })
+
+    const mod = await loadModule()
+    const res = mod.reclassifyGenericRecords()
+    expect(res).toEqual({ moved: 2, located: 1, deleted: 3 })
+
+    const amazonRows = sqlite
+      .prepare("SELECT type, title FROM records WHERE source='amazon' ORDER BY type")
+      .all()
+    expect(amazonRows).toEqual([
+      { type: 'gift-card', title: 'Gift card · 26.58 USD' },
+      { type: 'order', title: 'Amazon Music Unlimited' }
+    ])
+    // The title-less Digital Orders row is deliberately unclaimed.
+    expect(sqlite.prepare("SELECT provenance FROM records WHERE source='generic'").get()).toEqual({
+      provenance: 'Digital Orders.csv'
+    })
+    expect(sqlite.prepare('SELECT count(*) AS n FROM location_points').get()).toEqual({ n: 1 })
+  })
+})
+
+describe('runGenericTelemetryPurgeIfNeeded', () => {
+  it('refuses to run before the V2 reclassify gate is written', async () => {
+    seedGeneric('telemetry blob', 'DeviceState-1-1.csv', { state: 'ON' })
+    const mod = await loadModule()
+    expect(mod.runGenericTelemetryPurgeIfNeeded()).toEqual({ ran: false })
+    expect(
+      sqlite.prepare("SELECT count(*) AS n FROM records WHERE source='generic'").get()
+    ).toEqual({ n: 1 })
+  })
+
+  it('after V2, deletes only Amazon-telemetry generic rows (FTS consistent), then gates', async () => {
+    // A rider row V2 will promote + two telemetry rows + a signal row to keep
+    // + a generic row from a NON-Amazon import the purge must never touch.
+    seedGeneric('tap', 'rider_app_analytics-0.csv', {
+      'GPS Time (UTC)': '2026-06-09 00:15:24.694',
+      Latitude: '26.07069',
+      Longitude: '-80.14414'
+    })
+    seedGeneric('telemetry blob', 'DeviceState-1-1.csv', { state: 'ON' })
+    seedGeneric('impression', 'AppEngagement.csv', { app: 'x' })
+    seedGeneric('unrecognized bank row', 'MyBankExport.csv', { memo: 'rent' })
+    sqlite
+      .prepare(
+        "INSERT INTO records (source, type, occurred_at, title, dedup_hash) VALUES ('netflix', 'watch', 1, 'Red One', 'nf|1')"
+      )
+      .run()
+
+    const mod = await loadModule()
+    mod.runRecordsReclassifyIfNeeded() // writes the V2 gate, promotes the GPS row
+    const purge = mod.runGenericTelemetryPurgeIfNeeded()
+    expect(purge).toEqual({ ran: true, deleted: 2 })
+
+    // The non-Amazon generic import survives (provenance-fingerprint scoping).
+    expect(sqlite.prepare("SELECT title FROM records WHERE source='generic'").all()).toEqual([
+      { title: 'unrecognized bank row' }
+    ])
+    expect(sqlite.prepare('SELECT count(*) AS n FROM records').get()).toEqual({ n: 2 }) // netflix + bank
+    expect(sqlite.prepare('SELECT count(*) AS n FROM location_points').get()).toEqual({ n: 1 })
+    const base = sqlite.prepare('SELECT count(*) AS n FROM records').get() as { n: number }
+    const indexed = sqlite.prepare('SELECT count(*) AS n FROM records_fts_docsize').get() as {
+      n: number
+    }
+    expect(indexed.n).toBe(base.n)
+
+    // Gate consumed — a later telemetry-looking generic import is never purged.
+    seedGeneric('future import', 'DeviceState-2-1.csv', { a: 1 })
+    expect(mod.runGenericTelemetryPurgeIfNeeded()).toEqual({ ran: false })
+    expect(
+      sqlite.prepare("SELECT count(*) AS n FROM records WHERE source='generic'").get()
+    ).toEqual({ n: 2 })
+  })
 })

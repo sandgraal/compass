@@ -39,7 +39,11 @@ import { registerPeopleHandlers } from './ipc/people'
 import { registerPlacesHandlers } from './ipc/places'
 import { registerPlaidHandlers } from './ipc/plaid'
 import { registerQuickCaptureHandlers } from './ipc/quick-capture'
-import { registerRecordsHandlers, runRecordsReclassifyIfNeeded } from './ipc/records'
+import {
+  registerRecordsHandlers,
+  runGenericTelemetryPurgeIfNeeded,
+  runRecordsReclassifyIfNeeded
+} from './ipc/records'
 import { registerRelayHandlers } from './ipc/relay'
 import { registerSearchHandlers } from './ipc/search'
 import { registerSettingsHandlers } from './ipc/settings'
@@ -174,6 +178,14 @@ app.whenReady().then(async () => {
         }
       } catch (err) {
         console.error('[main] generic reclassify failed:', err)
+      }
+      // One-shot (user-approved): purge the remaining 'generic' telemetry rows.
+      // Must follow the reclassify above — the gate refuses to run before it.
+      try {
+        const res = runGenericTelemetryPurgeIfNeeded()
+        if (res.ran) console.log(`[main] generic telemetry purged (${res.deleted ?? 0} rows)`)
+      } catch (err) {
+        console.error('[main] generic telemetry purge failed:', err)
       }
       // One-shot spine expansion (data-access policy): project the domains
       // that predate their projectors (habits, tasks, medical, travel,
