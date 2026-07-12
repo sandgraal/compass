@@ -909,14 +909,19 @@ function DeviceSyncRows(): JSX.Element {
   const [confirmPass, setConfirmPass] = useState('')
   const [busy, setBusy] = useState<null | 'configure' | 'push' | 'pull' | 'disable'>(null)
 
-  async function refresh(): Promise<void> {
-    try {
-      setStatus(await window.api.deviceSync.status())
-    } catch {
-      /* main process unavailable (web preview) — section stays inert */
-    }
+  const api = typeof window !== 'undefined' ? window.api?.deviceSync : undefined
+  if (!api) {
+    return (
+      <SettingsRow
+        label="Device sync unavailable"
+        description="Device sync is available only in the desktop app."
+      >
+        <span className="text-xs text-muted-foreground">This section is disabled in web preview.</span>
+      </SettingsRow>
+    )
   }
 
+  async function refresh(): Promise<void> {
   useEffect(() => {
     if (typeof window === 'undefined' || !window.api?.deviceSync) return
     window.api.deviceSync
