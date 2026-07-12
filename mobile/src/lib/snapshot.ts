@@ -83,7 +83,12 @@ export function decryptSnapshot(blob: Uint8Array, passphrase: string): SnapshotB
     throw new Error('Wrong passphrase or corrupted snapshot')
   }
   const parsed = JSON.parse(utf8Decode(plaintext)) as SnapshotBundle
-  if (!parsed || typeof parsed !== 'object' || typeof parsed.exportedAt !== 'string') {
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    typeof parsed.exportedAt !== 'string' ||
+    typeof parsed.appVersion !== 'string'
+  ) {
     throw new Error('Snapshot payload structure is invalid')
   }
   return parsed
