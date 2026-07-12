@@ -232,6 +232,18 @@ describe('readTimelineSearch (raw timeline retrieval — Phase 10.7)', () => {
     expect(res.note).toBeTruthy()
   })
 
+  it('drops firehose sources by default; includeFirehose or a source filter restores them', () => {
+    createFts()
+    add('generic', 'event', 'TemperatureSensor coffee ping', null)
+    add('browser', 'visit', 'Coffee — Wikipedia', Date.UTC(2026, 0, 1))
+    add('amazon', 'order', 'Coffee beans', Date.UTC(2020, 0, 1))
+    expect(readTimelineSearch(db, { q: 'coffee' }).records.map((r) => r.source)).toEqual(['amazon'])
+    expect(readTimelineSearch(db, { q: 'coffee', includeFirehose: true }).count).toBe(3)
+    expect(
+      readTimelineSearch(db, { q: 'coffee', source: 'browser' }).records.map((r) => r.source)
+    ).toEqual(['browser'])
+  })
+
   it('falls back gracefully when the FTS index / records table is absent (legacy DB)', () => {
     // No createFts() — mirrors a DB that predates the Converse migration.
     const res = readTimelineSearch(db, { q: 'anything' })

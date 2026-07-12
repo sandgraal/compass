@@ -11,6 +11,7 @@
  */
 
 import type Database from 'better-sqlite3'
+import { FIREHOSE_SOURCE_LIST, isFirehose } from './source-tiers'
 
 export interface RecordSearchOpts {
   q: string
@@ -21,6 +22,14 @@ export interface RecordSearchOpts {
   limit?: number
   offset?: number
   mode?: 'keyword' | 'semantic' // PR1 is keyword-only; 'semantic' lands in PR2
+  /**
+   * Include firehose-tier sources (browser history, habit checks, …) in the
+   * hits. Default FALSE — high-volume telemetry otherwise buries the
+   * meaningful rows for every search surface (in-app, Ask-Compass, MCP).
+   * Ignored (treated as true) when `source` itself names a firehose source,
+   * so an explicit `source:'browser'` search still works.
+   */
+  includeFirehose?: boolean
 }
 
 export interface TimelineSearchHit {
@@ -65,6 +74,12 @@ export function searchRecords(
   if (!match) return []
   const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 50), 1), 200)
   const offset = Math.max(Math.trunc(opts.offset ?? 0), 0)
+  // Curate (source-tiers): firehose rows are excluded unless asked for — or
+  // unless the caller explicitly filters to a firehose source.
+  const excludeFirehose = !opts.includeFirehose && !(opts.source != null && isFirehose(opts.source))
+  const firehoseClause = excludeFirehose
+    ? `AND r.source NOT IN (${FIREHOSE_SOURCE_LIST.map((s) => `'${s}'`).join(', ')})`
+    : ''
   return sqlite
     .prepare(
       `SELECT r.id AS id, r.source AS source, r.type AS type, r.occurred_at AS occurredAt,
@@ -79,6 +94,7 @@ export function searchRecords(
           AND (@type   IS NULL OR r.type   = @type)
           AND (@from   IS NULL OR r.occurred_at >= @from)
           AND (@to     IS NULL OR r.occurred_at <= @to)
+          ${firehoseClause}
         ORDER BY rank
         LIMIT @limit OFFSET @offset`
     )

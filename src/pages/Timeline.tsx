@@ -111,7 +111,10 @@ export default function Timeline(): JSX.Element {
           from: range?.from ?? undefined,
           to: range?.to ?? undefined,
           limit: 200,
-          mode: semantic ? 'semantic' : undefined
+          mode: semantic ? 'semantic' : undefined,
+          // Mirror the browse list: telemetry stays out of search hits unless
+          // the firehose toggle (or a type chip) says otherwise.
+          includeFirehose: showFirehose || typesSel.length > 0
         })
         .then((hits) => {
           let rows: TimelineRecord[] = hits.map((h) => ({

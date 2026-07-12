@@ -200,9 +200,25 @@ function ymdMs(value: string | undefined, endOfDay: boolean): number | null {
  * noise, not a secrecy boundary). Empty/guarded when the FTS index or the
  * table is absent (older DB).
  */
+/**
+ * Firehose-tier sources excluded from search hits by default. KEEP IN SYNC
+ * with `FIREHOSE_SOURCES` in `electron/lib/source-tiers.ts` (this package
+ * can't import `electron/`, so the list is duplicated by design — like the
+ * FTS SQL itself).
+ */
+const FIREHOSE_SOURCES = ['browser', 'generic', 'habit', 'task']
+
 export function readTimelineSearch(
   db: Database.Database,
-  opts: { q: string; source?: string; type?: string; from?: string; to?: string; limit?: number }
+  opts: {
+    q: string
+    source?: string
+    type?: string
+    from?: string
+    to?: string
+    limit?: number
+    includeFirehose?: boolean
+  }
 ): TimelineSearchResult {
   const q = (opts.q ?? '').trim()
   const match = toFtsMatchQuery(q)
@@ -214,6 +230,13 @@ export function readTimelineSearch(
     1,
     Math.min(Math.floor(opts.limit ?? TIMELINE_SEARCH_DEFAULT), TIMELINE_SEARCH_MAX)
   )
+  // High-volume telemetry stays out of hits unless asked for — or unless the
+  // caller explicitly filters to a firehose source.
+  const excludeFirehose =
+    !opts.includeFirehose && !(opts.source != null && FIREHOSE_SOURCES.includes(opts.source))
+  const firehoseClause = excludeFirehose
+    ? `AND r.source NOT IN (${FIREHOSE_SOURCES.map((s) => `'${s}'`).join(', ')})`
+    : ''
   const rows = db
     .prepare(
       `SELECT r.occurred_at AS occurredAt, r.source AS source, r.type AS type,
@@ -226,6 +249,7 @@ export function readTimelineSearch(
           AND (@type   IS NULL OR r.type   = @type)
           AND (@from   IS NULL OR r.occurred_at >= @from)
           AND (@to     IS NULL OR r.occurred_at <= @to)
+          ${firehoseClause}
         ORDER BY rank
         LIMIT @limit`
     )

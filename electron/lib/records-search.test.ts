@@ -147,6 +147,22 @@ describe('searchRecords', () => {
   })
 })
 
+describe('firehose exclusion (source-tiers)', () => {
+  it('drops firehose hits by default, includes them on request', () => {
+    insert({ source: 'generic', type: 'event', title: 'TemperatureSensor Matrix ping' })
+    insert({ source: 'browser', type: 'visit', title: 'The Matrix — Wikipedia' })
+    insert({ source: 'netflix', type: 'watch', title: 'The Matrix' })
+    expect(searchRecords(sqlite, { q: 'matrix' }).map((h) => h.source)).toEqual(['netflix'])
+    expect(searchRecords(sqlite, { q: 'matrix', includeFirehose: true })).toHaveLength(3)
+  })
+
+  it('an explicit firehose source filter overrides the exclusion', () => {
+    insert({ source: 'browser', type: 'visit', title: 'The Matrix — Wikipedia' })
+    const hits = searchRecords(sqlite, { q: 'matrix', source: 'browser' })
+    expect(hits.map((h) => h.source)).toEqual(['browser'])
+  })
+})
+
 describe('index sync (triggers + rebuild backfill)', () => {
   const matrixCount = (): number => searchRecords(sqlite, { q: 'matrix' }).length
 

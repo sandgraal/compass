@@ -64,7 +64,7 @@ import {
   yearReviewNarrationPrompt,
   yearReviewNarrative
 } from '../lib/records-year-review'
-import { FIREHOSE_SOURCE_LIST } from '../lib/source-tiers'
+import { FIREHOSE_SOURCE_LIST, isFirehose } from '../lib/source-tiers'
 import { type MuteSet, rankMemories } from '../lib/timeline-memories'
 import { momentsForDay } from '../lib/timeline-moments'
 import { forEachZipEntry } from '../lib/zip'
@@ -946,8 +946,15 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
         from: finite(opts.from),
         to: finite(opts.to),
         limit: finite(opts.limit),
-        offset: finite(opts.offset)
+        offset: finite(opts.offset),
+        includeFirehose: opts.includeFirehose === true
       }
+      // Mirrors searchRecords: firehose hits are dropped unless asked for, or
+      // unless the search is explicitly scoped to a firehose source.
+      const keepHit = (source: string): boolean =>
+        base.includeFirehose ||
+        (base.source != null && isFirehose(base.source)) ||
+        !isFirehose(source)
       // "Find by meaning" — try the opt-in semantic index, transparently falling back
       // to FTS keyword when there's no index (null) or Ollama is offline (throws).
       if (opts.mode === 'semantic') {
@@ -961,7 +968,7 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
             from: base.from ?? null,
             to: base.to ?? null
           })
-          if (hits) return hits.map(semanticToHit)
+          if (hits) return hits.filter((h) => keepHit(h.source)).map(semanticToHit)
         } catch {
           /* fall through to FTS */
         }

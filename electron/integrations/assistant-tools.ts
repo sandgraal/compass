@@ -310,7 +310,12 @@ export const ASSISTANT_TOOLS = [
         },
         from: { type: 'string', description: 'Optional start date YYYY-MM-DD (inclusive)' },
         to: { type: 'string', description: 'Optional end date YYYY-MM-DD (inclusive)' },
-        limit: { type: 'integer', minimum: 1, maximum: 25, description: 'Max records (default 8)' }
+        limit: { type: 'integer', minimum: 1, maximum: 25, description: 'Max records (default 8)' },
+        includeFirehose: {
+          type: 'boolean',
+          description:
+            'Include high-volume telemetry sources (raw browser history, routine habit/task checks). Off by default so they never bury the meaningful records; a source filter naming one of them works regardless.'
+        }
       },
       required: ['q'],
       additionalProperties: false
@@ -825,7 +830,8 @@ function searchRecordsTool(sqlite: RawSqlite, input: Record<string, unknown>): u
     type: str(input.type) || undefined,
     from,
     to,
-    limit
+    limit,
+    includeFirehose: input.includeFirehose === true
   })
   const out: Array<{
     date: string | null

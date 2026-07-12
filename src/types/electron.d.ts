@@ -1441,6 +1441,7 @@ declare global {
           limit?: number
           offset?: number
           mode?: 'keyword' | 'semantic'
+          includeFirehose?: boolean
         }): Promise<TimelineSearchHit[]>
         rebuildSemantic(): Promise<{
           success: boolean
