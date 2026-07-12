@@ -21,7 +21,7 @@
  *
  * TCC / signing note: BOTH mechanisms need a macOS permission grant, and the
  * grant only fires reliably in a **signed + hardened-runtime + notarized**
- * build (entitlements + `NS…UsageDescription` — see `resources/entitlements.mac.plist`)
+ * build (entitlements + `NS…UsageDescription` — see `resources/entitlements.mac.plist`
  * and Track 4 of the spike plan). That's why the registry entry ships
  * `connected: false` for now: the wiring and read are real and unit-tested, but
  * the feature can't be proven for end users until notarization is configured.
