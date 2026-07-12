@@ -262,25 +262,45 @@ export async function pullSnapshot(
       headers: authHeaders()
     })
     if (!res.ok) return { success: false, error: `Relay responded ${res.status}` }
-    // Bound the response before buffering (when the relay advertises a length)
-    // and again after parsing — the envelope string itself is the second check.
-    const advertised = Number(res.headers.get('content-length'))
-    if (Number.isFinite(advertised) && advertised > MAX_PULL_BODY_BYTES) {
-      return { success: false, error: 'Snapshot response is too large to pull safely' }
+    // Read the body with an explicit byte cap so chunked/misreported responses
+    // can't force the main process to buffer unbounded data.
+    const reader = res.body?.getReader()
+    if (!reader) return { success: false, error: 'Relay returned an empty snapshot response' }
+    const chunks: Uint8Array[] = []
+    let size = 0
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      if (!value) continue
+      size += value.byteLength
+      if (size > MAX_PULL_BODY_BYTES) {
+        try {
+          await reader.cancel()
+        } catch {
+          /* best-effort */
+        }
+        return { success: false, error: 'Snapshot response is too large to pull safely' }
+      }
+      chunks.push(value)
     }
-    const text = await res.text()
-    if (text.length > MAX_PULL_BODY_BYTES) {
-      return { success: false, error: 'Snapshot response is too large to pull safely' }
+    const text = Buffer.concat(chunks.map((c) => Buffer.from(c))).toString('utf8')
+
+    const parsed = JSON.parse(text) as { blob?: unknown }
+    if (typeof parsed.blob !== 'string') {
+      return { success: false, error: 'Relay returned an invalid snapshot envelope' }
     }
-    const parsed = JSON.parse(text) as { blob: string; meta: SyncRemoteMeta }
+    const exportedAt = check.meta?.exportedAt
+    if (typeof exportedAt !== 'string') {
+      return { success: false, error: 'Relay returned an invalid sync meta' }
+    }
     // Capture device-LOCAL identity before the restore replaces app_settings.
     const localToken = readSetting('relayDeviceToken')
     const localDeviceId = readSetting(DEVICE_ID_SETTING)
     const stats = restoreEncryptedSnapshot(Buffer.from(parsed.blob, 'base64'), passphrase)
     if (localToken) writeSetting('relayDeviceToken', localToken)
     if (localDeviceId) writeSetting(DEVICE_ID_SETTING, localDeviceId)
-    writeSetting(LAST_SEEN_SETTING, parsed.meta.exportedAt)
-    return { success: true, upToDate: false, exportedAt: parsed.meta.exportedAt, rows: stats.rows }
+    writeSetting(LAST_SEEN_SETTING, exportedAt)
+    return { success: true, upToDate: false, exportedAt, rows: stats.rows }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : String(err) }
   }
