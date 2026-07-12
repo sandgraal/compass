@@ -589,6 +589,13 @@ export function buildRecordsCsv(): string {
 }
 
 export const RECORDS_RECLASSIFY_KEY = 'recordsReclassifyV1'
+/**
+ * V2 re-runs the (idempotent, dedupe-safe) reclassification for the families
+ * added after V1 shipped: rider-app GPS fixes → location_points, Digital
+ * Items, gift-card transactions. Installs that already consumed V1 pick the
+ * new families up here; fresh installs only ever run V2 (a superset).
+ */
+export const RECORDS_RECLASSIFY_V2_KEY = 'recordsReclassifyV2'
 
 export type ReclassifyResult = {
   moved: number // generic rows re-inserted as properly-sourced records
@@ -680,21 +687,65 @@ export function reclassifyGenericRecords(): ReclassifyResult {
  * App-launch wrapper: run the reclassification exactly once per install, gated
  * on an app_settings key written only AFTER success (crash → retried next
  * launch; the reclassify is dedup-safe so retries are safe). Same pattern as
- * `recordsDateRepairV1` / `financeSnapshotRepairV1`.
+ * `recordsDateRepairV1` / `financeSnapshotRepairV1`. The gate key is a
+ * parameter so each expansion of `AMAZON_REFILE_FAMILIES` ships as a new key
+ * (V2, …) that re-runs over installs whose earlier key is already consumed.
  */
-export function runRecordsReclassifyIfNeeded(): { ran: boolean } & Partial<ReclassifyResult> {
+export function runRecordsReclassifyIfNeeded(
+  gateKey: string = RECORDS_RECLASSIFY_V2_KEY
+): { ran: boolean } & Partial<ReclassifyResult> {
   const db = getDb()
+  const existing = db.select().from(appSettings).where(eq(appSettings.key, gateKey)).get()
+  if (existing) return { ran: false }
+  const res = reclassifyGenericRecords()
+  db.insert(appSettings).values({ key: gateKey, value: new Date().toISOString() }).run()
+  return { ran: true, ...res }
+}
+
+export const GENERIC_TELEMETRY_PURGE_KEY = 'genericTelemetryPurgeV1'
+
+/**
+ * One-shot purge of the remaining 'generic' rows (user-approved, 2026-07-11).
+ * After the V2 reclassify promotes every claimed family, what's left under
+ * 'generic' is Amazon-export device telemetry (DeviceState pings, impression /
+ * notification metadata — ~150k rows) that the user chose to delete rather
+ * than keep firehose-hidden. Chunked so each DELETE (and its FTS trigger
+ * fan-out) commits in a bounded transaction. Re-importing the export restores
+ * the rows; the consumed gate means later generic imports are never purged.
+ *
+ * Refuses to run until the V2 reclassify gate is written — purging first would
+ * destroy the GPS/order/gift-card rows V2 exists to promote.
+ */
+export function runGenericTelemetryPurgeIfNeeded(): { ran: boolean; deleted?: number } {
+  const db = getDb()
+  const reclassified = db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, RECORDS_RECLASSIFY_V2_KEY))
+    .get()
+  if (!reclassified) return { ran: false }
   const existing = db
     .select()
     .from(appSettings)
-    .where(eq(appSettings.key, RECORDS_RECLASSIFY_KEY))
+    .where(eq(appSettings.key, GENERIC_TELEMETRY_PURGE_KEY))
     .get()
   if (existing) return { ran: false }
-  const res = reclassifyGenericRecords()
+
+  const sqlite = getRawSqlite()
+  const del = sqlite.prepare(
+    "DELETE FROM records WHERE id IN (SELECT id FROM records WHERE source = 'generic' LIMIT 5000)"
+  )
+  let deleted = 0
+  for (;;) {
+    const changes = del.run().changes
+    deleted += changes
+    if (changes < 5000) break
+  }
+  if (deleted > 0) void refreshRecordsSemanticIndex()
   db.insert(appSettings)
-    .values({ key: RECORDS_RECLASSIFY_KEY, value: new Date().toISOString() })
+    .values({ key: GENERIC_TELEMETRY_PURGE_KEY, value: new Date().toISOString() })
     .run()
-  return { ran: true, ...res }
+  return { ran: true, deleted }
 }
 
 const EMPTY: Omit<RecordsImportResult, 'success'> = {

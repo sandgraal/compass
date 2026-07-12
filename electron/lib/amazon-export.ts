@@ -13,24 +13,35 @@
  *  - `Saved Music.csv` (library adds) → amazon-music / save
  *  - `Intent-1-1.csv` (Alexa utterances) → alexa / ask
  *  - `Geolocation-1-1.csv` → location_points (NEVER the records spine)
+ *  - `rider_app_analytics-*.csv` (shopping-app GPS fixes) → location_points
+ *  - `Digital Items.csv` (digital purchases w/ product names) → amazon / order
+ *  - `Retail.GiftCertificates.Transaction.csv` → amazon / gift-card
  *
  * Each family exposes its row mapper via `AMAZON_REFILE_FAMILIES` so the
  * one-shot reclassifier (`records-reclassify.ts`) can re-derive already-imported
  * generic rows from their stored payloads — same mapper, one source of truth.
  * Everything else in the archive (device telemetry, impressions, notification
  * metadata) deliberately stays generic; source-tiers collapses it as firehose.
+ *
+ * Deliberately NOT claimed:
+ *  - `Kindle.Devices.ReadingSession_v0.csv` — the same sessions already reach
+ *    the spine via `Kindle.reading-insights-sessions_with_adjustments.csv`
+ *    (the adjusted view, WITH book titles); claiming the raw device log would
+ *    double-count every read.
+ *  - `Digital Orders.csv` — carries order ids/addresses but no product name;
+ *    `Digital Items.csv` covers the same orders with real titles and prices.
  */
 
 import { parseCSV } from './csv'
 import { parseWhen } from './dates'
 import type { Recognizer, RecordInput } from './recognizers'
 
-/** Amazon CSVs write 'Not Available' / 'Data Not Available' instead of blanks. */
+/** Amazon CSVs write 'Not Available' / 'Data Not Available' / 'Not Applicable' instead of blanks. */
 function field(row: Record<string, unknown>, key: string): string {
   const v = row[key]
   if (v == null) return ''
   const s = String(v).trim()
-  return /^(data )?not available$/i.test(s) ? '' : s
+  return /^(data )?not (available|applicable)$/i.test(s) ? '' : s
 }
 
 /** First non-empty value across candidate column names (header naming varies by export vintage). */
@@ -294,6 +305,83 @@ export function mapAmazonGeolocation(row: Record<string, unknown>): RecordInput 
   }
 }
 
+/**
+ * Shopping-app analytics GPS fixes (`rider_app_analytics-*.csv`). Every UI tap
+ * logs a row that repeats the device's latest GPS fix, so thousands of rows
+ * collapse to a few hundred distinct fixes — the naturalKey (fix time + coords)
+ * does that collapsing. Same LocationPayload shape as `mapAmazonGeolocation`;
+ * routed to `location_points`, never the records spine.
+ */
+export function mapAmazonRiderLocation(row: Record<string, unknown>): RecordInput | null {
+  if (!hasKey(row, ['GPS Time (UTC)', 'Event Time (UTC)'])) return null
+  const lat = Number(field(row, 'Latitude'))
+  const lng = Number(field(row, 'Longitude'))
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return null
+  // Timestamps are 'YYYY-MM-DD HH:mm:ss.SSS' in UTC (the column says so) —
+  // rewrite to ISO so Date.parse doesn't read them as local time. Prefer the
+  // GPS fix time over the tap's event time.
+  const rawWhen = firstField(row, ['GPS Time (UTC)', 'Event Time (UTC)'])
+  const when = parseWhen(rawWhen ? `${rawWhen.replace(' ', 'T')}Z` : '')
+  if (when == null) return null
+  const acc = Number(field(row, 'Horizontal Accuracy'))
+  const payload: { lat: number; lng: number; acc?: number; src: string } = {
+    lat,
+    lng,
+    src: 'amazon-rider'
+  }
+  if (Number.isFinite(acc)) payload.acc = acc
+  return {
+    source: 'location',
+    type: 'location-point',
+    occurredAt: when,
+    title: `${lat.toFixed(2)}, ${lng.toFixed(2)}`,
+    payload,
+    naturalKey: `amazon-rider|${when}|${lat.toFixed(5)}|${lng.toFixed(5)}`
+  }
+}
+
+/**
+ * Digital purchases (`Digital Items.csv`) — one row per purchased item with a
+ * real product name and price. The sibling `Digital Orders.csv` is deliberately
+ * unclaimed (order ids without product names).
+ */
+export function mapAmazonDigitalItem(row: Record<string, unknown>): RecordInput | null {
+  if (!hasKey(row, ['DigitalOrderItemId'])) return null
+  const title = firstField(row, ['ProductName', 'Product Name'])
+  if (!title) return null
+  const when = firstField(row, ['OrderDate', 'FulfilledDate'])
+  const price = field(row, 'OurPrice')
+  const currency = field(row, 'OurPriceCurrencyCode')
+  return {
+    source: 'amazon',
+    type: 'order',
+    occurredAt: parseWhen(when),
+    title,
+    body: price ? `Digital · ${price}${currency ? ` ${currency}` : ''}` : 'Digital',
+    payload: row,
+    naturalKey: `${when}|${field(row, 'OrderId') || 'order'}|${field(row, 'ASIN') || title}`
+  }
+}
+
+/** Gift-card ledger (`Retail.GiftCertificates.Transaction.csv`). */
+export function mapAmazonGiftCertificate(row: Record<string, unknown>): RecordInput | null {
+  if (!hasKey(row, ['serialNumber'])) return null
+  const amount = field(row, 'transactionAmount')
+  if (!amount) return null
+  const when = field(row, 'transactionDate')
+  const currency = field(row, 'currencyCode')
+  const txType = field(row, 'transactionType')
+  return {
+    source: 'amazon',
+    type: 'gift-card',
+    occurredAt: parseWhen(when),
+    title: `Gift card · ${amount}${currency ? ` ${currency}` : ''}`,
+    body: txType ? txType.replace(/([a-z])([A-Z])/g, '$1 $2') : undefined,
+    payload: row,
+    naturalKey: `${when}|${field(row, 'serialNumber')}|${txType}|${amount}`
+  }
+}
+
 // ── Recognizers for FRESH imports of the same files ───────────────────────────
 
 function csvHeader(f: { ext: string; text: string }): string {
@@ -369,6 +457,28 @@ export const AMAZON_LOCATION_RECOGNIZER = csvRecognizer(
   mapAmazonGeolocation
 )
 
+/** Routed to location_points via LOCATION_RECOGNIZER_IDS — never `records`. */
+export const AMAZON_RIDER_LOCATION_RECOGNIZER = csvRecognizer(
+  'amazon-rider-location',
+  'Amazon app GPS fixes',
+  ['GPS Time (UTC)', 'Latitude', 'Longitude'],
+  mapAmazonRiderLocation
+)
+
+export const AMAZON_DIGITAL_ITEMS_RECOGNIZER = csvRecognizer(
+  'amazon-digital-items',
+  'Amazon digital purchases',
+  ['DigitalOrderItemId', 'ProductName'],
+  mapAmazonDigitalItem
+)
+
+export const AMAZON_GIFT_CERT_RECOGNIZER = csvRecognizer(
+  'amazon-gift-certificates',
+  'Amazon gift card transactions',
+  ['serialNumber', 'transactionAmount', 'transactionType'],
+  mapAmazonGiftCertificate
+)
+
 // Best-guess header detection for the four unvalidated families. Each requires a
 // distinctive column so they don't steal generic dated CSVs; if the real archive
 // spells the header differently, the file falls through to generic (safe).
@@ -420,6 +530,14 @@ export const AMAZON_REFILE_FAMILIES: readonly RefileFamily[] = [
   { matches: (p) => p.includes('Saved Music'), map: mapAmazonMusicSave },
   { matches: (p) => /^Intent-\d/.test(p), map: mapAlexaUtterance },
   { matches: (p) => /^Geolocation-\d/.test(p), map: mapAmazonGeolocation, location: true },
+  // V2 families (recordsReclassifyV2) — validated against the real export.
+  {
+    matches: (p) => p.includes('rider_app_analytics'),
+    map: mapAmazonRiderLocation,
+    location: true
+  },
+  { matches: (p) => p.includes('Digital Items'), map: mapAmazonDigitalItem },
+  { matches: (p) => p.includes('GiftCertificates'), map: mapAmazonGiftCertificate },
   // Unvalidated families — filename patterns are best-guess (see caveat above).
   { matches: (p) => /return/i.test(p), map: mapAmazonReturn },
   { matches: (p) => /review/i.test(p), map: mapAmazonReview },
