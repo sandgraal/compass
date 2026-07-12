@@ -909,19 +909,19 @@ function DeviceSyncRows(): JSX.Element {
   const [confirmPass, setConfirmPass] = useState('')
   const [busy, setBusy] = useState<null | 'configure' | 'push' | 'pull' | 'disable'>(null)
 
+  // NOTE: the availability early-return lives AFTER the hooks (React rules) —
+  // see the `if (!api)` block just before the configured/unconfigured render.
   const api = typeof window !== 'undefined' ? window.api?.deviceSync : undefined
-  if (!api) {
-    return (
-      <SettingsRow
-        label="Device sync unavailable"
-        description="Device sync is available only in the desktop app."
-      >
-        <span className="text-xs text-muted-foreground">This section is disabled in web preview.</span>
-      </SettingsRow>
-    )
-  }
 
   async function refresh(): Promise<void> {
+    if (!api) return
+    try {
+      setStatus(await api.status())
+    } catch {
+      /* main process unavailable (web preview) — section stays inert */
+    }
+  }
+
   useEffect(() => {
     if (typeof window === 'undefined' || !window.api?.deviceSync) return
     window.api.deviceSync
@@ -1025,6 +1025,21 @@ function DeviceSyncRows(): JSX.Element {
     } finally {
       setBusy(null)
     }
+  }
+
+  // Web preview / non-Electron: the deviceSync bridge doesn't exist — show a
+  // friendly inert row (placed after all hooks so the hook order never varies).
+  if (!api) {
+    return (
+      <SettingsRow
+        label="Device sync unavailable"
+        description="Device sync is available only in the desktop app."
+      >
+        <span className="text-xs text-muted-foreground">
+          This section is disabled in web preview.
+        </span>
+      </SettingsRow>
+    )
   }
 
   if (!status?.configured) {

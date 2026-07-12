@@ -1,6 +1,11 @@
 {
   "extends": "@electron-toolkit/tsconfig/tsconfig.node.json",
-  "include": ["electron.vite.config.*", "electron/**/*", "drizzle.config.ts"],
+  "include": [
+    "electron.vite.config.*",
+    "electron/**/*",
+    "drizzle.config.ts",
+    "mobile/src/lib/**/*"
+  ],
   "compilerOptions": {
     "composite": true,
     "types": ["electron-vite/node"],

@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "Compass",
+    "slug": "compass-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0f1117",
+    "ios": { "supportsTablet": true, "bundleIdentifier": "com.compass.mobile" },
+    "android": { "package": "com.compass.mobile" }
+  }
+}

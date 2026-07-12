@@ -137,12 +137,11 @@ export function handleSyncRequest(
     if (typeof envelope.deviceId !== 'string' || envelope.deviceId.length > 64) {
       return json(400, { error: 'Missing or invalid deviceId' })
     }
-    let decoded: Buffer
     const b64 = envelope.blob
     if (b64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) {
       return json(400, { error: 'Blob is not valid base64' })
     }
-    decoded = Buffer.from(b64, 'base64')
+    const decoded = Buffer.from(b64, 'base64')
     if (decoded.length === 0) return json(400, { error: 'Blob is empty' })
     if (decoded.length > sync.maxBlobBytes) {
       return json(413, { error: 'Snapshot exceeds the relay blob size limit' })

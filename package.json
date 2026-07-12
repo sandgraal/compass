@@ -74,6 +74,8 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@electron-toolkit/utils": "^4.0.0",
+    "@noble/ciphers": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
     "@playwright/test": "^1.49.0",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.1",
