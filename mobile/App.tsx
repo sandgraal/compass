@@ -47,7 +47,7 @@ export default function App(): JSX.Element {
     ;(async () => {
       const [relayUrl, deviceToken, passphrase] = await Promise.all([
         AsyncStorage.getItem(RELAY_URL_KEY),
-        AsyncStorage.getItem(TOKEN_KEY),
+        SecureStore.getItemAsync(TOKEN_KEY),
         SecureStore.getItemAsync(PASSPHRASE_KEY)
       ])
       setConfig(
