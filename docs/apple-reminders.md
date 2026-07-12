@@ -1,7 +1,7 @@
 # Apple Reminders integration — status & remaining work
 
-**Status: spike landed, gated on notarization.** The backend + wiring are built,
-unit-tested, and on `main`, but the integration ships as a **`connected: false`
+**Status: spike landed, gated on notarization.** The backend + wiring are built
+and unit-tested (see #376), but the integration ships as a **`connected: false`
 "Coming Soon" stub** and cannot be turned on for end users until a signed +
 notarized build is possible. This doc is the pick-up point.
 
