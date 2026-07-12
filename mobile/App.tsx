@@ -140,7 +140,11 @@ function SetupScreen({ onSave }: { onSave: (c: Config) => Promise<void> }): JSX.
         onPress={async () => {
           setBusy(true)
           try {
-            await onSave({ relayUrl: relayUrl.trim(), deviceToken: deviceToken.trim(), passphrase })
+            await onSave({
+              relayUrl: relayUrl.trim(),
+              deviceToken: deviceToken.trim(),
+              passphrase: passphrase.trim()
+            })
           } finally {
             setBusy(false)
           }
