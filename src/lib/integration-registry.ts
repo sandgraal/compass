@@ -287,6 +287,23 @@ export const INTEGRATION_REGISTRY: Record<string, IntegrationMeta> = {
     color: 'from-green-500/20 to-teal-500/20',
     logo: '#',
     connected: false
+  },
+  // Backend (JXA reader + sync pipeline) is built and unit-tested, but Reminders
+  // needs a signed + notarized build for its macOS permission prompt to fire —
+  // so it ships as a Coming Soon stub until notarization is configured (Track 4
+  // of the spike plan). Flipping `connected: true` + adding the setup entry is
+  // the only change needed once that lands.
+  'apple-reminders': {
+    id: 'apple-reminders',
+    name: 'Apple Reminders',
+    category: 'communication-productivity',
+    method: 'live',
+    description:
+      "Local read of your Reminders — today's and overdue into the daily checklist. No cloud.",
+    scopes: ['local:eventkit'],
+    color: 'from-orange-400/20 to-red-500/20',
+    logo: '☑',
+    connected: false
   }
 }
 

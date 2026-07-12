@@ -13,6 +13,7 @@ import {
   syncEvents
 } from '../db/schema'
 import { readAppleCalendars } from '../integrations/apple-calendar'
+import { syncAppleReminders } from '../integrations/apple-reminders'
 import { syncArcadia } from '../integrations/arcadia'
 import { syncArgyle } from '../integrations/argyle'
 import { syncCanopy } from '../integrations/canopy'
@@ -94,6 +95,7 @@ const SUPPORTED_SYNC_SERVICES = new Set([
   'linear',
   'todoist',
   'things',
+  'apple-reminders',
   'oura',
   'terra',
   'canopy',
@@ -343,6 +345,8 @@ function serviceLabelFor(service: string): string {
       return 'Apple Calendar'
     case 'things':
       return 'Things'
+    case 'apple-reminders':
+      return 'Apple Reminders'
     case 'plaid':
       return 'Plaid'
     case 'simplefin':
@@ -1036,6 +1040,21 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
         .run()
       return syncThings(win)
     }
+    if (service === 'apple-reminders') {
+      // Same opt-in model as Things: Connect / manual refresh flips the row to
+      // connected before syncing; disconnect leaves a 'disconnected' row that
+      // syncAppleReminders self-gates on. (Cron calls the sync fn directly and
+      // stays gated.)
+      const db = getDb()
+      db.insert(integrations)
+        .values({ service: 'apple-reminders', status: 'connected', connectedAt: new Date() })
+        .onConflictDoUpdate({
+          target: integrations.service,
+          set: { status: 'connected', errorMessage: null }
+        })
+        .run()
+      return syncAppleReminders(win)
+    }
     if (service === 'plaid') {
       const results = await syncAllPlaid()
       // Aggregate across every connected Item: `success` is true ONLY when
@@ -1140,6 +1159,16 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
       .get()
     if (thingsRow && thingsRow.status !== 'disconnected') {
       results.push(toPublicSyncResult(await syncThings(win)))
+    }
+    // Apple Reminders — same local-tokenless join rule as Things: only once the
+    // user has connected it AND hasn't disconnected.
+    const remindersRow = getDb()
+      .select({ status: integrations.status })
+      .from(integrations)
+      .where(eq(integrations.service, 'apple-reminders'))
+      .get()
+    if (remindersRow && remindersRow.status !== 'disconnected') {
+      results.push(toPublicSyncResult(await syncAppleReminders(win)))
     }
     return results
   })
