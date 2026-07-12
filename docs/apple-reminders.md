@@ -23,7 +23,7 @@ reason this is a stub.
 
 | File | What it is |
 |---|---|
-| [`electron/integrations/apple-reminders.ts`](../electron/integrations/apple-reminders.ts) | `syncAppleReminders` (imports overdue/due-today reminders into today's daily checklist as `source='apple-reminders'`, self-gate / preserve-local-checked / prune — a clone of `things.ts`), the pure `normalizeReminders`, and `readReminders` (the read seam). |
+| `electron/integrations/apple-reminders.ts` (see #376) | `syncAppleReminders` (imports overdue/due-today reminders into today's daily checklist as `source='apple-reminders'`, self-gate / preserve-local-checked / prune — a clone of `things.ts`), the pure `normalizeReminders`, and `readReminders` (the read seam). |
 | `electron/integrations/apple-reminders.test.ts` | Unit tests: normalize filtering, JXA parser + platform guard (injected `run`, never shells out), full sync pipeline, dispatch. |
 | `electron/ipc/sync.ts` | `apple-reminders` in `SUPPORTED_SYNC_SERVICES`, the `sync:trigger` opt-in-flip branch, the `sync:trigger-all` fan-out, `serviceLabelFor`. |
 | `electron/cron.ts` | `runSyncForService` dispatch branch. |
