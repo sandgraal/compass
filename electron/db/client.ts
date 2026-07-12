@@ -5,7 +5,7 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { backfillGeoFromNotes } from '../integrations/finance-geo'
 import { runSnapshotRepairIfNeeded } from '../integrations/finance-snapshot'
 import { backfillTaxTags } from '../integrations/finance-tax'
-import { runRecordsDateRepairIfNeeded } from '../lib/records-repair'
+import { runGcalDedupeIfNeeded, runRecordsDateRepairIfNeeded } from '../lib/records-repair'
 import { DATA_DIR } from '../paths'
 import { reconcileMigrationState } from './reconcile'
 import * as schema from './schema'
@@ -65,6 +65,13 @@ export async function initDb(): Promise<void> {
   // keeps the original cell) so year-over-year views are trustworthy.
   try {
     runRecordsDateRepairIfNeeded(sqlite)
+  } catch {
+    /* non-fatal — retried next launch while the gate key is unset */
+  }
+  // One-shot 2026-07 cleanup: drop duplicate gcal events left by .ics
+  // re-imports whose payload drifted (same title+time+file, different hash).
+  try {
+    runGcalDedupeIfNeeded(sqlite)
   } catch {
     /* non-fatal — retried next launch while the gate key is unset */
   }

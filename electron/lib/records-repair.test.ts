@@ -11,7 +11,12 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { RECORDS_DATE_REPAIR_KEY, runRecordsDateRepairIfNeeded } from './records-repair'
+import {
+  GCAL_DEDUPE_KEY,
+  RECORDS_DATE_REPAIR_KEY,
+  runGcalDedupeIfNeeded,
+  runRecordsDateRepairIfNeeded
+} from './records-repair'
 
 // Mirrors electron/db/client.ts ensureNewTables (records + app_settings).
 const RECORDS_DDL = `CREATE TABLE records (
@@ -95,6 +100,56 @@ describe('runRecordsDateRepairIfNeeded', () => {
     insert('real event', Date.parse('2024-05-12T00:00:00Z'))
     expect(runRecordsDateRepairIfNeeded(sqlite, NOW)).toEqual({ ran: true, repaired: 0 })
     expect(runRecordsDateRepairIfNeeded(sqlite, NOW).ran).toBe(false)
+  })
+})
+
+describe('runGcalDedupeIfNeeded', () => {
+  function insertGcal(
+    title: string,
+    occurredAt: number | null,
+    hash: string,
+    provenance = 'Work.ics'
+  ): void {
+    sqlite
+      .prepare(
+        "INSERT INTO records (source, type, occurred_at, title, dedup_hash, provenance) VALUES ('gcal', 'event', ?, ?, ?, ?)"
+      )
+      .run(occurredAt, title, hash, provenance)
+  }
+
+  it('keeps the oldest of each duplicate group and leaves distinct events alone', () => {
+    const when = Date.parse('2026-05-01T09:00:00Z')
+    // Duplicate pair from payload-drift across re-imports (different hashes).
+    insertGcal('Harvest Kale - Lacinato', when, 'h1')
+    insertGcal('Harvest Kale - Lacinato', when, 'h2')
+    // Same title+time but a DIFFERENT calendar file — not a duplicate.
+    insertGcal('Harvest Kale - Lacinato', when, 'h3', 'Personal.ics')
+    // Distinct events + a non-gcal row: untouched.
+    insertGcal('Standup', when, 'h4')
+    insert('generic row', when)
+
+    const res = runGcalDedupeIfNeeded(sqlite, NOW)
+    expect(res).toEqual({ ran: true, removed: 1 })
+    const kept = sqlite
+      .prepare("SELECT dedup_hash AS h FROM records WHERE source='gcal' ORDER BY id")
+      .all() as Array<{ h: string }>
+    expect(kept.map((k) => k.h)).toEqual(['h1', 'h3', 'h4']) // oldest of the pair survives
+    expect(
+      sqlite.prepare("SELECT count(*) AS n FROM records WHERE source='generic'").get()
+    ).toEqual({ n: 1 })
+  })
+
+  it('runs once and then gates', () => {
+    const when = Date.parse('2026-05-01T09:00:00Z')
+    insertGcal('A', when, 'a1')
+    expect(runGcalDedupeIfNeeded(sqlite, NOW)).toEqual({ ran: true, removed: 0 })
+    // A duplicate arriving after the gate is consumed stays (one-shot repair).
+    insertGcal('A', when, 'a2')
+    expect(runGcalDedupeIfNeeded(sqlite, NOW)).toEqual({ ran: false, removed: 0 })
+    const gate = sqlite
+      .prepare('SELECT value FROM app_settings WHERE key = ?')
+      .get(GCAL_DEDUPE_KEY) as { value: string } | undefined
+    expect(gate?.value).toBe(new Date(NOW).toISOString())
   })
 })
 
