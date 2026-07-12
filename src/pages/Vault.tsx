@@ -2,6 +2,7 @@ import {
   Banknote,
   ChevronRight,
   Copy,
+  Dna,
   Eye,
   EyeOff,
   Globe,
@@ -28,7 +29,8 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   credentials: <Key size={16} />,
   medical: <HeartPulse size={16} />,
   legal: <Scale size={16} />,
-  'foreign-accounts': <Globe size={16} />
+  'foreign-accounts': <Globe size={16} />,
+  genetics: <Dna size={16} />
 }
 
 const FIELD_TEMPLATES: Record<
@@ -76,6 +78,15 @@ const FIELD_TEMPLATES: Record<
     { key: 'accountNumber', label: 'Account Number', sensitive: true },
     { key: 'accountType', label: 'Account Type (bank / securities)' },
     { key: 'maxValueUsd', label: 'Max Value During Year (USD)' },
+    { key: 'notes', label: 'Notes' }
+  ],
+  // Entries are created only via the "Import raw data file" flow (see
+  // importGeneticsFile below) — never hand-typed. The raw genotype text
+  // itself is a separate encrypted blob and never appears as a field here.
+  genetics: [
+    { key: 'provider', label: 'Provider (23andMe / AncestryDNA)' },
+    { key: 'buildAssembly', label: 'Reference Build' },
+    { key: 'snpCount', label: 'SNPs Imported' },
     { key: 'notes', label: 'Notes' }
   ]
 }
@@ -280,6 +291,24 @@ export default function Vault(): JSX.Element {
     }
   }
 
+  async function importGeneticsFile() {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron) return
+    setImporting(true)
+    try {
+      const r = await window.api.vault.importGeneticsFile()
+      if (r.canceled) return
+      if (r.success) {
+        showToast('Raw genotype data imported and encrypted.', 'success')
+        await loadEntries()
+      } else {
+        showToast(`Import failed: ${r.error}`, 'error')
+      }
+    } finally {
+      setImporting(false)
+    }
+  }
+
   async function updateEntry(id: string, updates: Record<string, string>) {
     const isElectron = typeof window !== 'undefined' && !!window.api
     if (!isElectron) return
@@ -410,17 +439,28 @@ export default function Vault(): JSX.Element {
                 <Lock size={11} /> Lock
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => {
-                setAdding(true)
-                setNewEntry({})
-              }}
-              disabled={locked}
-              className="flex items-center gap-1.5 text-sm px-3 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
-            >
-              <Plus size={14} /> Add entry
-            </button>
+            {selectedCategory === 'genetics' ? (
+              <button
+                type="button"
+                onClick={importGeneticsFile}
+                disabled={locked || importing}
+                className="flex items-center gap-1.5 text-sm px-3 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
+              >
+                <Upload size={14} /> {importing ? 'Importing…' : 'Import raw data file'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setAdding(true)
+                  setNewEntry({})
+                }}
+                disabled={locked}
+                className="flex items-center gap-1.5 text-sm px-3 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors disabled:opacity-50"
+              >
+                <Plus size={14} /> Add entry
+              </button>
+            )}
           </div>
         </div>
 
@@ -511,10 +551,14 @@ export default function Vault(): JSX.Element {
                 </p>
                 <button
                   type="button"
-                  onClick={() => setAdding(true)}
+                  onClick={
+                    selectedCategory === 'genetics' ? importGeneticsFile : () => setAdding(true)
+                  }
                   className="text-xs text-primary hover:underline"
                 >
-                  Add your first entry
+                  {selectedCategory === 'genetics'
+                    ? 'Import raw data file'
+                    : 'Add your first entry'}
                 </button>
               </div>
             ) : (

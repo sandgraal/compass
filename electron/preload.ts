@@ -276,7 +276,8 @@ const api = {
       ipcRenderer.invoke('vault:delete-entry', category, id),
     setContentProtection: (enabled: boolean) =>
       ipcRenderer.send('vault:set-content-protection', enabled),
-    import1Password: () => ipcRenderer.invoke('vault:import-1password-csv')
+    import1Password: () => ipcRenderer.invoke('vault:import-1password-csv'),
+    importGeneticsFile: () => ipcRenderer.invoke('vault:import-genetics-file')
   },
 
   // --- Checklist ---
