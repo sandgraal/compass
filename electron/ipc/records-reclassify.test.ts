@@ -290,8 +290,9 @@ describe('runGenericTelemetryPurgeIfNeeded', () => {
     ).toEqual({ n: 1 })
   })
 
-  it('after V2, deletes only generic rows (FTS consistent), then gates', async () => {
-    // A rider row V2 will promote + two telemetry rows + a signal row to keep.
+  it('after V2, deletes only Amazon-telemetry generic rows (FTS consistent), then gates', async () => {
+    // A rider row V2 will promote + two telemetry rows + a signal row to keep
+    // + a generic row from a NON-Amazon import the purge must never touch.
     seedGeneric('tap', 'rider_app_analytics-0.csv', {
       'GPS Time (UTC)': '2026-06-09 00:15:24.694',
       Latitude: '26.07069',
@@ -299,6 +300,7 @@ describe('runGenericTelemetryPurgeIfNeeded', () => {
     })
     seedGeneric('telemetry blob', 'DeviceState-1-1.csv', { state: 'ON' })
     seedGeneric('impression', 'AppEngagement.csv', { app: 'x' })
+    seedGeneric('unrecognized bank row', 'MyBankExport.csv', { memo: 'rent' })
     sqlite
       .prepare(
         "INSERT INTO records (source, type, occurred_at, title, dedup_hash) VALUES ('netflix', 'watch', 1, 'Red One', 'nf|1')"
@@ -310,10 +312,11 @@ describe('runGenericTelemetryPurgeIfNeeded', () => {
     const purge = mod.runGenericTelemetryPurgeIfNeeded()
     expect(purge).toEqual({ ran: true, deleted: 2 })
 
-    expect(
-      sqlite.prepare("SELECT count(*) AS n FROM records WHERE source='generic'").get()
-    ).toEqual({ n: 0 })
-    expect(sqlite.prepare('SELECT count(*) AS n FROM records').get()).toEqual({ n: 1 }) // netflix survives
+    // The non-Amazon generic import survives (provenance-fingerprint scoping).
+    expect(sqlite.prepare("SELECT title FROM records WHERE source='generic'").all()).toEqual([
+      { title: 'unrecognized bank row' }
+    ])
+    expect(sqlite.prepare('SELECT count(*) AS n FROM records').get()).toEqual({ n: 2 }) // netflix + bank
     expect(sqlite.prepare('SELECT count(*) AS n FROM location_points').get()).toEqual({ n: 1 })
     const base = sqlite.prepare('SELECT count(*) AS n FROM records').get() as { n: number }
     const indexed = sqlite.prepare('SELECT count(*) AS n FROM records_fts_docsize').get() as {
@@ -321,11 +324,11 @@ describe('runGenericTelemetryPurgeIfNeeded', () => {
     }
     expect(indexed.n).toBe(base.n)
 
-    // Gate consumed — a later unrecognized generic import is never purged.
-    seedGeneric('future import', 'SomeOther.csv', { a: 1 })
+    // Gate consumed — a later telemetry-looking generic import is never purged.
+    seedGeneric('future import', 'DeviceState-2-1.csv', { a: 1 })
     expect(mod.runGenericTelemetryPurgeIfNeeded()).toEqual({ ran: false })
     expect(
       sqlite.prepare("SELECT count(*) AS n FROM records WHERE source='generic'").get()
-    ).toEqual({ n: 1 })
+    ).toEqual({ n: 2 })
   })
 })
