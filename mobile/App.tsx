@@ -68,7 +68,7 @@ export default function App(): JSX.Element {
   async function forget(): Promise<void> {
     await Promise.all([
       AsyncStorage.removeItem(RELAY_URL_KEY),
-      AsyncStorage.removeItem(TOKEN_KEY),
+      SecureStore.deleteItemAsync(TOKEN_KEY),
       SecureStore.deleteItemAsync(PASSPHRASE_KEY)
     ])
     setConfig(null)
