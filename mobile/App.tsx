@@ -59,7 +59,7 @@ export default function App(): JSX.Element {
   async function saveConfig(next: Config): Promise<void> {
     await Promise.all([
       AsyncStorage.setItem(RELAY_URL_KEY, next.relayUrl),
-      AsyncStorage.setItem(TOKEN_KEY, next.deviceToken),
+      SecureStore.setItemAsync(TOKEN_KEY, next.deviceToken),
       SecureStore.setItemAsync(PASSPHRASE_KEY, next.passphrase)
     ])
     setConfig(next)
