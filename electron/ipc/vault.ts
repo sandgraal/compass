@@ -335,8 +335,9 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
       const entry = {
         id: entryId,
         provider: summary.provider,
+        service: summary.provider === '23andme' ? '23andMe' : 'AncestryDNA',
         buildAssembly: summary.buildAssembly ?? '',
-        snpCount: summary.snpCount,
+        snpCount: String(summary.snpCount),
         notes: '',
         rawBlobName,
         createdAt: Date.now(),
