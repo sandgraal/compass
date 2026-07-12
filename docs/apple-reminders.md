@@ -19,7 +19,7 @@ permission prompt only fires reliably in a **signed + hardened-runtime +
 notarized** build. Compass has none of that configured yet, which is the whole
 reason this is a stub.
 
-## What's already built (on `main`)
+## What's already built (lands via #376)
 
 | File | What it is |
 |---|---|
