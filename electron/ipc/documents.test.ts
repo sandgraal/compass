@@ -3,7 +3,6 @@
  * `insertRecords` (the spine projection) is mocked to a spy so this suite stays
  * focused on the documents domain without pulling in records.ts's dep tree.
  */
-import { createHash } from 'node:crypto'
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,12 +11,9 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import type { IpcMain } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as schema from '../db/schema'
+import { hashRecord } from '../lib/recognizers'
 
 let sqlite: Database.Database
-
-function documentSpineHash(sha256: string): string {
-  return createHash('sha1').update(`document|file||${sha256}`).digest('hex').slice(0, 16)
-}
 
 vi.mock('../db/client', () => ({ getDb: () => drizzle(sqlite, { schema }) }))
 vi.mock('../lib/pdf', async (importOriginal) => {
@@ -203,7 +199,7 @@ describe('documents:delete', () => {
         'file',
         'bye',
         JSON.stringify({ sha256: doc.sha256 }),
-        documentSpineHash(doc.sha256)
+        hashRecord('document', 'file', null, doc.sha256)
       )
 
     expect(readdirSync(DOCS_DIR)).toContain(doc.storedPath)

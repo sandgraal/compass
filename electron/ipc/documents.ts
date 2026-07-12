@@ -193,7 +193,13 @@ async function importPaths(paths: string[]): Promise<DocumentsImportResult> {
 function deleteSpineFor(sha256: string): void {
   getDb()
     .delete(records)
-    .where(eq(records.dedupHash, hashRecord('document', 'file', null, sha256)))
+    .where(
+      and(
+        eq(records.dedupHash, hashRecord('document', 'file', null, sha256)),
+        eq(records.source, 'document'),
+        eq(records.type, 'file')
+      )
+    )
     .run()
 }
 
