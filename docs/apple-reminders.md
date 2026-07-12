@@ -28,7 +28,7 @@ reason this is a stub.
 | `electron/ipc/sync.ts` | `apple-reminders` in `SUPPORTED_SYNC_SERVICES`, the `sync:trigger` opt-in-flip branch, the `sync:trigger-all` fan-out, `serviceLabelFor`. |
 | `electron/cron.ts` | `runSyncForService` dispatch branch. |
 | [`src/lib/integration-registry.ts`](../src/lib/integration-registry.ts) | The `apple-reminders` entry — **`connected: false`** (Coming Soon stub). |
-| [`resources/entitlements.mac.plist`](../resources/entitlements.mac.plist) | Prepared entitlements — **not referenced by any build config**, so zero effect on current releases. |
+| `resources/entitlements.mac.plist` (see #376) | Prepared entitlements — **not referenced by any build config**, so zero effect on current releases. |
 
 Reminders land on the `records` spine automatically via the existing generic
 `projectTasks` — no per-source projector needed.
