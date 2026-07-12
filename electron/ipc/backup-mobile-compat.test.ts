@@ -128,11 +128,15 @@ describe('snapshot encrypt (desktop) → decrypt (mobile)', () => {
 
 describe('sync group id parity', () => {
   it('mobile deriveGroupId === desktop syncGroupId (slow scrypt, fixed context)', () => {
+    // The derivation is DELIBERATELY slow (scrypt N=2^15) and pure-JS on the
+    // mobile side — derive each value once and compare; generous timeout for
+    // slow CI runners.
     const pass = 'correct horse battery staple'
-    expect(deriveGroupId(pass)).toBe(syncGroupId(pass))
-    expect(deriveGroupId(pass)).toMatch(/^[a-f0-9]{32}$/)
-    expect(deriveGroupId('other-passphrase!')).not.toBe(deriveGroupId(pass))
-  })
+    const mobile = deriveGroupId(pass)
+    expect(mobile).toBe(syncGroupId(pass))
+    expect(mobile).toMatch(/^[a-f0-9]{32}$/)
+    expect(deriveGroupId('other-passphrase!')).not.toBe(mobile)
+  }, 60_000)
 })
 
 describe('mobile selectors over a decrypted bundle', () => {
