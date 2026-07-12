@@ -39,6 +39,7 @@ export async function fetchMeta(
   const text = await res.text()
   if (text.length > 64 * 1024) throw new Error('Relay returned an oversized meta response')
   return JSON.parse(text) as RemoteMeta
+}
 
 export async function fetchSnapshotBlob(
   relayUrl: string,
