@@ -65,7 +65,7 @@ import {
   yearReviewNarrationPrompt,
   yearReviewNarrative
 } from '../lib/records-year-review'
-import { FIREHOSE_SOURCE_LIST } from '../lib/source-tiers'
+import { FIREHOSE_SOURCE_LIST, isFirehose } from '../lib/source-tiers'
 import { type MuteSet, rankMemories } from '../lib/timeline-memories'
 import { momentsForDay } from '../lib/timeline-moments'
 import { forEachZipEntry } from '../lib/zip'
@@ -956,29 +956,50 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
       // surprising empty results. (limit/offset are additionally clamped downstream.)
       const finite = (v: unknown): number | undefined =>
         typeof v === 'number' && Number.isFinite(v) ? v : undefined
+      const strList = (v: unknown): string[] | undefined =>
+        Array.isArray(v)
+          ? v.filter((s): s is string => typeof s === 'string' && s.length > 0).slice(0, 50)
+          : undefined
       const base = {
         q: opts.q,
         source: typeof opts.source === 'string' ? opts.source : undefined,
         type: typeof opts.type === 'string' ? opts.type : undefined,
+        sources: strList(opts.sources),
+        types: strList(opts.types),
         from: finite(opts.from),
         to: finite(opts.to),
         limit: finite(opts.limit),
-        offset: finite(opts.offset)
+        offset: finite(opts.offset),
+        includeFirehose: opts.includeFirehose === true
+      }
+      const selectedSources = [
+        ...(base.source != null ? [base.source] : []),
+        ...(base.sources ?? [])
+      ]
+      const selectedTypes = [...(base.type != null ? [base.type] : []), ...(base.types ?? [])]
+      // Mirrors searchRecords: firehose hits are dropped unless asked for, or
+      // unless the search's source selection itself names a firehose source.
+      const keepHit = (h: { source: string; type: string }): boolean => {
+        if (selectedSources.length > 0 && !selectedSources.includes(h.source)) return false
+        if (selectedTypes.length > 0 && !selectedTypes.includes(h.type)) return false
+        return base.includeFirehose || selectedSources.some(isFirehose) || !isFirehose(h.source)
       }
       // "Find by meaning" — try the opt-in semantic index, transparently falling back
       // to FTS keyword when there's no index (null) or Ollama is offline (throws).
+      // The semantic reader only takes ONE source/type, so multi-select filtering
+      // (and the tier rule) applies to its hits via keepHit above.
       if (opts.mode === 'semantic') {
         try {
           const hits = await searchRecordsSemantic(getRawSqlite(), opts.q, {
             model: embeddingModel(),
             limit: base.limit ?? 50,
             offset: base.offset, // keep pagination consistent with the FTS path
-            source: base.source,
-            type: base.type,
+            source: selectedSources.length === 1 ? selectedSources[0] : undefined,
+            type: selectedTypes.length === 1 ? selectedTypes[0] : undefined,
             from: base.from ?? null,
             to: base.to ?? null
           })
-          if (hits) return hits.map(semanticToHit)
+          if (hits) return hits.filter(keepHit).map(semanticToHit)
         } catch {
           /* fall through to FTS */
         }

@@ -100,21 +100,25 @@ export default function Timeline(): JSX.Element {
     offsetRef.current = 0
     if (q) {
       // Ranked FTS (or the opt-in semantic index) across the whole timeline; hits
-      // re-sorted newest-first so they read as a timeline slice. The search API
-      // takes ONE source/type — with one chip selected it pushes server-side,
-      // with several the (≤200) hits are narrowed client-side.
+      // re-sorted newest-first so they read as a timeline slice. Chip selections
+      // push server-side (multi-select arrays) so filtering happens INSIDE the
+      // ranked query, not against the ≤200-hit cap.
       void window.api.records
         .search({
           q,
-          source: sourcesSel.length === 1 ? sourcesSel[0] : undefined,
-          type: typesSel.length === 1 ? typesSel[0] : undefined,
+          sources: sourcesSel.length > 0 ? sourcesSel : undefined,
+          types: typesSel.length > 0 ? typesSel : undefined,
           from: range?.from ?? undefined,
           to: range?.to ?? undefined,
           limit: 200,
-          mode: semantic ? 'semantic' : undefined
+          mode: semantic ? 'semantic' : undefined,
+          // Mirror the browse list: telemetry stays out of search hits unless
+          // the firehose toggle (or a type chip) says otherwise. A selection
+          // that names a firehose source overrides this server-side.
+          includeFirehose: showFirehose || typesSel.length > 0
         })
         .then((hits) => {
-          let rows: TimelineRecord[] = hits.map((h) => ({
+          const rows: TimelineRecord[] = hits.map((h) => ({
             id: h.id,
             source: h.source,
             type: h.type,
@@ -125,8 +129,6 @@ export default function Timeline(): JSX.Element {
             provenance: null,
             ingestedAt: null
           }))
-          if (sourcesSel.length > 1) rows = rows.filter((r) => sourcesSel.includes(r.source))
-          if (typesSel.length > 1) rows = rows.filter((r) => typesSel.includes(r.type))
           rows.sort(
             (a, b) =>
               (b.occurredAt ?? Number.NEGATIVE_INFINITY) -

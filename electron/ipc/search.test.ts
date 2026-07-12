@@ -221,7 +221,9 @@ describe('searchRecordsSpine', () => {
     expect(med[0]).toMatchObject({ kind: 'record', source: 'medical', title: 'Aspirin 81mg' })
 
     expect(searchRecordsSpine('starbucks')).toHaveLength(1)
-    expect(searchRecordsSpine('meditate')).toHaveLength(1)
+    // Firehose-tier sources (habit checks, browser history) stay out of global
+    // search — routine telemetry, not memories; tasks have their own lane.
+    expect(searchRecordsSpine('meditate')).toHaveLength(0)
   })
 
   it('returns empty (not throwing) when the FTS table is missing', () => {

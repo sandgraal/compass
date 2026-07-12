@@ -347,7 +347,13 @@ const TOOLS = [
         type: { type: 'string', description: 'Optional: one kind, e.g. "order", "watch"' },
         from: { type: 'string', description: 'Optional start date YYYY-MM-DD (inclusive)' },
         to: { type: 'string', description: 'Optional end date YYYY-MM-DD (inclusive)' },
-        limit: { type: 'integer', minimum: 1, maximum: 25, default: 8 }
+        limit: { type: 'integer', minimum: 1, maximum: 25, default: 8 },
+        includeFirehose: {
+          type: 'boolean',
+          default: false,
+          description:
+            'Include high-volume telemetry sources (raw browser history, routine habit/task checks) in the hits. Off by default so they never bury the meaningful records; a source filter naming one of them works regardless.'
+        }
       },
       required: ['q'],
       additionalProperties: false
@@ -425,7 +431,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         type: args?.type ? String(args.type) : undefined,
         from: args?.from ? String(args.from) : undefined,
         to: args?.to ? String(args.to) : undefined,
-        limit: Number(args?.limit ?? 8)
+        limit: Number(args?.limit ?? 8),
+        includeFirehose: args?.includeFirehose === true
       })
       db.close()
       return textResult(JSON.stringify(found, null, 2))

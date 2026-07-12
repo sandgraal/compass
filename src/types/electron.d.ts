@@ -1436,11 +1436,14 @@ declare global {
           q: string
           source?: string
           type?: string
+          sources?: string[]
+          types?: string[]
           from?: number | null
           to?: number | null
           limit?: number
           offset?: number
           mode?: 'keyword' | 'semantic'
+          includeFirehose?: boolean
         }): Promise<TimelineSearchHit[]>
         rebuildSemantic(): Promise<{
           success: boolean

@@ -147,6 +147,47 @@ describe('searchRecords', () => {
   })
 })
 
+describe('firehose exclusion (source-tiers)', () => {
+  it('drops firehose hits by default, includes them on request', () => {
+    insert({ source: 'generic', type: 'event', title: 'TemperatureSensor Matrix ping' })
+    insert({ source: 'browser', type: 'visit', title: 'The Matrix — Wikipedia' })
+    insert({ source: 'netflix', type: 'watch', title: 'The Matrix' })
+    expect(searchRecords(sqlite, { q: 'matrix' }).map((h) => h.source)).toEqual(['netflix'])
+    expect(searchRecords(sqlite, { q: 'matrix', includeFirehose: true })).toHaveLength(3)
+  })
+
+  it('an explicit firehose source filter overrides the exclusion', () => {
+    insert({ source: 'browser', type: 'visit', title: 'The Matrix — Wikipedia' })
+    const hits = searchRecords(sqlite, { q: 'matrix', source: 'browser' })
+    expect(hits.map((h) => h.source)).toEqual(['browser'])
+  })
+
+  it('a multi-select naming a firehose source returns its rows too (server-side)', () => {
+    insert({ source: 'browser', type: 'visit', title: 'The Matrix — Wikipedia' })
+    insert({ source: 'amazon', type: 'order', title: 'The Matrix Blu-ray' })
+    insert({ source: 'netflix', type: 'watch', title: 'The Matrix' })
+    const hits = searchRecords(sqlite, { q: 'matrix', sources: ['browser', 'amazon'] })
+    expect(hits.map((h) => h.source).sort()).toEqual(['amazon', 'browser'])
+  })
+})
+
+describe('multi-select filters (sources/types arrays)', () => {
+  it('filters inside the ranked query and merges with the singular forms', () => {
+    insert({ source: 'netflix', type: 'watch', title: 'Coffee documentary' })
+    insert({ source: 'amazon', type: 'order', title: 'Coffee beans' })
+    insert({ source: 'paypal', type: 'payment', title: 'Coffee shop' })
+    expect(
+      searchRecords(sqlite, { q: 'coffee', sources: ['netflix', 'amazon'] }).map((h) => h.source)
+    ).toEqual(expect.arrayContaining(['netflix', 'amazon']))
+    expect(searchRecords(sqlite, { q: 'coffee', sources: ['netflix', 'amazon'] })).toHaveLength(2)
+    // Singular + plural merge.
+    expect(
+      searchRecords(sqlite, { q: 'coffee', source: 'paypal', sources: ['netflix'] })
+    ).toHaveLength(2)
+    expect(searchRecords(sqlite, { q: 'coffee', types: ['order', 'payment'] })).toHaveLength(2)
+  })
+})
+
 describe('index sync (triggers + rebuild backfill)', () => {
   const matrixCount = (): number => searchRecords(sqlite, { q: 'matrix' }).length
 

@@ -239,9 +239,19 @@ describe('searchRecordsSpine', () => {
   })
 
   it('caps results at MAX_PER_KIND (12)', async () => {
-    for (let i = 0; i < 20; i++) seedRecord('habit', 'habit-check', `coffee habit ${i}`)
+    for (let i = 0; i < 20; i++) seedRecord('gmail', 'email', `coffee newsletter ${i}`)
     const { searchRecordsSpine } = await internal()
     expect(searchRecordsSpine('coffee')).toHaveLength(12)
+  })
+
+  it('keeps firehose-tier sources (habit checks, browser history) out of global search', async () => {
+    seedRecord('habit', 'habit-check', 'coffee habit')
+    seedRecord('browser', 'visit', 'coffee — Wikipedia')
+    seedRecord('finance', 'txn', 'coffee shop')
+    const { searchRecordsSpine } = await internal()
+    expect(
+      (searchRecordsSpine('coffee') as Array<{ source: string }>).map((h) => h.source)
+    ).toEqual(['finance'])
   })
 
   it('returns nothing when no record matches', async () => {
