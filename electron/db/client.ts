@@ -5,7 +5,11 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { backfillGeoFromNotes } from '../integrations/finance-geo'
 import { runSnapshotRepairIfNeeded } from '../integrations/finance-snapshot'
 import { backfillTaxTags } from '../integrations/finance-tax'
-import { runGcalDedupeIfNeeded, runRecordsDateRepairIfNeeded } from '../lib/records-repair'
+import {
+  runDocumentSpineDatesIfNeeded,
+  runGcalDedupeIfNeeded,
+  runRecordsDateRepairIfNeeded
+} from '../lib/records-repair'
 import { DATA_DIR } from '../paths'
 import { reconcileMigrationState } from './reconcile'
 import * as schema from './schema'
@@ -72,6 +76,14 @@ export async function initDb(): Promise<void> {
   // re-imports whose payload drifted (same title+time+file, different hash).
   try {
     runGcalDedupeIfNeeded(sqlite)
+  } catch {
+    /* non-fatal — retried next launch while the gate key is unset */
+  }
+  // One-shot 2026-07 cleanup: date undated document|file spine rows from the
+  // owned documents table (doc_date, else import time) so they surface on
+  // the timeline's date lenses.
+  try {
+    runDocumentSpineDatesIfNeeded(sqlite)
   } catch {
     /* non-fatal — retried next launch while the gate key is unset */
   }

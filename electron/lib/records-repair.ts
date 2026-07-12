@@ -87,3 +87,55 @@ export function runGcalDedupeIfNeeded(
     .run(GCAL_DEDUPE_KEY, new Date(now).toISOString(), now)
   return { ran: true, removed: res.changes }
 }
+
+export const DOCUMENT_SPINE_DATES_KEY = 'documentSpineDatesV1'
+
+/**
+ * One-shot backfill of undated `document|file` spine rows (data cleanup pass,
+ * 2026-07). The documents importer used to project `occurred_at: null`, so no
+ * imported document ever surfaced on a date lens. Join back to `documents` via
+ * the payload's sha256 and date each row from `doc_date` (content date, when
+ * known) falling back to `created_at` (import moment); refresh the title too
+ * (the owned row's title is the display name). `dedup_hash` is left alone —
+ * document dedupe happens on `documents.sha256` BEFORE the spine is touched,
+ * and `deleteSpineFor` matches by payload sha256, so the hash is never used to
+ * re-identify these rows. The pdf catch-all's `document|document` rows have no
+ * `documents` row and stay undated (their date genuinely wasn't extractable).
+ */
+export function runDocumentSpineDatesIfNeeded(
+  sqlite: SqliteForRepair,
+  now: number = Date.now()
+): { ran: boolean; dated: number } {
+  const existing = sqlite
+    .prepare('SELECT value FROM app_settings WHERE key = ?')
+    .get(DOCUMENT_SPINE_DATES_KEY) as { value: string } | undefined
+  if (existing) return { ran: false, dated: 0 }
+
+  const res = sqlite
+    .prepare(
+      `UPDATE records
+          SET occurred_at = (
+                SELECT COALESCE(CAST(strftime('%s', d.doc_date) AS INTEGER) * 1000, d.created_at)
+                  FROM documents d
+                 WHERE d.sha256 = json_extract(records.payload, '$.sha256')
+              ),
+              title = COALESCE(
+                (SELECT d.title FROM documents d
+                  WHERE d.sha256 = json_extract(records.payload, '$.sha256')),
+                title
+              )
+        WHERE source = 'document' AND type = 'file' AND occurred_at IS NULL
+          AND EXISTS (
+                SELECT 1 FROM documents d
+                 WHERE d.sha256 = json_extract(records.payload, '$.sha256')
+                   AND COALESCE(CAST(strftime('%s', d.doc_date) AS INTEGER) * 1000, d.created_at)
+                       IS NOT NULL
+              )`
+    )
+    .run()
+
+  sqlite
+    .prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)')
+    .run(DOCUMENT_SPINE_DATES_KEY, new Date(now).toISOString(), now)
+  return { ran: true, dated: res.changes }
+}

@@ -12,8 +12,10 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  DOCUMENT_SPINE_DATES_KEY,
   GCAL_DEDUPE_KEY,
   RECORDS_DATE_REPAIR_KEY,
+  runDocumentSpineDatesIfNeeded,
   runGcalDedupeIfNeeded,
   runRecordsDateRepairIfNeeded
 } from './records-repair'
@@ -25,6 +27,11 @@ const RECORDS_DDL = `CREATE TABLE records (
 );`
 const APP_SETTINGS_DDL = `CREATE TABLE app_settings (
   key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER
+);`
+const DOCUMENTS_DDL = `CREATE TABLE documents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, file_name TEXT NOT NULL,
+  sha256 TEXT NOT NULL UNIQUE, stored_path TEXT NOT NULL, doc_date TEXT,
+  created_at INTEGER, updated_at INTEGER
 );`
 
 const INDEXES_SQL = readFileSync(
@@ -173,6 +180,63 @@ describe('runGcalDedupeIfNeeded', () => {
     const gate = sqlite
       .prepare('SELECT value FROM app_settings WHERE key = ?')
       .get(GCAL_DEDUPE_KEY) as { value: string } | undefined
+    expect(gate?.value).toBe(new Date(NOW).toISOString())
+  })
+})
+
+describe('runDocumentSpineDatesIfNeeded', () => {
+  function insertDoc(
+    title: string,
+    sha256: string,
+    docDate: string | null,
+    createdAt: number
+  ): void {
+    sqlite
+      .prepare(
+        'INSERT INTO documents (title, file_name, sha256, stored_path, doc_date, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+      )
+      .run(title, `${title}.pdf`, sha256, `${sha256}.pdf`, docDate, createdAt)
+  }
+  function insertFileRow(title: string, sha256: string): void {
+    sqlite
+      .prepare(
+        "INSERT INTO records (source, type, occurred_at, title, payload, dedup_hash) VALUES ('document', 'file', NULL, ?, ?, ?)"
+      )
+      .run(title, JSON.stringify({ file: `${title}.pdf`, sha256 }), sha256)
+  }
+
+  beforeEach(() => sqlite.exec(DOCUMENTS_DDL))
+
+  it('dates rows from doc_date when known, else created_at, and refreshes the title', () => {
+    const imported = Date.parse('2026-07-07T15:00:00Z')
+    insertDoc('2017 Ennis C Form 1040', 'aaa', '2018-04-10', imported)
+    insertDoc('Condo Rules', 'bbb', null, imported)
+    insertFileRow('2017 Ennis C Form 1040  Individual Tax Return_Filing', 'aaa')
+    insertFileRow('Condo Rules', 'bbb')
+    // A pdf catch-all row with no documents match: stays undated.
+    sqlite
+      .prepare(
+        "INSERT INTO records (source, type, occurred_at, title, payload, dedup_hash) VALUES ('document', 'document', NULL, 'scan', '{\"file\":\"scan.pdf\"}', 'ccc')"
+      )
+      .run()
+
+    const res = runDocumentSpineDatesIfNeeded(sqlite, NOW)
+    expect(res).toEqual({ ran: true, dated: 2 })
+    expect(occurredAtOf('2017 Ennis C Form 1040')).toBe(Date.parse('2018-04-10T00:00:00Z'))
+    expect(occurredAtOf('Condo Rules')).toBe(imported)
+    expect(occurredAtOf('scan')).toBeNull()
+    // Title refreshed to the owned row's display name.
+    expect(
+      sqlite.prepare("SELECT count(*) AS n FROM records WHERE title LIKE '%Filing'").get()
+    ).toEqual({ n: 0 })
+  })
+
+  it('runs once and then gates', () => {
+    expect(runDocumentSpineDatesIfNeeded(sqlite, NOW)).toEqual({ ran: true, dated: 0 })
+    expect(runDocumentSpineDatesIfNeeded(sqlite, NOW)).toEqual({ ran: false, dated: 0 })
+    const gate = sqlite
+      .prepare('SELECT value FROM app_settings WHERE key = ?')
+      .get(DOCUMENT_SPINE_DATES_KEY) as { value: string } | undefined
     expect(gate?.value).toBe(new Date(NOW).toISOString())
   })
 })
