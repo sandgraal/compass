@@ -23,7 +23,7 @@ import { type IpcMain, dialog, shell } from 'electron'
 import { getDb } from '../db/client'
 import { documentLinks, documents, records } from '../db/schema'
 import { extractPdfText } from '../lib/pdf'
-import { type RecordInput, hashRecord } from '../lib/recognizers'
+import type { RecordInput } from '../lib/recognizers'
 import { DOCUMENTS_DIR } from '../paths'
 import { insertRecords } from './records'
 
@@ -156,12 +156,14 @@ async function importOne(srcPath: string): Promise<PerFile> {
     .run()
   const id = Number(res.lastInsertRowid)
 
-  // Project a lightweight timeline row (title + optional date, NO body text) so
-  // the document shows on the Timeline; naturalKey = sha256 dedupes re-imports.
+  // Project a lightweight timeline row (title, NO body text) so the document
+  // shows on the Timeline; naturalKey = sha256 dedupes re-imports. Dated at the
+  // import moment — the content date (doc_date) is unknown at import, and an
+  // undated row never surfaces on any date lens at all.
   const spine: RecordInput = {
     source: 'document',
     type: 'file',
-    occurredAt: null,
+    occurredAt: Date.now(),
     title,
     payload: { file: fileName, sha256 },
     naturalKey: sha256
@@ -189,15 +191,18 @@ async function importPaths(paths: string[]): Promise<DocumentsImportResult> {
   }
 }
 
-/** Delete the projected `document|file` spine rows for a given content hash. */
+/** Delete the projected `document|file` spine rows for a given content hash.
+ *  Matched by the payload's sha256 (not a reconstructed dedup hash): the hash
+ *  encodes occurred_at, which is null on pre-cleanup rows and the import
+ *  moment on newer ones — the payload key is the stable identity. */
 function deleteSpineFor(sha256: string): void {
   getDb()
     .delete(records)
     .where(
       and(
-        eq(records.dedupHash, hashRecord('document', 'file', null, sha256)),
         eq(records.source, 'document'),
-        eq(records.type, 'file')
+        eq(records.type, 'file'),
+        sql`json_extract(${records.payload}, '$.sha256') = ${sha256}`
       )
     )
     .run()
