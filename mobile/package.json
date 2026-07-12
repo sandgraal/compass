@@ -1,0 +1,26 @@
+{
+  "name": "compass-mobile",
+  "version": "0.1.0",
+  "description": "Compass mobile companion (Phase 4c) — a READ-ONLY viewer over the device-sync encrypted snapshot. Standalone Expo app (not an npm workspace, like relay/).",
+  "private": true,
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "ios": "expo start --ios",
+    "android": "expo start --android"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
+    "@react-native-async-storage/async-storage": "2.1.2",
+    "expo": "~53.0.0",
+    "expo-secure-store": "~14.2.0",
+    "expo-status-bar": "~2.2.0",
+    "react": "19.0.0",
+    "react-native": "0.79.5"
+  },
+  "devDependencies": {
+    "@types/react": "~19.0.0",
+    "typescript": "~5.8.0"
+  }
+}
