@@ -57,6 +57,10 @@ export async function fetchSnapshotBlob(
   }
   const text = await res.text()
   if (text.length > MAX_BODY_BYTES) throw new Error('Snapshot is too large for the mobile viewer')
-  const parsed = JSON.parse(text) as { blob: string; meta: RemoteMeta }
-  return { blob: fromBase64(parsed.blob), meta: parsed.meta }
+  const parsed = JSON.parse(text) as { blob?: unknown; meta?: unknown }
+  const blobB64 = parsed?.blob
+  if (typeof blobB64 !== 'string' || blobB64.length === 0) {
+    throw new Error('Relay returned an invalid snapshot envelope')
+  }
+  return { blob: fromBase64(blobB64), meta: parsed.meta as RemoteMeta }
 }
