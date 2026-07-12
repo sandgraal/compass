@@ -627,10 +627,18 @@ export function deriveEntities(records: EntityRecordRow[], owned: OwnedRefs): De
       // Amount-consistency gate: real subscriptions charge a near-constant
       // amount; groceries/gas on a regular shopping rhythm don't. Sources
       // without amounts (Netflix watches, etc.) pass on cadence alone.
+      // Min/max via a loop — spreading a big amounts array into Math.max
+      // blows the engine's argument limit on high-volume merchants.
       const amountsSteady = (): boolean => {
         if (e.amounts.length < 3) return true
+        let min = Number.POSITIVE_INFINITY
+        let max = Number.NEGATIVE_INFINITY
+        for (const a of e.amounts) {
+          if (a < min) min = a
+          if (a > max) max = a
+        }
         const med = median(e.amounts)
-        return med > 0 && Math.max(...e.amounts) - Math.min(...e.amounts) <= 0.35 * med
+        return med > 0 && max - min <= 0.35 * med
       }
       if (cadence && amountsSteady()) {
         const medAmount = e.amounts.length > 0 ? Math.round(median(e.amounts) * 100) / 100 : 0

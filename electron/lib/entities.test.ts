@@ -195,6 +195,16 @@ describe('deriveEntities — merchants & subscriptions', () => {
     expect(out.find((e) => e.kind === 'merchant')?.name).toBe('Amazon')
     expect(out.some((e) => e.kind === 'subscription-candidate')).toBe(false)
   })
+
+  it('emits a candidate on cadence alone for sources without amounts', () => {
+    // Netflix watch rows carry no amounts — the gate must pass them through.
+    const rows = ['2026-01-15', '2026-02-15', '2026-03-15'].map((d) =>
+      rec({ source: 'netflix', type: 'watch', title: 'Some Show', occurredAt: day(d) })
+    )
+    const sub = deriveEntities(rows, NO_OWNED).find((e) => e.kind === 'subscription-candidate')
+    expect(sub?.name).toBe('Netflix')
+    expect(sub?.attrs.cadence).toBe('monthly')
+  })
 })
 
 describe('deriveEntities — live finance transactions', () => {
@@ -219,6 +229,18 @@ describe('deriveEntities — live finance transactions', () => {
     const sub = deriveEntities(rows, NO_OWNED).find((e) => e.kind === 'subscription-candidate')
     expect(sub?.name).toBe('Netflix')
     expect(sub?.attrs.cadence).toBe('monthly')
+  })
+
+  it('does not emit a candidate for scattered amounts on a regular cadence (grocery shape)', () => {
+    // Monthly-regular dates, wildly varying amounts — a shopping rhythm, not a bill.
+    const rows = [
+      fin('MAXIPALI TURRIALBA', '-105.76 USD · Groceries', '2026-01-15'),
+      fin('MAXIPALI TURRIALBA', '-38.40 USD · Groceries', '2026-02-15'),
+      fin('MAXIPALI TURRIALBA', '-222.13 USD · Groceries', '2026-03-15')
+    ]
+    const out = deriveEntities(rows, NO_OWNED)
+    expect(out.some((e) => e.kind === 'merchant')).toBe(true) // merchant row stays
+    expect(out.some((e) => e.kind === 'subscription-candidate')).toBe(false)
   })
 
   it('ignores the generic-title fallback so blank descriptions do not pollute Merchants', () => {
