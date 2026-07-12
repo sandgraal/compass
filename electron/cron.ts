@@ -5,6 +5,7 @@ import { schedulePlaidDailySync, stopPlaidDailySync } from './cron-plaid'
 import { scheduleSimplefinDailySync, stopSimplefinDailySync } from './cron-simplefin'
 import { getDb, getRawSqlite } from './db/client'
 import { appSettings, integrations } from './db/schema'
+import { syncAppleReminders } from './integrations/apple-reminders'
 import { syncArcadia } from './integrations/arcadia'
 import { syncArgyle } from './integrations/argyle'
 import { syncCanopy } from './integrations/canopy'
@@ -162,6 +163,8 @@ function runSyncForService(service: string): void {
     void syncTodoist(win)
   } else if (service === 'things') {
     void syncThings(win)
+  } else if (service === 'apple-reminders') {
+    void syncAppleReminders(win)
   } else if (service === 'oura') {
     void syncOura(win)
   } else if (service === 'terra') {

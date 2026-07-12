@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PREPARED, NOT YET ACTIVE. This entitlements file is Track 3 of the Apple
+  Reminders spike (docs: the spike plan). It is intentionally NOT referenced by
+  package.json > build.mac yet, so it has ZERO effect on current releases.
+  (It lives under resources/ — alongside icon.icns — because build/ is gitignored.)
+
+  Activating it (Track 4, gated on an Apple Developer account) means adding to
+  build.mac:
+      "hardenedRuntime": true,
+      "entitlements": "resources/entitlements.mac.plist",
+      "entitlementsInherit": "resources/entitlements.mac.plist",
+      "extendInfo": {
+        "NSRemindersUsageDescription": "Compass reads your reminders into your daily checklist.",
+        "NSRemindersFullAccessUsageDescription": "Compass reads your reminders into your daily checklist.",
+        "NSAppleEventsUsageDescription": "Compass reads your reminders via the Reminders app."
+      }
+  plus notarization secrets in .github/workflows/release.yml. Hardened runtime
+  without notarization only makes Gatekeeper harsher — do not activate piecemeal.
+
+  The apple-events + JIT/library-validation keys below cover the JXA/osascript
+  read path AND a future native EventKit addon (unsigned-memory / disable-library-
+  validation are what a hardened-runtime host needs to load a native .node addon).
+  Trim to whichever read mechanism wins the spike before shipping.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Read the user's Reminders (EventKit / native addon path). -->
+  <key>com.apple.security.personal-information.reminders</key>
+  <true/>
+  <!-- Drive the Reminders app via Apple Events (JXA/osascript path). -->
+  <key>com.apple.security.automation.apple-events</key>
+  <true/>
+  <!-- Electron hardened-runtime baseline (V8 JIT). -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <!-- Needed for a hardened-runtime host to load an unsigned native .node addon
+       (only if the native EventKit addon path is chosen over JXA). -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>
