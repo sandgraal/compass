@@ -1058,6 +1058,37 @@ declare global {
           error?: string
         }>
       }
+      deviceSync: {
+        status(): Promise<{
+          configured: boolean
+          relayUrl: string
+          lastSeenExportedAt: string | null
+        }>
+        configure(passphrase: string): Promise<{ success: boolean; error?: string }>
+        disable(): Promise<{ success: boolean }>
+        check(): Promise<
+          | {
+              success: true
+              exists: boolean
+              meta: {
+                exportedAt: string
+                deviceId: string
+                bytes: number
+                updatedAt: string
+              } | null
+              newer: boolean
+            }
+          | { success: false; error: string }
+        >
+        push(): Promise<
+          { success: true; exportedAt: string; bytes: number } | { success: false; error: string }
+        >
+        pull(): Promise<
+          | { success: true; upToDate: true }
+          | { success: true; upToDate: false; exportedAt: string; rows: number }
+          | { success: false; error: string }
+        >
+      }
       spotlight: {
         getStatus(): Promise<{
           enabled: boolean

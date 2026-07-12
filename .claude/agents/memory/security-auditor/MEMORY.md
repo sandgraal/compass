@@ -25,12 +25,14 @@ _(empty — no accepted risks yet)_
 - **`copyKnowledgeInto` `relative()` output (run 2026-06-14):** `listMarkdown` only yields paths built by `join(KNOWLEDGE_DIR, …)` starting from a directory walk rooted at `KNOWLEDGE_DIR`. All `src` values passed to `relative(KNOWLEDGE_DIR, src)` are within `KNOWLEDGE_DIR` (absent symlinks addressed above), so the `dest` path stays within `destDir`.
 - **`contacts:export-vcard/csv` renderer-supplied `ids` array (run 2026-06-14):** The `ids` array controls only which already-fetched DB rows are filtered in memory via `Array.includes`. A renderer supplying non-integer or bogus values simply causes the filter to match nothing — it cannot trigger path traversal, SQL injection, or vault access. This is not a security defect.
 - **`vCard PHOTO` with arbitrary `data:` MIME type (run 2026-06-14):** Stored as a plain string in SQLite. The renderer currently renders no `<img>` from this field; `rowToRecord(..., false)` omits it from list payloads, and `contacts:get` returns it only on direct lookup. Even if rendered as `<img src=...>` in future, `data:text/html` in an `<img src>` is displayed as a broken image by Electron's Chromium, not executed as HTML.
+- **`electron/ipc/backup.ts` `restoreAllTablesRaw` bundle-driven table/column identifiers interpolated into `DELETE`/`PRAGMA`/`INSERT` strings (run 2026-07-11, v3 "allTables" backup):** Table names come from `Object.keys(bundle.allTables)` (attacker-controlled) but are gated by `existing.has(name)` where `existing` is read live from THIS machine's `sqlite_master` before the loop — an attacker can only select an identifier that already equals a real table name, never inject one. Column names are similarly intersected against `PRAGMA table_info("<already-validated-name>")` before being embedded in the `INSERT` column list. All row *values* are bound as `?` params. This is the same "closed allowlist sourced from the live schema, not the bundle" shape as the `contacts:list` LIKE-pattern pattern above — safe, not injectable. Re-verify this reasoning if `restoreAllTablesRaw` is ever refactored to build the `existing`/`destCols` sets from anything other than a fresh `sqlite_master`/`PRAGMA table_info` read.
 
 ## Recurring issues
 
 > Findings that keep coming back. If the same regression appears in multiple PRs, write a note about *why* (lint rule missing, no test, easy to forget).
 
 - **File-size cap before `readFileSync` on user-picked files — RESOLVED in PR #176 (run 2026-06-14):** `contacts:import-vcard` (incl. `multiSelections`) and `contacts:import-csv` now `statSync(...).size > MAX_IMPORT_BYTES` (50 MB) before reading and bail out otherwise. Keep the pattern in mind for *future* importers (Google Contacts / archive importers in Wave 1.1+): every new `readFileSync` on a user-picked file should size-check first.
+  - **Still OUTSTANDING in `electron/ipc/backup.ts` `backup:restore` (flagged 2026-07-11, `feat/encrypted-backup`):** `readFileSync(filePaths[0])` (line ~674) has no size cap before AES-GCM decrypt (`decryptBundle`, full-buffer `decipher.update`/`.final()` at line ~275) and `JSON.parse`. Notably this doesn't even require the correct passphrase to trigger the memory/CPU cost — only correct magic+version header bytes. Pre-existing gap (not introduced by the v3 diff), but the v3 "every table + documents store" bundle format makes legitimate backups (and therefore the plausible ceiling an attacker can hide behind) much larger, raising the severity. Recommend a `statSync` ceiling (e.g. a few GB) before `readFileSync` in `backup:restore`, mirroring the `contacts:import-*` pattern. Re-check on next backup.ts touch.
 
 ## Threat-model deltas
 
@@ -41,6 +43,19 @@ _(empty — no accepted risks yet)_
 ## Run log
 
 > One entry per audit run. Date · scope · top findings · status.
+
+### 2026-07-11 — encrypted backup/restore goes "v3 all-tables" (branch `feat/encrypted-backup`, uncommitted diff)
+
+**Scope:** `electron/ipc/backup.ts` only (per request), read-context from `electron/ipc/documents.ts`, `electron/db/client.ts`, `electron/db/schema.ts`, `electron/ipc/auth.ts`, `electron/paths.ts`, `docs/data-access-policy.md`, `electron/ipc/backup-handlers.test.ts`.
+
+**Top findings:**
+1. (medium, advisory) No size cap before `readFileSync(filePaths[0])` on the user-picked restore file (`backup.ts:674`) or on the full-buffer AES-GCM decrypt (`backup.ts:275`) — pre-existing gap, but v3's "every table + documents store" bundle makes the realistic blast radius (and the size an attacker can hide behind) much bigger. Matches the recurring "size-cap before readFileSync on user-picked files" pattern above — not yet applied here.
+2. (low, advisory) No unit test exercises path-traversal rejection for the new `documentsFiles` restore stage (`backup.ts:615-619`) — the vault/knowledge stages have this coverage (`backup-handlers.test.ts:234-247`), documents doesn't, even though the code shape is identical.
+3. (low, advisory) The file header (`backup.ts:1-37`) and the `applyRestore` staging doc (`backup.ts:303-322`) still describe only the v2 shape — not updated for `allTables`/`documentsFiles`/v3. Since this agent's own instructions say "read the header comment for intended invariants," a stale header is a minor trust hazard for future audits.
+
+**Verified safe (no regressions):** table/column identifiers in `restoreAllTablesRaw` are double-whitelisted against the live destination `sqlite_master`/`PRAGMA table_info` before SQL interpolation (attacker's bundle can't introduce a new identifier, only select among real ones) — see new Known-safe-patterns entry above. `documentsFiles`/vault/knowledge restore all reject `/`, `\`, `..` before any `fs` write and stay under their `*_DIR`. The `restoreAllTablesRaw` DELETE+INSERT run inside one `sqlite.transaction()`, so a throw anywhere (bad row shape, type mismatch, deferred-FK violation at commit) rolls back the whole DB restore before any Stage-4 filesystem write — the documented "DB commits before FS writes" invariant holds and now correctly covers the new documents stage too. Grepped `schema.ts` for token/secret/password/credential columns — confirmed no plaintext secrets live in any newly-included table; real secrets (OAuth tokens, Plaid `access_token`, SimpleFIN Access URL) stay in separate `safeStorage`-encrypted files outside `allTables`/`documentsFiles`/`vault` entirely, untouched by this diff. `masterKeyHex` handling, scrypt+AES-256-GCM crypto layer, and "master key never returned to renderer" are all unchanged.
+
+**Status: advisory** (no blockers — safe to merge; recommend the size-cap fix (#1) land this sprint given it directly matches Compass's named "billion-row blowup" threat-model item)
 
 ### 2026-07-03 — Oura Personal Access Token integration + habit auto-link (uncommitted diff, worktree `optimistic-feynman-c1558b`)
 

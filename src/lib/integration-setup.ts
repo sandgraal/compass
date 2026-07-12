@@ -20,6 +20,7 @@ export type AuthKind =
   | 'local-file' // Apple Calendar, Things 3 — no config, just OS permission
   | 'local-path' // Obsidian — a local vault folder
   | 'relay-widget' // Terra, Canopy, Argyle, Arcadia, Metriport, Nylas, Knot
+  | 'google-linked' // Email Receipts — no auth of its own; reuses the Google connection
 
 /** A single credential input rendered by the generic setup panel. */
 export interface SetupField {
@@ -111,6 +112,24 @@ export const INTEGRATION_SETUP: Record<string, IntegrationSetup> = {
       }
     ],
     docUrl: 'https://console.cloud.google.com/apis/credentials',
+    fields: []
+  },
+  'email-receipts': {
+    id: 'email-receipts',
+    authKind: 'google-linked',
+    requiresRelay: false,
+    byoSupported: false,
+    cost: 'Free — reuses your Google connection',
+    prerequisites: ['Google connected (with Gmail read access)'],
+    whatYoullNeed: ['Nothing — it reads receipt emails from the Gmail you already connected'],
+    steps: [
+      {
+        text: 'Connect Google first — it needs Gmail read access. If you connected before Gmail was included, reconnect to grant it.'
+      },
+      {
+        text: 'Click Connect here — Compass scans recent order/receipt emails and adds them to your Timeline + Merchants. They are never inserted as finance transactions, so they can’t double-count your bank/card spend.'
+      }
+    ],
     fields: []
   },
   github: {

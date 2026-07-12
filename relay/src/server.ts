@@ -23,6 +23,7 @@ import {
   recordCall,
   rollover
 } from './metering.js'
+import { type SyncConfig, handleSyncRequest } from './sync.js'
 import { TokenCache } from './token-cache.js'
 
 export type RelayRequest = {
@@ -44,6 +45,8 @@ export type RelayConfig = {
   fetchImpl?: typeof fetch // injected in tests
   now?: () => number // injected in tests
   tokenCache?: TokenCache // OAuth bearer cache for tokenAuth adapters; defaults to a shared one
+  /** Device-sync ciphertext mailbox (Phase 4b). Absent = /sync/* returns 404. */
+  sync?: SyncConfig
 }
 
 function json(status: number, obj: unknown): RelayResponse {
@@ -105,6 +108,14 @@ export async function handleRelayRequest(
   // Metering key = a NON-reversible hash of the token, so a shared KV store never
   // persists raw client auth tokens. The raw token is used only for the allowlist above.
   const userId = createHash('sha256').update(token).digest('hex')
+
+  // ── Device sync (Phase 4b): a ciphertext mailbox, not an aggregator proxy ──
+  // Behind the same bearer gate; opt-in via cfg.sync (RELAY_SYNC_DIR). Not
+  // metered — one PUT/GET per sync beat, bounded by sync.maxBlobBytes.
+  if (req.path.startsWith('/sync/')) {
+    if (!cfg.sync) return json(404, { error: 'Sync is not enabled on this relay' })
+    return handleSyncRequest(req, cfg.sync, cfg.now)
+  }
 
   // ── Route: /<aggregatorId>/<upstreamPath…> ──
   const segments = req.path.replace(/^\/+/, '').split('/')

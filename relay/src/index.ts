@@ -10,10 +10,20 @@
 import { createServer } from 'node:http'
 import { DEFAULT_QUOTA, InMemoryMeteringStore, type Quota } from './metering.js'
 import { type RelayConfig, handleRelayRequest } from './server.js'
+import { FsSyncStore } from './sync.js'
 
 // The only bodies we forward are tiny JSON (e.g. the Terra widget-session POST).
 // Cap the read so an internet-facing relay can't be memory/CPU-DoS'd by a large body.
 const MAX_BODY_BYTES = 64 * 1024
+
+// Device-sync snapshot PUTs are the one legitimately large body. Cap the DECODED
+// blob via RELAY_SYNC_MAX_BYTES (default 256 MB); the base64 JSON envelope on the
+// wire is ~4/3 of that plus envelope slack.
+const SYNC_MAX_BLOB_BYTES = (() => {
+  const v = Number(process.env.RELAY_SYNC_MAX_BYTES)
+  return Number.isFinite(v) && v > 0 ? v : 256 * 1024 * 1024
+})()
+const SYNC_MAX_BODY_BYTES = Math.ceil(SYNC_MAX_BLOB_BYTES * (4 / 3)) + 64 * 1024
 
 function quotaFromEnv(): Quota {
   const n = (key: string, fallback: number): number => {
@@ -38,16 +48,25 @@ const cfg: RelayConfig = {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean)
-  )
+  ),
+  // Device sync (Phase 4b) — opt-in ciphertext mailbox, inert unless the
+  // operator points it at a storage directory.
+  sync: process.env.RELAY_SYNC_DIR
+    ? { store: new FsSyncStore(process.env.RELAY_SYNC_DIR), maxBlobBytes: SYNC_MAX_BLOB_BYTES }
+    : undefined
 }
 
 const server = createServer(async (req, res) => {
   try {
+    // Sync snapshot PUTs are the one deliberately large body; everything else
+    // keeps the tight anti-DoS cap.
+    const isSyncPath = cfg.sync != null && (req.url ?? '').startsWith('/sync/')
+    const maxBody = isSyncPath ? SYNC_MAX_BODY_BYTES : MAX_BODY_BYTES
     const chunks: Buffer[] = []
     let size = 0
     for await (const c of req) {
       size += (c as Buffer).length
-      if (size > MAX_BODY_BYTES) {
+      if (size > maxBody) {
         res.writeHead(413, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ error: 'Request body too large' }))
         req.destroy()
