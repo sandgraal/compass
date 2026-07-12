@@ -33,6 +33,7 @@ import {
   searchRecordsSemantic
 } from '../knowledge/records-embeddings'
 import { updateRecordsKnowledge } from '../knowledge/records-extractor'
+import { isAmazonTelemetryProvenance } from '../lib/amazon-export'
 import { serializeCsv } from '../lib/csv'
 import { isPlausibleEpochMs } from '../lib/dates'
 import { refreshDerivedEntities } from '../lib/entities-projection'
@@ -787,13 +788,17 @@ export function runNetflixRefileIfNeeded(): { ran: boolean } & Partial<NetflixRe
 export const GENERIC_TELEMETRY_PURGE_KEY = 'genericTelemetryPurgeV1'
 
 /**
- * One-shot purge of the remaining 'generic' rows (user-approved, 2026-07-11).
- * After the V2 reclassify promotes every claimed family, what's left under
- * 'generic' is Amazon-export device telemetry (DeviceState pings, impression /
- * notification metadata — ~150k rows) that the user chose to delete rather
- * than keep firehose-hidden. Chunked so each DELETE (and its FTS trigger
- * fan-out) commits in a bounded transaction. Re-importing the export restores
- * the rows; the consumed gate means later generic imports are never purged.
+ * One-shot purge of the Amazon-export telemetry rows (user-approved,
+ * 2026-07-11). After the V2 reclassify promotes every claimed family, what
+ * that archive left under 'generic' is device telemetry (DeviceState pings,
+ * impression / notification metadata — ~150k rows) that the user chose to
+ * delete rather than keep firehose-hidden. Scoped by provenance fingerprint
+ * (`isAmazonTelemetryProvenance`) so generic rows from any OTHER unrecognized
+ * import are never touched — 'generic' is the catch-all for every dated CSV
+ * without a recognizer, not just this archive. Chunked so each DELETE (and
+ * its FTS trigger fan-out) commits in a bounded transaction. Re-importing the
+ * export restores the rows; the consumed gate means later imports are never
+ * purged.
  *
  * Refuses to run until the V2 reclassify gate is written — purging first would
  * destroy the GPS/order/gift-card rows V2 exists to promote.
@@ -814,14 +819,24 @@ export function runGenericTelemetryPurgeIfNeeded(): { ran: boolean; deleted?: nu
   if (existing) return { ran: false }
 
   const sqlite = getRawSqlite()
-  const del = sqlite.prepare(
-    "DELETE FROM records WHERE id IN (SELECT id FROM records WHERE source = 'generic' LIMIT 5000)"
+  const selectChunk = sqlite.prepare(
+    "SELECT id, provenance FROM records WHERE source = 'generic' AND id > ? ORDER BY id LIMIT 5000"
   )
+  const deleteById = sqlite.prepare('DELETE FROM records WHERE id = ?')
+  const deleteChunk = sqlite.transaction((ids: number[]) => {
+    for (const id of ids) deleteById.run(id)
+  })
   let deleted = 0
+  let lastId = 0
   for (;;) {
-    const changes = del.run().changes
-    deleted += changes
-    if (changes < 5000) break
+    const chunk = selectChunk.all(lastId) as Array<{ id: number; provenance: string | null }>
+    if (chunk.length === 0) break
+    lastId = chunk[chunk.length - 1].id
+    const ids = chunk.filter((r) => isAmazonTelemetryProvenance(r.provenance)).map((r) => r.id)
+    if (ids.length > 0) {
+      deleteChunk(ids)
+      deleted += ids.length
+    }
   }
   if (deleted > 0) void refreshRecordsSemanticIndex()
   db.insert(appSettings)

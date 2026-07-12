@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   ALEXA_UTTERANCE_RECOGNIZER,
+  AMAZON_DIGITAL_ITEMS_RECOGNIZER,
   AMAZON_LOCATION_RECOGNIZER,
   AMAZON_MUSIC_LIBRARY_RECOGNIZER,
   AMAZON_MUSIC_LIKES_RECOGNIZER,
@@ -18,6 +19,7 @@ import {
   AMAZON_WISHLIST_RECOGNIZER,
   KINDLE_READING_RECOGNIZER,
   PRIME_VIDEO_RECOGNIZER,
+  isAmazonTelemetryProvenance,
   mapAlexaUtterance,
   mapAmazonDigitalItem,
   mapAmazonGeolocation,
@@ -448,6 +450,63 @@ describe('additional-family recognizers detect on distinctive headers only', () 
       AMAZON_SEARCH_RECOGNIZER
     ]) {
       expect(r.detect(netflix)).toBe(false)
+    }
+  })
+})
+
+describe('AMAZON_DIGITAL_ITEMS_RECOGNIZER detection', () => {
+  it('detects on the distinctive item id regardless of the product-name header spelling', () => {
+    expect(
+      AMAZON_DIGITAL_ITEMS_RECOGNIZER.detect(
+        file('Digital Items.csv', 'ASIN,ProductName,OrderId,DigitalOrderItemId,OrderDate\n')
+      )
+    ).toBe(true)
+    expect(
+      AMAZON_DIGITAL_ITEMS_RECOGNIZER.detect(
+        file('Digital Items.csv', 'ASIN,Product Name,OrderId,DigitalOrderItemId,OrderDate\n')
+      )
+    ).toBe(true)
+    expect(
+      AMAZON_DIGITAL_ITEMS_RECOGNIZER.detect(file('orders.csv', 'OrderId,ProductName,Date\n'))
+    ).toBe(false)
+  })
+})
+
+describe('isAmazonTelemetryProvenance (purge scoping)', () => {
+  it('matches the telemetry families observed in the real export', () => {
+    for (const p of [
+      'DeviceState-1-1.csv',
+      'DeviceEngagement.csv',
+      'node_metadata_na_1.csv',
+      'AppEngagement.csv',
+      'apps-and-more.app-purchase-download-install.csv',
+      'Appstore.FireTVClient.operational_metrics.csv',
+      'Whispered-1-1.csv',
+      'Retail.OutboundNotifications.notificationMetadata.1.csv',
+      'Request All Your Data.Detail Page Glance View Impressions.csv',
+      'Alexa and Echo Devices.Alexa_Device_Daily_Toggle_Acivity.csv',
+      'rider_app_analytics-0.csv',
+      'FireTv.Live.CustomerStationList.1.csv',
+      'Kindle.Devices.ReadingSession_v0.csv',
+      'Digital Orders.csv',
+      'TotalUsagePerDay.csv',
+      'Device_Artifact_Frequency_Metrics-1.csv',
+      'D2DiodeErpService.json'
+    ]) {
+      expect(isAmazonTelemetryProvenance(p), p).toBe(true)
+    }
+  })
+
+  it('never matches non-Amazon imports (the purge must not touch them)', () => {
+    for (const p of [
+      'MyBankExport.csv',
+      'NetflixViewingHistory.csv',
+      'History.json',
+      'export.csv',
+      'Want to go.csv',
+      null
+    ]) {
+      expect(isAmazonTelemetryProvenance(p), String(p)).toBe(false)
     }
   })
 })
