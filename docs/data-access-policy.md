@@ -51,6 +51,12 @@ unchanged: AI reads everything, writes nothing without human approval.
   on disk.
 - **Portable exports** (`electron/ipc/export.ts`) still exclude the vault —
   an export is a plaintext artifact that leaves the app's custody.
+- **Device sync** (`electron/integrations/device-sync.ts`, Phase 4b) is the
+  one path that egresses the full dataset, vault included — but ONLY
+  passphrase-encrypted, only to the user-configured relay, and only on an
+  explicit push. Unlike exports, it doesn't exclude the vault; encryption is
+  the boundary here, not exclusion — the relay stores ciphertext it cannot
+  read (`relay/src/sync.ts`).
 - **Stripped-at-ingest data is gone, not hidden**: credit-report SSN/DOB,
   paystub per-tax lines, and raw Metriport clinical values were never stored.
   Re-import would be required to recover them; nothing in the app can.
