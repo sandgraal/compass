@@ -164,6 +164,30 @@ export default function Subscriptions(): JSX.Element {
     }
   }
 
+  async function dismissDetected(d: DetectedSubscription): Promise<void> {
+    if (!isElectron()) return
+    setBusy(true)
+    try {
+      await window.api.subscriptions.dismissDetected({ merchant: d.merchant, account: d.account })
+      toast(`${d.merchant} won't be suggested again.`, 'success')
+      await load()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function dismissCandidate(c: DerivedEntity): Promise<void> {
+    if (!isElectron()) return
+    setBusy(true)
+    try {
+      await window.api.entities.exclude([{ kind: 'subscription-candidate', key: c.key }])
+      toast(`${c.name} won't be suggested again. (Undo in Settings.)`, 'success')
+      await load()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function exportCsv(): Promise<void> {
     if (!isElectron()) return
     const r = await window.api.subscriptions.exportCsv()
@@ -271,6 +295,16 @@ export default function Subscriptions(): JSX.Element {
                 >
                   <Plus size={11} /> Track
                 </button>
+                <button
+                  type="button"
+                  onClick={() => dismissDetected(d)}
+                  disabled={busy}
+                  title="Not a subscription — don't suggest again"
+                  aria-label={`Not a subscription: ${d.merchant}`}
+                  className="flex items-center gap-1 text-xs px-2 py-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors disabled:opacity-50"
+                >
+                  <X size={11} />
+                </button>
               </div>
             ))}
           </div>
@@ -308,6 +342,16 @@ export default function Subscriptions(): JSX.Element {
                   className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-primary/15 hover:bg-primary/25 text-primary rounded-lg transition-colors disabled:opacity-50"
                 >
                   <Plus size={11} /> Track
+                </button>
+                <button
+                  type="button"
+                  onClick={() => dismissCandidate(c)}
+                  disabled={busy}
+                  title="Not a subscription — don't suggest again"
+                  aria-label={`Not a subscription: ${c.name}`}
+                  className="flex items-center gap-1 text-xs px-2 py-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors disabled:opacity-50"
+                >
+                  <X size={11} />
                 </button>
               </div>
             ))}

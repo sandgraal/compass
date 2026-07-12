@@ -1548,6 +1548,10 @@ declare global {
           cadence?: string
           medianAmount?: number
         }): Promise<{ success: boolean; id: number; alreadyTracked?: boolean }>
+        dismissDetected(input: {
+          merchant: string
+          account: string
+        }): Promise<{ success: boolean }>
         exportCsv(): Promise<ExportResult>
       }
       exporter: {

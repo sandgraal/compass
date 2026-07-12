@@ -23,6 +23,7 @@ import { getDb } from '../db/client'
 import { subscriptions } from '../db/schema'
 import { auditSubscriptions } from '../integrations/finance-subscriptions'
 import { serializeCsv } from '../lib/csv'
+import { addExclusions, loadExclusionSet } from '../lib/curation'
 import { annualizeCost } from '../lib/normalize'
 
 // Re-exported for the Storehouse summary (electron/ipc/storehouse.ts), which
@@ -188,9 +189,14 @@ export function registerSubscriptionsHandlers(ipcMain: IpcMain): void {
   })
 
   // Live detector, read-only — flags which detected charges are already tracked.
+  // Charges the user dismissed ("Not a subscription") are filtered out here so
+  // the durable no survives every re-audit.
   ipcMain.handle('subscriptions:get-detected', () => {
     const db = getDb()
     const audit = auditSubscriptions(db)
+    const dismissed = loadExclusionSet(db, ['subscription-dismissed'])
+    audit.active = audit.active.filter((s) => !dismissed.has(detectedKey(s.merchant, s.account)))
+    audit.zombies = audit.zombies.filter((s) => !dismissed.has(detectedKey(s.merchant, s.account)))
     const trackedKeys = new Set(
       db
         .select({ externalId: subscriptions.externalId })
@@ -217,6 +223,20 @@ export function registerSubscriptionsHandlers(ipcMain: IpcMain): void {
       zombies: audit.zombies.map(flag)
     }
   })
+
+  // "Not a subscription" — durably hide a detected charge from the suggestions.
+  // Renderer-only; never an AI tool. The exclusion is keyed exactly like
+  // track-detected so the same (merchant, account) can never be re-suggested.
+  ipcMain.handle(
+    'subscriptions:dismiss-detected',
+    (_event, input: { merchant?: string; account?: string }) => {
+      const merchant = String(input?.merchant ?? '').trim()
+      if (!merchant) throw new Error('subscriptions:dismiss-detected requires a merchant')
+      const account = String(input?.account ?? '—').trim() || '—'
+      addExclusions(getDb(), 'subscription-dismissed', [detectedKey(merchant, account)])
+      return { success: true }
+    }
+  )
 
   ipcMain.handle('subscriptions:create', (_event, input: SubscriptionInput) => {
     if (!input?.name?.trim()) throw new Error('subscriptions:create requires a name')

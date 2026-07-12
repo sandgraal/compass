@@ -535,6 +535,8 @@ const api = {
     delete: (id: number) => ipcRenderer.invoke('subscriptions:delete', id),
     trackDetected: (detected: DetectedSubscriptionInput) =>
       ipcRenderer.invoke('subscriptions:track-detected', detected),
+    dismissDetected: (input: { merchant: string; account: string }) =>
+      ipcRenderer.invoke('subscriptions:dismiss-detected', input),
     exportCsv: () => ipcRenderer.invoke('subscriptions:export-csv')
   },
 

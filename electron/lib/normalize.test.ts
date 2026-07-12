@@ -39,6 +39,20 @@ describe('detectCadence', () => {
   it('returns null for a single date', () => {
     expect(detectCadence([new Date('2026-01-01')])).toBe(null)
   })
+  it('tolerates one skipped month (regularity gate)', () => {
+    expect(
+      detectCadence(dates('2026-01-15', '2026-02-15', '2026-04-15', '2026-05-15', '2026-06-15'))
+    ).toBe('monthly')
+  })
+  it('rejects scattered gaps whose MEDIAN lands in a band (grocery-run shape)', () => {
+    // Gaps 3, 30, 12, 45, 7 — median 12 sits in the biweekly band, but only one
+    // gap is near it: shopping rhythm, not a billing schedule.
+    expect(
+      detectCadence(
+        dates('2026-01-01', '2026-01-04', '2026-02-03', '2026-02-15', '2026-04-01', '2026-04-08')
+      )
+    ).toBe(null)
+  })
 })
 
 describe('annualizeCost', () => {

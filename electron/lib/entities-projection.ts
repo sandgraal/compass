@@ -73,10 +73,12 @@ export function refreshDerivedEntities(db: BetterSQLite3Database<typeof schema>)
   const excludedPeople = loadExclusionSet(db, ['entity:person'])
   const excludedMerchants = loadExclusionSet(db, ['entity:merchant'])
   const excludedPlaces = loadExclusionSet(db, ['entity:place'])
+  const excludedSubCandidates = loadExclusionSet(db, ['entity:subscription-candidate'])
   const isExcluded = (kind: string, key: string): boolean => {
     if (kind === 'person') return excludedPeople.has(key)
     if (kind === 'merchant') return excludedMerchants.has(key)
     if (kind === 'place') return excludedPlaces.has(key)
+    if (kind === 'subscription-candidate') return excludedSubCandidates.has(key)
     return false
   }
 

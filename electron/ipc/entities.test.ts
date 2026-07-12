@@ -260,10 +260,11 @@ describe('entities:exclude ("Not interested")', () => {
     expect(after.map((p) => p.name)).toEqual(['Real Friend'])
   })
 
-  it('rejects empty/invalid payloads and subscription-candidates', () => {
+  it('rejects empty/invalid payloads; accepts subscription-candidates (dismiss support)', () => {
     expect(() => invoke('entities:exclude', { items: [] })).toThrow()
-    expect(() =>
-      invoke('entities:exclude', { items: [{ kind: 'subscription-candidate', key: 'x' }] })
-    ).toThrow()
+    const res = invoke('entities:exclude', {
+      items: [{ kind: 'subscription-candidate', key: 'x' }]
+    }) as { success: boolean; excluded: number }
+    expect(res).toEqual({ success: true, excluded: 1 })
   })
 })
