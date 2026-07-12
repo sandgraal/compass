@@ -1436,6 +1436,8 @@ declare global {
           q: string
           source?: string
           type?: string
+          sources?: string[]
+          types?: string[]
           from?: number | null
           to?: number | null
           limit?: number
