@@ -42,6 +42,7 @@ import { registerQuickCaptureHandlers } from './ipc/quick-capture'
 import {
   registerRecordsHandlers,
   runGenericTelemetryPurgeIfNeeded,
+  runNetflixRefileIfNeeded,
   runRecordsReclassifyIfNeeded
 } from './ipc/records'
 import { registerRelayHandlers } from './ipc/relay'
@@ -186,6 +187,18 @@ app.whenReady().then(async () => {
         if (res.ran) console.log(`[main] generic telemetry purged (${res.deleted ?? 0} rows)`)
       } catch (err) {
         console.error('[main] generic telemetry purge failed:', err)
+      }
+      // One-shot: re-file rows the over-greedy Netflix recognizer misclaimed
+      // (Prime Video sessions, saved-place lists, bookmarks, notes).
+      try {
+        const res = runNetflixRefileIfNeeded()
+        if (res.ran) {
+          console.log(
+            `[main] netflix refile (${res.moved ?? 0} re-sourced, ${res.facts ?? 0} → snapshot facts)`
+          )
+        }
+      } catch (err) {
+        console.error('[main] netflix refile failed:', err)
       }
       // One-shot spine expansion (data-access policy): project the domains
       // that predate their projectors (habits, tasks, medical, travel,

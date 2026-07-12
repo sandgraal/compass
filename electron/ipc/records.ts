@@ -37,6 +37,7 @@ import { serializeCsv } from '../lib/csv'
 import { isPlausibleEpochMs } from '../lib/dates'
 import { refreshDerivedEntities } from '../lib/entities-projection'
 import { LOCATION_RECOGNIZER_IDS, type LocationPayload } from '../lib/location'
+import { planNetflixRefile } from '../lib/netflix-refile'
 import { extractPdfText } from '../lib/pdf'
 import {
   type RecordInput,
@@ -699,6 +700,87 @@ export function runRecordsReclassifyIfNeeded(
   if (existing) return { ran: false }
   const res = reclassifyGenericRecords()
   db.insert(appSettings).values({ key: gateKey, value: new Date().toISOString() }).run()
+  return { ran: true, ...res }
+}
+
+export const NETFLIX_REFILE_KEY = 'netflixRefileV1'
+
+export type NetflixRefileResult = {
+  moved: number // rows re-inserted as properly-sourced records (prime-video, notes)
+  facts: number // rows converted to snapshot facts (bookmarks, saved places)
+  deleted: number // netflix rows removed (= moved + facts, minus fact dedupes)
+}
+
+/**
+ * Re-file rows the over-greedy Netflix recognizer misclaimed (see
+ * `netflix-refile.ts`): Prime Video playback sessions, Google Maps saved
+ * lists, bookmark CSVs, note exports. Same lossless executor shape as
+ * `reclassifyGenericRecords` — re-derive from the stored payload, insert
+ * through the production paths, delete the old row in the same transaction.
+ * Real Netflix rows are untouched (no mapper claims their {Title, Date} shape).
+ */
+export function refileNetflixRecords(): NetflixRefileResult {
+  const sqlite = getRawSqlite()
+  const result: NetflixRefileResult = { moved: 0, facts: 0, deleted: 0 }
+  const selectChunk = sqlite.prepare(
+    "SELECT id, provenance, payload FROM records WHERE source = 'netflix' AND id > ? ORDER BY id LIMIT 5000"
+  )
+  const deleteById = sqlite.prepare('DELETE FROM records WHERE id = ?')
+
+  const processChunk = sqlite.transaction(
+    (chunk: Array<{ id: number; provenance: string | null; payload: string | null }>) => {
+      const plan = planNetflixRefile(chunk)
+      const byProvenance = new Map<string, RecordInput[]>()
+      for (const move of plan.records) {
+        const list = byProvenance.get(move.provenance)
+        if (list) list.push(move.input)
+        else byProvenance.set(move.provenance, [move.input])
+      }
+      for (const [provenance, inputs] of byProvenance) insertRecords(inputs, provenance)
+      for (const move of plan.facts) insertSnapshotFacts([move.fact], move.provenance)
+      for (const move of plan.records) deleteById.run(move.deleteId)
+      for (const move of plan.facts) deleteById.run(move.deleteId)
+      return plan
+    }
+  )
+
+  let lastId = 0
+  for (;;) {
+    const chunk = selectChunk.all(lastId) as Array<{
+      id: number
+      provenance: string | null
+      payload: string | null
+    }>
+    if (chunk.length === 0) break
+    lastId = chunk[chunk.length - 1].id
+    const plan = processChunk(chunk)
+    result.moved += plan.records.length
+    result.facts += plan.facts.length
+    result.deleted += plan.records.length + plan.facts.length
+  }
+
+  if (result.deleted > 0) {
+    try {
+      refreshDerivedEntities(getDb())
+    } catch {
+      /* derived-entity projection is best-effort */
+    }
+    void refreshRecordsSemanticIndex()
+  }
+  return result
+}
+
+/** One-shot launch wrapper for the netflix refile, same gate pattern as reclassify. */
+export function runNetflixRefileIfNeeded(): { ran: boolean } & Partial<NetflixRefileResult> {
+  const db = getDb()
+  const existing = db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, NETFLIX_REFILE_KEY))
+    .get()
+  if (existing) return { ran: false }
+  const res = refileNetflixRecords()
+  db.insert(appSettings).values({ key: NETFLIX_REFILE_KEY, value: new Date().toISOString() }).run()
   return { ran: true, ...res }
 }
 
