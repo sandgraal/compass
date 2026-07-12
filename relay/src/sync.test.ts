@@ -125,9 +125,10 @@ describe('PUT + GET round-trip', () => {
 })
 
 describe('FsSyncStore', () => {
-  let dir: string
-  afterEach(() => rmSync(dir, { recursive: true, force: true }))
-
+  let dir: string | null = null
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true })
+  })
   it('keeps one previous blob generation on overwrite', () => {
     dir = mkdtempSync(join(tmpdir(), 'relay-sync-'))
     const store = new FsSyncStore(dir)
