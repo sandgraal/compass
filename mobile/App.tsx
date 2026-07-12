@@ -96,7 +96,9 @@ function SetupScreen({ onSave }: { onSave: (c: Config) => Promise<void> }): JSX.
   const [passphrase, setPassphrase] = useState('')
   const [busy, setBusy] = useState(false)
   const canSave =
-    relayUrl.trim().length > 0 && deviceToken.trim().length > 0 && passphrase.length >= 12
+    relayUrl.trim().length > 0 &&
+    deviceToken.trim().length > 0 &&
+    passphrase.trim().length >= 12
 
   return (
     <View style={styles.setup}>
