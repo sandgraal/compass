@@ -22,24 +22,28 @@ export type SqliteForOneShot = {
 
 /**
  * Run `repair()` exactly once per install, gated on `key` in `app_settings`.
- * Returns `{ ran: false }` (repair's own fields absent) if the key is already
- * set; otherwise runs the repair, writes the gate, and returns
- * `{ ran: true, ...repair()'s result }`.
+ * Returns `{ ran: false }` if the key is already set; otherwise runs the
+ * repair, writes the gate, and returns `{ ran: true, ...repair()'s result }`.
+ *
+ * Discriminated on `ran` so callers can narrow (`if (res.ran) res.imported`)
+ * without an `Partial<T>` cast. `ran: true` is spread LAST so a repair result
+ * can never accidentally shadow it, even if `T` happened to have its own
+ * `ran` field.
  */
 export function runOnceGated<T extends object>(
   sqlite: SqliteForOneShot,
   key: string,
   repair: () => T,
   now: number = Date.now()
-): { ran: boolean } & Partial<T> {
+): { ran: false } | ({ ran: true } & T) {
   const existing = sqlite.prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as
     | { value: string }
     | undefined
-  if (existing) return { ran: false } as { ran: boolean } & Partial<T>
+  if (existing) return { ran: false }
 
   const result = repair()
   sqlite
     .prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)')
     .run(key, new Date(now).toISOString(), now)
-  return { ran: true, ...result }
+  return { ...result, ran: true }
 }
