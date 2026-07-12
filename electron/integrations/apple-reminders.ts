@@ -41,7 +41,7 @@
  * can't re-import after a disconnect.
  */
 
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { and, eq } from 'drizzle-orm'
 import type { BrowserWindow } from 'electron'
 import { getDb } from '../db/client'
@@ -110,15 +110,15 @@ const JXA_TIMEOUT_MS = 30_000
  * which the caller surfaces on the integration row). `run` is injectable so
  * tests never shell out.
  */
-export function readReminders(
-  run: (script: string) => string = defaultOsascriptRun
-): ReminderRow[] {
+export async function readReminders(
+  run: (script: string) => string | Promise<string> = defaultOsascriptRun
+): Promise<ReminderRow[]> {
   if (process.platform !== 'darwin') {
     throw new Error(
       'Apple Reminders is macOS-only and requires Reminders access in System Settings › Privacy & Security.'
     )
   }
-  const raw = run(REMINDERS_JXA)
+  const raw = await run(REMINDERS_JXA)
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
@@ -139,11 +139,17 @@ export function readReminders(
 
 /** Default read: spawn `osascript -l JavaScript`. Separated so the reader is
  * pure over its `run` seam and tests inject a fake instead of shelling out. */
-function defaultOsascriptRun(script: string): string {
-  return execFileSync('osascript', ['-l', 'JavaScript', '-e', script], {
-    encoding: 'utf8',
-    timeout: JXA_TIMEOUT_MS,
-    maxBuffer: MAX_JXA_OUTPUT_BYTES
+function defaultOsascriptRun(script: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'osascript',
+      ['-l', 'JavaScript', '-e', script],
+      { encoding: 'utf8', timeout: JXA_TIMEOUT_MS, maxBuffer: MAX_JXA_OUTPUT_BYTES },
+      (err, stdout) => {
+        if (err) reject(err)
+        else resolve(stdout)
+      }
+    )
   })
 }
 
@@ -185,7 +191,7 @@ type SyncResult = { service: string; success: boolean; recordsUpdated?: number; 
  */
 export async function syncAppleReminders(
   mainWindow?: BrowserWindow | null,
-  opts?: { reader?: () => ReminderRow[] }
+  opts?: { reader?: () => ReminderRow[] | Promise<ReminderRow[]> }
 ): Promise<SyncResult> {
   const db = getDb()
   const today = localYmd()
@@ -205,7 +211,7 @@ export async function syncAppleReminders(
 
   try {
     const read = opts?.reader ?? (() => readReminders())
-    const rows = normalizeReminders(read(), today)
+    const rows = normalizeReminders(await read(), today)
 
     // Snapshot today's existing apple-reminders items so we can preserve local
     // completion across the re-import and prune the ones that fell off.

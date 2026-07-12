@@ -96,7 +96,7 @@ describe('readReminders', () => {
         { id: 'r1', title: 'Buy milk', completed: false, dueDate: '2026-06-13', list: 'Home' },
         { id: 'r2', title: null, completed: false, dueDate: null, list: 'Work' }
       ])
-    const rows = readReminders(fakeRun)
+    const rows = await readReminders(fakeRun)
     expect(rows).toEqual([
       { id: 'r1', title: 'Buy milk', completed: false, dueDate: '2026-06-13', list: 'Home' },
       { id: 'r2', title: null, completed: false, dueDate: null, list: 'Work' }
@@ -105,19 +105,19 @@ describe('readReminders', () => {
 
   onDarwin('throws on malformed bridge output', async () => {
     const { readReminders } = await import('./apple-reminders')
-    expect(() => readReminders(() => 'not-json')).toThrow(/malformed/i)
-    expect(() => readReminders(() => JSON.stringify({ not: 'an array' }))).toThrow(/list/i)
+    await expect(readReminders(() => 'not-json')).rejects.toThrow(/malformed/i)
+    await expect(readReminders(() => JSON.stringify({ not: 'an array' }))).rejects.toThrow(/list/i)
   })
 
   offDarwin('is macOS-only off darwin (throws before running the bridge)', async () => {
     const { readReminders } = await import('./apple-reminders')
     let ran = false
-    expect(() =>
+    await expect(
       readReminders(() => {
         ran = true
         return '[]'
       })
-    ).toThrow(/macOS-only/i)
+    ).rejects.toThrow(/macOS-only/i)
     expect(ran).toBe(false)
   })
 })
