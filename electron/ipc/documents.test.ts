@@ -11,13 +11,18 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import type { IpcMain } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as schema from '../db/schema'
+import { hashRecord } from '../lib/recognizers'
 
 let sqlite: Database.Database
 
 vi.mock('../db/client', () => ({ getDb: () => drizzle(sqlite, { schema }) }))
-vi.mock('../lib/pdf', () => ({
-  extractPdfText: vi.fn(async () => ({ text: 'ACME invoice — total 4200 due March', pages: 3 }))
-}))
+vi.mock('../lib/pdf', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/pdf')>()
+  return {
+    ...actual,
+    extractPdfText: vi.fn(async () => ({ text: 'ACME invoice — total 4200 due March', pages: 3 }))
+  }
+})
 vi.mock('./records', () => ({ insertRecords: vi.fn(() => ({ imported: 1 })) }))
 vi.mock('electron', () => ({
   dialog: { showOpenDialog: vi.fn() },
@@ -189,7 +194,13 @@ describe('documents:delete', () => {
     // Simulate the spine projection the mocked insertRecords didn't actually write.
     sqlite
       .prepare('INSERT INTO records (source, type, title, payload, dedup_hash) VALUES (?,?,?,?,?)')
-      .run('document', 'file', 'bye', JSON.stringify({ sha256: doc.sha256 }), `doc-${doc.sha256}`)
+      .run(
+        'document',
+        'file',
+        'bye',
+        JSON.stringify({ sha256: doc.sha256 }),
+        hashRecord('document', 'file', null, doc.sha256)
+      )
 
     expect(readdirSync(DOCS_DIR)).toContain(doc.storedPath)
 
