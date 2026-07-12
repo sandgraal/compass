@@ -204,7 +204,6 @@ export type NetflixRefilePlan = {
  */
 export function planNetflixRefile(rows: Iterable<GenericRowLite>): NetflixRefilePlan {
   const plan: NetflixRefilePlan = { records: [], facts: [] }
-  let position = 0
   for (const row of rows) {
     const { provenance, payload } = row
     if (!provenance || !payload) continue
@@ -228,20 +227,18 @@ export function planNetflixRefile(rows: Iterable<GenericRowLite>): NetflixRefile
       continue
     }
     if (/^Bookmarks[_\s-]?\d/i.test(provenance)) {
-      const fact = mapBookmarkFact(r, position)
-      if (fact) {
-        plan.facts.push({ deleteId: row.id, provenance, fact })
-        position++
-      }
+      // Position = the source record id: deterministic and unique across the
+      // executor's CHUNKED planner calls (a per-call counter would restart at
+      // 0 each chunk and produce colliding positions), and it preserves the
+      // original import order that `snapshot:list` sorts by.
+      const fact = mapBookmarkFact(r, row.id)
+      if (fact) plan.facts.push({ deleteId: row.id, provenance, fact })
       continue
     }
     // Fallback: any other CSV the greedy detect stole — claimed only when the
     // payload has the exact Google saved-list shape (real Netflix rows decline).
-    const fact = mapSavedPlaceFact(r, provenance, position)
-    if (fact) {
-      plan.facts.push({ deleteId: row.id, provenance, fact })
-      position++
-    }
+    const fact = mapSavedPlaceFact(r, provenance, row.id)
+    if (fact) plan.facts.push({ deleteId: row.id, provenance, fact })
   }
   return plan
 }
