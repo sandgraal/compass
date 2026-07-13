@@ -596,6 +596,18 @@ Apple Data & Privacy, Signal/Telegram), and full CRED beyond the SSA spike (10.6
     `calendarVsHabits`) for a new `/insights` page (recharts scatter plots, reuses the same read helpers as the
     detectors so chart data can't drift from the nudges). This closes the "rich combined dashboards" follow-up
     noted above. 14 new tests.
+  - [x] **Three more weekly pairs + a readiness panel** (`claude/cross-domain-correlation-triggers`). Three new
+    detectors/chart pairs complete the "commits × calendar × spend" triangle: `detectCommitsVsCalendar` (meeting
+    load vs. GitHub activity), `detectCalendarVsSpend` (calendar load vs. discretionary spend), and
+    `detectCommitsVsSpend` (coding output vs. discretionary spend) — all reusing the new `readGithubActivityByWeek`
+    (commits + PRs, since squash-merge workflows never produce `commit` records) and the now `now`-capped
+    `readCalendarByWeek` (future gcal events no longer inflate readiness counts). `insights:correlations` grows
+    `commitsVsCalendar`/`calendarVsSpend`/`commitsVsSpend` (each `| null`, same shape as the original three) plus a
+    fixed-order `readiness: PairReadiness[]` (one entry per pair: gates, current/needed progress, a hint for the
+    first unmet gate, data-quality caveats). `Insights.tsx` renders the three new scatter charts and a
+    `ReadinessPanel` that replaces the old blind empty state with per-pair "what's missing" detail. Also fixed a
+    `compass_health_summary`/`compass_income_summary` TypeError in the MCP (epoch-ms passed to the date-only
+    `localYmd`) while extracting `readHealthSummary` from `index.ts` into `readers.ts`.
 - [x] **10.8 Location → Residency autopilot** ✅ *shipped* — the first **completes-a-feature** source: a dropped
   location export (OwnTracks `.rec`/`.json`, GPX, Google `Records.json` streamed) → raw points in a dedicated
   `location_points` table (migration `0029`, BOTH paths) → an offline point-in-polygon projector

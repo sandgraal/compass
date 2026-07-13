@@ -1191,6 +1191,9 @@ declare global {
               | 'medical-out-of-pocket'
               | 'dev-productivity-vs-recovery'
               | 'calendar-load-vs-habits'
+              | 'commits-vs-calendar'
+              | 'calendar-vs-spend'
+              | 'commits-vs-spend'
             severity: 'info' | 'warn'
             title: string
             detail: string
@@ -1211,6 +1214,35 @@ declare global {
           calendarVsHabits: {
             points: Array<{ week: string; events: number; completionRate: number }>
           } | null
+          commitsVsCalendar: {
+            points: Array<{ week: string; events: number; activity: number }>
+          } | null
+          calendarVsSpend: {
+            points: Array<{ week: string; events: number; spend: number }>
+          } | null
+          commitsVsSpend: {
+            points: Array<{ week: string; activity: number; spend: number }>
+          } | null
+          readiness: Array<{
+            pair:
+              | 'sleepVsSpend'
+              | 'devVsRecovery'
+              | 'calendarVsHabits'
+              | 'commitsVsCalendar'
+              | 'calendarVsSpend'
+              | 'commitsVsSpend'
+            label: string
+            ready: boolean
+            checks: Array<{
+              id: string
+              label: string
+              current: number
+              needed: number
+              met: boolean
+            }>
+            hint: string | null
+            caveats: string[]
+          }>
         }>
       }
       documents: {

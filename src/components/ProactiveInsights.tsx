@@ -3,16 +3,19 @@ import {
   BellRing,
   CalendarClock,
   CalendarDays,
+  Coffee,
   Flame,
   GitCommitHorizontal,
   Lightbulb,
   Moon,
   PiggyBank,
   Repeat,
+  ShoppingBag,
   Stethoscope,
   Tag,
   Target,
   TrendingUp,
+  Users,
   Wallet
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -38,6 +41,9 @@ type Insight = {
     | 'medical-out-of-pocket'
     | 'dev-productivity-vs-recovery'
     | 'calendar-load-vs-habits'
+    | 'commits-vs-calendar'
+    | 'calendar-vs-spend'
+    | 'commits-vs-spend'
   severity: 'info' | 'warn'
   title: string
   detail: string
@@ -59,7 +65,10 @@ const KIND_ICON: Record<Insight['kind'], JSX.Element> = {
   'savings-rate': <PiggyBank size={15} className="text-amber-400" />,
   'medical-out-of-pocket': <Stethoscope size={15} className="text-rose-400" />,
   'dev-productivity-vs-recovery': <GitCommitHorizontal size={15} className="text-emerald-400" />,
-  'calendar-load-vs-habits': <CalendarDays size={15} className="text-violet-400" />
+  'calendar-load-vs-habits': <CalendarDays size={15} className="text-violet-400" />,
+  'commits-vs-calendar': <Users size={15} className="text-teal-400" />,
+  'calendar-vs-spend': <ShoppingBag size={15} className="text-fuchsia-400" />,
+  'commits-vs-spend': <Coffee size={15} className="text-orange-400" />
 }
 
 /**
