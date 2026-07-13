@@ -629,10 +629,11 @@ function getLabResults(sqlite: RawSqlite, input: Record<string, unknown>): unkno
   if (testName) series = series.filter((s) => s.testName.toLowerCase().includes(testName))
   if (panel) series = series.filter((s) => s.panel === panel)
   if (abnormalOnly) series = series.filter((s) => s.latest.flag && s.latest.flag !== 'normal')
+  const abnormalCount = series.filter((s) => s.latest.flag && s.latest.flag !== 'normal').length
   return {
     count: series.length,
     lastDate: summary.lastDate,
-    abnormalCount: summary.abnormalCount,
+    abnormalCount,
     panels: summary.panels,
     series
   }
