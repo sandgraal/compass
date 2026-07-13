@@ -57,7 +57,7 @@ function EventStudies({ events }: { events: Discovery['events'] }): JSX.Element 
                   <span className={d.pctChange > 0 ? 'text-emerald-400' : 'text-rose-400'}>
                     {d.pctChange > 0 ? '▲' : '▼'}{' '}
                     {d.pctChange >= 4
-                      ? `${Math.round(d.pctChange + 1)}×`
+                      ? `${(d.pctChange + 1).toFixed(1).replace(/\.0$/, '')}×`
                       : `${Math.abs(Math.round(d.pctChange * 100))}%`}
                   </span>{' '}
                   {d.label.toLowerCase()} ({perDay(d.before, d.unit)} → {perDay(d.after, d.unit)})

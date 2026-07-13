@@ -24,7 +24,7 @@
  * Pure functions over the DB — no network, no LLM, no writes. `buildDiscovery`
  * is exported for tests; thresholds are exported consts so tests pin them.
  */
-import { and, gte, isNotNull, lt } from 'drizzle-orm'
+import { and, eq, gte, inArray, isNotNull, lt, lte, or } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
 import { financeTransactions, medicalRecords, records, travelSegments } from '../db/schema'
@@ -261,15 +261,17 @@ interface TxnRow {
   category: string | null
 }
 
-/** All spine rows any registry metric could need, since 2000. Guarded: an older
- *  DB without `records` yields an empty list, and every series goes empty. */
+/**
+ * All spine rows any registry metric could need. The per-metric source/type
+ * filter and the future-event cap (synced calendars carry upcoming events) run
+ * IN SQL — the spine can hold hundreds of thousands of rows and this executes
+ * on every Insights page load. Guarded: an older DB without `records` yields
+ * an empty list, and every series goes empty.
+ */
 function fetchSpineRows(db: Db, untilMs: number): SpineRow[] {
-  const wanted = new Set<string>()
-  for (const m of METRICS) {
-    if (m.read.kind === 'spine-count' || m.read.kind === 'spine-sum') {
-      for (const t of m.read.types) wanted.add(`${m.read.source} ${t}`)
-    }
-  }
+  const spineReads = METRICS.flatMap((m) =>
+    m.read.kind === 'spine-count' || m.read.kind === 'spine-sum' ? [m.read] : []
+  )
   try {
     const rows = db
       .select({
@@ -279,15 +281,23 @@ function fetchSpineRows(db: Db, untilMs: number): SpineRow[] {
         payload: records.payload
       })
       .from(records)
-      .where(and(isNotNull(records.occurredAt), gte(records.occurredAt, new Date(2000, 0, 1))))
+      .where(
+        and(
+          isNotNull(records.occurredAt),
+          gte(records.occurredAt, new Date(2000, 0, 1)),
+          lte(records.occurredAt, new Date(untilMs)),
+          or(
+            ...spineReads.map((r) =>
+              and(eq(records.source, r.source), inArray(records.type, r.types))
+            )
+          )
+        )
+      )
       .all()
     const out: SpineRow[] = []
     for (const r of rows) {
       if (!r.occurredAt) continue
-      const at = r.occurredAt.getTime()
-      if (at > untilMs) continue // synced calendars carry future events
-      if (!wanted.has(`${r.source} ${r.type}`)) continue
-      out.push({ source: r.source, type: r.type, at, payload: r.payload })
+      out.push({ source: r.source, type: r.type, at: r.occurredAt.getTime(), payload: r.payload })
     }
     return out
   } catch {

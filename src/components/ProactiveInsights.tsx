@@ -121,7 +121,7 @@ export function ProactiveInsights(): JSX.Element | null {
             type="button"
             aria-label="Restore insight"
             title="Restore"
-            className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+            className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
             onClick={(e) => {
               e.preventDefault()
               e.stopPropagation()
@@ -140,7 +140,7 @@ export function ProactiveInsights(): JSX.Element | null {
                 'rounded p-1 transition-opacity hover:text-foreground',
                 insight.pinned
                   ? 'text-primary opacity-100'
-                  : 'text-muted-foreground opacity-0 group-hover:opacity-100'
+                  : 'text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100'
               )}
               onClick={(e) => {
                 e.preventDefault()
@@ -154,7 +154,7 @@ export function ProactiveInsights(): JSX.Element | null {
               type="button"
               aria-label="Dismiss insight"
               title="Dismiss — stop showing this"
-              className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+              className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
