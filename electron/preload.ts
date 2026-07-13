@@ -383,6 +383,10 @@ const api = {
     update: (id: number, updates: ContactInput) =>
       ipcRenderer.invoke('contacts:update', id, updates),
     delete: (id: number) => ipcRenderer.invoke('contacts:delete', id),
+    bulkDelete: (ids: number[]) => ipcRenderer.invoke('contacts:bulk-delete', { ids }),
+    bulkSetRelationship: (ids: number[], relationship: string) =>
+      ipcRenderer.invoke('contacts:bulk-set-relationship', { ids, relationship }),
+    suggestSurvivor: (ids: number[]) => ipcRenderer.invoke('contacts:suggest-survivor', { ids }),
     importVcard: () => ipcRenderer.invoke('contacts:import-vcard'),
     importCsv: () => ipcRenderer.invoke('contacts:import-csv'),
     importLinkedin: () => ipcRenderer.invoke('contacts:import-linkedin'),

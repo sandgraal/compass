@@ -14,7 +14,7 @@
 import { randomUUID } from 'node:crypto'
 import { lstatSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { and, eq, like } from 'drizzle-orm'
+import { and, eq, inArray, like, sql } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
 import { contacts, curationExclusions, derivedEntities } from '../db/schema'
@@ -24,7 +24,12 @@ import {
   parseGoogleVoice,
   parseLinkedInConnections
 } from '../lib/archive-importers'
-import { type DedupeContact, computeDedupe, dedupePairKey } from '../lib/contact-dedupe'
+import {
+  type DedupeContact,
+  computeDedupe,
+  dedupePairKey,
+  pickSurvivor
+} from '../lib/contact-dedupe'
 import {
   type ContactEnrichment,
   type CrossSourceSummary,
@@ -51,6 +56,9 @@ const MAX_NOTES = 20_000
 // can't exhaust the main-process heap (self-DoS) before we even parse it.
 const MAX_IMPORT_BYTES = 50 * 1024 * 1024 // 50 MB
 const MAX_SEARCH_CHARS = 200
+// Bulk operations cap: a selection larger than this is almost certainly a bug
+// in the renderer, and an unbounded IN(...) list has no business in one call.
+const MAX_BULK_IDS = 500
 
 /** What the renderer sends for create/update. Arrays are real arrays here. */
 export interface ContactInput {
@@ -97,6 +105,10 @@ export interface ContactRecord {
   photo: string | null
   source: string
   enrichment: ContactEnrichment | null
+  /** crossSource.lastSeen, surfaced on LIST payloads so the UI can sort by activity. */
+  lastSeen: number | null
+  /** crossSource.touchpointCount, surfaced on LIST payloads. */
+  touchpointCount: number
   createdAt: number | null
   updatedAt: number | null
 }
@@ -137,15 +149,13 @@ function computeSearchBlob(input: {
 }
 
 /**
- * DB row → renderer record (parse JSON arrays). `includePhoto=false` for list
- * payloads (keeps them light); `includeEnrichment=false` likewise — the
- * enrichment blob only rides on `contacts:get`.
+ * DB row → renderer record (parse JSON arrays), full detail — photo +
+ * enrichment included. Only used by `contacts:get`; `contacts:list` uses the
+ * lighter `listRowToRecord` below instead of parsing the full enrichment blob
+ * per row just to derive two numbers.
  */
-function rowToRecord(
-  row: ContactRow,
-  includePhoto: boolean,
-  includeEnrichment: boolean
-): ContactRecord {
+function rowToRecord(row: ContactRow): ContactRecord {
+  const enrichment = parseEnrichment(row.enrichment)
   return {
     id: row.id,
     externalId: row.externalId,
@@ -164,9 +174,73 @@ function rowToRecord(
     url: row.url,
     relationship: row.relationship,
     notes: row.notes,
-    photo: includePhoto ? row.photo : null,
+    photo: row.photo,
     source: row.source,
-    enrichment: includeEnrichment ? parseEnrichment(row.enrichment) : null,
+    enrichment,
+    lastSeen: enrichment.crossSource?.lastSeen ?? null,
+    touchpointCount: enrichment.crossSource?.touchpointCount ?? 0,
+    createdAt: row.createdAt ? row.createdAt.getTime() : null,
+    updatedAt: row.updatedAt ? row.updatedAt.getTime() : null
+  }
+}
+
+/**
+ * The narrow row shape `contacts:list` selects: every scalar column EXCEPT
+ * `photo`/`enrichment` (kept off list payloads to stay light), plus
+ * `lastSeen`/`touchpointCount` pulled straight out of the enrichment JSON via
+ * SQLite's `json_extract` — so a list of N contacts costs zero full-blob
+ * JSON.parse calls in the main process, not N of them.
+ */
+interface ContactListRow {
+  id: number
+  externalId: string
+  displayName: string
+  givenName: string | null
+  familyName: string | null
+  middleName: string | null
+  prefix: string | null
+  suffix: string | null
+  org: string | null
+  jobTitle: string | null
+  phones: string | null
+  emails: string | null
+  addresses: string | null
+  birthday: string | null
+  url: string | null
+  relationship: string | null
+  notes: string | null
+  source: string
+  createdAt: Date | null
+  updatedAt: Date | null
+  lastSeen: number | null
+  touchpointCount: number | null
+}
+
+/** `ContactListRow` → renderer record. No enrichment parse — SQL already did it. */
+function listRowToRecord(row: ContactListRow): ContactRecord {
+  return {
+    id: row.id,
+    externalId: row.externalId,
+    displayName: row.displayName,
+    givenName: row.givenName,
+    familyName: row.familyName,
+    middleName: row.middleName,
+    prefix: row.prefix,
+    suffix: row.suffix,
+    org: row.org,
+    jobTitle: row.jobTitle,
+    phones: parseArr<ContactPhone>(row.phones),
+    emails: parseArr<ContactEmail>(row.emails),
+    addresses: parseArr<ContactAddress>(row.addresses),
+    birthday: row.birthday,
+    url: row.url,
+    relationship: row.relationship,
+    notes: row.notes,
+    photo: null,
+    source: row.source,
+    enrichment: null,
+    lastSeen: row.lastSeen,
+    touchpointCount: row.touchpointCount ?? 0,
     createdAt: row.createdAt ? row.createdAt.getTime() : null,
     updatedAt: row.updatedAt ? row.updatedAt.getTime() : null
   }
@@ -594,6 +668,46 @@ export function mergeContacts(survivorId: number, loserIds: number[]): boolean {
 }
 
 /**
+ * Delete contacts by id, in ONE transaction. Delete means GONE: each externalId
+ * is tombstoned first so no future sync or import can re-create the contact
+ * (`upsertContacts` skips tombstoned ids; Settings → Curation can clear them).
+ * Any derived-entity promotion pointing at a deleted contact is unlinked so the
+ * People page is consistent immediately. `syncRelationships` is the caller's
+ * job (once per batch, not per delete). Returns how many rows were deleted.
+ */
+export function deleteContacts(ids: number[]): number {
+  const db = getDb()
+  let deleted = 0
+  db.transaction((tx) => {
+    for (const id of ids) {
+      const row = tx
+        .select({ externalId: contacts.externalId })
+        .from(contacts)
+        .where(eq(contacts.id, id))
+        .all()[0]
+      if (!row) continue
+      tx.insert(curationExclusions)
+        .values({ kind: 'contact-tombstone', target: row.externalId })
+        .onConflictDoNothing()
+        .run()
+      try {
+        tx.update(derivedEntities)
+          .set({ promotedKind: null, promotedId: null })
+          .where(
+            and(eq(derivedEntities.promotedKind, 'contact'), eq(derivedEntities.promotedId, id))
+          )
+          .run()
+      } catch {
+        /* derived_entities absent on a pristine DB — ignore */
+      }
+      tx.delete(contacts).where(eq(contacts.id, id)).run()
+      deleted++
+    }
+  })
+  return deleted
+}
+
+/**
  * Run the AUTO tier of the dedupe engine over the whole contacts table:
  * merge every exact-identifier group (shared email / same-name shared phone).
  * Called at the end of `upsertContacts` batches so every sync/import inherits
@@ -850,23 +964,48 @@ export function registerContactsHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('contacts:list', (_event, opts?: { search?: string }) => {
     const db = getDb()
     const q = opts?.search?.trim().slice(0, MAX_SEARCH_CHARS).toLowerCase()
-    const rows = q
-      ? db
-          .select()
-          .from(contacts)
-          .where(like(contacts.searchBlob, `%${q}%`))
-          .all()
-      : db.select().from(contacts).all()
-    return rows
-      .map((r) => rowToRecord(r, false, false))
-      .sort((a, b) => a.displayName.localeCompare(b.displayName))
+    // Explicit column list — never `photo`/`enrichment` (see ContactListRow).
+    // `lastSeen`/`touchpointCount` come straight out of the enrichment JSON via
+    // json_extract, so SQLite does the parsing, not a JS JSON.parse per row.
+    const listQuery = db
+      .select({
+        id: contacts.id,
+        externalId: contacts.externalId,
+        displayName: contacts.displayName,
+        givenName: contacts.givenName,
+        familyName: contacts.familyName,
+        middleName: contacts.middleName,
+        prefix: contacts.prefix,
+        suffix: contacts.suffix,
+        org: contacts.org,
+        jobTitle: contacts.jobTitle,
+        phones: contacts.phones,
+        emails: contacts.emails,
+        addresses: contacts.addresses,
+        birthday: contacts.birthday,
+        url: contacts.url,
+        relationship: contacts.relationship,
+        notes: contacts.notes,
+        source: contacts.source,
+        createdAt: contacts.createdAt,
+        updatedAt: contacts.updatedAt,
+        lastSeen: sql<
+          number | null
+        >`json_extract(${contacts.enrichment}, '$.crossSource.lastSeen')`,
+        touchpointCount: sql<
+          number | null
+        >`json_extract(${contacts.enrichment}, '$.crossSource.touchpointCount')`
+      })
+      .from(contacts)
+    const rows = q ? listQuery.where(like(contacts.searchBlob, `%${q}%`)).all() : listQuery.all()
+    return rows.map(listRowToRecord).sort((a, b) => a.displayName.localeCompare(b.displayName))
   })
 
   ipcMain.handle('contacts:get', (_event, id: number) => {
     if (!Number.isInteger(id)) throw new Error('contacts:get requires an integer id')
     const db = getDb()
     const row = db.select().from(contacts).where(eq(contacts.id, id)).all()[0]
-    return row ? rowToRecord(row, true, true) : null
+    return row ? rowToRecord(row) : null
   })
 
   ipcMain.handle('contacts:create', (_event, input: ContactInput) => {
@@ -917,29 +1056,64 @@ export function registerContactsHandlers(ipcMain: IpcMain): void {
 
   ipcMain.handle('contacts:delete', (_event, id: number) => {
     if (!Number.isInteger(id)) throw new Error('contacts:delete requires an integer id')
-    const db = getDb()
-    // Delete means GONE: tombstone the external id first so no future sync or
-    // import can re-create this contact (upsertContacts skips tombstoned ids).
-    // Settings → Curation can clear tombstones if the user changes their mind.
-    const row = db
-      .select({ externalId: contacts.externalId })
-      .from(contacts)
-      .where(eq(contacts.id, id))
-      .all()[0]
-    if (row?.externalId) addExclusions(db, 'contact-tombstone', [row.externalId])
-    db.delete(contacts).where(eq(contacts.id, id)).run()
-    // Un-link any derived-entity row that pointed at this contact so the People
-    // page is consistent immediately (the next rebuild recomputes this anyway).
-    try {
-      db.update(derivedEntities)
-        .set({ promotedKind: null, promotedId: null })
-        .where(and(eq(derivedEntities.promotedKind, 'contact'), eq(derivedEntities.promotedId, id)))
-        .run()
-    } catch {
-      /* derived_entities absent on a pristine DB — ignore */
-    }
+    deleteContacts([id])
     syncRelationships()
     return { success: true }
+  })
+
+  ipcMain.handle('contacts:bulk-delete', (_event, req: { ids: number[] }) => {
+    const ids = Array.isArray(req?.ids)
+      ? req.ids.filter((id): id is number => Number.isInteger(id))
+      : []
+    if (ids.length === 0) throw new Error('contacts:bulk-delete requires a non-empty ids array')
+    if (ids.length > MAX_BULK_IDS) {
+      throw new Error(`contacts:bulk-delete accepts at most ${MAX_BULK_IDS} ids per call`)
+    }
+    const deleted = deleteContacts(ids)
+    syncRelationships()
+    return { success: true, deleted }
+  })
+
+  ipcMain.handle(
+    'contacts:bulk-set-relationship',
+    (_event, req: { ids: number[]; relationship: string }) => {
+      const ids = Array.isArray(req?.ids)
+        ? req.ids.filter((id): id is number => Number.isInteger(id))
+        : []
+      if (ids.length === 0) {
+        throw new Error('contacts:bulk-set-relationship requires a non-empty ids array')
+      }
+      if (ids.length > MAX_BULK_IDS) {
+        throw new Error(
+          `contacts:bulk-set-relationship accepts at most ${MAX_BULK_IDS} ids per call`
+        )
+      }
+      // An empty string clears the relationship on every selected contact.
+      const relationship = clamp(req?.relationship?.trim() || null, MAX_TEXT)
+      const result = getDb()
+        .update(contacts)
+        .set({ relationship, updatedAt: new Date() })
+        .where(inArray(contacts.id, ids))
+        .run()
+      syncRelationships()
+      return { success: true, updated: Number(result.changes) }
+    }
+  )
+
+  // Deterministic survivor suggestion for the bulk-merge dialog — same ranking
+  // the auto-dedupe tier uses (source rank → filledness → age → id), so the
+  // dialog's default matches what an automatic merge would have picked.
+  ipcMain.handle('contacts:suggest-survivor', (_event, req: { ids: number[] }) => {
+    const ids = Array.isArray(req?.ids)
+      ? req.ids.filter((id): id is number => Number.isInteger(id))
+      : []
+    if (ids.length < 2) throw new Error('contacts:suggest-survivor requires at least two ids')
+    const idSet = new Set(ids)
+    const members = readDedupeRows().filter((r) => idSet.has(r.id))
+    if (members.length < 2) {
+      throw new Error('contacts:suggest-survivor found fewer than two matching contacts')
+    }
+    return { survivorId: pickSurvivor(members).id }
   })
 
   // ── Duplicates review queue ────────────────────────────────────────────────

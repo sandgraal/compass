@@ -8,11 +8,11 @@ import {
   Search,
   User,
   UserPlus,
-  Wallet,
-  X
+  Wallet
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import BulkActionBar from '../components/ui/BulkActionBar'
 import { useToast } from '../components/ui/Toast'
 
 const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
@@ -189,28 +189,17 @@ export default function People(): JSX.Element {
         </div>
       )}
 
-      {selected.size > 0 && (
-        <div className="sticky top-12 z-10 mb-3 flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-2.5 shadow-sm">
-          <span className="text-sm text-foreground">{selected.size} selected</span>
-          <button
-            type="button"
-            onClick={excludeSelected}
-            disabled={excluding}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 text-foreground rounded-lg transition-colors disabled:opacity-50"
-          >
-            <EyeOff size={12} />
-            {excluding ? 'Hiding…' : `Not interested (${selected.size})`}
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelected(new Set())}
-            aria-label="Clear selection"
-            className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <X size={12} /> Clear
-          </button>
-        </div>
-      )}
+      <BulkActionBar count={selected.size} onClear={() => setSelected(new Set())}>
+        <button
+          type="button"
+          onClick={excludeSelected}
+          disabled={excluding}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 text-foreground rounded-lg transition-colors disabled:opacity-50"
+        >
+          <EyeOff size={12} />
+          {excluding ? 'Hiding…' : `Not interested (${selected.size})`}
+        </button>
+      </BulkActionBar>
 
       {loaded && people.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center text-sm text-muted-foreground">

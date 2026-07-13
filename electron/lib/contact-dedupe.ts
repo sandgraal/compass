@@ -87,7 +87,7 @@ const SOURCE_RANK: Record<string, number> = {
 const sourceRank = (s: string): number => SOURCE_RANK[s] ?? 5
 
 /** Deterministic survivor: best source, then most-filled, then oldest, then lowest id. */
-function pickSurvivor(members: DedupeContact[]): DedupeContact {
+export function pickSurvivor(members: DedupeContact[]): DedupeContact {
   return [...members].sort((a, b) => {
     const src = sourceRank(a.source) - sourceRank(b.source)
     if (src !== 0) return src

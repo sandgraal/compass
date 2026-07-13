@@ -453,6 +453,10 @@ declare global {
     photo: string | null
     source: string
     enrichment: ContactEnrichment | null
+    /** crossSource.lastSeen, present on list payloads for activity sorting. */
+    lastSeen: number | null
+    /** crossSource.touchpointCount, present on list payloads. */
+    touchpointCount: number
     createdAt: number | null
     updatedAt: number | null
   }
@@ -1504,6 +1508,12 @@ declare global {
         create(input: ContactInput): Promise<{ success: boolean; id: number }>
         update(id: number, updates: ContactInput): Promise<{ success: boolean }>
         delete(id: number): Promise<{ success: boolean }>
+        bulkDelete(ids: number[]): Promise<{ success: boolean; deleted: number }>
+        bulkSetRelationship(
+          ids: number[],
+          relationship: string
+        ): Promise<{ success: boolean; updated: number }>
+        suggestSurvivor(ids: number[]): Promise<{ survivorId: number }>
         importVcard(): Promise<ImportResult>
         importCsv(): Promise<ImportResult>
         importLinkedin(): Promise<ImportResult>

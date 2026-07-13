@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { type DedupeContact, computeDedupe, dedupePairKey, normalizePhone } from './contact-dedupe'
+import {
+  type DedupeContact,
+  computeDedupe,
+  dedupePairKey,
+  normalizePhone,
+  pickSurvivor
+} from './contact-dedupe'
 
 let nextId = 1
 function c(over: Partial<DedupeContact> & { displayName: string }): DedupeContact {
@@ -156,5 +162,24 @@ describe('computeDedupe — fuzzy pairs', () => {
     expect(autoGroups).toHaveLength(1)
     // d pairs with nobody: a+b are consumed by the auto group.
     expect(fuzzyPairs).toHaveLength(0)
+  })
+})
+
+describe('pickSurvivor (exported for contacts:suggest-survivor)', () => {
+  it('prefers the better source rank regardless of filledness', () => {
+    const manual = c({ displayName: 'A', source: 'manual', filledScore: 0 })
+    const google = c({ displayName: 'A', source: 'google', filledScore: 9 })
+    const derived = c({ displayName: 'A', source: 'derived', filledScore: 9 })
+    expect(pickSurvivor([derived, google, manual]).id).toBe(manual.id)
+  })
+
+  it('breaks source ties by filledness, then age, then id', () => {
+    const sparse = c({ displayName: 'B', source: 'google', filledScore: 1, createdAt: 100 })
+    const full = c({ displayName: 'B', source: 'google', filledScore: 5, createdAt: 900 })
+    expect(pickSurvivor([sparse, full]).id).toBe(full.id)
+
+    const older = c({ displayName: 'C', source: 'csv', filledScore: 2, createdAt: 100 })
+    const newer = c({ displayName: 'C', source: 'csv', filledScore: 2, createdAt: 900 })
+    expect(pickSurvivor([newer, older]).id).toBe(older.id)
   })
 })

@@ -601,6 +601,182 @@ describe('contact dedupe (auto-merge + review queue)', () => {
     expect(after.notes).toContain('note B')
     expect(((await invoke('contacts:list')) as unknown[]).length).toBe(1)
   })
+
+  it('contacts:merge folds SEVERAL losers into one survivor in one call', async () => {
+    const { upsertContacts } = await import('./contacts')
+    upsertContacts([
+      { externalId: 'multi/s', displayName: 'Rae Sol', emails: [{ value: 'r@a.com' }], notes: 'A' },
+      { externalId: 'multi/l1', displayName: 'Rae S.', emails: [{ value: 'r@b.com' }], notes: 'B' },
+      {
+        externalId: 'multi/l2',
+        displayName: 'R. Sol',
+        emails: [{ value: 'r@c.com' }],
+        phones: [{ value: '+1 212 555 0100' }],
+        notes: 'C'
+      }
+    ])
+    const listed = (await invoke('contacts:list')) as Array<{ id: number; displayName: string }>
+    const survivor = listed.find((c) => c.displayName === 'Rae Sol') as { id: number }
+    const loserIds = listed.filter((c) => c.id !== survivor.id).map((c) => c.id)
+    const r = (await invoke('contacts:merge', {
+      survivorId: survivor.id,
+      loserIds
+    })) as { success: boolean }
+    expect(r.success).toBe(true)
+    const after = (await invoke('contacts:get', survivor.id)) as {
+      emails: Array<{ value: string }>
+      phones: Array<{ value: string }>
+      notes: string
+    }
+    expect(after.emails.map((e) => e.value).sort()).toEqual(['r@a.com', 'r@b.com', 'r@c.com'])
+    expect(after.phones.map((p) => p.value)).toContain('+1 212 555 0100')
+    for (const n of ['A', 'B', 'C']) expect(after.notes).toContain(n)
+    expect(((await invoke('contacts:list')) as unknown[]).length).toBe(1)
+    // Every loser externalId is suppressed against re-import.
+    const merged = sqlite
+      .prepare("SELECT target FROM curation_exclusions WHERE kind='contact-merged' ORDER BY target")
+      .all() as Array<{ target: string }>
+    expect(merged.map((m) => m.target)).toEqual(['multi/l1', 'multi/l2'])
+  })
+})
+
+describe('contacts bulk operations', () => {
+  it('bulk-delete removes N contacts, tombstones each, and unlinks derived entities', async () => {
+    const { upsertContacts } = await import('./contacts')
+    upsertContacts([
+      { externalId: 'bulk/1', displayName: 'One', source: 'google' },
+      { externalId: 'bulk/2', displayName: 'Two', source: 'google' },
+      { externalId: 'bulk/3', displayName: 'Three', source: 'google' }
+    ])
+    const listed = (await invoke('contacts:list')) as Array<{ id: number; displayName: string }>
+    const keep = listed.find((c) => c.displayName === 'Three') as { id: number }
+    const doomed = listed.filter((c) => c.id !== keep.id)
+    sqlite
+      .prepare(
+        "INSERT INTO derived_entities (kind, match_key, name, promoted_kind, promoted_id) VALUES ('person','one','One','contact',?)"
+      )
+      .run(doomed[0].id)
+
+    const r = (await invoke('contacts:bulk-delete', {
+      ids: doomed.map((c) => c.id)
+    })) as { success: boolean; deleted: number }
+    expect(r).toEqual({ success: true, deleted: 2 })
+    expect(((await invoke('contacts:list')) as unknown[]).length).toBe(1)
+
+    // Tombstoned: a re-sync of the same externalIds must be skipped.
+    const again = upsertContacts([
+      { externalId: 'bulk/1', displayName: 'One', source: 'google' },
+      { externalId: 'bulk/2', displayName: 'Two', source: 'google' }
+    ])
+    expect(again).toMatchObject({ imported: 0, skipped: 2 })
+
+    const unlinked = sqlite
+      .prepare(
+        "SELECT promoted_kind AS pk, promoted_id AS pid FROM derived_entities WHERE match_key='one'"
+      )
+      .get() as { pk: string | null; pid: number | null }
+    expect(unlinked.pk).toBeNull()
+    expect(unlinked.pid).toBeNull()
+  })
+
+  it('bulk-delete counts only rows that existed and rejects bad input', async () => {
+    const { upsertContacts } = await import('./contacts')
+    upsertContacts([{ externalId: 'bulk/x', displayName: 'Exists' }])
+    const listed = (await invoke('contacts:list')) as Array<{ id: number }>
+    const r = (await invoke('contacts:bulk-delete', {
+      ids: [listed[0].id, 99999]
+    })) as { deleted: number }
+    expect(r.deleted).toBe(1)
+    await expect(invoke('contacts:bulk-delete', { ids: [] })).rejects.toThrow(/non-empty/)
+    await expect(invoke('contacts:bulk-delete', {})).rejects.toThrow(/non-empty/)
+    await expect(invoke('contacts:bulk-delete', { ids: ['nope'] })).rejects.toThrow(/non-empty/)
+  })
+
+  it('bulk-set-relationship updates every selected row and clears on empty', async () => {
+    const { upsertContacts } = await import('./contacts')
+    upsertContacts([
+      { externalId: 'rel/1', displayName: 'Kin One' },
+      { externalId: 'rel/2', displayName: 'Kin Two' },
+      { externalId: 'rel/3', displayName: 'Stranger' }
+    ])
+    const listed = (await invoke('contacts:list')) as Array<{ id: number; displayName: string }>
+    const kin = listed.filter((c) => c.displayName.startsWith('Kin')).map((c) => c.id)
+    const r = (await invoke('contacts:bulk-set-relationship', {
+      ids: kin,
+      relationship: '  family '
+    })) as { success: boolean; updated: number }
+    expect(r).toEqual({ success: true, updated: 2 })
+    const after = (await invoke('contacts:list')) as Array<{
+      displayName: string
+      relationship: string | null
+    }>
+    expect(after.find((c) => c.displayName === 'Kin One')?.relationship).toBe('family')
+    expect(after.find((c) => c.displayName === 'Kin Two')?.relationship).toBe('family')
+    expect(after.find((c) => c.displayName === 'Stranger')?.relationship).toBeNull()
+
+    const cleared = (await invoke('contacts:bulk-set-relationship', {
+      ids: kin,
+      relationship: ''
+    })) as { updated: number }
+    expect(cleared.updated).toBe(2)
+    const final = (await invoke('contacts:list')) as Array<{
+      displayName: string
+      relationship: string | null
+    }>
+    expect(final.find((c) => c.displayName === 'Kin One')?.relationship).toBeNull()
+    await expect(invoke('contacts:bulk-set-relationship', { ids: [] })).rejects.toThrow(/non-empty/)
+  })
+
+  it('suggest-survivor prefers the curated source, matching the auto-dedupe ranking', async () => {
+    const { upsertContacts } = await import('./contacts')
+    upsertContacts([
+      { externalId: 'ss/derived', displayName: 'Pat Mae', source: 'derived' },
+      { externalId: 'ss/manual', displayName: 'Pat May', source: 'manual' },
+      { externalId: 'ss/other', displayName: 'Pat M', source: 'google-other' }
+    ])
+    const listed = (await invoke('contacts:list')) as Array<{ id: number; displayName: string }>
+    const manual = listed.find((c) => c.displayName === 'Pat May') as { id: number }
+    const r = (await invoke('contacts:suggest-survivor', {
+      ids: listed.map((c) => c.id)
+    })) as { survivorId: number }
+    expect(r.survivorId).toBe(manual.id)
+    await expect(invoke('contacts:suggest-survivor', { ids: [manual.id] })).rejects.toThrow(
+      /at least two/
+    )
+    await expect(invoke('contacts:suggest-survivor', { ids: [98765, 43210] })).rejects.toThrow(
+      /fewer than two/
+    )
+  })
+
+  it('list payload surfaces lastSeen/touchpointCount without shipping the enrichment blob', async () => {
+    const { upsertContacts } = await import('./contacts')
+    upsertContacts([{ externalId: 'act/1', displayName: 'Active Person' }])
+    sqlite
+      .prepare(
+        `UPDATE contacts SET enrichment = '{"crossSource":{"sources":["gmail"],"touchpointCount":7,"firstSeen":1,"lastSeen":1700000000000,"lastActivity":null,"matchedBy":["name"],"refreshedAt":2}}' WHERE external_id = 'act/1'`
+      )
+      .run()
+    const listed = (await invoke('contacts:list')) as Array<{
+      lastSeen: number | null
+      touchpointCount: number
+      enrichment: unknown
+      photo: string | null
+    }>
+    expect(listed[0].lastSeen).toBe(1700000000000)
+    expect(listed[0].touchpointCount).toBe(7)
+    expect(listed[0].enrichment).toBeNull()
+    expect(listed[0].photo).toBeNull()
+  })
+
+  it('list payload defaults lastSeen/touchpointCount when enrichment is NULL (json_extract over a null column)', async () => {
+    await invoke('contacts:create', { displayName: 'No Enrichment' })
+    const listed = (await invoke('contacts:list')) as Array<{
+      lastSeen: number | null
+      touchpointCount: number
+    }>
+    expect(listed[0].lastSeen).toBeNull()
+    expect(listed[0].touchpointCount).toBe(0)
+  })
 })
 
 type ContactEnrichmentShape = {
