@@ -80,12 +80,16 @@ export function buildLabResultsSummary(sqlite: SqliteForFx, historyCap = 12): La
   const dates: string[] = []
   let abnormalCount = 0
   for (const r of rows) {
-    const key = r.testName.trim().toLowerCase()
+    const testName = r.testName.trim()
+    const takenAt = r.takenAt.trim()
+    if (!testName || !takenAt) continue
+    const key = testName.toLowerCase()
     const group = byName.get(key)
     if (group) group.push(r)
     else byName.set(key, [r])
-    if (r.panel) panels.add(r.panel)
-    dates.push(r.takenAt)
+    const panel = r.panel?.trim()
+    if (panel) panels.add(panel)
+    dates.push(takenAt)
     if (r.flag && r.flag !== 'normal') abnormalCount++
   }
   dates.sort()
