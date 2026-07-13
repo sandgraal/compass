@@ -371,26 +371,62 @@ export interface ContactHit {
   org: string | null
   jobTitle: string | null
   relationship: string | null
+  /** Plain address values (capped) parsed from the JSON columns. */
+  emails: string[]
+  phones: string[]
+  /** Epoch ms of the newest cross-source touchpoint (from enrichment), if computed. */
+  lastSeen: number | null
 }
 
 export const CONTACTS_MAX = 25
 export const CONTACT_QUERY_MAX = 200
+const CONTACT_VALUES_MAX = 5
+
+/** `[{type?, value}]` JSON column → up to `cap` plain string values. */
+function parseContactValues(json: unknown, cap: number): string[] {
+  if (typeof json !== 'string' || !json) return []
+  try {
+    const arr = JSON.parse(json)
+    if (!Array.isArray(arr)) return []
+    return arr
+      .map((x) => (x && typeof x.value === 'string' ? x.value : null))
+      .filter((v): v is string => !!v)
+      .slice(0, cap)
+  } catch {
+    return []
+  }
+}
 
 /**
  * Address-book search over the precomputed search blob (name/org/email/phone/
- * nickname). Explicit column list — never photo (a data URI) or enrichment.
+ * nickname). Explicit column list — never photo (a data URI) or the full
+ * enrichment blob; only crossSource.lastSeen is extracted from it.
  */
 export function readContacts(db: Database.Database, q: string, limit = 10): ContactHit[] {
   if (!hasObject(db, 'contacts')) return []
   const needle = q.slice(0, CONTACT_QUERY_MAX).trim().toLowerCase()
   if (!needle) return []
   const capped = Math.max(1, Math.min(Math.floor(limit), CONTACTS_MAX))
-  return db
+  const rows = db
     .prepare(
-      `SELECT id, display_name AS displayName, org, job_title AS jobTitle, relationship
+      `SELECT id, display_name AS displayName, org, job_title AS jobTitle, relationship,
+              emails AS emailsJson, phones AS phonesJson,
+              json_extract(enrichment, '$.crossSource.lastSeen') AS lastSeen
          FROM contacts WHERE search_blob LIKE ? ORDER BY display_name LIMIT ?`
     )
-    .all(`%${needle}%`, capped) as ContactHit[]
+    .all(`%${needle}%`, capped) as Array<
+    Omit<ContactHit, 'emails' | 'phones' | 'lastSeen'> & {
+      emailsJson: string | null
+      phonesJson: string | null
+      lastSeen: unknown
+    }
+  >
+  return rows.map(({ emailsJson, phonesJson, lastSeen, ...rest }) => ({
+    ...rest,
+    emails: parseContactValues(emailsJson, CONTACT_VALUES_MAX),
+    phones: parseContactValues(phonesJson, CONTACT_VALUES_MAX),
+    lastSeen: typeof lastSeen === 'number' ? lastSeen : null
+  }))
 }
 
 const MEDICAL_CATEGORIES = new Set([

@@ -322,7 +322,8 @@ describe('readContacts', () => {
     db.exec(`
       CREATE TABLE contacts (
         id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
-        org TEXT, job_title TEXT, relationship TEXT, search_blob TEXT, photo TEXT, enrichment TEXT
+        org TEXT, job_title TEXT, relationship TEXT, search_blob TEXT, photo TEXT, enrichment TEXT,
+        emails TEXT, phones TEXT
       );
     `)
   }
@@ -330,12 +331,43 @@ describe('readContacts', () => {
   it('matches on the search blob and returns the light shape (never photo/enrichment)', () => {
     createContacts()
     db.prepare(
-      `INSERT INTO contacts (external_id, display_name, org, job_title, relationship, search_blob, photo)
-       VALUES ('c1', 'Jane Doe', 'Acme', 'CTO', 'colleague', 'jane doe acme jane@example.com', 'data:image/png;base64,xxx')`
+      `INSERT INTO contacts (external_id, display_name, org, job_title, relationship, search_blob, photo, emails, phones, enrichment)
+       VALUES ('c1', 'Jane Doe', 'Acme', 'CTO', 'colleague', 'jane doe acme jane@example.com', 'data:image/png;base64,xxx',
+               '[{"type":"work","value":"jane@example.com"}]', '[{"value":"+1 415 555 0100"}]',
+               '{"crossSource":{"lastSeen":1700000000000,"touchpointCount":4}}')`
     ).run()
     const hits = readContacts(db, 'jane')
     expect(hits).toEqual([
-      { id: 1, displayName: 'Jane Doe', org: 'Acme', jobTitle: 'CTO', relationship: 'colleague' }
+      {
+        id: 1,
+        displayName: 'Jane Doe',
+        org: 'Acme',
+        jobTitle: 'CTO',
+        relationship: 'colleague',
+        emails: ['jane@example.com'],
+        phones: ['+1 415 555 0100'],
+        lastSeen: 1700000000000
+      }
+    ])
+  })
+
+  it('degrades cleanly without enrichment or identifier values', () => {
+    createContacts()
+    db.prepare(
+      `INSERT INTO contacts (external_id, display_name, search_blob, emails)
+       VALUES ('c3', 'No Data', 'no data', 'not-json')`
+    ).run()
+    expect(readContacts(db, 'no data')).toEqual([
+      {
+        id: 1,
+        displayName: 'No Data',
+        org: null,
+        jobTitle: null,
+        relationship: null,
+        emails: [],
+        phones: [],
+        lastSeen: null
+      }
     ])
   })
 

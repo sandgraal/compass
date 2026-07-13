@@ -5,6 +5,7 @@ import {
   Cake,
   CalendarClock,
   Download,
+  GitMerge,
   Globe,
   Mail,
   MapPin,
@@ -21,11 +22,15 @@ import {
   Users,
   X
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import ContactsOverview from '../components/contacts/ContactsOverview'
+import MergeContactsDialog from '../components/contacts/MergeContactsDialog'
+import SetRelationshipDialog from '../components/contacts/SetRelationshipDialog'
+import BulkActionBar from '../components/ui/BulkActionBar'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
-import { cn } from '../lib/utils'
+import { cn, formatRelative } from '../lib/utils'
 
 type PhoneRow = { type?: string; value: string }
 type EmailRow = { type?: string; value: string }
@@ -53,6 +58,23 @@ const EMPTY_DRAFT: ContactInput = {
 
 const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
 
+type SortBy = 'name' | 'active' | 'added' | 'seen'
+
+const SOURCE_LABELS: Record<string, string> = {
+  manual: 'Manual',
+  vcard: 'vCard',
+  csv: 'CSV',
+  macos: 'macOS',
+  google: 'Google',
+  'google-other': 'Google (other)',
+  linkedin: 'LinkedIn',
+  facebook: 'Facebook',
+  gvoice: 'Voice',
+  nylas: 'Email sync',
+  derived: 'From timeline'
+}
+const sourceLabel = (s: string): string => SOURCE_LABELS[s] ?? s
+
 // Only render http(s) links as clickable — synced/imported urls are untrusted, so a
 // `javascript:`/`data:` value must degrade to plain text, never an active href.
 const safeHref = (value: string): string | undefined =>
@@ -75,19 +97,147 @@ export default function Contacts(): JSX.Element {
   const [dupes, setDupes] = useState<DuplicatePair[]>([])
   const [dupesBusy, setDupesBusy] = useState(false)
   const [showDupes, setShowDupes] = useState(false)
+  // Multi-select: id → record, so the merge dialog can show names/sources even
+  // for rows a later search filtered out of the loaded list.
+  const [selectedRows, setSelectedRows] = useState<Map<number, ContactRecord>>(new Map())
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [mergeOpen, setMergeOpen] = useState(false)
+  const [relationshipOpen, setRelationshipOpen] = useState(false)
+  const [sortBy, setSortBy] = useState<SortBy>('name')
+  const [sourceFilter, setSourceFilter] = useState<string | null>(null)
   const { toast } = useToast()
   const confirm = useConfirm()
   const navigate = useNavigate()
   // Monotonic token so a slow response from an earlier click can't overwrite the
   // selection/activity of a newer one (openContact does async IPC).
   const openSeq = useRef(0)
+  const selectAllRef = useRef<HTMLInputElement>(null)
 
   const openTimeline = (query: string): void => navigate(`/timeline?q=${encodeURIComponent(query)}`)
 
+  // Debounced: typing re-queries SQLite, so don't fire per keystroke.
   useEffect(() => {
-    void load(search)
+    const t = setTimeout(() => {
+      void load(search)
+    }, 150)
+    return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search])
+
+  /** The list as displayed: source-filtered, then sorted. Rows arrive name-sorted. */
+  const shown = useMemo(() => {
+    const filtered = sourceFilter ? contacts.filter((c) => c.source === sourceFilter) : contacts
+    if (sortBy === 'name') return filtered
+    const byName = (a: ContactRecord, b: ContactRecord): number =>
+      a.displayName.localeCompare(b.displayName)
+    const arr = [...filtered]
+    if (sortBy === 'active')
+      arr.sort((a, b) => (b.lastSeen ?? 0) - (a.lastSeen ?? 0) || byName(a, b))
+    else if (sortBy === 'added')
+      arr.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0) || byName(a, b))
+    else arr.sort((a, b) => b.touchpointCount - a.touchpointCount || byName(a, b))
+    return arr
+  }, [contacts, sortBy, sourceFilter])
+
+  const sourceCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const c of contacts) m.set(c.source, (m.get(c.source) ?? 0) + 1)
+    return [...m.entries()].sort((a, b) => b[1] - a[1])
+  }, [contacts])
+
+  const allShownSelected = shown.length > 0 && shown.every((c) => selectedRows.has(c.id))
+  const someShownSelected = shown.some((c) => selectedRows.has(c.id))
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someShownSelected && !allShownSelected
+    }
+  }, [someShownSelected, allShownSelected])
+
+  function toggleSelect(c: ContactRecord): void {
+    setSelectedRows((prev) => {
+      const next = new Map(prev)
+      if (next.has(c.id)) next.delete(c.id)
+      else next.set(c.id, c)
+      return next
+    })
+  }
+
+  function toggleSelectAllShown(): void {
+    setSelectedRows((prev) => {
+      const next = new Map(prev)
+      if (allShownSelected) for (const c of shown) next.delete(c.id)
+      else for (const c of shown) next.set(c.id, c)
+      return next
+    })
+  }
+
+  function clearSelection(): void {
+    setSelectedRows(new Map())
+  }
+
+  async function bulkDelete(): Promise<void> {
+    if (!isElectron() || selectedRows.size === 0 || bulkBusy) return
+    const n = selectedRows.size
+    const ok = await confirm({
+      title: n === 1 ? 'Delete 1 contact?' : `Delete ${n} contacts?`,
+      description:
+        'They will be permanently removed and never re-imported by a sync. Export first if you want a copy. (Undo the block in Settings → Curation.)',
+      confirmLabel: 'Delete',
+      destructive: true
+    })
+    if (!ok) return
+    setBulkBusy(true)
+    try {
+      const r = await window.api.contacts.bulkDelete([...selectedRows.keys()])
+      toast(`Deleted ${r.deleted} contact${r.deleted === 1 ? '' : 's'}.`, 'success')
+      if (selectedId != null && selectedRows.has(selectedId)) {
+        setSelectedId(null)
+        setSelected(null)
+      }
+      clearSelection()
+      await load(search)
+      await loadDupes()
+    } catch (err) {
+      console.error('[contacts] bulk delete failed', err)
+      toast('Delete failed.', 'error')
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  async function bulkSetRelationship(relationship: string): Promise<void> {
+    if (!isElectron() || selectedRows.size === 0 || bulkBusy) return
+    setBulkBusy(true)
+    try {
+      const r = await window.api.contacts.bulkSetRelationship(
+        [...selectedRows.keys()],
+        relationship
+      )
+      toast(
+        relationship
+          ? `Set relationship to “${relationship}” on ${r.updated} contact${r.updated === 1 ? '' : 's'}.`
+          : `Cleared relationship on ${r.updated} contact${r.updated === 1 ? '' : 's'}.`,
+        'success'
+      )
+      setRelationshipOpen(false)
+      clearSelection()
+      await load(search)
+      if (selectedId != null) await openContact(selectedId)
+    } catch (err) {
+      console.error('[contacts] bulk set relationship failed', err)
+      toast('Could not set the relationship.', 'error')
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  async function onMerged(survivorId: number): Promise<void> {
+    setMergeOpen(false)
+    clearSelection()
+    await load(search)
+    await loadDupes()
+    await openContact(survivorId)
+  }
 
   // Proactively surface the reconnect prompt on load if a contacts scope is missing.
   useEffect(() => {
@@ -370,10 +520,12 @@ export default function Contacts(): JSX.Element {
     if (!isElectron()) return
     setBusy(true)
     try {
+      // With a selection active, export exactly the ticked contacts; otherwise the whole book.
+      const ids = selectedRows.size > 0 ? [...selectedRows.keys()] : undefined
       const r =
         kind === 'vcard'
-          ? await window.api.contacts.exportVcard()
-          : await window.api.contacts.exportCsv()
+          ? await window.api.contacts.exportVcard(ids)
+          : await window.api.contacts.exportCsv(ids)
       if (r.canceled) return
       if (r.success) {
         toast(`Exported ${r.count ?? 0} contact(s).`, 'success')
@@ -390,11 +542,21 @@ export default function Contacts(): JSX.Element {
       {/* List panel */}
       <div className="w-72 shrink-0 border-r border-border bg-card/40 flex flex-col pt-4">
         <div className="px-4 pb-3 flex items-center gap-2">
+          <input
+            ref={selectAllRef}
+            type="checkbox"
+            checked={allShownSelected}
+            onChange={toggleSelectAllShown}
+            disabled={shown.length === 0}
+            aria-label="Select all shown contacts"
+            title="Select all shown"
+            className="h-3.5 w-3.5 accent-[hsl(var(--primary))] cursor-pointer disabled:cursor-default"
+          />
           <Users size={14} className="text-primary" />
           <span className="text-xs font-semibold text-foreground uppercase tracking-wider">
             Contacts
           </span>
-          <span className="ml-auto text-xs text-muted-foreground">{contacts.length}</span>
+          <span className="ml-auto text-xs text-muted-foreground">{shown.length}</span>
         </div>
 
         <div className="px-3 pb-2">
@@ -408,47 +570,156 @@ export default function Contacts(): JSX.Element {
           />
         </div>
 
-        <div className="px-3 pb-2">
-          <button
-            type="button"
-            onClick={() => importFrom('vcard')}
-            disabled={busy}
-            title="Import a .vcf exported from your phone (iCloud / Google / Outlook)"
-            className="w-full flex items-center justify-center gap-1.5 text-sm px-3 py-2 bg-primary/15 hover:bg-primary/25 text-primary rounded-lg transition-colors disabled:opacity-50"
+        <div className="px-3 pb-2 flex items-center gap-1.5">
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortBy)}
+            aria-label="Sort contacts"
+            className="flex-1 bg-secondary border border-border rounded-lg px-2 py-1 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary cursor-pointer"
           >
-            <Smartphone size={14} /> Import from phone
-          </button>
+            <option value="name">Sort: Name</option>
+            <option value="active">Sort: Recently active</option>
+            <option value="added">Sort: Recently added</option>
+            <option value="seen">Sort: Most seen</option>
+          </select>
         </div>
+
+        {sourceCounts.length > 1 && (
+          <div className="px-3 pb-2 flex gap-1.5 overflow-x-auto">
+            <button
+              type="button"
+              onClick={() => setSourceFilter(null)}
+              className={cn(
+                'shrink-0 text-[11px] px-2 py-0.5 rounded-full border transition-colors',
+                sourceFilter === null
+                  ? 'border-primary/60 bg-primary/10 text-primary'
+                  : 'border-border text-muted-foreground hover:text-foreground'
+              )}
+            >
+              All
+            </button>
+            {sourceCounts.map(([source, count]) => (
+              <button
+                key={source}
+                type="button"
+                onClick={() => setSourceFilter((prev) => (prev === source ? null : source))}
+                title={`${count} from ${sourceLabel(source)}`}
+                className={cn(
+                  'shrink-0 text-[11px] px-2 py-0.5 rounded-full border transition-colors',
+                  sourceFilter === source
+                    ? 'border-primary/60 bg-primary/10 text-primary'
+                    : 'border-border text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {sourceLabel(source)} {count}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {selectedRows.size > 0 ? (
+          <div className="px-3">
+            <BulkActionBar
+              count={selectedRows.size}
+              onClear={clearSelection}
+              className="static px-3 py-2 gap-2"
+            >
+              <button
+                type="button"
+                onClick={() => setMergeOpen(true)}
+                disabled={selectedRows.size < 2 || bulkBusy}
+                aria-label={`Merge ${selectedRows.size} contacts`}
+                title={
+                  selectedRows.size < 2 ? 'Select at least two contacts to merge' : 'Merge into one'
+                }
+                className="flex items-center gap-1 text-xs px-2 py-1.5 bg-secondary hover:bg-secondary/80 text-foreground rounded-lg transition-colors disabled:opacity-50"
+              >
+                <GitMerge size={12} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setRelationshipOpen(true)}
+                disabled={bulkBusy}
+                aria-label="Set relationship on selection"
+                title="Set relationship (family, coworker…)"
+                className="flex items-center gap-1 text-xs px-2 py-1.5 bg-secondary hover:bg-secondary/80 text-foreground rounded-lg transition-colors disabled:opacity-50"
+              >
+                <Tag size={12} />
+              </button>
+              <button
+                type="button"
+                onClick={bulkDelete}
+                disabled={bulkBusy}
+                aria-label="Delete selection"
+                title="Delete selected contacts"
+                className="flex items-center gap-1 text-xs px-2 py-1.5 bg-secondary hover:bg-destructive/20 text-foreground hover:text-destructive rounded-lg transition-colors disabled:opacity-50"
+              >
+                <Trash2 size={12} />
+              </button>
+            </BulkActionBar>
+          </div>
+        ) : (
+          <div className="px-3 pb-2">
+            <button
+              type="button"
+              onClick={() => importFrom('vcard')}
+              disabled={busy}
+              title="Import a .vcf exported from your phone (iCloud / Google / Outlook)"
+              className="w-full flex items-center justify-center gap-1.5 text-sm px-3 py-2 bg-primary/15 hover:bg-primary/25 text-primary rounded-lg transition-colors disabled:opacity-50"
+            >
+              <Smartphone size={14} /> Import from phone
+            </button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
           {loading ? (
             [1, 2, 3, 4].map((n) => (
               <div key={n} className="h-12 bg-secondary/30 rounded-lg animate-pulse mb-1" />
             ))
-          ) : contacts.length === 0 ? (
+          ) : shown.length === 0 ? (
             <p className="text-xs text-muted-foreground px-3 py-6 text-center">
-              {search ? 'No matches.' : 'No contacts yet.'}
+              {search || sourceFilter ? 'No matches.' : 'No contacts yet.'}
             </p>
           ) : (
-            contacts.map((c) => (
-              <button
-                type="button"
-                key={c.id}
-                onClick={() => openContact(c.id)}
-                className={cn(
-                  'w-full flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg text-left transition-colors',
-                  selectedId === c.id
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-foreground hover:bg-secondary/60'
-                )}
-              >
-                <span className="text-sm font-medium leading-tight">{c.displayName}</span>
-                {(c.org || c.relationship) && (
-                  <span className="text-xs text-muted-foreground">
-                    {[c.org, c.relationship].filter(Boolean).join(' · ')}
+            shown.map((c) => (
+              <div key={c.id} className="flex items-center gap-0.5">
+                <label className="pl-1.5 py-2 shrink-0 flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedRows.has(c.id)}
+                    onChange={() => toggleSelect(c)}
+                    aria-label={`Select ${c.displayName}`}
+                    className="h-3.5 w-3.5 accent-[hsl(var(--primary))] cursor-pointer"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => openContact(c.id)}
+                  className={cn(
+                    'flex-1 min-w-0 flex flex-col items-start gap-0.5 px-2 py-2 rounded-lg text-left transition-colors',
+                    selectedId === c.id
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-foreground hover:bg-secondary/60'
+                  )}
+                >
+                  <span className="text-sm font-medium leading-tight truncate w-full">
+                    {c.displayName}
                   </span>
-                )}
-              </button>
+                  {(sortBy === 'active' || sortBy === 'seen') && c.lastSeen != null ? (
+                    <span className="text-xs text-muted-foreground truncate w-full">
+                      {formatRelative(c.lastSeen)}
+                      {c.touchpointCount > 0 && ` · ${c.touchpointCount} touchpoints`}
+                    </span>
+                  ) : (
+                    (c.org || c.relationship) && (
+                      <span className="text-xs text-muted-foreground truncate w-full">
+                        {[c.org, c.relationship].filter(Boolean).join(' · ')}
+                      </span>
+                    )
+                  )}
+                </button>
+              </div>
             ))
           )}
         </div>
@@ -470,17 +741,17 @@ export default function Contacts(): JSX.Element {
           />
           <HeaderButton
             icon={<Download size={11} />}
-            label="vCard"
+            label={selectedRows.size > 0 ? `vCard (${selectedRows.size})` : 'vCard'}
             onClick={() => exportTo('vcard')}
             disabled={busy}
-            title="Export .vcf"
+            title={selectedRows.size > 0 ? 'Export the selected contacts as .vcf' : 'Export .vcf'}
           />
           <HeaderButton
             icon={<Download size={11} />}
-            label="CSV"
+            label={selectedRows.size > 0 ? `CSV (${selectedRows.size})` : 'CSV'}
             onClick={() => exportTo('csv')}
             disabled={busy}
-            title="Export .csv"
+            title={selectedRows.size > 0 ? 'Export the selected contacts as .csv' : 'Export .csv'}
           />
         </div>
 
@@ -667,11 +938,34 @@ export default function Contacts(): JSX.Element {
               activityLoading={activityLoading}
               onOpenTimeline={openTimeline}
             />
+          ) : contacts.length > 0 ? (
+            <ContactsOverview
+              contacts={contacts}
+              dupeCount={dupes.length}
+              sourceLabel={sourceLabel}
+              onFilterSource={(s) => setSourceFilter(s)}
+              onOpenContact={(id) => void openContact(id)}
+              onReviewDupes={() => setShowDupes(true)}
+            />
           ) : (
             <EmptyState onAdd={startAdd} onImport={() => importFrom('vcard')} />
           )}
         </div>
       </div>
+
+      <MergeContactsDialog
+        contacts={[...selectedRows.values()]}
+        open={mergeOpen}
+        onClose={() => setMergeOpen(false)}
+        onMerged={onMerged}
+      />
+      <SetRelationshipDialog
+        count={selectedRows.size}
+        open={relationshipOpen}
+        busy={bulkBusy}
+        onClose={() => setRelationshipOpen(false)}
+        onSubmit={bulkSetRelationship}
+      />
     </div>
   )
 }

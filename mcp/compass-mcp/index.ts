@@ -218,7 +218,7 @@ const TOOLS = [
   {
     name: 'compass_contacts',
     description:
-      "Search the user's address book by name, organization, email, phone, or nickname. Returns matching contacts (id, name, org, title, relationship). Read-only.",
+      "Search the user's address book by name, organization, email, phone, or nickname. Returns matching contacts (id, name, org, title, relationship, email/phone values, and lastSeen — the newest cross-source touchpoint, epoch ms). Read-only.",
     inputSchema: {
       type: 'object',
       properties: {
