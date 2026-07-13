@@ -6,7 +6,7 @@
  * (read-only) per call, same as every other tool there.
  */
 import type Database from 'better-sqlite3'
-import { localYmd } from './dates.js'
+import { DAY_MS, localYmd } from './dates.js'
 
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/
 /** Range cap so a careless agent can't ask for years of tasks at once. */
@@ -502,4 +502,152 @@ export function readPaystubs(db: Database.Database, limit = 12): PaystubsResult 
     )
     .get() as Record<string, unknown>
   return { paystubs: rows, totals, note }
+}
+
+export interface HealthSummary {
+  today: string
+  sources: { oura: boolean; appleHealth: boolean; fitbit: boolean; garmin: boolean }
+  stepsAvg7: number | null
+  stepsAvg30: number | null
+  sleepMinutesAvg7: number | null
+  sleepMinutesAvg30: number | null
+  oura: {
+    latestDate: string
+    sleepScore: number | null
+    readinessScore: number | null
+    activityScore: number | null
+    sleepScore7Avg: number | null
+    readiness7Avg: number | null
+    activity7Avg: number | null
+  } | null
+  restingHrLatest: number | null
+  restingHrAvg30: number | null
+  workouts30: number
+  activeDays30: number
+}
+
+/**
+ * Aggregate health picture across Oura + Apple Health / Fitbit / Garmin —
+ * mirrors electron/integrations/health-summary.ts (re-implemented because the
+ * MCP process can't import electron/). NOTE: `records.occurred_at` is epoch
+ * milliseconds — always wrap it in `new Date()` before day-keying; passing the
+ * raw number to `localYmd` (which takes a Date) was the crash that broke
+ * compass_health_summary.
+ */
+export function readHealthSummary(db: Database.Database, now: Date = new Date()): HealthSummary {
+  const nowMs = now.getTime()
+  const today = localYmd(now)
+  const start7 = localYmd(new Date(nowMs - 6 * DAY_MS))
+  const start30 = localYmd(new Date(nowMs - 29 * DAY_MS))
+
+  type OuraRow = {
+    date: string
+    sleepScore: number | null
+    readinessScore: number | null
+    activityScore: number | null
+    steps: number | null
+    sleepMin: number | null
+  }
+  let oura: OuraRow[] = []
+  try {
+    oura = db
+      .prepare(
+        'SELECT date, sleep_score AS sleepScore, readiness_score AS readinessScore, activity_score AS activityScore, steps, total_sleep_minutes AS sleepMin FROM oura_daily_metrics ORDER BY date'
+      )
+      .all() as OuraRow[]
+  } catch {
+    /* table absent */
+  }
+  let recs: Array<{ at: number; source: string; type: string; payload: string | null }> = []
+  try {
+    recs = db
+      .prepare(
+        "SELECT occurred_at AS at, source, type, payload FROM records WHERE source IN ('apple-health','fitbit','garmin') AND occurred_at IS NOT NULL"
+      )
+      .all() as Array<{ at: number; source: string; type: string; payload: string | null }>
+  } catch {
+    /* no records table */
+  }
+
+  const stepsByDay = new Map<string, number>()
+  const sleepByDay = new Map<string, number>()
+  const restingWindow: number[] = []
+  let restingLatest: { date: string; bpm: number } | null = null
+  const activeDays = new Set<string>()
+  let workouts30 = 0
+
+  const bump = (m: Map<string, number>, day: string, v: unknown): void => {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return
+    const p = m.get(day)
+    if (p == null || v > p) m.set(day, v)
+  }
+  for (const r of oura) {
+    bump(stepsByDay, r.date, r.steps)
+    bump(sleepByDay, r.date, r.sleepMin)
+  }
+  for (const r of recs) {
+    const day = localYmd(new Date(r.at))
+    let p: Record<string, unknown> = {}
+    try {
+      const parsed = r.payload ? JSON.parse(r.payload) : {}
+      if (parsed && typeof parsed === 'object') p = parsed as Record<string, unknown>
+    } catch {
+      /* ignore */
+    }
+    if (r.type === 'steps') bump(stepsByDay, day, r.source === 'fitbit' ? p.total : p.value)
+    else if (r.type === 'sleep')
+      bump(
+        sleepByDay,
+        day,
+        r.source === 'fitbit' ? p.minutesAsleep : typeof p.ms === 'number' ? p.ms / 60000 : null
+      )
+    else if (r.type === 'resting-hr' && typeof p.value === 'number') {
+      if (day >= start30 && day <= today) restingWindow.push(p.value)
+      if (!restingLatest || day > restingLatest.date) restingLatest = { date: day, bpm: p.value }
+    } else if (r.type === 'workout' && day >= start30 && day <= today) {
+      workouts30++
+      activeDays.add(day)
+    }
+  }
+  for (const [d, st] of stepsByDay) if (d >= start30 && d <= today && st >= 8000) activeDays.add(d)
+
+  const winAvg = (m: Map<string, number>, s: string, e: string): number | null => {
+    const v = [...m].filter(([d]) => d >= s && d <= e).map(([, x]) => x)
+    return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null
+  }
+  const mean = (v: number[]): number | null =>
+    v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null
+  const inWin = oura.filter((r) => r.date >= start7 && r.date <= today)
+  const ouraAvg = (pick: (r: OuraRow) => number | null): number | null =>
+    mean(inWin.map(pick).filter((x): x is number => typeof x === 'number'))
+  const latest = oura.length ? oura[oura.length - 1] : null
+
+  return {
+    today,
+    sources: {
+      oura: oura.length > 0,
+      appleHealth: recs.some((r) => r.source === 'apple-health'),
+      fitbit: recs.some((r) => r.source === 'fitbit'),
+      garmin: recs.some((r) => r.source === 'garmin')
+    },
+    stepsAvg7: winAvg(stepsByDay, start7, today),
+    stepsAvg30: winAvg(stepsByDay, start30, today),
+    sleepMinutesAvg7: winAvg(sleepByDay, start7, today),
+    sleepMinutesAvg30: winAvg(sleepByDay, start30, today),
+    oura: latest
+      ? {
+          latestDate: latest.date,
+          sleepScore: latest.sleepScore,
+          readinessScore: latest.readinessScore,
+          activityScore: latest.activityScore,
+          sleepScore7Avg: ouraAvg((r) => r.sleepScore),
+          readiness7Avg: ouraAvg((r) => r.readinessScore),
+          activity7Avg: ouraAvg((r) => r.activityScore)
+        }
+      : null,
+    restingHrLatest: restingLatest?.bpm ?? null,
+    restingHrAvg30: mean(restingWindow),
+    workouts30,
+    activeDays30: activeDays.size
+  }
 }
