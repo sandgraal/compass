@@ -27,6 +27,7 @@ import { useNavigate } from 'react-router-dom'
 import ContactsOverview from '../components/contacts/ContactsOverview'
 import MergeContactsDialog from '../components/contacts/MergeContactsDialog'
 import SetRelationshipDialog from '../components/contacts/SetRelationshipDialog'
+import WebEnrichDialog from '../components/contacts/WebEnrichDialog'
 import BulkActionBar from '../components/ui/BulkActionBar'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
@@ -80,6 +81,14 @@ const sourceLabel = (s: string): string => SOURCE_LABELS[s] ?? s
 const safeHref = (value: string): string | undefined =>
   /^https?:\/\//i.test(value) ? value : undefined
 
+const hostnameOf = (url: string): string => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return url
+  }
+}
+
 export default function Contacts(): JSX.Element {
   const [contacts, setContacts] = useState<ContactRecord[]>([])
   const [search, setSearch] = useState('')
@@ -90,6 +99,7 @@ export default function Contacts(): JSX.Element {
   const [draft, setDraft] = useState<ContactInput>(EMPTY_DRAFT)
   const [busy, setBusy] = useState(false)
   const [enriching, setEnriching] = useState(false)
+  const [webEnrichOpen, setWebEnrichOpen] = useState(false)
   const [needsReconnect, setNeedsReconnect] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
   const [activity, setActivity] = useState<ContactActivityHit[]>([])
@@ -812,6 +822,14 @@ export default function Contacts(): JSX.Element {
               <>
                 <button
                   type="button"
+                  onClick={() => setWebEnrichOpen(true)}
+                  title="Search the public web for this person, then review what to keep"
+                  className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-primary/40 hover:border-primary text-primary rounded-lg transition-colors"
+                >
+                  <Globe size={12} /> Enrich from web
+                </button>
+                <button
+                  type="button"
                   onClick={startEdit}
                   aria-label="Edit contact"
                   className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-border hover:border-primary/50 text-muted-foreground hover:text-foreground rounded-lg transition-colors"
@@ -937,6 +955,7 @@ export default function Contacts(): JSX.Element {
               activity={activity}
               activityLoading={activityLoading}
               onOpenTimeline={openTimeline}
+              onEnrichWeb={() => setWebEnrichOpen(true)}
             />
           ) : contacts.length > 0 ? (
             <ContactsOverview
@@ -966,6 +985,17 @@ export default function Contacts(): JSX.Element {
         onClose={() => setRelationshipOpen(false)}
         onSubmit={bulkSetRelationship}
       />
+      {selected && (
+        <WebEnrichDialog
+          contact={selected}
+          open={webEnrichOpen}
+          onClose={() => setWebEnrichOpen(false)}
+          onApplied={async () => {
+            await load(search)
+            if (selectedId != null) await openContact(selectedId)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -1069,15 +1099,18 @@ function ContactDetail({
   contact,
   activity,
   activityLoading,
-  onOpenTimeline
+  onOpenTimeline,
+  onEnrichWeb
 }: {
   contact: ContactRecord
   activity: ContactActivityHit[]
   activityLoading: boolean
   onOpenTimeline: (query: string) => void
+  onEnrichWeb: () => void
 }): JSX.Element {
   const g = contact.enrichment?.google
   const cs = contact.enrichment?.crossSource
+  const web = contact.enrichment?.web
   const links: { type?: string; value: string }[] = [
     ...(contact.url ? [{ value: contact.url }] : []),
     ...(g?.urls ?? []).filter((u) => u.value !== contact.url)
@@ -1125,6 +1158,67 @@ function ContactDetail({
           </p>
           <p className="text-xs text-muted-foreground mt-1 capitalize">{cs.sources.join(', ')}</p>
         </button>
+      )}
+
+      {web && (
+        <div className="rounded-lg border border-border bg-secondary/40 px-3 py-2.5 space-y-2">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+            <Globe size={13} className="text-primary" /> Web presence
+          </p>
+          {web.bio && <p className="text-sm text-foreground whitespace-pre-wrap">{web.bio}</p>}
+          {web.location && (
+            <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+              <MapPin size={12} /> {web.location}
+            </p>
+          )}
+          {web.links.length > 0 && (
+            <div className="space-y-1">
+              {web.links.map((l, i) => (
+                <DetailRow
+                  key={`${l.value}-${i}`}
+                  label={l.type}
+                  value={l.value}
+                  href={safeHref(l.value)}
+                />
+              ))}
+            </div>
+          )}
+          {web.facts.length > 0 && (
+            <ul className="space-y-1">
+              {web.facts.map((f, i) => (
+                <li key={`${f.text}-${i}`} className="text-sm text-foreground">
+                  {f.text}
+                  {f.sourceUrl && safeHref(f.sourceUrl) && (
+                    <a
+                      href={safeHref(f.sourceUrl)}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={f.sourceUrl}
+                      className="ml-1.5 text-xs text-primary hover:underline"
+                    >
+                      {hostnameOf(f.sourceUrl)}
+                    </a>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {!web.bio && !web.location && web.links.length === 0 && web.facts.length === 0 && (
+            <p className="text-xs text-muted-foreground">No web findings were kept.</p>
+          )}
+          <div className="flex items-center justify-between pt-1">
+            <p className="text-xs text-muted-foreground" title={`Searched as: ${web.searchedAs}`}>
+              Refreshed {formatRelative(web.refreshedAt)}
+            </p>
+            <button
+              type="button"
+              onClick={onEnrichWeb}
+              className="text-xs text-primary hover:underline"
+            >
+              Re-run
+            </button>
+          </div>
+        </div>
       )}
 
       {g?.biography && (

@@ -35,6 +35,12 @@ export interface AnthropicTool {
   input_schema: Record<string, unknown>
 }
 
+/**
+ * An Anthropic SERVER tool (e.g. `web_search_20250305`) — executed by the API
+ * itself, so it has a `type` instead of an `input_schema` and we never run it.
+ */
+export type AnthropicServerTool = Record<string, unknown> & { type: string; name: string }
+
 /** A minimal Anthropic content block (text / tool_use / tool_result). */
 export type AnthropicContentBlock = Record<string, unknown> & { type: string }
 
@@ -51,8 +57,8 @@ export interface LlmRequest {
   system: string
   messages: LlmMessage[]
   maxTokens?: number
-  /** Anthropic tool-use (8.5). Ignored by the OpenAI path. */
-  tools?: AnthropicTool[]
+  /** Anthropic tool-use (8.5) — client tools and/or server tools. Ignored by the OpenAI path. */
+  tools?: Array<AnthropicTool | AnthropicServerTool>
   /** Mark the system prompt with `cache_control` for prompt caching (Anthropic). */
   cacheSystem?: boolean
   /** AbortSignal so the renderer can cancel mid-request via `assistant:cancel`. */
@@ -68,6 +74,12 @@ export interface LlmResponse {
   stopReason?: string
   /** Tool-use blocks the model emitted (Anthropic, when tools are supplied). */
   toolUses?: LlmToolUse[]
+  /**
+   * The verbatim Anthropic `content` array. Callers using server tools need it
+   * to (a) resend the assistant turn unmodified on `stop_reason: 'pause_turn'`
+   * and (b) read `web_search_tool_result` blocks (real source URLs).
+   */
+  rawContent?: AnthropicContentBlock[]
 }
 
 export class LlmAbortError extends Error {
@@ -159,7 +171,7 @@ async function callAnthropic(
     )
   }
   const json = (await resp.json()) as {
-    content?: Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown }>
+    content?: AnthropicContentBlock[]
     model?: string
     stop_reason?: string
     usage?: { input_tokens?: number; output_tokens?: number }
@@ -182,7 +194,8 @@ async function callAnthropic(
     inputTokens: json.usage?.input_tokens,
     outputTokens: json.usage?.output_tokens,
     stopReason: json.stop_reason,
-    toolUses: toolUses.length > 0 ? toolUses : undefined
+    toolUses: toolUses.length > 0 ? toolUses : undefined,
+    rawContent: json.content
   }
 }
 

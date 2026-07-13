@@ -2,8 +2,8 @@
  * Contact enrichment — the pure core of "get everything about my contacts,
  * from everywhere we can".
  *
- * A contact's `enrichment` column is a JSON blob with two INDEPENDENTLY-OWNED
- * namespaces so the two writers never clobber each other:
+ * A contact's `enrichment` column is a JSON blob with INDEPENDENTLY-OWNED
+ * namespaces so the writers never clobber each other:
  *   - `google`      — the rich People API fields that have no dedicated column
  *                     (nicknames, biography, extra urls, IM handles, relations,
  *                     important dates, occupations, extra orgs, contact-group
@@ -13,10 +13,14 @@
  *                     (which connected sources mention them, touchpoint count,
  *                     first/last seen, most-recent activity). Owned by the
  *                     enrichment pass.
+ *   - `web`         — the person's public web presence (bio, links, facts with
+ *                     source citations), found via the explicit-opt-in
+ *                     "Enrich from web" flow. Owned by contact-web-enrich;
+ *                     only ever written after the user reviews the findings.
  *
  * This module is PURE — no Electron, no Drizzle — so it unit-tests against
- * fixtures. `mergeEnrichment` guarantees a `{crossSource}` patch preserves an
- * existing `google` block and vice-versa. `computeCrossSourceSummary`
+ * fixtures. `mergeEnrichment` guarantees a patch carrying one namespace
+ * preserves the others. `computeCrossSourceSummary`
  * (added below) turns a contact + its matched person entity + timeline hits
  * into the `crossSource` summary.
  */
@@ -66,9 +70,51 @@ export interface CrossSourceSummary {
   refreshedAt: number
 }
 
+/** A page that actually came back from a web search — ground truth for citations. */
+export interface WebSource {
+  url: string
+  title?: string
+}
+
+/** One sourced claim about the person ("Spoke at PyCon 2025"). */
+export interface WebFact {
+  text: string
+  sourceUrl?: string
+  confidence: 'high' | 'medium' | 'low'
+}
+
+/** A public profile / site found on the web. */
+export interface WebLink {
+  /** 'linkedin' | 'github' | 'x' | 'website' | free text. */
+  type?: string
+  value: string
+  sourceUrl?: string
+}
+
+/**
+ * The person's public web presence, found via the explicit-opt-in
+ * "Enrich from web" flow (BYO Anthropic key + server-side web search).
+ * Only ever persisted after the user reviews the findings.
+ */
+export interface WebEnrichment {
+  /** Exactly what identity string was searched (name + org + user hints). */
+  searchedAs: string
+  /** The model's overall identity-match confidence. */
+  matchConfidence: 'high' | 'medium' | 'low'
+  bio?: string | null
+  location?: string | null
+  links: WebLink[]
+  facts: WebFact[]
+  /** URLs harvested from actual search results — what `sourceUrl`s verify against. */
+  sources: WebSource[]
+  refreshedAt: number
+  model?: string
+}
+
 export interface ContactEnrichment {
   google?: GoogleEnrichment
   crossSource?: CrossSourceSummary
+  web?: WebEnrichment
 }
 
 /** One person-bearing hit from the `records` FTS search, tagged with the channel
@@ -119,6 +165,7 @@ export function mergeEnrichment(
   const merged: ContactEnrichment = { ...base }
   if (patch.google !== undefined) merged.google = patch.google
   if (patch.crossSource !== undefined) merged.crossSource = patch.crossSource
+  if (patch.web !== undefined) merged.web = patch.web
   return merged
 }
 

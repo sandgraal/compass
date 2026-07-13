@@ -159,3 +159,44 @@ describe('callLlm — Anthropic tool-use + prompt caching (8.5)', () => {
     expect(msgs[0].content[0].type).toBe('tool_result')
   })
 })
+
+describe('callLlm — Anthropic server tools (web_search)', () => {
+  it('returns rawContent verbatim and keeps server_tool_use out of toolUses', async () => {
+    const content = [
+      { type: 'server_tool_use', id: 'st1', name: 'web_search', input: { query: 'jane doe acme' } },
+      {
+        type: 'web_search_tool_result',
+        tool_use_id: 'st1',
+        content: [
+          { type: 'web_search_result', url: 'https://example.com/jane', title: 'Jane Doe — Acme' }
+        ]
+      },
+      {
+        type: 'text',
+        text: 'Jane Doe is VP at Acme.',
+        citations: [{ type: 'web_search_result_location', url: 'https://example.com/jane' }]
+      }
+    ]
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ model: 'm', stop_reason: 'end_turn', content }), {
+          status: 200,
+          statusText: 'OK'
+        })
+    ) as unknown as typeof fetch
+
+    const res = await callLlm({
+      provider: 'anthropic',
+      apiKey: 'sk-ant-x',
+      system: 'sys',
+      messages: [{ role: 'user', content: 'who is jane' }],
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }]
+    })
+
+    // Verbatim passthrough — pause_turn resends depend on this being unmodified.
+    expect(res.rawContent).toEqual(content)
+    // server_tool_use is executed by the API, not by us.
+    expect(res.toolUses).toBeUndefined()
+    expect(res.text).toBe('Jane Doe is VP at Acme.')
+  })
+})
