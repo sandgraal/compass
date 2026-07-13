@@ -550,7 +550,7 @@ export default function Contacts(): JSX.Element {
             disabled={shown.length === 0}
             aria-label="Select all shown contacts"
             title="Select all shown"
-            className="h-3.5 w-3.5 accent-[hsl(var(--primary))] cursor-pointer disabled:cursor-default"
+            className="h-3.5 w-3.5 accent-primary cursor-pointer disabled:cursor-default"
           />
           <Users size={14} className="text-primary" />
           <span className="text-xs font-semibold text-foreground uppercase tracking-wider">
@@ -690,7 +690,7 @@ export default function Contacts(): JSX.Element {
                     checked={selectedRows.has(c.id)}
                     onChange={() => toggleSelect(c)}
                     aria-label={`Select ${c.displayName}`}
-                    className="h-3.5 w-3.5 accent-[hsl(var(--primary))] cursor-pointer"
+                    className="h-3.5 w-3.5 accent-primary cursor-pointer"
                   />
                 </label>
                 <button

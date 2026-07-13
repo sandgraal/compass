@@ -767,6 +767,16 @@ describe('contacts bulk operations', () => {
     expect(listed[0].enrichment).toBeNull()
     expect(listed[0].photo).toBeNull()
   })
+
+  it('list payload defaults lastSeen/touchpointCount when enrichment is NULL (json_extract over a null column)', async () => {
+    await invoke('contacts:create', { displayName: 'No Enrichment' })
+    const listed = (await invoke('contacts:list')) as Array<{
+      lastSeen: number | null
+      touchpointCount: number
+    }>
+    expect(listed[0].lastSeen).toBeNull()
+    expect(listed[0].touchpointCount).toBe(0)
+  })
 })
 
 type ContactEnrichmentShape = {
