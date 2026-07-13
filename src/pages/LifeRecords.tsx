@@ -106,6 +106,11 @@ const FALLBACK_CATEGORIES: LifeCategory[] = [
 
 const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
 
+// Fixed set of valid category ids (mirrors LIFE_CATEGORY_IDS in
+// electron/lib/life-records.ts) — used to validate untrusted sessionStorage
+// input before it becomes `selectedCategory` state.
+const KNOWN_CATEGORY_IDS = new Set(Object.keys(CATEGORY_ICONS))
+
 interface Draft {
   fields: Record<string, string>
   secrets: Record<string, string>
@@ -141,10 +146,12 @@ export default function LifeRecords(): JSX.Element {
       setCategories(FALLBACK_CATEGORIES)
     }
     // ⌘K deep-link: a `life` search hit stashes the category before navigating.
+    // Validate against the known ids — untrusted storage must never put the
+    // page into a category create/update can't handle.
     const pending = sessionStorage.getItem('compass:open-life-category')
     if (pending) {
       sessionStorage.removeItem('compass:open-life-category')
-      setSelectedCategory(pending)
+      if (KNOWN_CATEGORY_IDS.has(pending)) setSelectedCategory(pending)
     }
   }, [])
 

@@ -34,6 +34,13 @@ vi.mock('./life-records', () => ({
   insertLifeRecord: insertLifeRecordMock
 }))
 
+// afterDomainWrite schedules the real debounced spine projection (which needs
+// a real DB) — stub it so this suite only asserts it gets CALLED, never runs.
+const afterDomainWriteMock = vi.fn()
+vi.mock('./storehouse-sync', () => ({
+  afterDomainWrite: afterDomainWriteMock
+}))
+
 // In-memory FS, keyed by absolute path. Returned `Buffer` instances are
 // the same shape `fs` produces in production code.
 const fakeFs: Record<string, Buffer> = {}
@@ -98,6 +105,7 @@ beforeEach(() => {
   existsSyncMock.mockClear()
   showOpenDialogMock.mockClear().mockResolvedValue({ canceled: true, filePaths: [] })
   insertLifeRecordMock.mockClear()
+  afterDomainWriteMock.mockClear()
 })
 
 afterEach(() => {
@@ -390,6 +398,23 @@ describe('vault:import-1password-csv', () => {
       source: '1password',
       fields: { institution: 'Amex Platinum', accountType: 'Credit Card' }
     })
+    // A life record was written — the spine must be told to re-project it.
+    expect(afterDomainWriteMock).toHaveBeenCalledOnce()
+  })
+
+  it('does NOT call afterDomainWrite when nothing routed to a life record', async () => {
+    showOpenDialogMock.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ['/import/1p.csv']
+    })
+    fakeFs['/import/1p.csv'] = Buffer.from(
+      ['Type,Title,Username,Password', 'Login,NewSite,u,p'].join('\n'),
+      'utf8'
+    )
+    const h = await registerAndGet('vault:import-1password-csv')
+    await invoke(h)
+    expect(insertLifeRecordMock).not.toHaveBeenCalled()
+    expect(afterDomainWriteMock).not.toHaveBeenCalled()
   })
 
   it('appends imported entries to existing vault contents (does not clobber)', async () => {

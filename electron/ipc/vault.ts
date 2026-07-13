@@ -7,6 +7,7 @@ import { parseCSV } from '../lib/csv'
 import { detectGenotypeProvider, parseGenotypeSummary } from '../lib/genetics'
 import { VAULT_DIR } from '../paths'
 import { insertLifeRecord } from './life-records'
+import { afterDomainWrite } from './storehouse-sync'
 
 // Crypto primitives live in `electron/lib/crypto-vault.ts` so the Plaid
 // token vault can share the same master key + AES layout.
@@ -165,6 +166,7 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
       const credEntries = readVaultCategory('credentials', key) as Record<string, unknown>[]
 
       let imported = 0
+      let lifeRecordsAdded = 0
       for (const row of rows) {
         const type = (row.Type || row.type || 'Login').toLowerCase()
         const title = row.Title || row.title || ''
@@ -183,6 +185,7 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
             notes: [url, notes].filter(Boolean).join('\n') || null,
             source: '1password'
           })
+          lifeRecordsAdded++
         } else {
           // Login, Secure Note, API Credential, etc. → credentials category
           const entry = {
@@ -201,6 +204,10 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
       }
 
       writeVaultCategory('credentials', credEntries, key)
+      // The credit-card branch wrote plaintext life records — project them onto
+      // the spine like every other life-records writer (seedLifeRecordsFromDetectedAccounts,
+      // the life:create/update IPC) so the timeline/assistant see them promptly.
+      if (lifeRecordsAdded > 0) afterDomainWrite()
 
       return { success: true, imported }
     } catch (err) {

@@ -115,6 +115,17 @@ export const SECRET_FIELDS_BY_CATEGORY: Record<string, string[]> = Object.fromEn
 )
 
 /**
+ * category → non-secret keys declared in the template — the plaintext-fields
+ * allowlist. Shared by `splitVaultEntry` (migration) and the IPC layer's
+ * `sanitizeFields` (renderer input) so both writers of `life_records.fields`
+ * agree on what's allowed to land there: an unexpected key (a stray field on
+ * a legacy vault entry, a future/buggy writer) is dropped, not persisted.
+ */
+export const FIELD_KEYS_BY_CATEGORY: Record<string, string[]> = Object.fromEntries(
+  LIFE_CATEGORIES.map((c) => [c.id, c.fields.filter((f) => !f.secret).map((f) => f.key)])
+)
+
+/**
  * Preferred display-label fields per category, in priority order — lifted from
  * the old ⌘K vault search's title allowlist so migrated entries keep the same
  * label they had as vault hits.
@@ -161,9 +172,13 @@ export interface SplitVaultEntry {
  * System keys are stripped; `_history` is dropped (the renamed
  * `<category>.migrated.enc` backup preserves it). A masked `••••1234`
  * accountNumber stub is NOT a secret — it becomes the plaintext `lastFour`.
+ * Any key not declared in the category's template (secret or non-secret) is
+ * dropped rather than migrated as a plaintext field — a stray key on a
+ * legacy entry, or a future/buggy writer, must never leak into the DB.
  */
 export function splitVaultEntry(category: string, entry: Record<string, unknown>): SplitVaultEntry {
   const secretKeys = new Set(SECRET_FIELDS_BY_CATEGORY[category] ?? [])
+  const fieldKeys = new Set(FIELD_KEYS_BY_CATEGORY[category] ?? [])
   const fields: Record<string, string> = {}
   const secrets: Record<string, string> = {}
   let notes: string | null = null
@@ -186,6 +201,7 @@ export function splitVaultEntry(category: string, entry: Record<string, unknown>
       }
       continue
     }
+    if (!fieldKeys.has(key)) continue // not on this category's template — drop it
     fields[key] = v
   }
 

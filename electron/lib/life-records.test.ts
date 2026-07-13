@@ -127,9 +127,25 @@ describe('splitVaultEntry', () => {
       weird: { nested: true },
       maxDepth: 3
     })
-    expect(split.fields).toEqual({ documentType: 'Deed', date: '2024-05-01', maxDepth: '3' })
+    expect(split.fields).toEqual({ documentType: 'Deed', date: '2024-05-01' })
     expect(split.secrets).toEqual({})
     expect(split.notes).toBeNull()
     expect(split.title).toBe('Deed')
+  })
+
+  it('drops any key not declared on the category template — never leaks unexpected data into plaintext', () => {
+    const split = splitVaultEntry('financial', {
+      id: 'x',
+      institution: 'Chase',
+      // Not on the financial template at all — must be dropped, not persisted.
+      unexpectedField: 'sneaky-value',
+      // A key that's a SECRET on a different category must not slip through
+      // as a plaintext field just because it happens to be a string.
+      memberId: 'M123456'
+    })
+    expect(split.fields).toEqual({ institution: 'Chase' })
+    expect(split.secrets).toEqual({})
+    expect(JSON.stringify(split)).not.toContain('sneaky-value')
+    expect(JSON.stringify(split)).not.toContain('M123456')
   })
 })
