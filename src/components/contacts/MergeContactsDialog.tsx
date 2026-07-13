@@ -7,7 +7,7 @@
  */
 import * as AlertDialog from '@radix-ui/react-alert-dialog'
 import { GitMerge } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { cn } from '../../lib/utils'
 import { useToast } from '../ui/Toast'
 
@@ -27,15 +27,31 @@ export default function MergeContactsDialog({
   const [busy, setBusy] = useState(false)
   const { toast } = useToast()
 
+  const ids = useMemo(() => contacts.map((c) => c.id), [contacts])
+  // The parent passes `[...selectedRows.values()]`, a fresh array every
+  // render — depending on `ids` directly would re-fire suggestSurvivor on
+  // every unrelated re-render. Depend on a stable key derived from the ids
+  // instead, so the effect only re-runs when the selection actually changes.
+  const idsKey = useMemo(() => [...ids].sort((a, b) => a - b).join(','), [ids])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the stable `idsKey`, not `ids` — `contacts` (and thus `ids`) is a fresh array every parent render, so depending on `ids` directly would re-fire suggestSurvivor on every unrelated re-render
   useEffect(() => {
-    if (!open || contacts.length < 2) return
+    if (!open || ids.length < 2) return
+    let cancelled = false
     // Fall back to the first selected contact if the suggestion call fails.
-    setSurvivorId(contacts[0]?.id ?? null)
+    setSurvivorId(ids[0] ?? null)
     window.api.contacts
-      .suggestSurvivor(contacts.map((c) => c.id))
-      .then((r) => setSurvivorId(r.survivorId))
+      .suggestSurvivor(ids)
+      .then((r) => {
+        // The selection may have changed while this request was in flight —
+        // an older response must never clobber a newer selection's default.
+        if (!cancelled) setSurvivorId(r.survivorId)
+      })
       .catch(() => {})
-  }, [open, contacts])
+    return () => {
+      cancelled = true
+    }
+  }, [open, idsKey])
 
   async function merge(): Promise<void> {
     if (survivorId == null || busy) return
@@ -94,7 +110,7 @@ export default function MergeContactsDialog({
                   name="merge-survivor"
                   checked={survivorId === c.id}
                   onChange={() => setSurvivorId(c.id)}
-                  className="h-3.5 w-3.5 accent-[hsl(var(--primary))] cursor-pointer shrink-0"
+                  className="h-3.5 w-3.5 accent-primary cursor-pointer shrink-0"
                 />
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-medium text-foreground truncate">

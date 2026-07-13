@@ -14,7 +14,7 @@
 import { randomUUID } from 'node:crypto'
 import { lstatSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { and, eq, inArray, like } from 'drizzle-orm'
+import { and, eq, inArray, like, sql } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
 import { contacts, curationExclusions, derivedEntities } from '../db/schema'
@@ -149,15 +149,12 @@ function computeSearchBlob(input: {
 }
 
 /**
- * DB row → renderer record (parse JSON arrays). `includePhoto=false` for list
- * payloads (keeps them light); `includeEnrichment=false` likewise — the
- * enrichment blob only rides on `contacts:get`.
+ * DB row → renderer record (parse JSON arrays), full detail — photo +
+ * enrichment included. Only used by `contacts:get`; `contacts:list` uses the
+ * lighter `listRowToRecord` below instead of parsing the full enrichment blob
+ * per row just to derive two numbers.
  */
-function rowToRecord(
-  row: ContactRow,
-  includePhoto: boolean,
-  includeEnrichment: boolean
-): ContactRecord {
+function rowToRecord(row: ContactRow): ContactRecord {
   const enrichment = parseEnrichment(row.enrichment)
   return {
     id: row.id,
@@ -177,11 +174,73 @@ function rowToRecord(
     url: row.url,
     relationship: row.relationship,
     notes: row.notes,
-    photo: includePhoto ? row.photo : null,
+    photo: row.photo,
     source: row.source,
-    enrichment: includeEnrichment ? enrichment : null,
+    enrichment,
     lastSeen: enrichment.crossSource?.lastSeen ?? null,
     touchpointCount: enrichment.crossSource?.touchpointCount ?? 0,
+    createdAt: row.createdAt ? row.createdAt.getTime() : null,
+    updatedAt: row.updatedAt ? row.updatedAt.getTime() : null
+  }
+}
+
+/**
+ * The narrow row shape `contacts:list` selects: every scalar column EXCEPT
+ * `photo`/`enrichment` (kept off list payloads to stay light), plus
+ * `lastSeen`/`touchpointCount` pulled straight out of the enrichment JSON via
+ * SQLite's `json_extract` — so a list of N contacts costs zero full-blob
+ * JSON.parse calls in the main process, not N of them.
+ */
+interface ContactListRow {
+  id: number
+  externalId: string
+  displayName: string
+  givenName: string | null
+  familyName: string | null
+  middleName: string | null
+  prefix: string | null
+  suffix: string | null
+  org: string | null
+  jobTitle: string | null
+  phones: string | null
+  emails: string | null
+  addresses: string | null
+  birthday: string | null
+  url: string | null
+  relationship: string | null
+  notes: string | null
+  source: string
+  createdAt: Date | null
+  updatedAt: Date | null
+  lastSeen: number | null
+  touchpointCount: number | null
+}
+
+/** `ContactListRow` → renderer record. No enrichment parse — SQL already did it. */
+function listRowToRecord(row: ContactListRow): ContactRecord {
+  return {
+    id: row.id,
+    externalId: row.externalId,
+    displayName: row.displayName,
+    givenName: row.givenName,
+    familyName: row.familyName,
+    middleName: row.middleName,
+    prefix: row.prefix,
+    suffix: row.suffix,
+    org: row.org,
+    jobTitle: row.jobTitle,
+    phones: parseArr<ContactPhone>(row.phones),
+    emails: parseArr<ContactEmail>(row.emails),
+    addresses: parseArr<ContactAddress>(row.addresses),
+    birthday: row.birthday,
+    url: row.url,
+    relationship: row.relationship,
+    notes: row.notes,
+    photo: null,
+    source: row.source,
+    enrichment: null,
+    lastSeen: row.lastSeen,
+    touchpointCount: row.touchpointCount ?? 0,
     createdAt: row.createdAt ? row.createdAt.getTime() : null,
     updatedAt: row.updatedAt ? row.updatedAt.getTime() : null
   }
@@ -905,23 +964,48 @@ export function registerContactsHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('contacts:list', (_event, opts?: { search?: string }) => {
     const db = getDb()
     const q = opts?.search?.trim().slice(0, MAX_SEARCH_CHARS).toLowerCase()
-    const rows = q
-      ? db
-          .select()
-          .from(contacts)
-          .where(like(contacts.searchBlob, `%${q}%`))
-          .all()
-      : db.select().from(contacts).all()
-    return rows
-      .map((r) => rowToRecord(r, false, false))
-      .sort((a, b) => a.displayName.localeCompare(b.displayName))
+    // Explicit column list — never `photo`/`enrichment` (see ContactListRow).
+    // `lastSeen`/`touchpointCount` come straight out of the enrichment JSON via
+    // json_extract, so SQLite does the parsing, not a JS JSON.parse per row.
+    const listQuery = db
+      .select({
+        id: contacts.id,
+        externalId: contacts.externalId,
+        displayName: contacts.displayName,
+        givenName: contacts.givenName,
+        familyName: contacts.familyName,
+        middleName: contacts.middleName,
+        prefix: contacts.prefix,
+        suffix: contacts.suffix,
+        org: contacts.org,
+        jobTitle: contacts.jobTitle,
+        phones: contacts.phones,
+        emails: contacts.emails,
+        addresses: contacts.addresses,
+        birthday: contacts.birthday,
+        url: contacts.url,
+        relationship: contacts.relationship,
+        notes: contacts.notes,
+        source: contacts.source,
+        createdAt: contacts.createdAt,
+        updatedAt: contacts.updatedAt,
+        lastSeen: sql<
+          number | null
+        >`json_extract(${contacts.enrichment}, '$.crossSource.lastSeen')`,
+        touchpointCount: sql<
+          number | null
+        >`json_extract(${contacts.enrichment}, '$.crossSource.touchpointCount')`
+      })
+      .from(contacts)
+    const rows = q ? listQuery.where(like(contacts.searchBlob, `%${q}%`)).all() : listQuery.all()
+    return rows.map(listRowToRecord).sort((a, b) => a.displayName.localeCompare(b.displayName))
   })
 
   ipcMain.handle('contacts:get', (_event, id: number) => {
     if (!Number.isInteger(id)) throw new Error('contacts:get requires an integer id')
     const db = getDb()
     const row = db.select().from(contacts).where(eq(contacts.id, id)).all()[0]
-    return row ? rowToRecord(row, true, true) : null
+    return row ? rowToRecord(row) : null
   })
 
   ipcMain.handle('contacts:create', (_event, input: ContactInput) => {
