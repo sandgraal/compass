@@ -1,35 +1,31 @@
 import {
-  Banknote,
   ChevronRight,
   Copy,
   Dna,
   Eye,
   EyeOff,
-  Globe,
-  HeartPulse,
   History,
   IdCard,
   Key,
   Lock,
   Pencil,
   Plus,
-  Scale,
   ShieldCheck,
   Trash2,
   Upload
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
 import { cn } from '../lib/utils'
 
+// Post vault-split (2026-07): the vault holds ONLY what must stay sealed —
+// credentials + genetics. The old document categories (financial, identity,
+// medical, legal, foreign-accounts) live on the Life Records page, with their
+// secret field values still encrypted behind the scenes.
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
-  financial: <Banknote size={16} />,
-  identity: <IdCard size={16} />,
   credentials: <Key size={16} />,
-  medical: <HeartPulse size={16} />,
-  legal: <Scale size={16} />,
-  'foreign-accounts': <Globe size={16} />,
   genetics: <Dna size={16} />
 }
 
@@ -37,47 +33,11 @@ const FIELD_TEMPLATES: Record<
   string,
   Array<{ key: string; label: string; sensitive?: boolean }>
 > = {
-  financial: [
-    { key: 'institution', label: 'Institution' },
-    { key: 'accountType', label: 'Account Type' },
-    { key: 'accountNumber', label: 'Account Number', sensitive: true },
-    { key: 'routingNumber', label: 'Routing Number', sensitive: true },
-    { key: 'notes', label: 'Notes' }
-  ],
-  identity: [
-    { key: 'documentType', label: 'Document Type' },
-    { key: 'number', label: 'Number', sensitive: true },
-    { key: 'issueDate', label: 'Issue Date' },
-    { key: 'expiryDate', label: 'Expiry Date' },
-    { key: 'notes', label: 'Notes' }
-  ],
   credentials: [
     { key: 'service', label: 'Service / App' },
     { key: 'username', label: 'Username / Email' },
     { key: 'password', label: 'Password', sensitive: true },
     { key: 'apiKey', label: 'API Key', sensitive: true },
-    { key: 'notes', label: 'Notes' }
-  ],
-  medical: [
-    { key: 'type', label: 'Type (insurance/rx/provider)' },
-    { key: 'provider', label: 'Provider / Insurer' },
-    { key: 'memberId', label: 'Member ID', sensitive: true },
-    { key: 'groupNumber', label: 'Group Number', sensitive: true },
-    { key: 'notes', label: 'Notes' }
-  ],
-  legal: [
-    { key: 'documentType', label: 'Document Type' },
-    { key: 'parties', label: 'Parties Involved' },
-    { key: 'date', label: 'Date' },
-    { key: 'location', label: 'Stored Location' },
-    { key: 'notes', label: 'Notes' }
-  ],
-  'foreign-accounts': [
-    { key: 'institution', label: 'Institution' },
-    { key: 'country', label: 'Country' },
-    { key: 'accountNumber', label: 'Account Number', sensitive: true },
-    { key: 'accountType', label: 'Account Type (bank / securities)' },
-    { key: 'maxValueUsd', label: 'Max Value During Year (USD)' },
     { key: 'notes', label: 'Notes' }
   ],
   // Entries are created only via the "Import raw data file" flow (see
@@ -97,7 +57,7 @@ const VAULT_AUTOLOCK_DEFAULT_MINUTES = 5
 
 export default function Vault(): JSX.Element {
   const [categories, setCategories] = useState<VaultCategory[]>([])
-  const [selectedCategory, setSelectedCategory] = useState('financial')
+  const [selectedCategory, setSelectedCategory] = useState('credentials')
   const [entries, setEntries] = useState<VaultEntry[]>([])
   const [revealedFields, setRevealedFields] = useState<Set<string>>(new Set())
   const [adding, setAdding] = useState(false)
@@ -203,30 +163,16 @@ export default function Vault(): JSX.Element {
     } else {
       setCategories([
         {
-          id: 'financial',
-          label: 'Financial',
-          icon: 'banknote',
-          description: 'Bank accounts, credit cards'
-        },
-        { id: 'identity', label: 'Identity', icon: 'id-card', description: 'SSN, passport, ID' },
-        {
           id: 'credentials',
           label: 'Credentials',
           icon: 'key',
           description: 'Passwords, API keys'
         },
         {
-          id: 'medical',
-          label: 'Medical',
-          icon: 'heart-pulse',
-          description: 'Insurance, prescriptions'
-        },
-        { id: 'legal', label: 'Legal', icon: 'scale', description: 'Contracts, wills' },
-        {
-          id: 'foreign-accounts',
-          label: 'Foreign Accounts',
-          icon: 'globe',
-          description: 'FBAR/FATCA account numbers + institutions'
+          id: 'genetics',
+          label: 'Genetics',
+          icon: 'dna',
+          description: 'Raw genotype data — sealed from AI, vault-only'
         }
       ])
     }
@@ -390,6 +336,17 @@ export default function Vault(): JSX.Element {
               />
             </button>
           ))}
+        </div>
+
+        <div className="px-4 py-3 border-t border-border">
+          <p className="text-[11px] text-muted-foreground/80 leading-relaxed">
+            <IdCard size={11} className="inline mr-1 text-primary" />
+            Financial, identity, medical, legal &amp; foreign-account records moved to{' '}
+            <Link to="/life-records" className="text-primary hover:underline">
+              Life Records
+            </Link>
+            . Their account/ID numbers stay encrypted here.
+          </p>
         </div>
 
         <div className="px-4 py-3 border-t border-border space-y-2">

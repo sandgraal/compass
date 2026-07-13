@@ -15,6 +15,7 @@ import {
   HeartPulse,
   History,
   Home,
+  IdCard,
   Inbox,
   Layers,
   LayoutDashboard,
@@ -266,10 +267,28 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
     {
       id: 'vault',
       label: 'Vault',
-      description: 'Secure sensitive data',
+      description: 'Sealed secrets — passwords & genetics',
       icon: <ShieldCheck size={15} />,
       action: () => nav('/vault'),
-      keywords: ['secure', 'passwords', 'credentials', 'financial']
+      keywords: ['secure', 'passwords', 'credentials', 'genetics']
+    },
+    {
+      id: 'life-records',
+      label: 'Life Records',
+      description: 'Financial, identity, medical, legal & foreign-account records',
+      icon: <IdCard size={15} />,
+      action: () => nav('/life-records'),
+      keywords: [
+        'financial',
+        'identity',
+        'medical',
+        'legal',
+        'foreign',
+        'passport',
+        'insurance',
+        'accounts',
+        'documents'
+      ]
     },
     {
       id: 'contacts',
@@ -472,6 +491,21 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
           onClose()
           sessionStorage.setItem('compass:open-vault-category', hit.category)
           navigate('/vault')
+        }
+      }
+    }
+    if (hit.kind === 'life') {
+      return {
+        id: `life:${hit.id}`,
+        label: hit.title,
+        description: hit.snippet
+          ? `Life record · ${hit.category} · ${hit.snippet}`
+          : `Life record · ${hit.category}`,
+        icon: <IdCard size={15} />,
+        action: () => {
+          onClose()
+          sessionStorage.setItem('compass:open-life-category', hit.category)
+          navigate('/life-records')
         }
       }
     }

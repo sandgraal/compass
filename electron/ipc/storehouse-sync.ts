@@ -32,6 +32,7 @@ import {
   habitEntries,
   habits,
   labResults,
+  lifeRecords,
   linearIssues,
   medicalRecords,
   ouraDailyMetrics,
@@ -52,6 +53,7 @@ import {
   type GmailRow,
   type HabitCheckRow,
   type LabResultRow,
+  type LifeRecordProjRow,
   type LinearRow,
   type MedicalRow,
   type OuraRow,
@@ -68,6 +70,7 @@ import {
   projectGmail,
   projectHabitChecks,
   projectLabResults,
+  projectLifeRecords,
   projectLinear,
   projectMedicalRecords,
   projectOuraMetrics,
@@ -236,6 +239,37 @@ function readLabResults(): LabResultRow[] {
     .all()
 }
 
+/** `fields` JSON column → Record<string,string> (defensive; written by life-records.ts). */
+function parseLifeFields(json: string | null): Record<string, string> {
+  if (!json) return {}
+  try {
+    const v = JSON.parse(json)
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/** Read life records as projector inputs — plaintext metadata only, by construction. */
+function readLifeRecords(): LifeRecordProjRow[] {
+  return getDb()
+    .select({
+      externalId: lifeRecords.externalId,
+      category: lifeRecords.category,
+      title: lifeRecords.title,
+      fields: lifeRecords.fields,
+      notes: lifeRecords.notes,
+      createdAt: lifeRecords.createdAt
+    })
+    .from(lifeRecords)
+    .all()
+    .map((r) => ({
+      ...r,
+      fields: parseLifeFields(r.fields),
+      createdAt: r.createdAt ? r.createdAt.getTime() : null
+    }))
+}
+
 /** Read logged trips as projector inputs. */
 function readTravelSegments(): TravelSegmentRow[] {
   return getDb()
@@ -386,6 +420,9 @@ function projectUserEditedDomainsToRecords(): number {
   const labInputs = projectLabResults(readLabResults())
   imported += upsertLiveRecords(labInputs, `live:lab:${now}`).imported
   reconcileLiveRecords('lab', labInputs)
+  const lifeInputs = projectLifeRecords(readLifeRecords())
+  imported += upsertLiveRecords(lifeInputs, `live:life:${now}`).imported
+  reconcileLiveRecords('life', lifeInputs)
   const travelInputs = projectTravelSegments(readTravelSegments())
   imported += upsertLiveRecords(travelInputs, `live:travel:${now}`).imported
   reconcileLiveRecords('travel', travelInputs)

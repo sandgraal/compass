@@ -511,6 +511,22 @@ function ensureNewTables(sqlite: Database.Database): void {
       created_at INTEGER
     );
     CREATE INDEX IF NOT EXISTS lab_results_test_name_taken_at ON lab_results (test_name, taken_at);
+    -- Life records: the plaintext metadata half of the old vault document
+    -- categories — mirrors migration 0039 (packaged builds skip migrations).
+    -- Secret field values live in .vault/record-secrets.enc, never here.
+    CREATE TABLE IF NOT EXISTS life_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      external_id TEXT NOT NULL,
+      category TEXT NOT NULL,
+      title TEXT NOT NULL,
+      fields TEXT,
+      notes TEXT,
+      has_secrets INTEGER NOT NULL DEFAULT 0,
+      source TEXT NOT NULL DEFAULT 'manual',
+      created_at INTEGER,
+      updated_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS life_records_external_id_unique ON life_records (external_id);
   `)
 
   // Backfill the FTS index for rows that predate it (the triggers only fire on

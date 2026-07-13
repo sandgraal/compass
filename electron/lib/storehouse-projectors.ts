@@ -662,3 +662,43 @@ export function projectSnapshotFacts(rows: SnapshotFactRow[]): RecordInput[] {
   }
   return out
 }
+
+/** A life record reduced to the projector's fields (`life_records`). */
+export interface LifeRecordProjRow {
+  externalId: string
+  category: string // 'financial' | 'identity' | 'medical' | 'legal' | 'foreign-accounts'
+  title: string
+  fields: Record<string, string> // parsed, NON-secret by construction
+  notes: string | null
+  createdAt: number | null
+}
+
+/**
+ * Project `life_records` → records (`source:'life'`, `type:` the category).
+ * Structurally secret-free: the table only ever holds the plaintext metadata
+ * half of the vault split — the secret field values live in the encrypted
+ * `record-secrets` blob and never reach this projector. `occurredAt` prefers
+ * a parseable category date field (legal `date`, identity `issueDate`) over
+ * the row's own createdAt, so a migrated will/contract sits at its real date.
+ */
+export function projectLifeRecords(rows: LifeRecordProjRow[]): RecordInput[] {
+  const out: RecordInput[] = []
+  for (const r of rows) {
+    if (!r.externalId || !r.title?.trim()) continue
+    const dateField = r.fields.date ?? r.fields.issueDate ?? null
+    const fieldDate = dateField ? localDayMs(dateField.slice(0, 10)) : null
+    const parts = Object.values(r.fields)
+      .filter((v) => v?.trim())
+      .slice(0, 3)
+    out.push({
+      source: 'life',
+      type: r.category,
+      occurredAt: fieldDate ?? r.createdAt,
+      title: r.title.trim(),
+      body: parts.length > 0 ? parts.join(' · ').slice(0, 300) : undefined,
+      payload: { category: r.category, fields: r.fields, notes: r.notes },
+      naturalKey: r.externalId
+    })
+  }
+  return out
+}

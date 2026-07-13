@@ -46,6 +46,42 @@ declare global {
     description: string
   }
 
+  interface LifeCategoryField {
+    key: string
+    label: string
+    /** Value is stored encrypted in the vault, never in the DB row. */
+    secret?: boolean
+  }
+
+  interface LifeCategory {
+    id: string
+    label: string
+    icon: string
+    description: string
+    fields: LifeCategoryField[]
+  }
+
+  interface LifeRecord {
+    id: number
+    externalId: string
+    category: string
+    title: string
+    fields: Record<string, string>
+    notes: string | null
+    hasSecrets: boolean
+    source: string
+    createdAt: number | null
+    updatedAt: number | null
+  }
+
+  interface LifeRecordInput {
+    category: string
+    fields?: Record<string, string>
+    notes?: string | null
+    /** Per key: non-empty sets, empty string deletes, absent leaves untouched. */
+    secrets?: Record<string, string>
+  }
+
   interface KnowledgeFile {
     path: string
     title: string
@@ -137,6 +173,14 @@ declare global {
         title: string
         fileName: string
         snippet: string
+        score: number
+      }
+    | {
+        kind: 'life'
+        id: number
+        category: string
+        title: string
+        snippet?: string
         score: number
       }
 
@@ -876,6 +920,7 @@ declare global {
             records: number
             contacts: number
             documents: number
+            life: number
           }
         }>
       }
@@ -1344,6 +1389,15 @@ declare global {
           error?: string
           entry?: VaultEntry
         }>
+      }
+      life: {
+        categories(): Promise<LifeCategory[]>
+        list(opts?: { category?: string }): Promise<LifeRecord[]>
+        create(input: LifeRecordInput): Promise<{ success: boolean; id: number }>
+        update(id: number, updates: LifeRecordInput): Promise<{ success: boolean }>
+        delete(id: number): Promise<{ success: boolean }>
+        getSecrets(id: number): Promise<Record<string, string>>
+        exportCsv(): Promise<ExportResult>
       }
       habits: {
         list(includeInactive?: boolean): Promise<Habit[]>

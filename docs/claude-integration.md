@@ -47,9 +47,9 @@ flowchart LR
 1. Claude **never** writes `compass.db`, the vault, or knowledge files — it only appends to the separate, append-only proposal inbox.
 2. Compass remains the **sole writer**, executing approved proposals through its **existing, input-validating** IPC handlers.
 3. **Every** mutation is **human-approved** in the Claude Inbox and **audit-logged**.
-4. The **vault `credentials` category, the vault `genetics` category, and all token vaults are never exposed** to any Claude surface (read or write) — genetics is sealed the same way as credentials (excluded from `VAULT_DOC_CATEGORIES`), the most sensitive category in the app. The vault's *document* categories (financial, identity, medical, legal, foreign-accounts) are readable by the **in-app assistant only** — decrypted in memory per call; the MCP process has no Keychain access and cannot reach the vault at all.
+4. The **vault (`credentials`, `genetics`, and the life-record `record-secrets` blob) and all token vaults are never exposed** to any Claude surface (read or write). Post vault-split the vault is secrets-only: the old document categories live as plaintext **life records** (`life_records` table), whose METADATA is readable by the in-app assistant (`search_life_records` / `get_life_record`) **and** the MCP (`compass_life_records`); their secret field values (account/ID numbers, member IDs) stay encrypted and are structurally unreachable — the MCP process has no Keychain access, and no assistant tool can decrypt anything.
 5. **Every domain is exposed in full detail** (2026-07 data-access policy): the `records` Timeline, individual finance transactions, medical records, contacts, paystubs, and the rest — via explicitly-named detail tools (`search_records`/`list_transactions`/`get_medical_records`/… in the agent; `compass_search_timeline`/`compass_transactions`/`compass_contacts`/… in the MCP). Aggregate tools remain as convenient rollups. The one data exclusion: **raw GPS coordinates never enter `records` or any AI surface** — only country-level `travel_segments` project.
-6. Cloud LLM access stays **BYO-key, opt-in, local-first** (Ollama preferred). Full-detail tool results (including vault documents, in the in-app agent) reach the provider on user-initiated turns — a documented decision, not an accident.
+6. Cloud LLM access stays **BYO-key, opt-in, local-first** (Ollama preferred). Full-detail tool results (including life-record metadata) reach the provider on user-initiated turns — a documented decision, not an accident.
 7. **Raw location is never readable by the assistant or MCP** — reinforcing #5's GPS exclusion. `location_points` never enter `records`; only country-level `travel_segments` project. The Places-page map reads clustered location cells through `location:map-data`, but that is a **renderer-local UI read only**; it is not, and must never be, registered as an assistant or MCP tool.
 
 ## Phase 8 tracks (proposed)
@@ -84,14 +84,14 @@ Extends `mcp/compass-mcp/index.ts`:
   - `get_timeline` — aggregate counts over the unified life Timeline; `search_records` — the **actual matching records across every domain** on the spine
   - `search_contacts` / `get_contact` — address-book search + the full card (never the photo)
   - `get_medical_records` — full clinical rows; `get_paystubs` — per-stub rows + totals
-  - `search_vault` / `get_vault_entry` — the vault's **document categories** (financial, identity, medical, legal, foreign-accounts), decrypted in memory per call via an injected `VaultReader`. The `credentials` and `genetics` categories are refused at the tool boundary AND by the reader's allowlist — passwords/API keys/tokens and raw genotype data are sealed everywhere.
+  - `search_life_records` / `get_life_record` — life-record METADATA (financial, identity, medical, legal, foreign-accounts) read straight from `compass.db`; no tool can decrypt anything. Secret field values, `credentials`, and `genetics` are sealed everywhere.
   - `propose_task` — **enqueues a `pending` `claude_proposals` row** (→ the Claude Inbox) rather than writing directly. The same propose→approve funnel as the MCP.
   - OpenAI keeps the single-shot RAG `ask` instead of the tool-use loop.
 - ✅ Renderer **Agent toggle** in Ask Compass (`src/pages/Ask.tsx`) — routes through `assistant:agent`, shows the tool trace, and surfaces proposed changes as a banner linking to the Claude Inbox. Anthropic-only (auto-disabled for other providers).
 - 🔜 More propose-write tools (notes, habits, txn-tag — mirroring the MCP's `compass_propose_*` set) and proactive-insights surfacing beyond the read-only `get_insights`.
 
 ### 8.6 Claude Skills for Compass — ✅ *(shipped)*
-- `claude-plugin/skills/`: `morning-brief`, `weekly-review`, `budget-check`, `plan-my-week`, `capture-from-web`. Each is **read-first** (via the MCP read tools) and routes any change through `compass_propose_*` → the Claude Inbox approval flow — never a direct write. The vault is unreachable from MCP (in-app-assistant-only for document categories; credentials sealed everywhere); finance is readable in full detail via `compass_transactions`.
+- `claude-plugin/skills/`: `morning-brief`, `weekly-review`, `budget-check`, `plan-my-week`, `capture-from-web`. Each is **read-first** (via the MCP read tools) and routes any change through `compass_propose_*` → the Claude Inbox approval flow — never a direct write. The vault is unreachable from MCP (secrets-only post-split); life-record metadata is readable via `compass_life_records`; finance is readable in full detail via `compass_transactions`.
 
 ## Expert deep-dive (five lenses)
 

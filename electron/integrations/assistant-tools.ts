@@ -5,17 +5,18 @@
  *   - READ tools answer questions from `compass.db` — per the data-access
  *     policy (docs/data-access-policy.md) they see EVERY domain in full
  *     detail: raw transactions, medical records, contacts, paystubs, the
- *     records spine, and the vault DOCUMENT categories. The only things
- *     sealed everywhere: the vault `credentials` category + token vaults
- *     (access keys, not life data) and raw GPS coordinates.
+ *     records spine, and life-record metadata (the plaintext half of the
+ *     old vault document categories). The only things sealed everywhere:
+ *     life-record SECRET field values + the vault `credentials`/`genetics`
+ *     categories + token vaults, and raw GPS coordinates.
  *   - PROPOSE tools never mutate anything; they enqueue a `pending` row in
  *     `claude_proposals`, exactly like the MCP propose tools, so the change
  *     surfaces in the Claude Inbox for human approval.
  *
  * `executeAssistantTool` is pure w.r.t. the model — it takes a db handle + the
- * tool name/input (+ optional injected VaultReader) and returns a
- * JSON-serialisable result — so it unit-tests against an in-memory SQLite
- * without any network or keychain.
+ * tool name/input and returns a JSON-serialisable result — so it unit-tests
+ * against an in-memory SQLite without any network or keychain. (Nothing here
+ * can decrypt: the vault is structurally out of reach of this module.)
  */
 
 import { randomUUID } from 'node:crypto'
@@ -28,38 +29,16 @@ import {
   checklistItems,
   claudeProposals,
   contacts,
-  financeAccounts
+  financeAccounts,
+  lifeRecords
 } from '../db/schema'
 import { buildInsights } from '../ipc/insights'
+import { LIFE_CATEGORY_IDS } from '../lib/life-records'
 import { searchRecords } from '../lib/records-search'
 import { buildLabResultsSummary } from './lab-results'
 
 type Db = ReturnType<typeof getDb>
 type RawSqlite = BetterSqlite3.Database
-
-/**
- * Vault access injected by the caller (electron/ipc/assistant.ts wires the
- * real decrypt-in-memory reader; tests pass a fake). Absent ⇒ the vault
- * tools return a clean "vault unavailable" error. Only the document
- * categories below are ever readable — `readCategory` is never called with
- * `credentials`.
- */
-export interface VaultReader {
-  readCategory(category: string): Array<Record<string, unknown>>
-}
-export interface AssistantToolDeps {
-  vault?: VaultReader
-}
-
-/** Vault document categories readable by the assistant. `credentials` is sealed. */
-export const VAULT_DOC_CATEGORIES = [
-  'financial',
-  'identity',
-  'medical',
-  'legal',
-  'foreign-accounts'
-] as const
-const VAULT_DOC_SET = new Set<string>(VAULT_DOC_CATEGORIES)
 
 const DAY_MS = 86_400_000
 const LIST_TYPES = new Set(['daily', 'weekly', 'monthly'])
@@ -233,9 +212,9 @@ export const ASSISTANT_TOOLS = [
     }
   },
   {
-    name: 'search_vault',
+    name: 'search_life_records',
     description:
-      'Search the encrypted vault DOCUMENT categories (financial, identity, medical, legal, foreign-accounts) by any field value — e.g. "find my passport number", "which policy covers dental". Returns matching entries with the matched field. The credentials category (passwords, API keys) is permanently sealed and cannot be searched or read. Read-only; decryption happens in memory per call.',
+      'Search life records — financial accounts, identity documents, medical insurance, legal documents, and foreign accounts (institutions, document types, parties, dates, notes) — by any field value, e.g. "when does my passport expire", "which policy covers dental". Secret field values (account/routing numbers, SSN/passport/license numbers, insurance member IDs) are sealed in the encrypted vault and can never be searched or read. Read-only.',
     input_schema: {
       type: 'object',
       properties: {
@@ -243,7 +222,7 @@ export const ASSISTANT_TOOLS = [
         category: {
           type: 'string',
           enum: ['financial', 'identity', 'medical', 'legal', 'foreign-accounts'],
-          description: 'Optional: restrict to one document category'
+          description: 'Optional: restrict to one category'
         }
       },
       required: ['q'],
@@ -251,19 +230,15 @@ export const ASSISTANT_TOOLS = [
     }
   },
   {
-    name: 'get_vault_entry',
+    name: 'get_life_record',
     description:
-      'Read one full vault document entry by category + id (from search_vault) — every field, e.g. the passport number, policy details, account identifiers. The credentials category is permanently sealed. Read-only; decryption happens in memory per call.',
+      'Read one full life record by id (from search_life_records) — every non-secret field plus notes. Secret values (account numbers, document numbers, member IDs) stay sealed in the encrypted vault; hasSecrets tells you they exist. Read-only.',
     input_schema: {
       type: 'object',
       properties: {
-        category: {
-          type: 'string',
-          enum: ['financial', 'identity', 'medical', 'legal', 'foreign-accounts']
-        },
-        id: { type: 'string', description: 'Entry id from search_vault' }
+        id: { type: 'integer', description: 'Record id from search_life_records' }
       },
-      required: ['category', 'id'],
+      required: ['id'],
       additionalProperties: false
     }
   },
@@ -661,78 +636,86 @@ function getPaystubs(sqlite: RawSqlite, input: Record<string, unknown>): unknown
   }
 }
 
-const VAULT_SEARCH_MAX = 20
+const LIFE_SEARCH_MAX = 20
+const SEALED_SECRETS_NOTE =
+  'Secret field values (account/routing numbers, document numbers, member IDs) are sealed in the encrypted vault and never readable here.'
 
-function searchVaultTool(deps: AssistantToolDeps, input: Record<string, unknown>): unknown {
-  if (!deps.vault) return { error: 'Vault unavailable in this context.' }
-  const q = str(input.q).slice(0, 200).toLowerCase()
-  if (!q) return { error: 'q (search text) is required' }
-  const catFilter = str(input.category)
-  if (catFilter === 'credentials') {
-    return {
-      error:
-        'The credentials category (passwords, API keys) is permanently sealed — the assistant can never search or read it.'
-    }
-  }
-  if (catFilter && !VAULT_DOC_SET.has(catFilter)) {
-    return { error: `Unknown vault document category: ${catFilter}` }
-  }
-  const categories = catFilter ? [catFilter] : [...VAULT_DOC_CATEGORIES]
-  const entriesOut: Array<Record<string, unknown>> = []
-  for (const category of categories) {
-    let entries: Array<Record<string, unknown>>
-    try {
-      entries = deps.vault.readCategory(category)
-    } catch {
-      continue // category file corrupt/unreadable — skip, keep searching the rest
-    }
-    for (const entry of entries) {
-      if (!entry || typeof entry !== 'object') continue
-      const id = typeof entry.id === 'string' ? entry.id : null
-      if (!id) continue
-      for (const [field, value] of Object.entries(entry)) {
-        if (field === 'id' || typeof value !== 'string') continue
-        if (!value.toLowerCase().includes(q)) continue
-        entriesOut.push({ category, id, matchedField: field, value: value.slice(0, 200) })
-        break // one hit per entry
-      }
-      if (entriesOut.length >= VAULT_SEARCH_MAX) break
-    }
-    if (entriesOut.length >= VAULT_SEARCH_MAX) break
-  }
-  return {
-    query: q,
-    count: entriesOut.length,
-    entries: entriesOut,
-    note: 'Use get_vault_entry(category, id) to read a full entry.'
+/** `fields` JSON column → Record<string,string> (defensive parse). */
+function parseLifeFields(json: string | null): Record<string, string> {
+  if (!json) return {}
+  try {
+    const v = JSON.parse(json)
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, string>) : {}
+  } catch {
+    return {}
   }
 }
 
-function getVaultEntry(deps: AssistantToolDeps, input: Record<string, unknown>): unknown {
-  if (!deps.vault) return { error: 'Vault unavailable in this context.' }
-  const category = str(input.category)
-  if (category === 'credentials') {
-    return {
-      error:
-        'The credentials category (passwords, API keys) is permanently sealed — the assistant can never search or read it.'
-    }
+function searchLifeRecordsTool(db: Db, input: Record<string, unknown>): unknown {
+  const q = str(input.q).slice(0, 200).toLowerCase()
+  if (!q) return { error: 'q (search text) is required' }
+  const catFilter = str(input.category)
+  if (catFilter && !LIFE_CATEGORY_IDS.includes(catFilter)) {
+    return { error: `category must be one of: ${LIFE_CATEGORY_IDS.join(', ')}` }
   }
-  if (!VAULT_DOC_SET.has(category)) {
-    return { error: `category must be one of: ${VAULT_DOC_CATEGORIES.join(', ')}` }
-  }
-  const id = str(input.id)
-  if (!id) return { error: 'id is required (from search_vault)' }
-  let entries: Array<Record<string, unknown>>
+  let rows: Array<typeof lifeRecords.$inferSelect>
   try {
-    entries = deps.vault.readCategory(category)
+    rows = catFilter
+      ? db.select().from(lifeRecords).where(eq(lifeRecords.category, catFilter)).all()
+      : db.select().from(lifeRecords).all()
   } catch {
-    return { error: `Could not read the ${category} vault category.` }
+    return { query: q, count: 0, records: [], note: 'No life records yet.' }
   }
-  const entry = entries.find((e) => e && typeof e === 'object' && e.id === id)
-  if (!entry) return { error: `No ${category} entry with id ${id}` }
-  // Full entry minus `_history` (prior versions — bulk noise for the model).
-  const { _history, ...fields } = entry
-  return { category, entry: fields }
+  const out: Array<Record<string, unknown>> = []
+  for (const row of rows) {
+    const candidates: Array<[string, string]> = [
+      ['title', row.title],
+      ...Object.entries(parseLifeFields(row.fields)),
+      ['notes', row.notes ?? '']
+    ]
+    for (const [field, value] of candidates) {
+      if (!value || !value.toLowerCase().includes(q)) continue
+      out.push({
+        id: row.id,
+        category: row.category,
+        title: row.title,
+        matchedField: field,
+        value: value.slice(0, 200)
+      })
+      break // one hit per record
+    }
+    if (out.length >= LIFE_SEARCH_MAX) break
+  }
+  return {
+    query: q,
+    count: out.length,
+    records: out,
+    note: `Use get_life_record(id) to read a full record. ${SEALED_SECRETS_NOTE}`
+  }
+}
+
+function getLifeRecord(db: Db, input: Record<string, unknown>): unknown {
+  const id = Number(input.id)
+  if (!Number.isInteger(id)) return { error: 'id (integer, from search_life_records) is required' }
+  let row: typeof lifeRecords.$inferSelect | undefined
+  try {
+    row = db.select().from(lifeRecords).where(eq(lifeRecords.id, id)).all()[0]
+  } catch {
+    row = undefined
+  }
+  if (!row) return { error: `No life record with id ${id}` }
+  return {
+    record: {
+      id: row.id,
+      category: row.category,
+      title: row.title,
+      fields: parseLifeFields(row.fields),
+      notes: row.notes,
+      hasSecrets: Boolean(row.hasSecrets),
+      source: row.source
+    },
+    ...(row.hasSecrets ? { note: SEALED_SECRETS_NOTE } : {})
+  }
 }
 
 const MAX_WEEK_TASK_RANGE_DAYS = 31
@@ -986,16 +969,13 @@ function proposeTask(db: Db, input: Record<string, unknown>): unknown {
 /**
  * Execute a single tool call. Read tools return data; propose tools enqueue a
  * pending proposal (never mutate user data). Returns a tagged result so the
- * caller can feed `data` back to the model (or surface `error`). `deps`
- * carries capabilities only the production wiring can provide (the vault
- * reader); when absent those tools fail cleanly.
+ * caller can feed `data` back to the model (or surface `error`).
  */
 export function executeAssistantTool(
   db: Db,
   sqlite: RawSqlite,
   name: string,
-  input: Record<string, unknown>,
-  deps: AssistantToolDeps = {}
+  input: Record<string, unknown>
 ): ToolResult {
   const asResult = (res: unknown): ToolResult => {
     const rec = res as Record<string, unknown>
@@ -1022,10 +1002,10 @@ export function executeAssistantTool(
         return asResult(getLabResults(sqlite, input))
       case 'get_paystubs':
         return asResult(getPaystubs(sqlite, input))
-      case 'search_vault':
-        return asResult(searchVaultTool(deps, input))
-      case 'get_vault_entry':
-        return asResult(getVaultEntry(deps, input))
+      case 'search_life_records':
+        return asResult(searchLifeRecordsTool(db, input))
+      case 'get_life_record':
+        return asResult(getLifeRecord(db, input))
       case 'get_week_tasks': {
         const res = getWeekTasks(db, input) as Record<string, unknown>
         if ('error' in res) return { ok: false, error: String(res.error) }

@@ -429,6 +429,68 @@ export function readContacts(db: Database.Database, q: string, limit = 10): Cont
   }))
 }
 
+export interface LifeRecordsResult {
+  count: number
+  records: Array<Record<string, unknown>>
+}
+
+export const LIFE_RECORDS_MAX = 100
+
+/** `fields` JSON column → plain object (defensive parse). */
+function parseLifeFieldsJson(json: unknown): Record<string, string> {
+  if (typeof json !== 'string' || !json) return {}
+  try {
+    const v = JSON.parse(json)
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Life-record metadata — the plaintext half of the old vault document
+ * categories (financial / identity / medical / legal / foreign-accounts).
+ * Secret field values (account/ID numbers) are structurally absent: they live
+ * in the encrypted vault, which this process cannot reach; `hasSecrets` only
+ * says they exist.
+ */
+export function readLifeRecords(
+  db: Database.Database,
+  opts: { category?: string; q?: string; limit?: number }
+): LifeRecordsResult {
+  if (!hasObject(db, 'life_records')) return { count: 0, records: [] }
+  const limit = Math.max(1, Math.min(Math.floor(opts.limit ?? LIFE_RECORDS_MAX), LIFE_RECORDS_MAX))
+  const category = opts.category?.trim() || null
+  const q = opts.q?.trim().slice(0, 200).toLowerCase() || null
+  const clauses: string[] = []
+  const params: unknown[] = []
+  if (category) {
+    clauses.push('category = ?')
+    params.push(category)
+  }
+  if (q) {
+    clauses.push(
+      "(lower(title) LIKE ? OR lower(coalesce(fields, '')) LIKE ? OR lower(coalesce(notes, '')) LIKE ?)"
+    )
+    params.push(`%${q}%`, `%${q}%`, `%${q}%`)
+  }
+  const where = clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : ''
+  const rows = db
+    .prepare(
+      `SELECT id, category, title, fields, notes, has_secrets AS hasSecrets, source, created_at AS createdAt
+         FROM life_records${where} ORDER BY category, title LIMIT ?`
+    )
+    .all(...params, limit) as Array<Record<string, unknown>>
+  return {
+    count: rows.length,
+    records: rows.map((r) => ({
+      ...r,
+      fields: parseLifeFieldsJson(r.fields),
+      hasSecrets: Boolean(r.hasSecrets)
+    }))
+  }
+}
+
 const MEDICAL_CATEGORIES = new Set([
   'condition',
   'medication',

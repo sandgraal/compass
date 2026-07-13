@@ -2,6 +2,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AssetInput } from './ipc/assets'
 import type { ContactInput } from './ipc/contacts'
+import type { LifeRecordInput } from './ipc/life-records'
 import type { SubscriptionInput } from './ipc/subscriptions'
 import type { UpdaterStatusPayload } from './ipc/updater'
 import type { EntityKind } from './lib/entities'
@@ -279,6 +280,18 @@ const api = {
       ipcRenderer.send('vault:set-content-protection', enabled),
     import1Password: () => ipcRenderer.invoke('vault:import-1password-csv'),
     importGeneticsFile: () => ipcRenderer.invoke('vault:import-genetics-file')
+  },
+
+  // --- Life records (the vault split — plaintext metadata + sealed secrets) ---
+  life: {
+    categories: () => ipcRenderer.invoke('life:categories'),
+    list: (opts?: { category?: string }) => ipcRenderer.invoke('life:list', opts),
+    create: (input: LifeRecordInput) => ipcRenderer.invoke('life:create', input),
+    update: (id: number, updates: LifeRecordInput) =>
+      ipcRenderer.invoke('life:update', id, updates),
+    delete: (id: number) => ipcRenderer.invoke('life:delete', id),
+    getSecrets: (id: number) => ipcRenderer.invoke('life:get-secrets', id),
+    exportCsv: () => ipcRenderer.invoke('life:export-csv')
   },
 
   // --- Checklist ---

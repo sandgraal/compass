@@ -31,15 +31,9 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import type { IpcMain } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
-import {
-  ASSISTANT_TOOLS,
-  VAULT_DOC_CATEGORIES,
-  type VaultReader,
-  executeAssistantTool
-} from '../integrations/assistant-tools'
+import { ASSISTANT_TOOLS, executeAssistantTool } from '../integrations/assistant-tools'
 import {
   type LlmProvider,
   clearAllAssistantKeys,
@@ -58,8 +52,7 @@ import {
   callLlm
 } from '../integrations/llm-client'
 import { semanticSearch } from '../knowledge/embeddings'
-import { decryptBlob, getOrCreateKey } from '../lib/crypto-vault'
-import { KNOWLEDGE_DIR, VAULT_DIR } from '../paths'
+import { KNOWLEDGE_DIR } from '../paths'
 
 const MAX_AGENT_STEPS = 6
 
@@ -71,34 +64,14 @@ How to work:
 - Call a read tool (e.g. get_upcoming, get_week_tasks, get_finance_summary) to ground your answer in real data BEFORE answering. Don't guess at the user's tasks, events, or numbers.
 - For weekly planning ("plan my week"): gather get_week_tasks + get_upcoming + get_weekly_goals + get_habit_streaks (and get_insights for caveats), draft a balanced plan around existing commitments, then propose each concrete task with its own propose_task call on a specific listDate. Summarize the plan and remind the user the tasks await approval.
 - To add or change something, call a propose_* tool. This enqueues a proposal the user must APPROVE in the Compass "Claude Inbox" — it does NOT take effect immediately. After proposing, tell the user plainly that you've queued it for their approval and that nothing has changed yet. Never claim you already made the change.
-- Everything is readable in detail: the full Timeline (search_records / get_timeline), individual transactions (list_transactions), medical records (get_medical_records), quantitative lab/vital results (get_lab_results — cholesterol, troponin, blood pressure, glucose, etc. with actual values/units/reference ranges), contacts (search_contacts / get_contact), paystubs (get_paystubs), and the vault's DOCUMENT categories — financial, identity, medical, legal, foreign-accounts (search_vault / get_vault_entry).
-- The ONLY things you can never see, by design: the vault credentials category (passwords, API keys, tokens — permanently sealed), the vault genetics category (raw 23andMe/AncestryDNA genotype data — permanently sealed, the most sensitive category in the app), and raw GPS coordinates (country-level travel IS on the timeline). If asked for a password or genetic data, say that category is sealed and point the user to the Vault page.
+- Everything is readable in detail: the full Timeline (search_records / get_timeline), individual transactions (list_transactions), medical records (get_medical_records), quantitative lab/vital results (get_lab_results — cholesterol, troponin, blood pressure, glucose, etc. with actual values/units/reference ranges), contacts (search_contacts / get_contact), paystubs (get_paystubs), and life records — financial accounts, identity documents, medical insurance, legal documents, foreign accounts (search_life_records / get_life_record).
+- The ONLY things you can never see, by design: life-record SECRET field values (account/routing numbers, SSN/passport/license numbers, insurance member IDs — sealed in the encrypted vault), the vault credentials category (passwords, API keys, tokens — permanently sealed), the vault genetics category (raw 23andMe/AncestryDNA genotype data — permanently sealed, the most sensitive category in the app), and raw GPS coordinates (country-level travel IS on the timeline). If asked for one of those, say it is sealed and point the user to the Life Records or Vault page.
 - Be concise. Prefer tight bullets. When you cite a number or item, it should come from a tool result, not memory.`
 
 const MAX_QUESTION_LENGTH = 2000
 const MAX_HISTORY_TURNS = 12
 const TOP_K_CONTEXT = 6
 const MIN_SEMANTIC_SCORE = 0.2
-
-/**
- * The production VaultReader for the agent's vault-document tools:
- * decrypt-in-memory per call, nothing cached, nothing written. Defense in
- * depth — the tool layer already rejects `credentials`, and this reader
- * refuses ANY category outside the document allowlist, so a future tool bug
- * can't reach passwords or token blobs through it.
- */
-const vaultReader: VaultReader = {
-  readCategory(category: string): Array<Record<string, unknown>> {
-    if (!(VAULT_DOC_CATEGORIES as readonly string[]).includes(category)) {
-      throw new Error(`Vault category not readable by the assistant: ${category}`)
-    }
-    const path = join(VAULT_DIR, `${category}.enc`)
-    if (!existsSync(path)) return []
-    const json = decryptBlob(readFileSync(path), getOrCreateKey())
-    const parsed: unknown = JSON.parse(json)
-    return Array.isArray(parsed) ? (parsed as Array<Record<string, unknown>>) : []
-  }
-}
 
 let currentController: AbortController | null = null
 
@@ -288,7 +261,7 @@ async function runAgent(
       // Execute each requested tool and feed results back.
       const resultBlocks: AnthropicContentBlock[] = []
       for (const tu of res.toolUses) {
-        const out = executeAssistantTool(db, sqlite, tu.name, tu.input, { vault: vaultReader })
+        const out = executeAssistantTool(db, sqlite, tu.name, tu.input)
         toolCalls.push({ name: tu.name, ok: out.ok })
         if (out.ok) {
           const data = out.data as { proposalId?: string }

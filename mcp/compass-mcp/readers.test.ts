@@ -14,6 +14,7 @@ import {
   normalizeTaskRange,
   readContacts,
   readLabResults,
+  readLifeRecords,
   readMedicalRecords,
   readPaystubs,
   readRecentNotes,
@@ -486,5 +487,47 @@ describe('readPaystubs', () => {
     const res = readPaystubs(db)
     expect(res.paystubs.map((p) => p.netPay)).toEqual([3010, 3000])
     expect(res.totals).toMatchObject({ count: 2, totalNet: 6010, totalGross: 8000 })
+  })
+})
+
+describe('readLifeRecords', () => {
+  function createLifeRecords(): void {
+    db.exec(`
+      CREATE TABLE life_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, category TEXT NOT NULL,
+        title TEXT NOT NULL, fields TEXT, notes TEXT, has_secrets INTEGER NOT NULL DEFAULT 0,
+        source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER
+      );
+    `)
+    db.prepare(
+      `INSERT INTO life_records (external_id, category, title, fields, notes, has_secrets)
+       VALUES ('vault:1', 'identity', 'Passport', '{"documentType":"Passport","expiryDate":"2030-04-01"}', 'renew early', 1),
+              ('manual:2', 'legal', 'Will', '{"documentType":"Will","parties":"Chris"}', NULL, 0)`
+    ).run()
+  }
+
+  it('returns metadata with parsed fields; secrets are only a boolean flag', () => {
+    createLifeRecords()
+    const res = readLifeRecords(db, {})
+    expect(res.count).toBe(2)
+    const passport = res.records.find((r) => r.title === 'Passport')
+    expect(passport).toMatchObject({
+      category: 'identity',
+      fields: { documentType: 'Passport', expiryDate: '2030-04-01' },
+      notes: 'renew early',
+      hasSecrets: true
+    })
+  })
+
+  it('filters by category and q (title/fields/notes)', () => {
+    createLifeRecords()
+    expect(readLifeRecords(db, { category: 'legal' }).count).toBe(1)
+    expect(readLifeRecords(db, { q: 'renew early' }).count).toBe(1)
+    expect(readLifeRecords(db, { q: '2030-04' }).count).toBe(1)
+    expect(readLifeRecords(db, { q: 'chris', category: 'identity' }).count).toBe(0)
+  })
+
+  it('guards the absent table (older DB)', () => {
+    expect(readLifeRecords(db, {})).toEqual({ count: 0, records: [] })
   })
 })

@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { type IpcMain, dialog } from 'electron'
@@ -6,6 +6,7 @@ import { decryptBlob, encryptBlob, getOrCreateKey, writeEncryptedJson } from '..
 import { parseCSV } from '../lib/csv'
 import { detectGenotypeProvider, parseGenotypeSummary } from '../lib/genetics'
 import { VAULT_DIR } from '../paths'
+import { insertLifeRecord } from './life-records'
 
 // Crypto primitives live in `electron/lib/crypto-vault.ts` so the Plaid
 // token vault can share the same master key + AES layout.
@@ -42,19 +43,14 @@ function writeVaultCategory(category: string, entries: unknown[], key: Buffer): 
   writeFileSync(path, blob)
 }
 
+// The vault split (2026-07): the five old "document" categories (financial /
+// identity / medical / legal / foreign-accounts) moved to the plaintext
+// `life_records` table — see electron/ipc/life-records.ts and
+// docs/data-access-policy.md. The vault now holds ONLY what must stay sealed:
+// credentials, genetics, and (as a standalone non-category blob) the
+// record-secrets map for life records. `assertKnownCategory` seals the
+// migrated categories from IPC automatically.
 const VAULT_CATEGORIES = [
-  {
-    id: 'financial',
-    label: 'Financial',
-    icon: 'banknote',
-    description: 'Bank accounts, credit cards, investments'
-  },
-  {
-    id: 'identity',
-    label: 'Identity',
-    icon: 'id-card',
-    description: "SSN, passport, driver's license"
-  },
   {
     id: 'credentials',
     label: 'Credentials',
@@ -62,34 +58,10 @@ const VAULT_CATEGORIES = [
     description: 'Passwords, API keys, license keys'
   },
   {
-    id: 'medical',
-    label: 'Medical',
-    icon: 'heart-pulse',
-    description: 'Insurance, prescriptions, providers'
-  },
-  {
-    id: 'legal',
-    label: 'Legal',
-    icon: 'scale',
-    description: 'Contracts, wills, property documents'
-  },
-  {
-    // Phase 11.2 — foreign financial account identifiers for FBAR/FATCA. Account
-    // numbers + institution addresses are secrets: encrypted at rest like every
-    // vault category, never logged, and EXCLUDED from exports. The FBAR/FATCA
-    // summary computes max-aggregate values WITHOUT these identifiers.
-    id: 'foreign-accounts',
-    label: 'Foreign Accounts',
-    icon: 'globe',
-    description: 'FBAR/FATCA — foreign bank/securities account numbers + institutions'
-  },
-  {
     // Genetics is the most sensitive category in the app — immutable, family-
     // implicating, GINA discrimination risk. It's sealed even from the in-app
-    // assistant (deliberately excluded from VAULT_DOC_CATEGORIES in
-    // electron/integrations/assistant-tools.ts, same as `credentials`) and, like
-    // every vault category, structurally unreachable by MCP. Raw genotype text
-    // never lives in this category's own entries — see
+    // assistant and, like every vault category, structurally unreachable by
+    // MCP. Raw genotype text never lives in this category's own entries — see
     // `vault:import-genetics-file` below, which stores it as a separate
     // standalone encrypted blob and keeps only a summary here.
     id: 'genetics',
@@ -98,73 +70,6 @@ const VAULT_CATEGORIES = [
     description: 'Raw genotype data (23andMe, AncestryDNA) — sealed from AI, vault-only'
   }
 ]
-
-/**
- * Seed (idempotently) a stub financial Vault entry for each detected account.
- * Skips entries whose `institution` + `accountType` already exist — won't
- * overwrite anything the user has filled in. Returns the count of new entries
- * created so callers can tell the user.
- *
- * Designed for the finance folder watcher: when a CSV/XLSX reveals an
- * account we've never seen, we drop a stub the user can complete in Vault
- * (account #, routing, login, security questions, etc.).
- */
-export function seedVaultFromDetectedAccounts(
-  detectedAccounts: Array<{
-    name: string
-    institution: string
-    type: string
-    lastFour?: string
-    sourceFile: string
-  }>
-): number {
-  if (detectedAccounts.length === 0) return 0
-  const key = getOrCreateKey()
-  const existing = readVaultCategory('financial', key) as Record<string, unknown>[]
-  let added = 0
-
-  for (const acct of detectedAccounts) {
-    const accountTypeLabel =
-      acct.type === 'credit'
-        ? 'Credit Card'
-        : acct.type === 'savings'
-          ? 'Savings'
-          : acct.type === 'checking'
-            ? 'Checking'
-            : acct.type
-    // Idempotent match on institution + accountType + lastFour
-    const dupe = existing.find((e) => {
-      if (e.institution !== acct.institution) return false
-      if (e.accountType !== accountTypeLabel) return false
-      if (acct.lastFour && e.accountNumber && String(e.accountNumber).endsWith(acct.lastFour))
-        return true
-      // No lastFour — match on the human name (USAA Checking vs USAA Savings)
-      if (!acct.lastFour) {
-        const accountName = acct.name?.trim()
-        if (accountName && e.notes && String(e.notes).includes(accountName)) return true
-      }
-      return false
-    })
-    if (dupe) continue
-
-    const newEntry = {
-      id: randomBytes(8).toString('hex'),
-      institution: acct.institution,
-      accountType: accountTypeLabel,
-      accountNumber: acct.lastFour ? `••••${acct.lastFour}` : '',
-      routingNumber: '',
-      notes: `Auto-detected from ${acct.sourceFile} — ${acct.name}. Fill in account number, login, and security questions.`,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      _autoSeeded: true
-    }
-    existing.push(newEntry)
-    added++
-  }
-
-  if (added > 0) writeVaultCategory('financial', existing, key)
-  return added
-}
 
 export function registerVaultHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('vault:get-categories', () => VAULT_CATEGORIES)
@@ -258,7 +163,6 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
 
       const key = getOrCreateKey()
       const credEntries = readVaultCategory('credentials', key) as Record<string, unknown>[]
-      const financialEntries = readVaultCategory('financial', key) as Record<string, unknown>[]
 
       let imported = 0
       for (const row of rows) {
@@ -270,15 +174,15 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
         const notes = row.Notes || row.notes || ''
 
         if (type.includes('credit') || type.includes('card')) {
-          const entry = {
-            id: randomBytes(8).toString('hex'),
-            institution: title,
-            accountType: 'Credit Card',
-            notes: [url, notes].filter(Boolean).join('\n'),
-            createdAt: Date.now(),
-            updatedAt: Date.now()
-          }
-          financialEntries.push(entry)
+          // Credit cards are non-secret metadata post-split (1Password's CSV
+          // export never carried card numbers) → a financial life record.
+          insertLifeRecord({
+            externalId: `1password:${randomUUID()}`,
+            category: 'financial',
+            fields: { institution: title, accountType: 'Credit Card' },
+            notes: [url, notes].filter(Boolean).join('\n') || null,
+            source: '1password'
+          })
         } else {
           // Login, Secure Note, API Credential, etc. → credentials category
           const entry = {
@@ -297,7 +201,6 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
       }
 
       writeVaultCategory('credentials', credEntries, key)
-      writeVaultCategory('financial', financialEntries, key)
 
       return { success: true, imported }
     } catch (err) {

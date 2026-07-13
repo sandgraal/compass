@@ -21,6 +21,7 @@ import { serializeIcs } from '../lib/ics'
 import { KNOWLEDGE_DIR } from '../paths'
 import { buildAssetsCsv } from './assets'
 import { buildContactsCsv, buildContactsVcf } from './contacts'
+import { buildLifeRecordsCsv } from './life-records'
 import { buildRecordsCsv } from './records'
 import { buildSubscriptionsCsv } from './subscriptions'
 
@@ -190,6 +191,7 @@ export function registerExportHandlers(ipcMain: IpcMain): void {
       const subsCsv = buildSubscriptionsCsv()
       const assetsCsv = buildAssetsCsv()
       const recordsCsv = buildRecordsCsv()
+      const lifeCsv = buildLifeRecordsCsv()
       writeFileSync(join(root, 'contacts.vcf'), vcf, 'utf-8')
       writeFileSync(join(root, 'contacts.csv'), contactsCsv, 'utf-8')
       writeFileSync(join(root, 'calendar.ics'), ics, 'utf-8')
@@ -197,6 +199,7 @@ export function registerExportHandlers(ipcMain: IpcMain): void {
       writeFileSync(join(root, 'subscriptions.csv'), subsCsv, 'utf-8')
       writeFileSync(join(root, 'assets.csv'), assetsCsv, 'utf-8')
       writeFileSync(join(root, 'records.csv'), recordsCsv, 'utf-8')
+      writeFileSync(join(root, 'life-records.csv'), lifeCsv, 'utf-8')
       const knowledgeCount = copyKnowledgeInto(join(root, 'knowledge'))
 
       const manifest = [
@@ -213,10 +216,13 @@ export function registerExportHandlers(ipcMain: IpcMain): void {
         '  subscriptions.csv  — tracked subscriptions',
         '  assets.csv         — household & assets (property, vehicles, insurance…)',
         '  records.csv        — imported data exports on your unified timeline',
+        '  life-records.csv   — life-record metadata (institutions, documents, dates)',
         `  knowledge/         — ${knowledgeCount} markdown note(s)`,
         '',
-        'NOT included: the encrypted vault (passwords, IDs, account numbers).',
-        'Use Settings → Backup to export the vault under your passphrase.'
+        'NOT included: the encrypted vault — passwords, raw genetics, and the',
+        'secret halves of your life records (account/routing numbers, SSN/passport',
+        'numbers, member IDs). Use Settings → Backup to export those under your',
+        'passphrase.'
       ].join('\n')
       writeFileSync(join(root, 'manifest.txt'), manifest, 'utf-8')
 
@@ -231,6 +237,7 @@ export function registerExportHandlers(ipcMain: IpcMain): void {
           'subscriptions.csv',
           'assets.csv',
           'records.csv',
+          'life-records.csv',
           'manifest.txt'
         ],
         knowledgeCount

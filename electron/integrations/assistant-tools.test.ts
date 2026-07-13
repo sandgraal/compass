@@ -96,8 +96,8 @@ describe('ASSISTANT_TOOLS', () => {
     expect(names).toContain('get_contact')
     expect(names).toContain('get_medical_records')
     expect(names).toContain('get_paystubs')
-    expect(names).toContain('search_vault')
-    expect(names).toContain('get_vault_entry')
+    expect(names).toContain('search_life_records')
+    expect(names).toContain('get_life_record')
     expect(names).toContain('get_week_tasks')
     expect(names).toContain('get_weekly_goals')
     expect(names).toContain('get_habit_streaks')
@@ -109,11 +109,15 @@ describe('ASSISTANT_TOOLS', () => {
   })
 
   it('never offers the credentials vault category in any tool schema', () => {
-    // The enums on search_vault/get_vault_entry are the policy surface the
-    // model sees — credentials must not be selectable.
+    // The enums on search_life_records/get_life_record are the policy surface
+    // the model sees — credentials must not be selectable, and no vault tool
+    // exists at all post-split.
     const json = JSON.stringify(ASSISTANT_TOOLS)
     expect(json).not.toContain("'credentials'")
     expect(json).not.toContain('"credentials"')
+    const names = ASSISTANT_TOOLS.map((t) => t.name)
+    expect(names).not.toContain('search_vault')
+    expect(names).not.toContain('get_vault_entry')
   })
 })
 
@@ -577,101 +581,82 @@ describe('get_paystubs', () => {
   })
 })
 
-describe('search_vault / get_vault_entry (docs open, credentials sealed)', () => {
-  const fakeVault = {
-    calls: [] as string[],
-    readCategory(category: string): Array<Record<string, unknown>> {
-      fakeVault.calls.push(category)
-      if (category === 'identity') {
-        return [
-          {
-            id: 'e1',
-            documentType: 'Passport',
-            name: 'Chris',
-            passportNumber: 'X1234567',
-            _history: [{ passportNumber: 'OLD' }]
-          }
-        ]
-      }
-      return []
-    }
+describe('search_life_records / get_life_record (metadata open, secrets sealed)', () => {
+  function createLifeRecords(): void {
+    sqlite.exec(`
+      CREATE TABLE life_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, category TEXT NOT NULL,
+        title TEXT NOT NULL, fields TEXT, notes TEXT, has_secrets INTEGER NOT NULL DEFAULT 0,
+        source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER
+      );
+    `)
+    sqlite
+      .prepare(
+        `INSERT INTO life_records (external_id, category, title, fields, notes, has_secrets)
+         VALUES ('vault:e1', 'identity', 'Passport',
+                 '{"documentType":"Passport","expiryDate":"2030-04-01"}', 'renew early', 1),
+                ('manual:e2', 'legal', 'Will', '{"documentType":"Will","parties":"Chris"}', NULL, 0)`
+      )
+      .run()
   }
-  beforeEach(() => {
-    fakeVault.calls = []
-  })
 
-  it('search_vault finds document entries by any field value', () => {
-    const res = executeAssistantTool(
-      db(),
-      sqlite,
-      'search_vault',
-      { q: 'x1234567' },
-      { vault: fakeVault }
-    )
+  it('search_life_records finds records by any field value', () => {
+    createLifeRecords()
+    const res = executeAssistantTool(db(), sqlite, 'search_life_records', { q: '2030-04' })
     expect(res.ok).toBe(true)
-    expect(toolData(res).entries[0]).toMatchObject({
+    expect(toolData(res).records[0]).toMatchObject({
       category: 'identity',
-      id: 'e1',
-      matchedField: 'passportNumber'
+      title: 'Passport',
+      matchedField: 'expiryDate'
     })
   })
 
-  it('get_vault_entry returns the full entry minus _history', () => {
-    const res = executeAssistantTool(
-      db(),
-      sqlite,
-      'get_vault_entry',
-      { category: 'identity', id: 'e1' },
-      { vault: fakeVault }
-    )
+  it('search_life_records honors the category filter and matches notes', () => {
+    createLifeRecords()
+    const hit = executeAssistantTool(db(), sqlite, 'search_life_records', {
+      q: 'renew early',
+      category: 'identity'
+    })
+    expect(toolData(hit).count).toBe(1)
+    const miss = executeAssistantTool(db(), sqlite, 'search_life_records', {
+      q: 'renew early',
+      category: 'legal'
+    })
+    expect(toolData(miss).count).toBe(0)
+  })
+
+  it('get_life_record returns the full record; secrets stay structurally absent', () => {
+    createLifeRecords()
+    const found = toolData(
+      executeAssistantTool(db(), sqlite, 'search_life_records', { q: 'passport' })
+    ).records[0] as { id: number }
+    const res = executeAssistantTool(db(), sqlite, 'get_life_record', { id: found.id })
     expect(res.ok).toBe(true)
-    expect(toolData(res).entry).toEqual({
-      id: 'e1',
-      documentType: 'Passport',
-      name: 'Chris',
-      passportNumber: 'X1234567'
+    expect(toolData(res).record).toMatchObject({
+      category: 'identity',
+      title: 'Passport',
+      fields: { documentType: 'Passport', expiryDate: '2030-04-01' },
+      notes: 'renew early',
+      hasSecrets: true
     })
-    expect('_history' in toolData(res).entry).toBe(false)
+    // The secret VALUES are not in the DB at all — the result can only say they exist.
+    expect(toolData(res).record.fields).not.toHaveProperty('number')
+    expect(String(toolData(res).note)).toContain('sealed')
   })
 
-  it('REFUSES the credentials category with an explanatory error, never touching the reader', () => {
-    for (const [tool, input] of [
-      ['search_vault', { q: 'netflix', category: 'credentials' }],
-      ['get_vault_entry', { category: 'credentials', id: 'c1' }]
-    ] as const) {
-      const res = executeAssistantTool(db(), sqlite, tool, input, { vault: fakeVault })
-      expect(res.ok).toBe(false)
-      expect(!res.ok && res.error).toContain('sealed')
-    }
-    // The reader was never asked for credentials — the gate is at the tool boundary.
-    expect(fakeVault.calls).not.toContain('credentials')
+  it('rejects an unknown category and a bad id', () => {
+    createLifeRecords()
+    expect(
+      executeAssistantTool(db(), sqlite, 'search_life_records', { q: 'x', category: 'attic' }).ok
+    ).toBe(false)
+    expect(executeAssistantTool(db(), sqlite, 'get_life_record', { id: 'nope' }).ok).toBe(false)
+    expect(executeAssistantTool(db(), sqlite, 'get_life_record', { id: 999 }).ok).toBe(false)
   })
 
-  it('a full-vault search never queries the credentials category', () => {
-    executeAssistantTool(db(), sqlite, 'search_vault', { q: 'anything' }, { vault: fakeVault })
-    expect(fakeVault.calls).toEqual([
-      'financial',
-      'identity',
-      'medical',
-      'legal',
-      'foreign-accounts'
-    ])
-  })
-
-  it('fails cleanly when no vault reader is wired (tests, non-production contexts)', () => {
-    const res = executeAssistantTool(db(), sqlite, 'search_vault', { q: 'x' })
-    expect(res).toEqual({ ok: false, error: 'Vault unavailable in this context.' })
-  })
-
-  it('rejects an unknown category', () => {
-    const res = executeAssistantTool(
-      db(),
-      sqlite,
-      'search_vault',
-      { q: 'x', category: 'attic' },
-      { vault: fakeVault }
-    )
-    expect(res.ok).toBe(false)
+  it('degrades cleanly when the table is absent (older DB)', () => {
+    const res = executeAssistantTool(db(), sqlite, 'search_life_records', { q: 'x' })
+    expect(res.ok).toBe(true)
+    expect(toolData(res).count).toBe(0)
   })
 })
 

@@ -624,8 +624,8 @@ export default function Finance(): JSX.Element {
           <p className="text-foreground/80">{detectedAccounts.join(' · ')}</p>
           {vaultSeeded > 0 && (
             <p className="text-muted-foreground mt-1">
-              Created {vaultSeeded} stub{vaultSeeded > 1 ? 's' : ''} in Vault → Financial. Open the
-              Vault to fill in account numbers.
+              Created {vaultSeeded} stub{vaultSeeded > 1 ? 's' : ''} in Life Records → Financial.
+              Open Life Records to fill in the details (account numbers stay encrypted).
             </p>
           )}
         </div>

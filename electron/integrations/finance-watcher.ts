@@ -17,7 +17,7 @@ import type { BrowserWindow } from 'electron'
 import { Notification } from 'electron'
 import { getDb } from '../db/client'
 import * as schema from '../db/schema'
-import { seedVaultFromDetectedAccounts } from '../ipc/vault'
+import { seedLifeRecordsFromDetectedAccounts } from '../ipc/life-records'
 import { type DetectedAccount, ingestFinanceFiles } from './finance'
 
 // PDF support added Phase-4 follow-up: many banks (USAA, AMEX, Chase, BofA,
@@ -68,7 +68,7 @@ async function flushQueue(): Promise<void> {
     )
 
     // Seed stub Vault entries for any newly-detected accounts (idempotent)
-    const vaultSeeded = seedVaultFromDetectedAccounts(detectedAccounts)
+    const vaultSeeded = seedLifeRecordsFromDetectedAccounts(detectedAccounts)
 
     // Notify the renderer to refresh
     emit('ingest-complete', { result, detectedAccounts, vaultSeeded })
@@ -262,7 +262,7 @@ export async function ingestWatchedFolderNow(): Promise<{
     subcategory: r.subcategory
   }))
   const out = await ingestFinanceFiles(db, files, ruleArgs, watchedFolder ?? undefined)
-  const vaultSeeded = seedVaultFromDetectedAccounts(out.detectedAccounts)
+  const vaultSeeded = seedLifeRecordsFromDetectedAccounts(out.detectedAccounts)
   const payload = { ...out, vaultSeeded }
   emit('ingest-complete', payload)
   return payload
