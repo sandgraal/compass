@@ -143,8 +143,9 @@ export const COMMITS_SPEND_MIN_DELTA = 40
 
 const EXCLUDED_ANOMALY_CATEGORIES = new Set(['Transfers', 'Transfer', 'Uncategorized'])
 
-/** Discretionary categories the sleep×spend detector watches (impulse-sensitive). */
-const DISCRETIONARY_CATEGORIES = new Set([
+/** Discretionary categories the sleep×spend detector watches (impulse-sensitive).
+ *  Exported so the discovery engine's spend series stays in lockstep. */
+export const DISCRETIONARY_CATEGORIES = new Set([
   'Dining',
   'Restaurants',
   'Food & Drink',

@@ -1244,6 +1244,109 @@ declare global {
             caveats: string[]
           }>
         }>
+        discovery(): Promise<{
+          generatedAt: string
+          weekly: Array<{
+            id: string
+            window: 'weekly' | 'monthly'
+            x: { id: string; label: string; unit: string | null }
+            y: { id: string; label: string; unit: string | null }
+            rho: number
+            n: number
+            sentence: string
+            points: Array<{ bucket: string; x: number; y: number }>
+          }>
+          monthly: Array<{
+            id: string
+            window: 'weekly' | 'monthly'
+            x: { id: string; label: string; unit: string | null }
+            y: { id: string; label: string; unit: string | null }
+            rho: number
+            n: number
+            sentence: string
+            points: Array<{ bucket: string; x: number; y: number }>
+          }>
+          scanned: { weekly: number; monthly: number }
+          events: Array<{
+            kind: 'medical' | 'travel'
+            label: string
+            date: string
+            compareLabel: string
+            deltas: Array<{
+              id: string
+              label: string
+              unit: string | null
+              before: number
+              after: number
+              pctChange: number
+            }>
+          }>
+        }>
+        list(): Promise<{
+          generatedAt: string
+          insights: Array<{
+            key: string
+            kind:
+              | 'spending-anomaly'
+              | 'uncategorized-spend'
+              | 'habit-slippage'
+              | 'stale-notes'
+              | 'goal-off-track'
+              | 'renewal-due'
+              | 'paycheck-anomaly'
+              | 'utility-spike'
+              | 'unused-subscription'
+              | 'sleep-vs-spend'
+              | 'savings-rate'
+              | 'medical-out-of-pocket'
+              | 'dev-productivity-vs-recovery'
+              | 'calendar-load-vs-habits'
+              | 'commits-vs-calendar'
+              | 'calendar-vs-spend'
+              | 'commits-vs-spend'
+              | 'series-anomaly'
+            severity: 'info' | 'warn'
+            title: string
+            detail: string
+            route: string
+            firstSeen: number
+            pinned: boolean
+            isNew: boolean
+            dismissedAt: number | null
+          }>
+          dismissed: Array<{
+            key: string
+            kind:
+              | 'spending-anomaly'
+              | 'uncategorized-spend'
+              | 'habit-slippage'
+              | 'stale-notes'
+              | 'goal-off-track'
+              | 'renewal-due'
+              | 'paycheck-anomaly'
+              | 'utility-spike'
+              | 'unused-subscription'
+              | 'sleep-vs-spend'
+              | 'savings-rate'
+              | 'medical-out-of-pocket'
+              | 'dev-productivity-vs-recovery'
+              | 'calendar-load-vs-habits'
+              | 'commits-vs-calendar'
+              | 'calendar-vs-spend'
+              | 'commits-vs-spend'
+              | 'series-anomaly'
+            severity: 'info' | 'warn'
+            title: string
+            detail: string
+            route: string
+            firstSeen: number
+            pinned: boolean
+            isNew: boolean
+            dismissedAt: number | null
+          }>
+        }>
+        dismiss(key: string, dismissed?: boolean): Promise<{ success: boolean }>
+        pin(key: string, pinned: boolean): Promise<{ success: boolean }>
       }
       documents: {
         import(): Promise<DocumentsImportResult>

@@ -26,6 +26,8 @@ import { registerFinanceHandlers } from './ipc/finance'
 import { registerHabitsHandlers } from './ipc/habits'
 import { registerHealthHandlers } from './ipc/health'
 import { registerInsightsHandlers } from './ipc/insights'
+import { registerDiscoveryHandlers } from './ipc/insights-discovery'
+import { registerInsightLifecycleHandlers } from './ipc/insights-lifecycle'
 import { registerKnotHandlers } from './ipc/knot'
 import { registerKnowledgeHandlers } from './ipc/knowledge'
 import { registerLocationHandlers } from './ipc/location'
@@ -271,6 +273,8 @@ app.whenReady().then(async () => {
   registerQuickCaptureHandlers(ipcMain)
   registerObsidianHandlers(ipcMain)
   registerInsightsHandlers(ipcMain)
+  registerDiscoveryHandlers(ipcMain)
+  registerInsightLifecycleHandlers(ipcMain)
 
   // Toggle content protection when navigating to/from vault
   ipcMain.on('vault:set-content-protection', (_event, enabled: boolean) => {

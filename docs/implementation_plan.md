@@ -608,6 +608,23 @@ Apple Data & Privacy, Signal/Telegram), and full CRED beyond the SSA spike (10.6
     `ReadinessPanel` that replaces the old blind empty state with per-pair "what's missing" detail. Also fixed a
     `compass_health_summary`/`compass_income_summary` TypeError in the MCP (epoch-ms passed to the date-only
     `localYmd`) while extracting `readHealthSummary` from `index.ts` into `readers.ts`.
+  - [x] **Discovery engine, event studies, and an insight lifecycle** (`claude/cross-domain-correlation-triggers`,
+    cont.). The generic successor to the hand-picked pairs above: `insights:discovery`
+    (`electron/ipc/insights-discovery.ts`) derives a ~20-metric family-tagged registry (steps/active-energy/fitness,
+    browsing/searches/maps, YouTube/Netflix/Prime/Kindle/Alexa, texts/calls/emails, calendar, coding, Amazon
+    orders/PayPal, total/discretionary spend) from the `records` spine + finance, buckets weekly (last 13 complete
+    weeks) and monthly (full archive), and Spearman-scans every cross-family pair with honesty gates (n-aware `|ρ|`
+    bar ≈ p<0.01, split-half sign stability, count zero-fill confined to each series' own active range) — top 6
+    findings per window. The same registry powers **event studies**: anchors are medical
+    encounters/procedures (grouped into episodes) and travel segments ≥5 days within the last 400 days; per-day
+    metric means 28 days before vs. after (medical) or before vs. during (travel), surfacing ≥25% deltas. New
+    table **`insight_log`** (migration `0039`) plus `electron/ipc/insights-lifecycle.ts` (`insights:list` /
+    `insights:dismiss` / `insights:pin`) give "Worth a look" a memory — pinned-first sort, dismissed-separated,
+    an `isNew` badge since the last visit (`app_settings` `insights.lastSeenAt`) — and add a `series-anomaly`
+    insight kind (weekly z-score ≥2 + ≥25% relative change vs. trailing baseline per registry metric).
+    `ProactiveInsights.tsx` (Dashboard + `/insights`) now consumes `insights:list` with dismiss/pin/NEW-badge UI
+    and a "show dismissed" footer; `Insights.tsx` gains "Discovered relationships" scatter charts and an "Around
+    your life events" section. The old `insights:get` is unchanged — still the tool the in-app assistant/MCP use.
 - [x] **10.8 Location → Residency autopilot** ✅ *shipped* — the first **completes-a-feature** source: a dropped
   location export (OwnTracks `.rec`/`.json`, GPX, Google `Records.json` streamed) → raw points in a dedicated
   `location_points` table (migration `0029`, BOTH paths) → an offline point-in-polygon projector
