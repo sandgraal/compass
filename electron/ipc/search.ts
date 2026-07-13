@@ -2,27 +2,34 @@
  * Global search — the ⌘K surface over EVERYTHING, per the data-access
  * policy (docs/data-access-policy.md): knowledge bodies, the records
  * spine (FTS — timeline, finance, medical, habits, tasks-as-records,
- * trips, paystubs, facts…), checklist titles, contacts, and vault
- * BODIES for the document categories.
+ * trips, paystubs, facts…), checklist titles, contacts, life records
+ * (the plaintext metadata half of the old vault document categories),
+ * and vault credential TITLES.
  *
  * Returns a single ranked list the renderer can fan out into typed
  * sections without doing the cross-domain JOIN itself.
  *
- * The two walls that remain:
+ * The walls that remain (post vault-split):
  *  - vault `credentials` stays title-only (the `service` label). Passwords,
  *    API keys, and usernames are access keys, not life data — indexing
- *    them is leak risk with zero search value.
- *  - vault bodies are decrypted PER QUERY in the main process and never
- *    written to any on-disk index; only the matched snippet crosses the
- *    IPC boundary.
+ *    them is leak risk with zero search value. (`genetics` is not
+ *    searchable at all.)
+ *  - the remaining vault blobs are decrypted PER QUERY in the main process
+ *    and never written to any on-disk index; life-record SECRET field
+ *    values live in `record-secrets.enc` and are not searchable.
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, extname, join, relative } from 'node:path'
-import { like } from 'drizzle-orm'
+import { like, or } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
-import { checklistItems, contacts, knowledgeFiles as knowledgeFilesTable } from '../db/schema'
+import {
+  checklistItems,
+  contacts,
+  knowledgeFiles as knowledgeFilesTable,
+  lifeRecords
+} from '../db/schema'
 import { decryptBlob, getOrCreateKey } from '../lib/crypto-vault'
 import { searchDocuments } from '../lib/documents-search'
 import { searchRecords } from '../lib/records-search'
@@ -83,48 +90,34 @@ export type GlobalSearchHit =
       snippet: string
       score: number
     }
+  | {
+      kind: 'life'
+      id: number
+      category: string
+      title: string
+      snippet?: string
+      score: number
+    }
 
 const MAX_RESULTS = 60
 const MAX_PER_KIND = 12
 const MAX_QUERY_LENGTH = 200
 
-// Same six categories the vault knows about; mirrored here so we don't
-// have to take a dependency on `electron/ipc/vault.ts` (which would
-// pull in its own dialog-using imports).
-const VAULT_CATEGORIES = [
-  'financial',
-  'identity',
-  'credentials',
-  'medical',
-  'legal',
-  'foreign-accounts'
-]
+// Post vault-split, `credentials` is the only searchable vault category
+// (the old document categories live in `life_records`; `genetics` and the
+// `record-secrets` blob are not searchable at all). Mirrored here so we
+// don't take a dependency on `electron/ipc/vault.ts` (which would pull in
+// its own dialog-using imports).
+const VAULT_CATEGORIES = ['credentials']
 
-// Document categories whose FULL bodies are searchable (decrypt-per-query,
-// nothing persisted). `credentials` is deliberately absent — it stays
-// title-only below.
-const OPEN_VAULT_CATEGORIES = new Set([
-  'financial',
-  'identity',
-  'medical',
-  'legal',
-  'foreign-accounts'
-])
-
-// Per-category label fields used as the hit TITLE. For the open categories
-// these are just the preferred display labels (body fields are searchable
-// too); for `credentials` this allowlist is the ENTIRE searchable surface.
+// Per-category label fields used as the hit TITLE. For `credentials` this
+// allowlist is the ENTIRE searchable surface.
 //
 // `username` is excluded from `credentials` even though it's the most
 // natural alternate label, because usernames are sensitive in their own
 // right (think: linked email addresses, identifiers used elsewhere).
 const TITLE_FIELDS_BY_CATEGORY: Record<string, string[]> = {
-  financial: ['institution', 'accountType'],
-  identity: ['documentType', 'name'],
-  credentials: ['service'],
-  medical: ['provider', 'condition'],
-  legal: ['title', 'documentType'],
-  'foreign-accounts': ['institution', 'country']
+  credentials: ['service']
 }
 
 function pickTitle(category: string, entry: Record<string, unknown>): string | null {
@@ -215,9 +208,9 @@ function matchWindow(value: string, lq: string): string {
 
 function searchVault(query: string): GlobalSearchHit[] {
   // Decrypt-per-query in the main process; nothing is ever written to an
-  // on-disk index. Open (document) categories are body-searchable per the
-  // data-access policy; `credentials` remains title-only — passwords and
-  // API keys never cross the IPC boundary, not even as snippets.
+  // on-disk index. Post vault-split only `credentials` remains, and it is
+  // title-only — passwords and API keys never cross the IPC boundary, not
+  // even as snippets.
   const lq = query.toLowerCase()
   const hits: GlobalSearchHit[] = []
   let key: Buffer
@@ -239,31 +232,10 @@ function searchVault(query: string): GlobalSearchHit[] {
         const id = entry.id
         if (typeof id !== 'string') continue
         const title = pickTitle(category, entry)
-
-        // Title (label) match — works for every category, credentials included.
+        // Title (label) match only — the entry body is never scanned.
         const titleScore = title === null ? 0 : scoreMatch(title, lq)
         if (titleScore > 0 && title !== null) {
           hits.push({ kind: 'vault', category, id, title, score: titleScore })
-          continue
-        }
-
-        // Body match — open categories only. Scan every string field of the
-        // entry and return the matched field + a snippet window.
-        if (!OPEN_VAULT_CATEGORIES.has(category)) continue
-        for (const [field, value] of Object.entries(entry)) {
-          if (field === 'id' || typeof value !== 'string' || !value.trim()) continue
-          const score = scoreMatch(value, lq)
-          if (score === 0) continue
-          hits.push({
-            kind: 'vault',
-            category,
-            id,
-            title: title ?? `${category} entry`,
-            snippet: matchWindow(value, lq),
-            matchedField: field,
-            score
-          })
-          break // one hit per entry — the first matching field wins
         }
       }
     } catch {
@@ -374,6 +346,67 @@ function searchContacts(query: string): GlobalSearchHit[] {
 }
 
 /**
+ * Life records — the plaintext metadata half of the old vault document
+ * categories. Full-body LIKE over title/fields/notes (contacts idiom; the
+ * table is small). Secret field values live in `record-secrets.enc` and are
+ * structurally absent from what this scans.
+ */
+function searchLifeRecords(query: string): GlobalSearchHit[] {
+  const lq = query.toLowerCase()
+  const db = getDb()
+  let rows: Array<{
+    id: number
+    category: string
+    title: string
+    fields: string | null
+    notes: string | null
+  }>
+  try {
+    rows = db
+      .select({
+        id: lifeRecords.id,
+        category: lifeRecords.category,
+        title: lifeRecords.title,
+        fields: lifeRecords.fields,
+        notes: lifeRecords.notes
+      })
+      .from(lifeRecords)
+      .where(
+        or(
+          like(lifeRecords.title, `%${lq}%`),
+          like(lifeRecords.fields, `%${lq}%`),
+          like(lifeRecords.notes, `%${lq}%`)
+        )
+      )
+      .limit(MAX_PER_KIND * 4)
+      .all()
+  } catch {
+    return [] // table absent on an odd/old DB
+  }
+  const hits: GlobalSearchHit[] = []
+  for (const r of rows) {
+    const titleScore = scoreMatch(r.title, lq)
+    if (titleScore > 0) {
+      hits.push({ kind: 'life', id: r.id, category: r.category, title: r.title, score: titleScore })
+      continue
+    }
+    const haystack = [r.fields ?? '', r.notes ?? ''].join(' ')
+    const bodyScore = scoreMatch(haystack, lq)
+    if (bodyScore === 0) continue
+    hits.push({
+      kind: 'life',
+      id: r.id,
+      category: r.category,
+      title: r.title,
+      snippet: matchWindow(haystack, lq),
+      score: bodyScore
+    })
+  }
+  hits.sort((a, b) => b.score - a.score)
+  return hits.slice(0, MAX_PER_KIND)
+}
+
+/**
  * The documents store via FTS — finds a document by a word inside the file
  * (extracted PDF / text), not just its title. try/catch yields [] when
  * documents_fts is absent (odd/old DB), matching `searchRecordsSpine`.
@@ -415,8 +448,9 @@ export function registerSearchHandlers(ipcMain: IpcMain): void {
     const records = searchRecordsSpine(trimmed)
     const contactHits = searchContacts(trimmed)
     const docs = searchDocumentsHits(trimmed)
+    const life = searchLifeRecords(trimmed)
 
-    const all = [...knowledge, ...vault, ...tasks, ...records, ...contactHits, ...docs]
+    const all = [...knowledge, ...vault, ...tasks, ...records, ...contactHits, ...docs, ...life]
     all.sort((a, b) => b.score - a.score)
     return {
       hits: all.slice(0, MAX_RESULTS),
@@ -426,7 +460,8 @@ export function registerSearchHandlers(ipcMain: IpcMain): void {
         tasks: tasks.length,
         records: records.length,
         contacts: contactHits.length,
-        documents: docs.length
+        documents: docs.length,
+        life: life.length
       }
     }
   })
@@ -449,5 +484,6 @@ export const _internal = {
   searchRecordsSpine,
   searchContacts,
   searchDocumentsHits,
+  searchLifeRecords,
   scoreMatch
 }

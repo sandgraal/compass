@@ -5,6 +5,7 @@ import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { BrowserWindow, app, ipcMain, nativeTheme, shell } from 'electron'
 import { startCronJobs } from './cron'
 import { getDb, getRawSqlite, initDb } from './db/client'
+import { runVaultLifeMigrationIfNeeded } from './integrations/vault-life-migration'
 import { registerArcadiaHandlers } from './ipc/arcadia'
 import { registerArgyleHandlers } from './ipc/argyle'
 import { registerAssetsHandlers } from './ipc/assets'
@@ -30,6 +31,7 @@ import { registerDiscoveryHandlers } from './ipc/insights-discovery'
 import { registerInsightLifecycleHandlers } from './ipc/insights-lifecycle'
 import { registerKnotHandlers } from './ipc/knot'
 import { registerKnowledgeHandlers } from './ipc/knowledge'
+import { registerLifeRecordsHandlers } from './ipc/life-records'
 import { registerLocationHandlers } from './ipc/location'
 import { registerMedicalHandlers } from './ipc/medical'
 import { registerMonthlyRollupHandlers } from './ipc/monthly-rollup'
@@ -211,6 +213,19 @@ app.whenReady().then(async () => {
       } catch (err) {
         console.error('[main] spine expansion backfill failed:', err)
       }
+      // One-shot vault split: move the old vault document categories into the
+      // plaintext life_records table (needs safeStorage + DB — can't be a
+      // drizzle migration). A failure leaves the gate unset → retried next boot.
+      try {
+        const res = runVaultLifeMigrationIfNeeded(getRawSqlite())
+        if (res.ran && res.categoriesProcessed > 0) {
+          console.log(
+            `[main] vault → life records migration (${res.migrated} records, ${res.secretsKept} secret fields kept in vault)`
+          )
+        }
+      } catch (err) {
+        console.error('[main] vault life-records migration failed (will retry next boot):', err)
+      }
       try {
         const { built, count } = ensureDerivedEntities(getDb())
         if (built) console.log(`[main] derived-entity cache built (${count} entities)`)
@@ -229,6 +244,7 @@ app.whenReady().then(async () => {
   registerSyncHandlers(ipcMain)
   registerKnowledgeHandlers(ipcMain)
   registerVaultHandlers(ipcMain)
+  registerLifeRecordsHandlers(ipcMain)
   registerSettingsHandlers(ipcMain)
   registerFinanceHandlers(ipcMain)
   registerHabitsHandlers(ipcMain)

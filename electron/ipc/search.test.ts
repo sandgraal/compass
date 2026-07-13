@@ -1,10 +1,11 @@
 /**
  * Global-search tests — the scoring math plus the data-access-policy walls:
- * vault DOCUMENT categories are body-searchable (decrypt-per-query, mocked
- * here as JSON passthrough), while `credentials` stays title-only — a
- * password value must never come back through search. The records-spine and
- * contacts domains run against a real in-memory SQLite with the same FTS
- * schema `db/client.ts` creates.
+ * post vault-split, `credentials` is the only searchable vault category and
+ * it stays title-only — a password value must never come back through
+ * search — while life records (the plaintext successors of the old document
+ * categories) are body-searchable straight from the DB. The records-spine,
+ * contacts, and life-records domains run against a real in-memory SQLite
+ * with the same schema `db/client.ts` creates.
  */
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -40,8 +41,14 @@ vi.mock('../db/client', () => ({
 
 import { _internal } from './search'
 
-const { scoreMatch, searchVault, searchRecordsSpine, searchContacts, searchDocumentsHits } =
-  _internal
+const {
+  scoreMatch,
+  searchVault,
+  searchRecordsSpine,
+  searchContacts,
+  searchDocumentsHits,
+  searchLifeRecords
+} = _internal
 
 function writeVaultCategory(category: string, entries: Array<Record<string, unknown>>): void {
   writeFileSync(join(dirs.vault, `${category}.enc`), JSON.stringify(entries))
@@ -76,6 +83,11 @@ beforeEach(() => {
     );
     CREATE VIRTUAL TABLE documents_fts USING fts5(title, extracted_text, content='documents', content_rowid='id', tokenize='unicode61 remove_diacritics 2');
     CREATE TRIGGER documents_ai AFTER INSERT ON documents BEGIN INSERT INTO documents_fts(rowid,title,extracted_text) VALUES (new.id,new.title,new.extracted_text); END;
+    CREATE TABLE life_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, category TEXT NOT NULL,
+      title TEXT NOT NULL, fields TEXT, notes TEXT, has_secrets INTEGER NOT NULL DEFAULT 0,
+      source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER
+    );
   `)
 })
 
@@ -131,41 +143,69 @@ describe('scoreMatch', () => {
   })
 })
 
-describe('searchVault — document categories are body-searchable', () => {
-  it('finds an identity entry by a body field value, with matched field + snippet', () => {
+describe('searchVault — post-split, MIGRATED category blobs are never searched', () => {
+  it('ignores a leftover identity blob entirely (life records own that data now)', () => {
     writeVaultCategory('identity', [
       { id: 'e1', documentType: 'Passport', name: 'Chris', passportNumber: 'X1234567' }
     ])
-    const hits = searchVault('x1234567')
+    expect(searchVault('x1234567')).toHaveLength(0)
+    expect(searchVault('passport')).toHaveLength(0)
+  })
+})
+
+describe('searchLifeRecords — metadata is body-searchable, secrets structurally absent', () => {
+  function insertLife(row: {
+    externalId: string
+    category: string
+    title: string
+    fields?: Record<string, string>
+    notes?: string
+  }): void {
+    sqlite
+      .prepare(
+        'INSERT INTO life_records (external_id, category, title, fields, notes) VALUES (?,?,?,?,?)'
+      )
+      .run(
+        row.externalId,
+        row.category,
+        row.title,
+        row.fields ? JSON.stringify(row.fields) : null,
+        row.notes ?? null
+      )
+  }
+
+  it('finds a record by its title (no snippet on a title match)', () => {
+    insertLife({ externalId: 'v:1', category: 'identity', title: 'Passport' })
+    const hits = searchLifeRecords('passport')
     expect(hits).toHaveLength(1)
-    expect(hits[0]).toMatchObject({
-      kind: 'vault',
-      category: 'identity',
-      id: 'e1',
-      title: 'Passport',
-      matchedField: 'passportNumber'
+    expect(hits[0]).toMatchObject({ kind: 'life', category: 'identity', title: 'Passport' })
+    expect(hits[0].kind === 'life' && hits[0].snippet).toBeUndefined()
+  })
+
+  it('finds a record by a field value or notes, with a snippet window', () => {
+    insertLife({
+      externalId: 'v:2',
+      category: 'legal',
+      title: 'Will',
+      fields: { parties: 'Chris & Jane' },
+      notes: 'stored in the fireproof box'
     })
-    expect(hits[0].kind === 'vault' && hits[0].snippet).toContain('X1234567')
+    const byField = searchLifeRecords('jane')
+    expect(byField).toHaveLength(1)
+    expect(byField[0].kind === 'life' && byField[0].snippet).toContain('Jane')
+    expect(searchLifeRecords('fireproof')).toHaveLength(1)
   })
 
-  it('still finds entries by their title label (no snippet on a title match)', () => {
-    writeVaultCategory('identity', [{ id: 'e1', documentType: 'Passport', name: 'Chris' }])
-    const hits = searchVault('passport')
-    expect(hits).toHaveLength(1)
-    expect(hits[0].kind === 'vault' && hits[0].snippet).toBeUndefined()
-  })
-
-  it('searches foreign-accounts (previously missing from the category list entirely)', () => {
-    writeVaultCategory('foreign-accounts', [
-      { id: 'f1', institution: 'BAC San José', country: 'CR', accountNumber: 'CR99-0001-4321' }
-    ])
-    expect(searchVault('bac')).toHaveLength(1) // title field
-    const byNumber = searchVault('cr99')
-    expect(byNumber).toHaveLength(1) // body field
-    expect(byNumber[0]).toMatchObject({
+  it('searches foreign-account metadata but can never see an account number', () => {
+    // The secret VALUE is not in the table by construction — only the metadata is.
+    insertLife({
+      externalId: 'v:3',
       category: 'foreign-accounts',
-      matchedField: 'accountNumber'
+      title: 'BAC San José',
+      fields: { country: 'CR', accountType: 'bank' }
     })
+    expect(searchLifeRecords('bac')).toHaveLength(1)
+    expect(searchLifeRecords('cr99')).toHaveLength(0)
   })
 })
 

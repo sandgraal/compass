@@ -8,6 +8,7 @@ import {
   type GmailRow,
   type HabitCheckRow,
   type LabResultRow,
+  type LifeRecordProjRow,
   type LinearRow,
   type MedicalRow,
   type OuraRow,
@@ -24,6 +25,7 @@ import {
   projectGmail,
   projectHabitChecks,
   projectLabResults,
+  projectLifeRecords,
   projectLinear,
   projectMedicalRecords,
   projectOuraMetrics,
@@ -618,5 +620,48 @@ describe('projectSnapshotFacts', () => {
   it('skips rows without a dedup hash or value', () => {
     expect(projectSnapshotFacts([fact({ dedupHash: '' })])).toHaveLength(0)
     expect(projectSnapshotFacts([fact({ value: '  ' })])).toHaveLength(0)
+  })
+})
+
+describe('projectLifeRecords', () => {
+  const life = (p: Partial<LifeRecordProjRow> = {}): LifeRecordProjRow => ({
+    externalId: 'vault:l1',
+    category: 'legal',
+    title: 'Will',
+    fields: { documentType: 'Will', parties: 'Chris', date: '2024-05-01' },
+    notes: 'fireproof box',
+    createdAt: 1700000000000,
+    ...p
+  })
+
+  it('maps a record with source life, type = category, dated by the category date field', () => {
+    const [r] = projectLifeRecords([life()])
+    expect(r.source).toBe('life')
+    expect(r.type).toBe('legal')
+    expect(r.title).toBe('Will')
+    expect(r.naturalKey).toBe('vault:l1')
+    expect(r.body).toContain('Chris')
+    // fields.date wins over createdAt so a migrated will sits at its real date.
+    expect(new Date(r.occurredAt as number).getFullYear()).toBe(2024)
+  })
+
+  it('falls back to createdAt when no field date parses', () => {
+    const [r] = projectLifeRecords([life({ fields: { documentType: 'Deed' } })])
+    expect(r.occurredAt).toBe(1700000000000)
+  })
+
+  it('is structurally secret-free: the payload carries only the plaintext row', () => {
+    const [r] = projectLifeRecords([
+      life({ category: 'financial', fields: { institution: 'USAA', lastFour: '1003' } })
+    ])
+    const json = JSON.stringify(r)
+    // The projector input CANNOT contain secret keys — they never enter the table.
+    expect(json).not.toContain('accountNumber')
+    expect(json).not.toContain('routingNumber')
+  })
+
+  it('skips rows without an externalId or title', () => {
+    expect(projectLifeRecords([life({ externalId: '' })])).toHaveLength(0)
+    expect(projectLifeRecords([life({ title: '  ' })])).toHaveLength(0)
   })
 })

@@ -145,6 +145,7 @@ export function Sidebar(): JSX.Element {
         { label: 'Knowledge Base', to: '/knowledge', icon: <BookOpen size={18} /> },
         { label: 'Ask Compass', to: '/ask', icon: <Sparkles size={18} /> },
         { label: 'Claude Inbox', to: '/claude-inbox', icon: <Inbox size={18} /> },
+        { label: 'Life Records', to: '/life-records', icon: <IdCard size={18} /> },
         { label: 'Vault', to: '/vault', icon: <ShieldCheck size={18} /> }
       ]
     },

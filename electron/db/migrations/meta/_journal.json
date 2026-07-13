@@ -281,6 +281,13 @@
       "when": 1783948359556,
       "tag": "0039_insight_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1783966721626,
+      "tag": "0040_black_cobalt_man",
+      "breakpoints": true
     }
   ]
 }

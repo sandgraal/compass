@@ -308,24 +308,31 @@ describe('searchVault', () => {
   }
 
   it('a title match projects the label only — other fields stay out of that hit', async () => {
-    writeVaultFile('financial')
+    // Post vault-split, `credentials` is the only searchable vault category.
+    writeVaultFile('credentials')
     decryptBlobMock.mockReturnValue(
-      JSON.stringify([
-        { id: 'v1', institution: 'Chase Sapphire', accountNumber: '4111-1111-1111-1111' }
-      ])
+      JSON.stringify([{ id: 'v1', service: 'Chase Sapphire', password: '4111-1111-1111-1111' }])
     )
     const { searchVault } = await internal()
     const hits = searchVault('chase') as Array<Record<string, unknown>>
     expect(hits).toHaveLength(1)
     expect(hits[0]).toEqual({
       kind: 'vault',
-      category: 'financial',
+      category: 'credentials',
       id: 'v1',
       title: 'Chase Sapphire',
       score: expect.any(Number)
     })
     // A label match must not drag other field values along with it.
     expect(JSON.stringify(hits[0])).not.toContain('4111')
+  })
+
+  it('never reads a MIGRATED category blob (financial lives in life_records now)', async () => {
+    writeVaultFile('financial')
+    decryptBlobMock.mockReturnValue(JSON.stringify([{ id: 'v1', institution: 'Chase Sapphire' }]))
+    const { searchVault } = await internal()
+    expect(searchVault('chase')).toEqual([])
+    expect(decryptBlobMock).not.toHaveBeenCalled()
   })
 
   it('skips entries with no allowlisted label field', async () => {
@@ -337,7 +344,7 @@ describe('searchVault', () => {
   })
 
   it('returns [] when the vault key is unavailable', async () => {
-    writeVaultFile('financial')
+    writeVaultFile('credentials')
     getOrCreateKeyMock.mockImplementation(() => {
       throw new Error('no keychain')
     })

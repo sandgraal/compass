@@ -7,14 +7,16 @@
  * we can assert behavior without ever touching the real Keychain or
  * `.vault/` directory on disk.
  *
- * Coverage scope:
+ * Coverage scope (post vault-split: only credentials + genetics remain;
+ * the old document categories live in `life_records` — see
+ * electron/ipc/life-records.test.ts):
  *
  *   - Category validation (the security boundary that stops a hostile
- *     renderer from writing outside VAULT_DIR).
+ *     renderer from writing outside VAULT_DIR), including the migrated
+ *     categories now being sealed from IPC.
  *   - Round-trip add/get/update/delete.
  *   - Update history: snapshot of prior values, capped at 5.
- *   - `seedVaultFromDetectedAccounts` idempotency.
- *   - 1Password CSV import routing (canceled, empty, credit→financial,
+ *   - 1Password CSV import routing (canceled, empty, credit→life record,
  *     login→credentials). The internal CSV parser has its own coverage
  *     elsewhere, so the cases here focus on the handler's branching
  *     rather than parser edge cases.
@@ -22,6 +24,22 @@
 
 import type { IpcMain } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// The 1Password importer routes credit cards to the life-records store —
+// stub it so this suite never needs a DB.
+const insertLifeRecordMock = vi.fn<
+  (input: Record<string, unknown>) => { id: number; inserted: boolean }
+>(() => ({ id: 1, inserted: true }))
+vi.mock('./life-records', () => ({
+  insertLifeRecord: insertLifeRecordMock
+}))
+
+// afterDomainWrite schedules the real debounced spine projection (which needs
+// a real DB) — stub it so this suite only asserts it gets CALLED, never runs.
+const afterDomainWriteMock = vi.fn()
+vi.mock('./storehouse-sync', () => ({
+  afterDomainWrite: afterDomainWriteMock
+}))
 
 // In-memory FS, keyed by absolute path. Returned `Buffer` instances are
 // the same shape `fs` produces in production code.
@@ -86,6 +104,8 @@ beforeEach(() => {
   readFileSyncMock.mockClear()
   existsSyncMock.mockClear()
   showOpenDialogMock.mockClear().mockResolvedValue({ canceled: true, filePaths: [] })
+  insertLifeRecordMock.mockClear()
+  afterDomainWriteMock.mockClear()
 })
 
 afterEach(() => {
@@ -125,13 +145,10 @@ function seedFile(category: string, entries: unknown[]): void {
 // ─── vault:get-categories ────────────────────────────────────────────────────
 
 describe('vault:get-categories', () => {
-  it('returns the static category list', async () => {
+  it('returns ONLY the sealed categories (the document categories moved to life records)', async () => {
     const h = await registerAndGet('vault:get-categories')
     const out = (await h({})) as Array<{ id: string }>
-    expect(out.length).toBeGreaterThanOrEqual(5)
-    expect(out.map((c) => c.id)).toEqual(
-      expect.arrayContaining(['financial', 'identity', 'credentials', 'medical', 'legal'])
-    )
+    expect(out.map((c) => c.id)).toEqual(['credentials', 'genetics'])
   })
 })
 
@@ -148,18 +165,29 @@ describe('vault:get-entries', () => {
     expect(readFileSyncMock).not.toHaveBeenCalled()
   })
 
+  it('seals the MIGRATED categories from IPC (they now live in life_records)', async () => {
+    // Post-split, `financial`/`identity`/… must behave exactly like any
+    // unknown category — even the `record-secrets` blob name is refused.
+    const h = await registerAndGet('vault:get-entries')
+    for (const cat of ['financial', 'identity', 'medical', 'legal', 'foreign-accounts']) {
+      await expect(invoke(h, cat)).rejects.toThrow(/Unknown vault category/)
+    }
+    await expect(invoke(h, 'record-secrets')).rejects.toThrow(/Unknown vault category/)
+    expect(readFileSyncMock).not.toHaveBeenCalled()
+  })
+
   it('returns [] when the category file does not exist', async () => {
     const h = await registerAndGet('vault:get-entries')
-    const out = (await h({}, 'financial')) as unknown[]
+    const out = (await h({}, 'credentials')) as unknown[]
     expect(out).toEqual([])
   })
 
   it('returns decrypted entries when the file exists', async () => {
-    seedFile('financial', [{ id: 'a', institution: 'Bank' }])
+    seedFile('credentials', [{ id: 'a', service: 'GitHub' }])
     const h = await registerAndGet('vault:get-entries')
-    const out = (await h({}, 'financial')) as Array<{ institution: string }>
+    const out = (await h({}, 'credentials')) as Array<{ service: string }>
     expect(out).toHaveLength(1)
-    expect(out[0].institution).toBe('Bank')
+    expect(out[0].service).toBe('GitHub')
   })
 
   it('returns [] on a corrupted/undecryptable blob (does not throw)', async () => {
@@ -168,9 +196,9 @@ describe('vault:get-entries', () => {
     // beats crashing the whole IPC — the user sees an "empty" vault
     // and can investigate, which is recoverable. Throwing would just
     // produce an unhandled rejection in the renderer with no UX.
-    fakeFs[VAULT_FILE('financial')] = Buffer.from('not-json-after-prefix-strip', 'utf8')
+    fakeFs[VAULT_FILE('credentials')] = Buffer.from('not-json-after-prefix-strip', 'utf8')
     const h = await registerAndGet('vault:get-entries')
-    const out = (await h({}, 'financial')) as unknown[]
+    const out = (await h({}, 'credentials')) as unknown[]
     expect(out).toEqual([])
   })
 })
@@ -180,14 +208,14 @@ describe('vault:get-entries', () => {
 describe('vault:add-entry', () => {
   it('persists the new entry with auto-assigned id + timestamps', async () => {
     const h = await registerAndGet('vault:add-entry')
-    const out = (await h({}, 'financial', { institution: 'Chase' })) as {
+    const out = (await h({}, 'credentials', { service: 'Chase' })) as {
       id: string
-      institution: string
+      service: string
       createdAt: number
       updatedAt: number
     }
     expect(out.id).toMatch(/^[0-9a-f]{16}$/) // 8 random bytes = 16 hex
-    expect(out.institution).toBe('Chase')
+    expect(out.service).toBe('Chase')
     expect(out.createdAt).toBeTypeOf('number')
     expect(out.updatedAt).toBeTypeOf('number')
     // File was written
@@ -196,18 +224,18 @@ describe('vault:add-entry', () => {
       writeFileSyncMock.mock.calls[0][1].toString('utf8').replace(/^enc:/, '')
     )
     expect(written).toHaveLength(1)
-    expect(written[0].institution).toBe('Chase')
+    expect(written[0].service).toBe('Chase')
   })
 
   it('appends to an existing list rather than replacing', async () => {
-    seedFile('financial', [{ id: 'pre', institution: 'WF' }])
+    seedFile('credentials', [{ id: 'pre', service: 'WF' }])
     const h = await registerAndGet('vault:add-entry')
-    await h({}, 'financial', { institution: 'Chase' })
+    await h({}, 'credentials', { service: 'Chase' })
     const written = JSON.parse(
       writeFileSyncMock.mock.calls[0][1].toString('utf8').replace(/^enc:/, '')
     )
     expect(written).toHaveLength(2)
-    expect(written.map((e: { institution: string }) => e.institution)).toEqual(['WF', 'Chase'])
+    expect(written.map((e: { service: string }) => e.service)).toEqual(['WF', 'Chase'])
   })
 
   it('rejects an unknown category', async () => {
@@ -221,50 +249,50 @@ describe('vault:add-entry', () => {
 
 describe('vault:update-entry', () => {
   it('updates fields and snapshots prior state into _history', async () => {
-    seedFile('financial', [
-      { id: 'a', institution: 'Chase', accountNumber: '1234', createdAt: 1, updatedAt: 2 }
+    seedFile('credentials', [
+      { id: 'a', service: 'Chase', password: '1234', createdAt: 1, updatedAt: 2 }
     ])
     const h = await registerAndGet('vault:update-entry')
-    const out = (await h({}, 'financial', 'a', { accountNumber: '5678' })) as {
-      accountNumber: string
-      _history: Array<{ accountNumber: string }>
+    const out = (await h({}, 'credentials', 'a', { password: '5678' })) as {
+      password: string
+      _history: Array<{ password: string }>
     }
-    expect(out.accountNumber).toBe('5678')
+    expect(out.password).toBe('5678')
     expect(out._history).toHaveLength(1)
-    expect(out._history[0].accountNumber).toBe('1234')
+    expect(out._history[0].password).toBe('1234')
   })
 
   it('caps _history at the last 5 snapshots', async () => {
-    seedFile('financial', [
+    seedFile('credentials', [
       {
         id: 'a',
-        institution: 'Chase',
-        accountNumber: 'current',
+        service: 'Chase',
+        password: 'current',
         createdAt: 1,
         updatedAt: 2,
         _history: [
-          { accountNumber: 'v5' },
-          { accountNumber: 'v4' },
-          { accountNumber: 'v3' },
-          { accountNumber: 'v2' },
-          { accountNumber: 'v1' }
+          { password: 'v5' },
+          { password: 'v4' },
+          { password: 'v3' },
+          { password: 'v2' },
+          { password: 'v1' }
         ]
       }
     ])
     const h = await registerAndGet('vault:update-entry')
-    const out = (await h({}, 'financial', 'a', { accountNumber: 'newest' })) as {
-      _history: Array<{ accountNumber: string }>
+    const out = (await h({}, 'credentials', 'a', { password: 'newest' })) as {
+      _history: Array<{ password: string }>
     }
     expect(out._history).toHaveLength(5)
     // Newest snapshot pushed to the front; oldest (v1) dropped.
-    expect(out._history[0].accountNumber).toBe('current')
-    expect(out._history.map((h) => h.accountNumber)).not.toContain('v1')
+    expect(out._history[0].password).toBe('current')
+    expect(out._history.map((h) => h.password)).not.toContain('v1')
   })
 
   it('throws when the entry id is unknown', async () => {
-    seedFile('financial', [{ id: 'a', institution: 'Chase' }])
+    seedFile('credentials', [{ id: 'a', service: 'Chase' }])
     const h = await registerAndGet('vault:update-entry')
-    await expect(invoke(h, 'financial', 'ghost', { x: 1 })).rejects.toThrow(/not found/)
+    await expect(invoke(h, 'credentials', 'ghost', { x: 1 })).rejects.toThrow(/not found/)
   })
 
   it('rejects an unknown category', async () => {
@@ -277,13 +305,13 @@ describe('vault:update-entry', () => {
 
 describe('vault:delete-entry', () => {
   it('removes the entry with the given id, leaves others intact', async () => {
-    seedFile('financial', [
-      { id: 'a', institution: 'A' },
-      { id: 'b', institution: 'B' },
-      { id: 'c', institution: 'C' }
+    seedFile('credentials', [
+      { id: 'a', service: 'A' },
+      { id: 'b', service: 'B' },
+      { id: 'c', service: 'C' }
     ])
     const h = await registerAndGet('vault:delete-entry')
-    const out = (await h({}, 'financial', 'b')) as { success: boolean }
+    const out = (await h({}, 'credentials', 'b')) as { success: boolean }
     expect(out.success).toBe(true)
     const written = JSON.parse(
       writeFileSyncMock.mock.calls[0][1].toString('utf8').replace(/^enc:/, '')
@@ -294,93 +322,15 @@ describe('vault:delete-entry', () => {
   it('is a no-op (still returns success) when the id is unknown', async () => {
     // Important for idempotency — clicking delete twice from the UI shouldn't
     // throw "not found" on the second click.
-    seedFile('financial', [{ id: 'a' }])
+    seedFile('credentials', [{ id: 'a' }])
     const h = await registerAndGet('vault:delete-entry')
-    const out = (await h({}, 'financial', 'ghost')) as { success: boolean }
+    const out = (await h({}, 'credentials', 'ghost')) as { success: boolean }
     expect(out.success).toBe(true)
   })
 
   it('rejects an unknown category', async () => {
     const h = await registerAndGet('vault:delete-entry')
     await expect(invoke(h, 'bogus', 'a')).rejects.toThrow(/Unknown vault category/)
-  })
-})
-
-// ─── seedVaultFromDetectedAccounts ───────────────────────────────────────────
-
-describe('seedVaultFromDetectedAccounts', () => {
-  it('returns 0 when given an empty list (does not even read the vault)', async () => {
-    const mod = await load()
-    expect(mod.seedVaultFromDetectedAccounts([])).toBe(0)
-    expect(readFileSyncMock).not.toHaveBeenCalled()
-  })
-
-  it('creates one stub per new account', async () => {
-    const mod = await load()
-    const added = mod.seedVaultFromDetectedAccounts([
-      {
-        name: 'USAA Checking',
-        institution: 'USAA',
-        type: 'checking',
-        sourceFile: 'usaa.csv'
-      },
-      {
-        name: 'Amex Platinum',
-        institution: 'American Express',
-        type: 'credit',
-        lastFour: '1003',
-        sourceFile: 'amex.xlsx'
-      }
-    ])
-    expect(added).toBe(2)
-    expect(writeFileSyncMock).toHaveBeenCalledOnce()
-    const written = JSON.parse(
-      writeFileSyncMock.mock.calls[0][1].toString('utf8').replace(/^enc:/, '')
-    )
-    expect(written).toHaveLength(2)
-  })
-
-  it('is idempotent on the institution + type + lastFour signature', async () => {
-    seedFile('financial', [
-      {
-        id: 'existing',
-        institution: 'American Express',
-        accountType: 'Credit Card',
-        accountNumber: '****1003'
-      }
-    ])
-    const mod = await load()
-    const added = mod.seedVaultFromDetectedAccounts([
-      {
-        name: 'Amex Platinum',
-        institution: 'American Express',
-        type: 'credit',
-        lastFour: '1003',
-        sourceFile: 'amex.xlsx'
-      }
-    ])
-    expect(added).toBe(0)
-  })
-
-  it('matches on the human name when no lastFour is available', async () => {
-    seedFile('financial', [
-      {
-        id: 'existing',
-        institution: 'USAA',
-        accountType: 'Checking',
-        notes: 'imported from USAA Checking — Aug 2025'
-      }
-    ])
-    const mod = await load()
-    const added = mod.seedVaultFromDetectedAccounts([
-      {
-        name: 'USAA Checking',
-        institution: 'USAA',
-        type: 'checking',
-        sourceFile: 'usaa.csv'
-      }
-    ])
-    expect(added).toBe(0)
   })
 })
 
@@ -408,7 +358,7 @@ describe('vault:import-1password-csv', () => {
     expect(writeFileSyncMock).not.toHaveBeenCalled()
   })
 
-  it('routes credit-card rows to financial and login rows to credentials', async () => {
+  it('routes credit-card rows to a life record and login rows to credentials', async () => {
     showOpenDialogMock.mockResolvedValueOnce({
       canceled: false,
       filePaths: ['/import/1p.csv']
@@ -430,35 +380,41 @@ describe('vault:import-1password-csv', () => {
 
     expect(out).toEqual({ success: true, imported: 2 })
 
-    // The handler writes BOTH category files (even if one ends up empty,
-    // because it does the write unconditionally). Inspect both blobs.
-    const writes = writeFileSyncMock.mock.calls
-    const byPath = new Map<string, unknown[]>()
-    for (const [p, data] of writes) {
-      const decoded = (data as Buffer).toString('utf8').replace(/^enc:/, '')
-      byPath.set(p as string, JSON.parse(decoded))
-    }
-    const credentials = byPath.get(VAULT_FILE('credentials')) as Array<{
-      service: string
-      username: string
-      password: string
-    }>
-    const financial = byPath.get(VAULT_FILE('financial')) as Array<{
-      institution: string
-      accountType: string
-    }>
-
+    // Login → credentials blob; credit card → life_records (post-split there
+    // is no vault `financial` category to write).
+    const credentials = JSON.parse(
+      writeFileSyncMock.mock.calls[0][1].toString('utf8').replace(/^enc:/, '')
+    ) as Array<{ service: string; username: string; password: string }>
+    expect(writeFileSyncMock.mock.calls[0][0]).toBe(VAULT_FILE('credentials'))
     expect(credentials).toHaveLength(1)
     expect(credentials[0]).toMatchObject({
       service: 'GitHub',
       username: 'me@example.com',
       password: 'hunter2'
     })
-    expect(financial).toHaveLength(1)
-    expect(financial[0]).toMatchObject({
-      institution: 'Amex Platinum',
-      accountType: 'Credit Card'
+    expect(insertLifeRecordMock).toHaveBeenCalledOnce()
+    expect(insertLifeRecordMock.mock.calls[0][0]).toMatchObject({
+      category: 'financial',
+      source: '1password',
+      fields: { institution: 'Amex Platinum', accountType: 'Credit Card' }
     })
+    // A life record was written — the spine must be told to re-project it.
+    expect(afterDomainWriteMock).toHaveBeenCalledOnce()
+  })
+
+  it('does NOT call afterDomainWrite when nothing routed to a life record', async () => {
+    showOpenDialogMock.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ['/import/1p.csv']
+    })
+    fakeFs['/import/1p.csv'] = Buffer.from(
+      ['Type,Title,Username,Password', 'Login,NewSite,u,p'].join('\n'),
+      'utf8'
+    )
+    const h = await registerAndGet('vault:import-1password-csv')
+    await invoke(h)
+    expect(insertLifeRecordMock).not.toHaveBeenCalled()
+    expect(afterDomainWriteMock).not.toHaveBeenCalled()
   })
 
   it('appends imported entries to existing vault contents (does not clobber)', async () => {

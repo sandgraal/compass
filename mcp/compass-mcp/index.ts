@@ -24,11 +24,13 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
  *
  * Data boundary (docs/data-access-policy.md): every domain is exposed in FULL
  * DETAIL — timeline records, individual transactions, medical records,
- * contacts, paystubs. The exclusions: the encrypted vault and OAuth/API tokens
- * are unreachable from this process (no Keychain access — vault documents are
- * readable only by the in-app Ask Compass assistant, and the credentials
- * category is sealed everywhere), and raw GPS coordinates never enter the
- * tables this server reads (country-level travel does).
+ * contacts, paystubs, and life-record metadata (compass_life_records — the
+ * plaintext half of the old vault document categories). The exclusions: the
+ * vault is secrets-only post-split (credentials, genetics, and life-record
+ * secret field values like account/ID numbers) and is unreachable from this
+ * process (no Keychain access), OAuth/API tokens likewise, and raw GPS
+ * coordinates never enter the tables this server reads (country-level
+ * travel does).
  *
  * Run: tsx mcp/compass-mcp/index.ts
  * Register in .mcp.json (already done at repo root).
@@ -42,6 +44,7 @@ import {
   readContacts,
   readHealthSummary,
   readLabResults,
+  readLifeRecords,
   readMedicalRecords,
   readPaystubs,
   readRecentNotes,
@@ -293,6 +296,24 @@ const TOOLS = [
           description: 'Optional: filter to one panel (e.g. "CBC Panel Auto")'
         },
         limit: { type: 'integer', minimum: 1, maximum: 200, default: 100 }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'compass_life_records',
+    description:
+      "The user's life records — financial accounts, identity documents, medical insurance, legal documents, foreign accounts (institutions, document types, parties, dates, notes). Metadata only: secret field values (account/routing numbers, SSN/passport numbers, member IDs) are sealed in the encrypted vault, unreachable from this process — hasSecrets just says they exist. Optional category / q (substring) filters. Read-only.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        category: {
+          type: 'string',
+          enum: ['financial', 'identity', 'medical', 'legal', 'foreign-accounts'],
+          description: 'Optional: restrict to one category'
+        },
+        q: { type: 'string', description: 'Optional: search text over title/fields/notes' },
+        limit: { type: 'integer', minimum: 1, maximum: 100, default: 100 }
       },
       additionalProperties: false
     }
@@ -842,6 +863,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       } catch (err) {
         db.close()
         return errorResult(String(err))
+      }
+    }
+
+    // Life-record metadata (the vault split) — secrets structurally unreachable.
+    if (name === 'compass_life_records') {
+      const db = openDb()
+      if (!db) return errorResult('Compass DB not found')
+      try {
+        const res = readLifeRecords(db, {
+          category: args?.category ? String(args.category) : undefined,
+          q: args?.q ? String(args.q) : undefined,
+          limit: Number.isFinite(Number(args?.limit)) ? Number(args?.limit) : undefined
+        })
+        return textResult(JSON.stringify(res, null, 2))
+      } finally {
+        db.close()
       }
     }
 

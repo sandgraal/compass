@@ -332,15 +332,16 @@ export default function Ask(): JSX.Element {
             <p className="text-[10px] text-muted-foreground mt-2">
               {agentMode ? (
                 <>
-                  Agent mode: Claude reads your agenda + finance <em>summaries</em> via tools and
-                  can <strong>propose</strong> changes — which you approve in the Claude Inbox. The
-                  vault is never exposed; finance is summaries only.
+                  Agent mode: Claude reads your local data in full detail via tools — timeline,
+                  transactions, contacts, medical, and life-record metadata — and can{' '}
+                  <strong>propose</strong> changes, which you approve in the Claude Inbox.
+                  Passwords, genetics, and account/ID numbers stay sealed in the vault.
                 </>
               ) : (
                 <>
-                  Compass sends your question + the top-{6} matching knowledge snippets to{' '}
-                  {status?.activeProvider ?? 'the configured provider'}. Vault entries, task titles,
-                  and transactions are never included.
+                  Compass sends your question + the top-{6} matching knowledge-note snippets to{' '}
+                  {status?.activeProvider ?? 'the configured provider'}. The vault is never indexed;
+                  knowledge notes hold summaries, not raw rows.
                 </>
               )}
             </p>

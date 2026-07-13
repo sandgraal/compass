@@ -107,6 +107,11 @@ beforeEach(async () => {
       occurred_at INTEGER, title TEXT NOT NULL, body TEXT, payload TEXT,
       dedup_hash TEXT NOT NULL UNIQUE, provenance TEXT, ingested_at INTEGER
     );
+    CREATE TABLE life_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, category TEXT NOT NULL,
+      title TEXT NOT NULL, fields TEXT, notes TEXT, has_secrets INTEGER NOT NULL DEFAULT 0,
+      source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER
+    );
   `)
   // Seed one row per exported domain.
   sqlite
@@ -134,6 +139,11 @@ beforeEach(async () => {
       'INSERT INTO finance_transactions (hash, date, amount, description, account_id) VALUES (?, ?, ?, ?, ?)'
     )
     .run('h1', '2026-06-01', -42.5, 'Coffee', 1)
+  sqlite
+    .prepare(
+      "INSERT INTO life_records (external_id, category, title, fields, has_secrets) VALUES ('vault:l1', 'legal', 'Will', ?, 1)"
+    )
+    .run(JSON.stringify({ documentType: 'Will', parties: 'Ada' }))
 
   mkdirSync(join(KNOWLEDGE_TMP, 'profile'), { recursive: true })
   writeFileSync(join(KNOWLEDGE_TMP, 'profile', 'relationships.md'), '# People\n\nAda Lovelace\n')
@@ -177,6 +187,9 @@ describe('export:export-all', () => {
     expect(readFileSync(join(dir, 'assets.csv'), 'utf-8')).toContain('Lake House')
     expect(existsSync(join(dir, 'records.csv'))).toBe(true)
     expect(readFileSync(join(dir, 'records.csv'), 'utf-8')).toContain('The Matrix')
+    // Life-record METADATA is included; the secret halves live in the vault and can't be.
+    expect(existsSync(join(dir, 'life-records.csv'))).toBe(true)
+    expect(readFileSync(join(dir, 'life-records.csv'), 'utf-8')).toContain('Will')
   })
 
   it('NEVER writes vault data and says so in the manifest', async () => {

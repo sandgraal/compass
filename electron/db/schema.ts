@@ -652,6 +652,33 @@ export const assets = sqliteTable('assets', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
+// ---- Life records (the vault split — 2026-07) ----
+// The METADATA half of what used to live in the encrypted vault's document
+// categories (financial / identity / medical / legal / foreign-accounts):
+// institutions, document types, parties, dates, notes — plaintext, searchable,
+// timeline-projected, and readable by every surface including the MCP server,
+// per docs/data-access-policy.md. The SECRET field values (account/routing
+// numbers, SSN/passport/DL numbers, insurance member/group ids) never touch
+// this table: they live in the standalone encrypted `.vault/record-secrets.enc`
+// blob, keyed by this table's row id (see electron/ipc/life-records.ts).
+// One flat table with a `category` discriminator + schemaless `fields` JSON —
+// the same pragmatic shape as `assets` and the vault's own category templates.
+export const lifeRecords = sqliteTable('life_records', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  // 'vault:<oldEntryId>' (migrated) | 'manual:<uuid>' | 'detected:<uuid>' | '1password:<uuid>'
+  externalId: text('external_id').notNull().unique(),
+  // 'financial' | 'identity' | 'medical' | 'legal' | 'foreign-accounts'
+  category: text('category').notNull(),
+  title: text('title').notNull(), // derived display label (institution / documentType / provider …)
+  fields: text('fields'), // JSON Record<string,string> — NON-secret template fields only
+  notes: text('notes'),
+  // Lock badge without decrypting: does record-secrets.enc hold values for this row?
+  hasSecrets: integer('has_secrets', { mode: 'boolean' }).notNull().default(false),
+  source: text('source').notNull().default('manual'), // 'manual' | 'vault-migration' | 'detected' | '1password'
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+})
+
 // ---- Derived entities (cross-reference engine) ----
 // A CACHE, not user data: the people / merchants / places / subscription
 // candidates the engine (`electron/lib/entities.ts`) derives from the `records`

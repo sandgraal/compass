@@ -20,6 +20,7 @@ import Health from './pages/Health'
 import Insights from './pages/Insights'
 import Integrations from './pages/Integrations'
 import KnowledgeBase from './pages/KnowledgeBase'
+import LifeRecords from './pages/LifeRecords'
 import Merchants from './pages/Merchants'
 import Monthly from './pages/Monthly'
 import Overview from './pages/Overview'
@@ -94,6 +95,7 @@ export default function App(): JSX.Element {
           <Route path="monthly" element={<Monthly />} />
           <Route path="knowledge/*" element={<KnowledgeBase />} />
           <Route path="vault" element={<Vault />} />
+          <Route path="life-records" element={<LifeRecords />} />
           <Route path="contacts" element={<Contacts />} />
           <Route path="people" element={<People />} />
           <Route path="merchants" element={<Merchants />} />

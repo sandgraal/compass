@@ -163,6 +163,11 @@ beforeEach(() => {
       dedup_hash TEXT NOT NULL UNIQUE, provenance TEXT, ingested_at INTEGER
     );
     CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER);
+    CREATE TABLE life_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, category TEXT NOT NULL,
+      title TEXT NOT NULL, fields TEXT, notes TEXT, has_secrets INTEGER NOT NULL DEFAULT 0,
+      source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER
+    );
   `)
 })
 
