@@ -621,6 +621,25 @@ declare global {
     lastDate: string | null
   }
 
+  /** One dated reading in a lab-result trend (a single specimen draw). */
+  interface LabResultPoint {
+    takenAt: string
+    value: number | null
+    valueText: string | null
+    unit: string | null
+    refRange: string | null
+    flag: string | null
+    encounterId: string | null
+  }
+
+  /** One test's trend line — latest reading plus its dated history. */
+  interface LabResultSeries {
+    testName: string
+    panel: string | null
+    latest: LabResultPoint
+    history: LabResultPoint[]
+  }
+
   type EntityKind = 'person' | 'merchant' | 'place' | 'subscription-candidate'
 
   interface EntityAttrs {
@@ -983,6 +1002,15 @@ declare global {
           immunizations: MedicalDirectoryEntry[]
           allergies: MedicalDirectoryEntry[]
           providersAvailable: false
+        }>
+        getLabResults(): Promise<{
+          hasData: boolean
+          count: number
+          firstDate: string | null
+          lastDate: string | null
+          abnormalCount: number
+          panels: string[]
+          series: LabResultSeries[]
         }>
       }
       // Metriport (Phase 10.9) — relay-fronted medical aggregator → medical records.

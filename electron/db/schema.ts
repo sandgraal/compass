@@ -787,6 +787,37 @@ export const medicalRecords = sqliteTable('medical_records', {
   ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
+// ---- Lab results (manually imported quantitative lab/vital values) ----
+// `medicalRecords` (above) is deliberately summary-only — no raw values, by design,
+// because it mirrors Metriport's stripped-at-ingest FHIR feed. This table is the
+// counterpart for hand/document-imported results where the NUMBER is the point:
+// cholesterol panels, CBC/chem panels, troponin, vitals. One row per individual
+// test so trends are queryable; `panel` groups tests drawn together (e.g.
+// 'Coronary Risk Profile', 'CBC Panel Auto'), `encounterId` groups panels from the
+// same visit/lab order. Per the data-access policy this is full-detail readable,
+// same posture as `medicalRecords` — not vault-sealed.
+export const labResults = sqliteTable(
+  'lab_results',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    testName: text('test_name').notNull(),
+    panel: text('panel'),
+    value: real('value'), // numeric result, when the result is a number
+    valueText: text('value_text'), // fallback display for non-numeric results
+    unit: text('unit'),
+    refRange: text('ref_range'), // as printed/reported, e.g. '<200 mg/dL' or '3.5-5.5 mmol/L'
+    flag: text('flag'), // 'normal' | 'low' | 'high' | 'critical-low' | 'critical-high'
+    takenAt: text('taken_at').notNull(), // 'YYYY-MM-DD' — specimen collected date
+    encounterId: text('encounter_id'), // groups results from the same visit/lab order
+    source: text('source').notNull().default('manual'), // 'manual' | 'document-import'
+    notes: text('notes'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+  },
+  (t) => ({
+    testNameTakenAtIdx: index('lab_results_test_name_taken_at').on(t.testName, t.takenAt)
+  })
+)
+
 // ---- Timeline memory mutes (Timeline 2.0 PR 6) ----
 // "Never resurface this" — the memory layer's safety valve (breakups, losses,
 // anything the user doesn't want the On-this-day hero echoing back). Reversible

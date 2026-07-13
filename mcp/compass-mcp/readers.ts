@@ -438,6 +438,43 @@ export function readMedicalRecords(
   return { count: rows.length, records: rows }
 }
 
+export interface LabResultsResult {
+  count: number
+  records: Array<Record<string, unknown>>
+}
+
+export const LAB_RESULTS_MAX = 200
+
+/**
+ * Quantitative lab/vital rows (test name, panel, value/unit/reference-range,
+ * flag, date) — the counterpart to `readMedicalRecords`, which never carries
+ * a raw value by design. Optional testName (substring) / panel filters.
+ */
+export function readLabResults(
+  db: Database.Database,
+  opts: { testName?: string; panel?: string; limit?: number }
+): LabResultsResult {
+  if (!hasObject(db, 'lab_results')) return { count: 0, records: [] }
+  const testName = opts.testName?.trim() || null
+  const panel = opts.panel?.trim() || null
+  const limit = Math.max(1, Math.min(Math.floor(opts.limit ?? 100), LAB_RESULTS_MAX))
+  const rows = db
+    .prepare(
+      `SELECT test_name AS testName, panel, value, value_text AS valueText, unit,
+              ref_range AS refRange, flag, taken_at AS takenAt, encounter_id AS encounterId
+         FROM lab_results
+        WHERE (@testName IS NULL OR test_name LIKE @testName COLLATE NOCASE)
+          AND (@panel IS NULL OR panel = @panel)
+        ORDER BY taken_at IS NULL, taken_at DESC LIMIT @limit`
+    )
+    .all({
+      testName: testName ? `%${testName}%` : null,
+      panel,
+      limit
+    }) as Array<Record<string, unknown>>
+  return { count: rows.length, records: rows }
+}
+
 export interface PaystubsResult {
   paystubs: Array<Record<string, unknown>>
   totals: Record<string, unknown> | null

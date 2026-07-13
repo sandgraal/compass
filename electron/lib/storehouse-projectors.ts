@@ -376,6 +376,70 @@ export function projectMedicalRecords(rows: MedicalRow[]): RecordInput[] {
   return out
 }
 
+/** A quantitative lab/vital result reduced to the projector's fields (`lab_results`). */
+export interface LabResultRow {
+  id: number
+  testName: string
+  panel: string | null
+  value: number | null
+  valueText: string | null
+  unit: string | null
+  flag: string | null
+  takenAt: string // 'YYYY-MM-DD'
+  encounterId: string | null
+}
+
+/** Render one result as "Name value unit (FLAG)", omitting parts that are absent. */
+function formatLabResult(r: LabResultRow): string {
+  const amount = r.value != null ? `${r.value}${r.unit ? ` ${r.unit}` : ''}` : (r.valueText ?? '')
+  const flag = r.flag && r.flag !== 'normal' ? ` (${r.flag})` : ''
+  return `${r.testName} ${amount}${flag}`.trim()
+}
+
+/**
+ * Project `lab_results` → records at PANEL granularity (`source:'lab'`,
+ * `type:'lab'`) — one row per (encounter, panel, date) grouping the individual
+ * tests drawn together, not one row per test. `lab_results` itself stays the
+ * fine-grained source of truth for trends/queries; flooding the Timeline with a
+ * row per test (a panel can carry 10-40+) would bury everything else. Abnormal
+ * results are called out in the body so the panel's headline is scannable.
+ * `type:'lab'` is in timeline-memories.ts's SENSITIVE_TYPES, so it never
+ * auto-resurfaces on-this-day, same posture as `medical_records`.
+ */
+export function projectLabResults(rows: LabResultRow[]): RecordInput[] {
+  const groups = new Map<string, LabResultRow[]>()
+  for (const r of rows) {
+    if (!r.testName || !r.takenAt) continue
+    const key = `${r.encounterId ?? ''}|${r.panel ?? ''}|${r.takenAt}`
+    const group = groups.get(key)
+    if (group) group.push(r)
+    else groups.set(key, [r])
+  }
+  const out: RecordInput[] = []
+  for (const [key, group] of groups) {
+    const panel = group[0].panel?.trim() || 'Labs'
+    const abnormal = group.filter((r) => r.flag && r.flag !== 'normal')
+    out.push({
+      source: 'lab',
+      type: 'lab',
+      occurredAt: localDayMs(group[0].takenAt),
+      title: `${panel} · ${group.length} result${group.length === 1 ? '' : 's'}`,
+      body:
+        abnormal.length > 0
+          ? abnormal.map(formatLabResult).join(' · ')
+          : `${group.length} result${group.length === 1 ? '' : 's'}, all in normal range`,
+      payload: {
+        panel,
+        takenAt: group[0].takenAt,
+        encounterId: group[0].encounterId,
+        results: group
+      },
+      naturalKey: key
+    })
+  }
+  return out
+}
+
 /** A logged trip reduced to the projector's fields (`travel_segments`). */
 export interface TravelSegmentRow {
   id: number

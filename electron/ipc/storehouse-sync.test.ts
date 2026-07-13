@@ -125,6 +125,11 @@ beforeEach(() => {
       id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, category TEXT NOT NULL,
       description TEXT, code TEXT, status TEXT, recorded_at TEXT, ingested_at INTEGER
     );
+    CREATE TABLE lab_results (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, test_name TEXT NOT NULL, panel TEXT, value REAL,
+      value_text TEXT, unit TEXT, ref_range TEXT, flag TEXT, taken_at TEXT NOT NULL,
+      encounter_id TEXT, source TEXT NOT NULL DEFAULT 'manual', notes TEXT, created_at INTEGER
+    );
     CREATE TABLE travel_segments (
       id INTEGER PRIMARY KEY AUTOINCREMENT, country TEXT NOT NULL, start_date TEXT NOT NULL,
       end_date TEXT NOT NULL, notes TEXT, source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER
