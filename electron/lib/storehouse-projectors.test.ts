@@ -7,6 +7,7 @@ import {
   type GithubRow,
   type GmailRow,
   type HabitCheckRow,
+  type LabResultRow,
   type LinearRow,
   type MedicalRow,
   type OuraRow,
@@ -22,6 +23,7 @@ import {
   projectGithub,
   projectGmail,
   projectHabitChecks,
+  projectLabResults,
   projectLinear,
   projectMedicalRecords,
   projectOuraMetrics,
@@ -372,6 +374,51 @@ describe('projectMedicalRecords', () => {
   it('skips rows without an external id or category', () => {
     expect(projectMedicalRecords([med({ externalId: '' })])).toHaveLength(0)
     expect(projectMedicalRecords([med({ category: '' })])).toHaveLength(0)
+  })
+})
+
+describe('projectLabResults', () => {
+  const lab = (p: Partial<LabResultRow> = {}): LabResultRow => ({
+    id: 1,
+    testName: 'Cholesterol',
+    panel: 'Coronary Risk Profile',
+    value: 305,
+    valueText: null,
+    unit: 'mg/dL',
+    flag: 'high',
+    takenAt: '2026-04-17',
+    encounterId: 'L00094302617',
+    ...p
+  })
+
+  it('groups same-panel/encounter/date results into one panel-level record', () => {
+    const rows = [
+      lab({ id: 1, testName: 'Cholesterol', value: 305, flag: 'high' }),
+      lab({ id: 2, testName: 'HDL Cholesterol', value: 38, flag: 'low' }),
+      lab({ id: 3, testName: 'Triglycerides', value: 331, unit: 'mg/dL', flag: 'normal' })
+    ]
+    const [r] = projectLabResults(rows)
+    expect(r.source).toBe('lab')
+    expect(r.type).toBe('lab')
+    expect(r.title).toBe('Coronary Risk Profile · 3 results')
+    expect(r.body).toBe('Cholesterol 305 mg/dL (high) · HDL Cholesterol 38 mg/dL (low)')
+    expect(r.naturalKey).toBe('L00094302617|Coronary Risk Profile|2026-04-17')
+    expect(r.occurredAt).toBe(new Date('2026-04-17T00:00:00').getTime())
+  })
+
+  it('separates a different panel, date, or encounter into its own record', () => {
+    const rows = [lab(), lab({ id: 2, panel: 'Chem 7 Profile' })]
+    expect(projectLabResults(rows)).toHaveLength(2)
+  })
+
+  it('summarizes as all-normal when nothing is flagged', () => {
+    const [r] = projectLabResults([lab({ flag: 'normal' })])
+    expect(r.body).toBe('1 result, all in normal range')
+  })
+
+  it('skips rows without a test name or taken date', () => {
+    expect(projectLabResults([lab({ testName: '' })])).toHaveLength(0)
+    expect(projectLabResults([lab({ takenAt: '' })])).toHaveLength(0)
   })
 })
 

@@ -492,6 +492,25 @@ function ensureNewTables(sqlite: Database.Database): void {
       INSERT INTO documents_fts(documents_fts, rowid, title, extracted_text) VALUES('delete', old.id, old.title, old.extracted_text);
       INSERT INTO documents_fts(rowid, title, extracted_text) VALUES (new.id, new.title, new.extracted_text);
     END;
+    -- Lab results: manually/document-imported quantitative test values (schema.ts
+    -- has the full rationale). Counterpart to medical_records, which is
+    -- summary-only by design; here the number is the point.
+    CREATE TABLE IF NOT EXISTS lab_results (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      test_name TEXT NOT NULL,
+      panel TEXT,
+      value REAL,
+      value_text TEXT,
+      unit TEXT,
+      ref_range TEXT,
+      flag TEXT,
+      taken_at TEXT NOT NULL,
+      encounter_id TEXT,
+      source TEXT NOT NULL DEFAULT 'manual',
+      notes TEXT,
+      created_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS lab_results_test_name_taken_at ON lab_results (test_name, taken_at);
   `)
 
   // Backfill the FTS index for rows that predate it (the triggers only fire on

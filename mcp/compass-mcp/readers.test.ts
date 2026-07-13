@@ -13,6 +13,7 @@ import {
   TRANSACTIONS_MAX,
   normalizeTaskRange,
   readContacts,
+  readLabResults,
   readMedicalRecords,
   readPaystubs,
   readRecentNotes,
@@ -392,6 +393,45 @@ describe('readMedicalRecords', () => {
 
   it('guards the absent table (older DB)', () => {
     expect(readMedicalRecords(db, {})).toMatchObject({ count: 0, records: [] })
+  })
+})
+
+describe('readLabResults', () => {
+  function createLabResults(): void {
+    db.exec(`
+      CREATE TABLE lab_results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, test_name TEXT NOT NULL, panel TEXT, value REAL,
+        value_text TEXT, unit TEXT, ref_range TEXT, flag TEXT, taken_at TEXT NOT NULL,
+        encounter_id TEXT
+      );
+    `)
+  }
+
+  it('returns quantitative rows with testName/panel filters', () => {
+    createLabResults()
+    db.prepare(
+      "INSERT INTO lab_results (test_name, panel, value, unit, ref_range, flag, taken_at) VALUES ('Cholesterol', 'Coronary Risk Profile', 305, 'mg/dL', '<200 mg/dL', 'high', '2026-04-17')"
+    ).run()
+    db.prepare(
+      "INSERT INTO lab_results (test_name, panel, value, unit, flag, taken_at) VALUES ('Sodium', 'Chem 7 Profile', 137, 'mmol/L', 'normal', '2026-04-17')"
+    ).run()
+    const all = readLabResults(db, {})
+    expect(all.count).toBe(2)
+    expect(all.records[0]).toMatchObject({
+      testName: 'Cholesterol',
+      panel: 'Coronary Risk Profile',
+      value: 305,
+      unit: 'mg/dL',
+      refRange: '<200 mg/dL',
+      flag: 'high',
+      takenAt: '2026-04-17'
+    })
+    expect(readLabResults(db, { testName: 'chol' }).count).toBe(1)
+    expect(readLabResults(db, { panel: 'Chem 7 Profile' }).count).toBe(1)
+  })
+
+  it('guards the absent table (older DB)', () => {
+    expect(readLabResults(db, {})).toMatchObject({ count: 0, records: [] })
   })
 })
 

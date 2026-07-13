@@ -32,6 +32,7 @@ import {
 } from '../db/schema'
 import { buildInsights } from '../ipc/insights'
 import { searchRecords } from '../lib/records-search'
+import { buildLabResultsSummary } from './lab-results'
 
 type Db = ReturnType<typeof getDb>
 type RawSqlite = BetterSqlite3.Database
@@ -189,6 +190,26 @@ export const ASSISTANT_TOOLS = [
           minimum: 1,
           maximum: 100,
           description: 'Max records (default 50)'
+        }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'get_lab_results',
+    description:
+      "Read the user's quantitative lab/vital results (cholesterol panels, CBC, chem panels, troponin, blood pressure, glucose, etc.) — manually or document-imported, distinct from get_medical_records (which never carries raw values). Grouped by test name into a trend: latest value/unit/reference-range/flag plus dated history. Optional testName/panel filters. Read-only.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        testName: { type: 'string', description: 'Optional: filter to one test (substring match)' },
+        panel: {
+          type: 'string',
+          description: 'Optional: filter to one panel (e.g. "CBC Panel Auto")'
+        },
+        abnormalOnly: {
+          type: 'boolean',
+          description: 'Optional: only tests whose latest result is flagged high/low/critical'
         }
       },
       additionalProperties: false
@@ -599,6 +620,25 @@ function getMedicalRecords(sqlite: RawSqlite, input: Record<string, unknown>): u
   return { count: rows.length, records: rows }
 }
 
+function getLabResults(sqlite: RawSqlite, input: Record<string, unknown>): unknown {
+  const testName = str(input.testName)?.toLowerCase()
+  const panel = str(input.panel)
+  const abnormalOnly = input.abnormalOnly === true
+  const summary = buildLabResultsSummary(sqlite)
+  let series = summary.series
+  if (testName) series = series.filter((s) => s.testName.toLowerCase().includes(testName))
+  if (panel) series = series.filter((s) => s.panel === panel)
+  if (abnormalOnly) series = series.filter((s) => s.latest.flag && s.latest.flag !== 'normal')
+  const abnormalCount = series.filter((s) => s.latest.flag && s.latest.flag !== 'normal').length
+  return {
+    count: series.length,
+    lastDate: summary.lastDate,
+    abnormalCount,
+    panels: summary.panels,
+    series
+  }
+}
+
 function getPaystubs(sqlite: RawSqlite, input: Record<string, unknown>): unknown {
   const limit = clampInt(input.limit, 1, 36, 12)
   const rows = sqlite
@@ -978,6 +1018,8 @@ export function executeAssistantTool(
         return asResult(getContact(db, input))
       case 'get_medical_records':
         return asResult(getMedicalRecords(sqlite, input))
+      case 'get_lab_results':
+        return asResult(getLabResults(sqlite, input))
       case 'get_paystubs':
         return asResult(getPaystubs(sqlite, input))
       case 'search_vault':

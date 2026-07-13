@@ -40,6 +40,7 @@ import { PROPOSE_TOOLS, appendProposal, buildProposal, makeProposal } from './pr
 import {
   normalizeTaskRange,
   readContacts,
+  readLabResults,
   readMedicalRecords,
   readPaystubs,
   readRecentNotes,
@@ -274,6 +275,23 @@ const TOOLS = [
         },
         status: { type: 'string', description: 'Optional: e.g. "active", "resolved"' },
         limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'compass_lab_results',
+    description:
+      "Returns the user's quantitative lab/vital results — cholesterol panels, CBC, chem panels, troponin, blood pressure, glucose, A1C, etc. — each with test name, panel, value, unit, reference range, flag (normal/high/low/critical), and date. Distinct from compass_medical_summary, which never carries a raw value by design. Optional testName (substring) / panel filters. Read-only.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        testName: { type: 'string', description: 'Optional: filter to one test (substring match)' },
+        panel: {
+          type: 'string',
+          description: 'Optional: filter to one panel (e.g. "CBC Panel Auto")'
+        },
+        limit: { type: 'integer', minimum: 1, maximum: 200, default: 100 }
       },
       additionalProperties: false
     }
@@ -940,6 +958,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             2
           )
         )
+      } catch (err) {
+        db.close()
+        return errorResult(String(err))
+      }
+    }
+
+    // Quantitative lab/vital results — the counterpart to compass_medical_summary
+    // (which never carries a raw value by design).
+    if (name === 'compass_lab_results') {
+      const db = openDb()
+      if (!db) return errorResult('Compass DB not found')
+      try {
+        const res = readLabResults(db, {
+          testName: args?.testName ? String(args.testName) : undefined,
+          panel: args?.panel ? String(args.panel) : undefined,
+          limit: Number.isFinite(Number(args?.limit)) ? Number(args?.limit) : undefined
+        })
+        db.close()
+        return textResult(JSON.stringify(res, null, 2))
       } catch (err) {
         db.close()
         return errorResult(String(err))

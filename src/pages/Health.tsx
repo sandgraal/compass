@@ -65,11 +65,35 @@ function Bars({ data }: { data: Array<{ date: string; value: number }> }): JSX.E
 }
 
 type MedicalDirectory = Awaited<ReturnType<Window['api']['medical']['getDirectory']>>
+type LabResultsSummary = Awaited<ReturnType<Window['api']['medical']['getLabResults']>>
+
+/** Flag → badge color. Unflagged/normal renders no badge. */
+const FLAG_STYLE: Record<string, string> = {
+  low: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30',
+  high: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30',
+  'critical-low': 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30',
+  'critical-high': 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30'
+}
+
+function FlagBadge({ flag }: { flag: string | null }): JSX.Element | null {
+  if (!flag || flag === 'normal') return null
+  return (
+    <span
+      className={cn(
+        'text-[10px] font-medium px-1.5 py-0.5 rounded border uppercase tracking-wide',
+        FLAG_STYLE[flag] ?? 'bg-muted text-muted-foreground border-border'
+      )}
+    >
+      {flag.replace('-', ' ')}
+    </span>
+  )
+}
 
 export default function Health(): JSX.Element {
   const [summary, setSummary] = useState<HealthSummary | null>(null)
   const [medical, setMedical] = useState<MedicalSummary | null>(null)
   const [directory, setDirectory] = useState<MedicalDirectory | null>(null)
+  const [labs, setLabs] = useState<LabResultsSummary | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -97,6 +121,13 @@ export default function Health(): JSX.Element {
         .getDirectory()
         .then((d) => setDirectory(d))
         .catch(() => setDirectory(null))
+    }
+    // Quantitative lab/vital trends — renders its own card when present.
+    if (window.api.medical?.getLabResults) {
+      window.api.medical
+        .getLabResults()
+        .then((l) => setLabs(l))
+        .catch(() => setLabs(null))
     }
   }, [])
 
@@ -303,6 +334,45 @@ export default function Health(): JSX.Element {
             title="Medications"
             entries={directory?.medications ?? medicalFallback(medical.medications)}
           />
+        </div>
+      )}
+
+      {/* Lab/vital results (manually/document-imported) — quantitative, unlike medical records. */}
+      {labs?.hasData && (
+        <div className="bg-card border border-border rounded-xl p-4 mt-6">
+          <div className="flex items-center gap-2 text-muted-foreground mb-3">
+            <HeartPulse size={15} />
+            <span className="text-xs font-medium">
+              Lab &amp; vital results · {labs.count} value{labs.count === 1 ? '' : 's'}
+              {labs.lastDate ? ` · latest ${labs.lastDate}` : ''}
+              {labs.abnormalCount > 0
+                ? ` · ${labs.abnormalCount} flagged out of range`
+                : ' · all in normal range'}
+            </span>
+          </div>
+          <ul className="space-y-1.5">
+            {labs.series.map((s) => (
+              <li
+                key={s.testName}
+                className="flex items-center justify-between text-sm gap-3 py-1 border-b border-border/50 last:border-0"
+              >
+                <span className="text-foreground min-w-0 truncate">
+                  {s.testName}
+                  {s.panel && (
+                    <span className="text-xs text-muted-foreground ml-1.5">{s.panel}</span>
+                  )}
+                </span>
+                <span className="flex items-center gap-2 shrink-0">
+                  <span className="text-foreground font-medium">
+                    {s.latest.value != null ? s.latest.value : (s.latest.valueText ?? '—')}
+                    {s.latest.unit ? ` ${s.latest.unit}` : ''}
+                  </span>
+                  <FlagBadge flag={s.latest.flag} />
+                  <span className="text-xs text-muted-foreground">{s.latest.takenAt}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>

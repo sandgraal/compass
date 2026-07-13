@@ -31,6 +31,7 @@ import {
   gmailActions,
   habitEntries,
   habits,
+  labResults,
   linearIssues,
   medicalRecords,
   ouraDailyMetrics,
@@ -50,6 +51,7 @@ import {
   type GithubRow,
   type GmailRow,
   type HabitCheckRow,
+  type LabResultRow,
   type LinearRow,
   type MedicalRow,
   type OuraRow,
@@ -65,6 +67,7 @@ import {
   projectGithub,
   projectGmail,
   projectHabitChecks,
+  projectLabResults,
   projectLinear,
   projectMedicalRecords,
   projectOuraMetrics,
@@ -215,6 +218,24 @@ function readMedicalRecords(): MedicalRow[] {
     .all()
 }
 
+/** Read quantitative lab/vital results as projector inputs. */
+function readLabResults(): LabResultRow[] {
+  return getDb()
+    .select({
+      id: labResults.id,
+      testName: labResults.testName,
+      panel: labResults.panel,
+      value: labResults.value,
+      valueText: labResults.valueText,
+      unit: labResults.unit,
+      flag: labResults.flag,
+      takenAt: labResults.takenAt,
+      encounterId: labResults.encounterId
+    })
+    .from(labResults)
+    .all()
+}
+
 /** Read logged trips as projector inputs. */
 function readTravelSegments(): TravelSegmentRow[] {
   return getDb()
@@ -362,6 +383,9 @@ function projectUserEditedDomainsToRecords(): number {
   const medicalInputs = projectMedicalRecords(readMedicalRecords())
   imported += upsertLiveRecords(medicalInputs, `live:medical:${now}`).imported
   reconcileLiveRecords('medical', medicalInputs)
+  const labInputs = projectLabResults(readLabResults())
+  imported += upsertLiveRecords(labInputs, `live:lab:${now}`).imported
+  reconcileLiveRecords('lab', labInputs)
   const travelInputs = projectTravelSegments(readTravelSegments())
   imported += upsertLiveRecords(travelInputs, `live:travel:${now}`).imported
   reconcileLiveRecords('travel', travelInputs)
