@@ -12,14 +12,16 @@ if [ -z "$COMMAND" ]; then
 fi
 
 # Block git push --force or -f to main/master
-if echo "$COMMAND" | grep -qE 'git\s+push.*(^|\s)(-f|--force(-with-lease)?)(\s|$).*\b(main|master)\b'; then
+# Matches: -f, --force, --force-with-lease (with or without an =<ref> arg),
+# and short-flag clusters that bundle f with other single-letter flags (-fu, -uf, ...)
+if echo "$COMMAND" | grep -qE 'git\s+push.*(^|\s)(-[a-z]*f[a-z]*|--force(-with-lease(=\S+)?)?)(\s|$).*\b(main|master)\b'; then
   echo "BLOCKED: force-push to main/master is not allowed." >&2
   echo "If this is truly necessary, run it yourself outside the agent." >&2
   exit 2
 fi
 
 # Also block force-push when origin/HEAD is main/master
-if echo "$COMMAND" | grep -qE 'git\s+push.*(^|\s)(-f|--force(-with-lease)?)(\s|$)' && \
+if echo "$COMMAND" | grep -qE 'git\s+push.*(^|\s)(-[a-z]*f[a-z]*|--force(-with-lease(=\S+)?)?)(\s|$)' && \
    echo "$COMMAND" | grep -qE '\borigin\b' && \
    ! echo "$COMMAND" | grep -qE '\b(feat|fix|chore|docs|refactor|test)/'; then
   echo "BLOCKED: force-push without a feature branch suffix." >&2
