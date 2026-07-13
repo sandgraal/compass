@@ -26,6 +26,17 @@ export function localYm(date: Date = new Date()): string {
 }
 
 /**
+ * Monday (local) of the week containing `date`, as `YYYY-MM-DD` — the
+ * canonical week bucket key (same semantics as `weekKey` in
+ * `electron/ipc/insights.ts`).
+ */
+export function localWeekKey(date: Date): string {
+  const m = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  m.setDate(m.getDate() - ((m.getDay() + 6) % 7)) // back up to Monday
+  return localYmd(m)
+}
+
+/**
  * The window Compass accepts as a real event time: [1970-01-01, now + 5 years].
  * Export cells that aren't dates at all (IDs, quantities, truncated fragments)
  * otherwise slip through `Date.parse` as years like 104 or 10801 and poison

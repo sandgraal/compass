@@ -230,7 +230,12 @@ const api = {
   // --- Proactive insights (Phase 7 Track E) ---
   insights: {
     get: () => ipcRenderer.invoke('insights:get'),
-    correlations: () => ipcRenderer.invoke('insights:correlations')
+    correlations: () => ipcRenderer.invoke('insights:correlations'),
+    discovery: () => ipcRenderer.invoke('insights:discovery'),
+    list: () => ipcRenderer.invoke('insights:list'),
+    dismiss: (key: string, dismissed?: boolean) =>
+      ipcRenderer.invoke('insights:dismiss', key, dismissed),
+    pin: (key: string, pinned: boolean) => ipcRenderer.invoke('insights:pin', key, pinned)
   },
 
   // --- Documents & files store (Phase 9.2) ---

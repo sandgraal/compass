@@ -13,6 +13,7 @@ import {
   TRANSACTIONS_MAX,
   normalizeTaskRange,
   readContacts,
+  readHealthSummary,
   readLabResults,
   readLifeRecords,
   readMedicalRecords,
@@ -529,5 +530,84 @@ describe('readLifeRecords', () => {
 
   it('guards the absent table (older DB)', () => {
     expect(readLifeRecords(db, {})).toEqual({ count: 0, records: [] })
+  })
+})
+
+describe('readHealthSummary', () => {
+  function createHealthTables(): void {
+    db.exec(`
+      CREATE TABLE oura_daily_metrics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL,
+        sleep_score INTEGER, readiness_score INTEGER, activity_score INTEGER,
+        steps INTEGER, total_sleep_minutes INTEGER
+      );
+      CREATE TABLE records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, type TEXT NOT NULL,
+        occurred_at INTEGER, title TEXT NOT NULL, body TEXT, payload TEXT,
+        dedup_hash TEXT NOT NULL UNIQUE, provenance TEXT, ingested_at INTEGER
+      );
+    `)
+  }
+  let recSeq = 0
+  function addRecord(source: string, type: string, occurredAt: number, payload: unknown): void {
+    recSeq++
+    db.prepare(
+      'INSERT INTO records (source, type, occurred_at, title, payload, dedup_hash) VALUES (?,?,?,?,?,?)'
+    ).run(source, type, occurredAt, `${source} ${type}`, JSON.stringify(payload), `hs-${recSeq}`)
+  }
+  /** epoch ms for a local YYYY-MM-DD midnight — the exact shape `records.occurred_at` stores. */
+  function ymdMs(ymd: string): number {
+    return new Date(`${ymd}T00:00:00`).getTime()
+  }
+
+  it('aggregates epoch-ms apple-health records (regression: localYmd was fed a number)', () => {
+    createHealthTables()
+    addRecord('apple-health', 'resting-hr', ymdMs('2026-06-14'), { value: 55 })
+    addRecord('apple-health', 'sleep', ymdMs('2026-06-14'), { ms: 8 * 3_600_000 })
+    addRecord('apple-health', 'steps', ymdMs('2026-06-13'), { value: 9000 })
+    addRecord('apple-health', 'workout', ymdMs('2026-06-10'), {})
+
+    const s = readHealthSummary(db, NOW)
+    expect(s.today).toBe('2026-06-15')
+    expect(s.sources).toEqual({ oura: false, appleHealth: true, fitbit: false, garmin: false })
+    expect(s.restingHrLatest).toBe(55)
+    expect(s.restingHrAvg30).toBe(55)
+    expect(s.sleepMinutesAvg7).toBe(480)
+    expect(s.stepsAvg7).toBe(9000)
+    expect(s.workouts30).toBe(1)
+    expect(s.activeDays30).toBe(2) // workout day + ≥8000-step day
+  })
+
+  it('blends Oura daily metrics and reports the latest scores', () => {
+    createHealthTables()
+    db.prepare(
+      "INSERT INTO oura_daily_metrics (date, sleep_score, readiness_score, activity_score, steps, total_sleep_minutes) VALUES ('2026-06-13', 70, 75, 80, 6000, 400)"
+    ).run()
+    db.prepare(
+      "INSERT INTO oura_daily_metrics (date, sleep_score, readiness_score, activity_score, steps, total_sleep_minutes) VALUES ('2026-06-14', 80, 85, 90, 12000, 440)"
+    ).run()
+
+    const s = readHealthSummary(db, NOW)
+    expect(s.sources.oura).toBe(true)
+    expect(s.oura).toMatchObject({
+      latestDate: '2026-06-14',
+      sleepScore: 80,
+      readinessScore: 85,
+      sleepScore7Avg: 75,
+      readiness7Avg: 80
+    })
+    expect(s.sleepMinutesAvg7).toBe(420)
+    expect(s.activeDays30).toBe(1) // only the 12000-step day crosses 8000
+  })
+
+  it('returns an empty summary when the health tables are absent (older DB)', () => {
+    const s = readHealthSummary(db, NOW)
+    expect(s.today).toBe('2026-06-15')
+    expect(s.sources).toEqual({ oura: false, appleHealth: false, fitbit: false, garmin: false })
+    expect(s.oura).toBeNull()
+    expect(s.stepsAvg7).toBeNull()
+    expect(s.restingHrLatest).toBeNull()
+    expect(s.workouts30).toBe(0)
+    expect(s.activeDays30).toBe(0)
   })
 })

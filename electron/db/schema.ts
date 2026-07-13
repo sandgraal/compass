@@ -156,6 +156,25 @@ export const appSettings = sqliteTable('app_settings', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
+// ---- Insight lifecycle (Phase 7 Track E follow-up) ----
+// One row per insight the detectors have EVER surfaced, keyed by a stable
+// per-insight key. Gives "Worth a look" a memory: first-seen (for "new"
+// badges), dismissed (stop nagging), pinned (keep on top). Detectors stay
+// pure — this log is written only by the insights:list lifecycle layer.
+export const insightLog = sqliteTable('insight_log', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  key: text('key').notNull().unique(),
+  kind: text('kind').notNull(),
+  severity: text('severity').notNull(),
+  title: text('title').notNull(),
+  detail: text('detail').notNull(),
+  route: text('route').notNull(),
+  firstSeen: integer('first_seen', { mode: 'timestamp_ms' }).notNull(),
+  lastSeen: integer('last_seen', { mode: 'timestamp_ms' }).notNull(),
+  dismissedAt: integer('dismissed_at', { mode: 'timestamp_ms' }),
+  pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false)
+})
+
 // ---- Finance ----
 export const financeAccounts = sqliteTable('finance_accounts', {
   id: integer('id').primaryKey({ autoIncrement: true }),
