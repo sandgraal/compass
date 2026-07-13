@@ -791,6 +791,252 @@ describe('correlations (chart data for /insights)', () => {
   })
 })
 
+describe('commits vs calendar (github × gcal, weekly)', () => {
+  beforeEach(() => createRecordsTable())
+  // 8 seeded weeks (the oldest Monday falls outside the 8-week record window →
+  // 7 usable): even = meeting-heavy, odd = light.
+  function seedWeeks(
+    heavyEvents: number,
+    lightEvents: number,
+    heavyCommits: number,
+    lightCommits: number
+  ): void {
+    for (let w = 0; w < 8; w++) {
+      const md = weekYmd(w)
+      const heavy = w % 2 === 0
+      for (let e = 0; e < (heavy ? heavyEvents : lightEvents); e++)
+        addRecord('gcal', 'event', ymdMs(md), { title: 'mtg' })
+      for (let c = 0; c < (heavy ? heavyCommits : lightCommits); c++)
+        addRecord('github', 'commit', ymdMs(md), {})
+    }
+  }
+
+  it('fires when meeting-heavy weeks cut commit output', async () => {
+    const { buildInsights } = await import('./insights')
+    seedWeeks(8, 2, 2, 15)
+    const hit = buildInsights(db(), NOW).insights.filter((i) => i.kind === 'commits-vs-calendar')
+    expect(hit).toHaveLength(1)
+    expect(hit[0].route).toBe('/insights')
+  })
+
+  it('stays quiet when the commit gap is below the delta', async () => {
+    const { buildInsights } = await import('./insights')
+    seedWeeks(8, 2, 10, 12) // gap of 2 commits/week < COMMITS_CAL_MIN_DELTA
+    expect(
+      buildInsights(db(), NOW).insights.filter((i) => i.kind === 'commits-vs-calendar')
+    ).toHaveLength(0)
+  })
+
+  it('stays quiet when heavy weeks are not genuinely busy', async () => {
+    const { buildInsights } = await import('./insights')
+    seedWeeks(4, 1, 2, 15) // heaviest weeks average < COMMITS_CAL_MIN_EVENTS
+    expect(
+      buildInsights(db(), NOW).insights.filter((i) => i.kind === 'commits-vs-calendar')
+    ).toHaveLength(0)
+  })
+})
+
+describe('calendar load vs spend (gcal × finance, weekly)', () => {
+  beforeEach(() => createRecordsTable())
+  function seedWeeks(heavySpend: number, lightSpend: number): void {
+    for (let w = 0; w < 8; w++) {
+      const md = weekYmd(w)
+      const heavy = w % 2 === 0
+      for (let e = 0; e < (heavy ? 8 : 2); e++)
+        addRecord('gcal', 'event', ymdMs(md), { title: 'mtg' })
+      addTxn(md, heavy ? -heavySpend : -lightSpend, 'Dining')
+    }
+  }
+
+  it('fires when busy weeks average materially more discretionary spend', async () => {
+    const { buildInsights } = await import('./insights')
+    seedWeeks(200, 50)
+    const hit = buildInsights(db(), NOW).insights.filter((i) => i.kind === 'calendar-vs-spend')
+    expect(hit).toHaveLength(1)
+    expect(hit[0].title).toMatch(/\$150/)
+  })
+
+  it('stays quiet below the delta', async () => {
+    const { buildInsights } = await import('./insights')
+    seedWeeks(80, 60) // $20 gap < CAL_SPEND_MIN_DELTA
+    expect(
+      buildInsights(db(), NOW).insights.filter((i) => i.kind === 'calendar-vs-spend')
+    ).toHaveLength(0)
+  })
+
+  it('never counts uncategorized spend (overlap collapses below the floor)', async () => {
+    const { buildInsights } = await import('./insights')
+    for (let w = 0; w < 8; w++) {
+      const md = weekYmd(w)
+      const heavy = w % 2 === 0
+      for (let e = 0; e < (heavy ? 8 : 2); e++)
+        addRecord('gcal', 'event', ymdMs(md), { title: 'mtg' })
+      addTxn(md, heavy ? -500 : -50, heavy ? 'Uncategorized' : 'Dining')
+    }
+    expect(
+      buildInsights(db(), NOW).insights.filter((i) => i.kind === 'calendar-vs-spend')
+    ).toHaveLength(0)
+  })
+})
+
+describe('commits vs spend (github × finance, weekly)', () => {
+  beforeEach(() => createRecordsTable())
+  function seedWeeks(heavySpend: number, lightSpend: number): void {
+    for (let w = 0; w < 8; w++) {
+      const md = weekYmd(w)
+      const heavy = w % 2 === 0
+      for (let c = 0; c < (heavy ? 15 : 1); c++) addRecord('github', 'commit', ymdMs(md), {})
+      addTxn(md, heavy ? -heavySpend : -lightSpend, 'Dining')
+    }
+  }
+
+  it('fires when heavy commit weeks average more discretionary spend', async () => {
+    const { buildInsights } = await import('./insights')
+    seedWeeks(200, 50)
+    const hit = buildInsights(db(), NOW).insights.filter((i) => i.kind === 'commits-vs-spend')
+    expect(hit).toHaveLength(1)
+    expect(hit[0].title).toMatch(/\$150/)
+  })
+
+  it('stays quiet below the delta', async () => {
+    const { buildInsights } = await import('./insights')
+    seedWeeks(80, 60)
+    expect(
+      buildInsights(db(), NOW).insights.filter((i) => i.kind === 'commits-vs-spend')
+    ).toHaveLength(0)
+  })
+})
+
+describe('correlations — new weekly pair sections + readiness', () => {
+  beforeEach(() => createRecordsTable())
+
+  function seedCommitCalWeeks(count: number): void {
+    for (let w = 0; w < count; w++) {
+      const md = weekYmd(w)
+      addRecord('gcal', 'event', ymdMs(md), { title: 'mtg' })
+      addRecord('github', 'commit', ymdMs(md), {})
+    }
+  }
+
+  it('charts commitsVsCalendar at the 6-week overlap floor', async () => {
+    const { buildCorrelations } = await import('./insights')
+    seedCommitCalWeeks(6)
+    const c = buildCorrelations(db(), NOW)
+    expect(c.commitsVsCalendar).not.toBeNull()
+    expect(c.commitsVsCalendar?.points).toHaveLength(6)
+  })
+
+  it('counts PR records as coding activity (squash-merge syncs have no commit rows)', async () => {
+    const { buildCorrelations } = await import('./insights')
+    for (let w = 0; w < 7; w++) {
+      const md = weekYmd(w)
+      addRecord('gcal', 'event', ymdMs(md), { title: 'mtg' })
+      addRecord('github', 'pr', ymdMs(md), {})
+    }
+    const c = buildCorrelations(db(), NOW)
+    expect(c.commitsVsCalendar).not.toBeNull()
+    expect(c.commitsVsCalendar?.points.every((p) => p.activity === 1)).toBe(true)
+  })
+
+  it('ignores future calendar events (they can never pair with past activity)', async () => {
+    const { buildCorrelations } = await import('./insights')
+    seedCommitCalWeeks(3)
+    // Synced calendars carry upcoming events — these must not inflate the counts.
+    for (const ymd of ['2026-06-22', '2026-06-29', '2026-07-06', '2026-07-13']) {
+      addRecord('gcal', 'event', ymdMs(ymd), { title: 'future mtg' })
+    }
+    const r = buildCorrelations(db(), NOW).readiness.find((x) => x.pair === 'commitsVsCalendar')
+    expect(r?.checks.find((ch) => ch.id === 'calendar-weeks')).toMatchObject({
+      current: 3,
+      met: false
+    })
+  })
+
+  it('gates below the floor and reports progress in readiness', async () => {
+    const { buildCorrelations } = await import('./insights')
+    seedCommitCalWeeks(5)
+    const c = buildCorrelations(db(), NOW)
+    expect(c.commitsVsCalendar).toBeNull()
+    const r = c.readiness.find((x) => x.pair === 'commitsVsCalendar')
+    expect(r?.ready).toBe(false)
+    expect(r?.checks.find((ch) => ch.id === 'overlap-weeks')).toMatchObject({
+      current: 5,
+      needed: 6,
+      met: false
+    })
+    expect(r?.hint).toMatch(/5 of 6/)
+  })
+
+  it('always returns 6 readiness entries whose ready flag mirrors the section', async () => {
+    const { buildCorrelations } = await import('./insights')
+    seedCommitCalWeeks(7)
+    const c = buildCorrelations(db(), NOW)
+    expect(c.readiness).toHaveLength(6)
+    const sections: Record<string, unknown> = {
+      sleepVsSpend: c.sleepVsSpend,
+      devVsRecovery: c.devVsRecovery,
+      calendarVsHabits: c.calendarVsHabits,
+      commitsVsCalendar: c.commitsVsCalendar,
+      calendarVsSpend: c.calendarVsSpend,
+      commitsVsSpend: c.commitsVsSpend
+    }
+    for (const r of c.readiness) expect(r.ready).toBe(sections[r.pair] !== null)
+  })
+
+  it('explains an empty DB with unready pairs and actionable hints', async () => {
+    const { buildCorrelations } = await import('./insights')
+    const c = buildCorrelations(db(), NOW)
+    expect(c.readiness.every((r) => !r.ready)).toBe(true)
+    expect(c.readiness.find((r) => r.pair === 'sleepVsSpend')?.hint).toMatch(/Apple Health|Oura/)
+    expect(c.readiness.find((r) => r.pair === 'calendarVsHabits')?.hint).toMatch(/No active habits/)
+  })
+
+  it('reports the wearable-less dev scenario: commits OK, recovery missing', async () => {
+    const { buildCorrelations } = await import('./insights')
+    // 10 heavy commit days, no wearable data at all — the "github but no Oura /
+    // Apple Health" user.
+    for (let i = 0; i < 10; i++) {
+      const ymd = ymdMinus('2026-06-14', i)
+      for (let c2 = 0; c2 < 6; c2++) addRecord('github', 'commit', ymdMs(ymd), {})
+    }
+    const r = buildCorrelations(db(), NOW).readiness.find((x) => x.pair === 'devVsRecovery')
+    expect(r?.ready).toBe(false)
+    expect(r?.checks.find((ch) => ch.id === 'recovery-days')).toMatchObject({
+      current: 0,
+      met: false
+    })
+    expect(r?.checks.find((ch) => ch.id === 'busy-days')?.met).toBe(true)
+    expect(r?.checks.find((ch) => ch.id === 'quiet-days')?.met).toBe(true)
+    expect(r?.hint).toMatch(/Oura|Apple Health/)
+  })
+
+  it('flags uncategorized transactions as a caveat on the spend pairs only', async () => {
+    const { buildCorrelations } = await import('./insights')
+    addTxn('2026-06-10', -120, 'Uncategorized')
+    const c = buildCorrelations(db(), NOW)
+    for (const pair of ['sleepVsSpend', 'calendarVsSpend', 'commitsVsSpend'] as const) {
+      const r = c.readiness.find((x) => x.pair === pair)
+      expect(r?.caveats).toHaveLength(1)
+      expect(r?.caveats[0]).toMatch(/1 uncategorized transaction/)
+    }
+    for (const pair of ['devVsRecovery', 'calendarVsHabits', 'commitsVsCalendar'] as const) {
+      expect(c.readiness.find((x) => x.pair === pair)?.caveats).toEqual([])
+    }
+  })
+})
+
+describe('correlations survive a missing records table', () => {
+  it('degrades every pair to unready without throwing', async () => {
+    // The shared beforeEach creates no records table — this is the default state.
+    const { buildCorrelations } = await import('./insights')
+    const c = buildCorrelations(db(), NOW)
+    expect(c.sleepVsSpend).toBeNull()
+    expect(c.commitsVsCalendar).toBeNull()
+    expect(c.readiness).toHaveLength(6)
+    expect(c.readiness.every((r) => !r.ready)).toBe(true)
+  })
+})
+
 describe('cross-domain detectors survive a missing table', () => {
   it('does not throw when records/subscriptions/paystubs tables are absent', async () => {
     // The shared beforeEach creates none of them — this is the default state.
