@@ -409,8 +409,12 @@ function formatLabResult(r: LabResultRow): string {
 export function projectLabResults(rows: LabResultRow[]): RecordInput[] {
   const groups = new Map<string, LabResultRow[]>()
   for (const r of rows) {
-    if (!r.testName || !r.takenAt) continue
-    const key = `${r.encounterId ?? ''}|${r.panel ?? ''}|${r.takenAt}`
+    const testName = r.testName.trim()
+    const takenAt = r.takenAt.trim()
+    if (!testName || !takenAt) continue
+    const encounterId = r.encounterId?.trim() || ''
+    const panel = r.panel?.trim() || testName
+    const key = `${encounterId}|${panel}|${takenAt}`
     const group = groups.get(key)
     if (group) group.push(r)
     else groups.set(key, [r])
