@@ -411,6 +411,12 @@ const api = {
     enrichAll: () => ipcRenderer.invoke('contacts:enrich-all'),
     enrichStatus: () => ipcRenderer.invoke('contacts:enrich-status'),
     activity: (id: number) => ipcRenderer.invoke('contacts:activity', id),
+    // Opt-in web enrichment (BYO Anthropic key): search → review → apply-by-id.
+    webEnrich: (req: { contactId: number; hints?: string; candidateHint?: string }) =>
+      ipcRenderer.invoke('contacts:web-enrich', req),
+    webEnrichApply: (req: { runId: string; accepted: number[] }) =>
+      ipcRenderer.invoke('contacts:web-enrich-apply', req),
+    webEnrichCancel: () => ipcRenderer.invoke('contacts:web-enrich-cancel'),
     // Duplicates review queue (auto tier merges during sync; this is the manual tier).
     duplicates: () => ipcRenderer.invoke('contacts:duplicates'),
     merge: (survivorId: number, loserIds: number[]) =>

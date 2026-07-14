@@ -60,6 +60,16 @@ deliberate decision by the app's sole user** — not an accident to be "fixed"
 by re-walling domains. The propose→approve write funnel (Claude Inbox) is
 unchanged: AI reads everything, writes nothing without human approval.
 
+**Contact web enrichment** ("Enrich from web", `electron/ipc/contact-web-enrich.ts`)
+is the one surface that deliberately looks a person up on the public web. It
+sends the contact's name, org, and job title plus user-typed hints to
+Anthropic's server-side web search (BYO Anthropic key) — only on an explicit
+per-contact button press behind a consent dialog that shows the exact outbound
+payload. Emails and phone numbers are never sent, and never written back (a
+wrong identifier could trigger contact auto-merge). Results land as proposals
+the user reviews item-by-item; nothing is persisted without acceptance. No
+bulk mode, no background refresh.
+
 ## What's still true (not walls — different properties)
 
 - **Encryption at rest**: `.vault/*.enc` stays AES-256-GCM, key in the OS
