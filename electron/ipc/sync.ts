@@ -964,9 +964,12 @@ export async function syncGitHub(
       // of requests; `upsertGh`'s externalId=sha conflict target makes this
       // fully idempotent alongside the events-feed pull above.
       try {
-        const reposResp = await fetch('https://api.github.com/user/repos?sort=pushed&per_page=10', {
-          headers
-        })
+        const reposResp = await fetch(
+          `https://api.github.com/user/repos?sort=pushed&per_page=${GITHUB_COMMIT_REPO_LIMIT}`,
+          {
+            headers
+          }
+        )
         if (reposResp.ok) {
           const repos = (await reposResp.json()) as Array<{ full_name?: string }>
           const since = new Date(Date.now() - GITHUB_COMMIT_LOOKBACK_MS).toISOString()

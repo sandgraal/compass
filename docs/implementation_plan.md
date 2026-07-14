@@ -953,8 +953,9 @@ undo any of it:
   eventually-consistent, and silently drops pushes GitHub doesn't surface there — so commits reaching
   the timeline were unreliable in practice. Fixed by adding a second, deterministic pull that runs
   alongside the events-feed one (both stay in place): `GET /user/repos?sort=pushed&per_page=10`, then
-  for the top `GITHUB_COMMIT_REPO_LIMIT` (10) repos, `GET /repos/{owner}/{repo}/commits?author={login}
-  &since={90-days-ago}&per_page=GITHUB_COMMIT_PER_REPO_LIMIT(30)`. Both pulls feed the same `upsertGh`
+  for the top `GITHUB_COMMIT_REPO_LIMIT` (10) repos,
+  `GET /repos/{owner}/{repo}/commits?author={login}&since={90-days-ago}&per_page=30`
+  (`GITHUB_COMMIT_PER_REPO_LIMIT`). Both pulls feed the same `upsertGh`
   closure keyed on `externalId=sha` (`onConflictDoUpdate`), so a commit seen by both is a no-op the
   second time — fully idempotent. Bounds are module-level consts: `GITHUB_COMMIT_REPO_LIMIT=10`,
   `GITHUB_COMMIT_PER_REPO_LIMIT=30`, `GITHUB_COMMIT_LOOKBACK_MS=90 days`. Each pull (repos list, and
