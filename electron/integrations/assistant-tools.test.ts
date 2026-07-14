@@ -37,7 +37,8 @@ beforeEach(() => {
     , is_foreign INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE finance_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, amount REAL, category TEXT,
-      description TEXT DEFAULT '', currency TEXT DEFAULT 'USD'
+      description TEXT DEFAULT '', currency TEXT DEFAULT 'USD',
+      normalized_merchant TEXT
     );
     CREATE TABLE contacts (
       id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,

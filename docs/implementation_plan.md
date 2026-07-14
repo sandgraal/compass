@@ -838,6 +838,35 @@ undo any of it:
 
 ---
 
+## Addendum (2026-07-13) — Merchants redesign: tracked-merchant profiles
+
+> Follow-up to the 2026-07-10 curation addendum's "Merchants & Places split" (#342): `/merchants` gets its
+> own owned-data surface instead of just being a promote-and-forget list over the cross-reference engine.
+
+- **Schema** — `finance_transactions.normalized_merchant` (indexed, the persisted `normalizeMerchant(description)`
+  merge key, backfilled at startup via `ensureNormalizedMerchants` in `electron/lib/merchant-match.ts`) and
+  `places.meta` (namespaced JSON — `support` contacts today, reserved for a future consent-gated
+  web-enrichment blob). Migration `0041` (+ `ensureNewTables` mirror).
+- **New IPC namespace** — `electron/ipc/merchants.ts` registers `merchants:list-tracked`, `merchants:profile`,
+  `merchants:update`, `merchants:untrack` (`window.api.merchants.{listTracked,profile,update,untrack}`),
+  backed by `electron/lib/merchant-match.ts` (backfill + match-key) and `electron/lib/merchant-profile.ts`
+  (stats, monthly buckets, price trend, tax rollup).
+- **UI** — `src/pages/Merchants.tsx` rewritten as **Tracked / Discovered** tabs: Tracked is a Contacts-style
+  master–detail over promoted `places` rows with live ledger stats, opening the new
+  `src/components/MerchantDetail.tsx` (stats, spend chart, transactions, cross-source `records` activity,
+  subscription link, attached documents via `document_links` `targetKind:'merchant'`, tax summary, editable
+  details); Discovered is the prior cross-reference-engine list. `src/components/DerivedEntityList.tsx`
+  gained optional `promoteLabel`/`promotedLabel`/`onPromoted` props so Merchants can rebrand "Save" → "Track"
+  and jump straight into the new profile — `/places` is unchanged.
+- **MCP** — new `compass_merchants` tool (`readMerchants` in `mcp/compass-mcp/readers.ts`, with its own copy
+  of `normalizeMerchant` since the MCP process can't import `electron/`).
+- **Morning Brief** — a new unusual-charge alert (no settings gate, unlike low-cash/price-hike):
+  `computeMerchantChargeAlert` (`electron/ipc/morning-brief.ts`) flags recent charges at a tracked merchant
+  that exceed 2× its historical median (≥5 prior charges required), wired into `cron.ts` and
+  `src/components/MorningBrief.tsx`.
+
+---
+
 ## Backlog (deferred, considered but out of scope this round)
 
 ## Phase 5 — Strategic-review follow-ups (May 2026)

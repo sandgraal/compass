@@ -40,7 +40,8 @@ beforeEach(() => {
       id INTEGER PRIMARY KEY, country TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL
     );
     CREATE TABLE finance_transactions (
-      id INTEGER PRIMARY KEY, date TEXT NOT NULL, amount REAL NOT NULL, description TEXT NOT NULL
+      id INTEGER PRIMARY KEY, date TEXT NOT NULL, amount REAL NOT NULL, description TEXT NOT NULL,
+      normalized_merchant TEXT
     );
     CREATE TABLE finance_accounts (id INTEGER PRIMARY KEY, is_debt INTEGER DEFAULT 0);
     CREATE TABLE finance_balance_snapshots (

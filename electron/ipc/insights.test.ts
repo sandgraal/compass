@@ -67,7 +67,8 @@ beforeEach(() => {
       tax_tag_source TEXT NOT NULL DEFAULT 'auto',
       tax_year INTEGER,
       source_file TEXT,
-      ingested_at INTEGER
+      ingested_at INTEGER,
+      normalized_merchant TEXT
     );
     CREATE TABLE habits (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

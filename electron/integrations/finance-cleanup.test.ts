@@ -28,7 +28,8 @@ beforeEach(() => {
       amount REAL NOT NULL,
       description TEXT NOT NULL,
       account_id INTEGER REFERENCES finance_accounts(id),
-      source_file TEXT
+      source_file TEXT,
+      normalized_merchant TEXT
     );
     CREATE TABLE finance_balance_snapshots (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

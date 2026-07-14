@@ -101,7 +101,8 @@ function makeDb(): Database.Database {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL, amount REAL NOT NULL, currency TEXT NOT NULL DEFAULT 'USD',
       description TEXT NOT NULL DEFAULT '', tax_tag TEXT NOT NULL DEFAULT 'tax:none',
-      geo TEXT NOT NULL DEFAULT 'US', purpose TEXT
+      geo TEXT NOT NULL DEFAULT 'US', purpose TEXT,
+      normalized_merchant TEXT
     );
   `)
   return sqlite

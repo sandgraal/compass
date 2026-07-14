@@ -63,7 +63,8 @@ beforeEach(() => {
     CREATE TABLE finance_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, date TEXT NOT NULL,
       amount REAL NOT NULL, currency TEXT NOT NULL DEFAULT 'USD', description TEXT NOT NULL,
-      category TEXT DEFAULT 'Uncategorized'
+      category TEXT DEFAULT 'Uncategorized',
+      normalized_merchant TEXT
     );
     CREATE TABLE gmail_actions (
       id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL UNIQUE, subject TEXT NOT NULL,
@@ -98,7 +99,8 @@ beforeEach(() => {
     CREATE TABLE places (
       id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, kind TEXT NOT NULL DEFAULT 'merchant',
       name TEXT NOT NULL, category TEXT, address TEXT, url TEXT, total_spend REAL, notes TEXT,
-      source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER
+      source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER,
+      meta TEXT
     );
     CREATE TABLE derived_entities (
       id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, match_key TEXT NOT NULL, name TEXT NOT NULL,

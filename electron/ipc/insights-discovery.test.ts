@@ -35,7 +35,8 @@ beforeEach(() => {
       date TEXT NOT NULL,
       amount REAL NOT NULL,
       description TEXT NOT NULL,
-      category TEXT DEFAULT 'Uncategorized'
+      category TEXT DEFAULT 'Uncategorized',
+      normalized_merchant TEXT
     );
   `)
 })

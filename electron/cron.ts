@@ -25,6 +25,7 @@ import { syncThings } from './integrations/things'
 import { syncTodoist } from './integrations/todoist'
 import {
   computeLowCashAlert,
+  computeMerchantChargeAlert,
   computePriceHikeAlert,
   morningBriefCronExpr,
   notifyMorningBrief
@@ -113,7 +114,8 @@ function scheduleMorningBrief(): void {
         db,
         fireTime,
         computeLowCashAlert(db, getRawSqlite(), fireTime),
-        computePriceHikeAlert(db, fireTime)
+        computePriceHikeAlert(db, fireTime),
+        computeMerchantChargeAlert(getRawSqlite(), fireTime)
       )
     } catch (err) {
       console.error('[cron] morning brief notification failed:', err)

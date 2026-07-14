@@ -17,7 +17,8 @@ beforeEach(() => {
     );
     CREATE TABLE finance_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, date TEXT NOT NULL,
-      amount REAL NOT NULL, currency TEXT DEFAULT 'USD', description TEXT NOT NULL DEFAULT '', category TEXT
+      amount REAL NOT NULL, currency TEXT DEFAULT 'USD', description TEXT NOT NULL DEFAULT '', category TEXT,
+      normalized_merchant TEXT
     );
     CREATE TABLE records (
       id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, type TEXT NOT NULL, occurred_at INTEGER,

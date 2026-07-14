@@ -577,7 +577,8 @@ describe('detectRecurringIncome', () => {
         account_id INTEGER,
         date TEXT NOT NULL,
         amount REAL NOT NULL,
-        description TEXT NOT NULL DEFAULT ''
+        description TEXT NOT NULL DEFAULT '',
+        normalized_merchant TEXT
       );
       INSERT INTO finance_accounts (id, name, is_debt) VALUES (1, 'Chase', 0);
     `)

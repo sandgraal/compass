@@ -47,6 +47,7 @@ import {
   syncEvents
 } from '../../db/schema'
 import { categorizationRules } from '../../db/schema'
+import { normalizeMerchant } from '../../lib/normalize'
 import { categorize } from '../finance'
 import { applyAtmSplit } from '../finance-atm-split'
 import { reconcileTransactionCurrency } from '../finance-currency'
@@ -217,6 +218,7 @@ function applyPage(
         taxTag: t.taxTag ?? 'tax:none',
         taxTagSource: 'auto',
         taxYear: t.taxYear ?? null,
+        normalizedMerchant: normalizeMerchant(t.description),
         sourceFile: t.sourceFile,
         ingestedAt: new Date()
       })
@@ -245,6 +247,7 @@ function applyPage(
         geo: t.geo ?? 'US',
         purpose: t.purpose ?? null,
         taxTag: t.taxTag ?? 'tax:none',
+        normalizedMerchant: normalizeMerchant(t.description),
         sourceFile: t.sourceFile
       })
       .where(eq(financeTransactions.hash, t.hash))
