@@ -50,7 +50,12 @@ export interface MerchantMeta {
 export interface TrackedMerchant extends PlaceRecord {
   matchKey: string
   meta: MerchantMeta | null
-  live: { totalSpend: number; txnCount: number; lastTxnDate: string | null } | null
+  live: {
+    totalSpend: number
+    txnCount: number
+    lastTxnDate: string | null
+    currency: string
+  } | null
 }
 
 export interface MerchantTxnListItem {
@@ -158,31 +163,48 @@ function loadSlimTxns(matchKey: string): MerchantSlimTxn[] {
  */
 function liveStatsFor(
   keys: string[]
-): Map<string, { totalSpend: number; txnCount: number; lastTxnDate: string | null }> {
+): Map<
+  string,
+  { totalSpend: number; txnCount: number; lastTxnDate: string | null; currency: string }
+> {
   const map = new Map<
     string,
-    { totalSpend: number; txnCount: number; lastTxnDate: string | null }
+    { totalSpend: number; txnCount: number; lastTxnDate: string | null; currency: string }
   >()
   const unique = [...new Set(keys.filter((k) => k.length > 0))]
   if (unique.length === 0) return map
   const rows = getRawSqlite()
     .prepare(
       `SELECT normalized_merchant AS key,
-              ROUND(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 2) AS totalSpend,
-              COUNT(*) AS txnCount,
-              MAX(date) AS lastTxnDate
-         FROM finance_transactions
-        WHERE normalized_merchant IN (${unique.map(() => '?').join(', ')})
-        GROUP BY normalized_merchant`
+             date,
+             amount,
+             currency,
+             tax_tag AS taxTag,
+             tax_year AS taxYear
+        FROM finance_transactions
+       WHERE normalized_merchant IN (${unique.map(() => '?').join(', ')})
+       ORDER BY normalized_merchant, date`
     )
-    .all(...unique) as Array<{
-    key: string
-    totalSpend: number
-    txnCount: number
-    lastTxnDate: string | null
-  }>
-  for (const r of rows)
-    map.set(r.key, { totalSpend: r.totalSpend, txnCount: r.txnCount, lastTxnDate: r.lastTxnDate })
+    .all(...unique) as Array<
+    {
+      key: string
+    } & MerchantSlimTxn
+  >
+  const byKey = new Map<string, MerchantSlimTxn[]>()
+  for (const row of rows) {
+    const txns = byKey.get(row.key) ?? []
+    txns.push(row)
+    byKey.set(row.key, txns)
+  }
+  for (const [key, txns] of byKey) {
+    const stats = computeMerchantStats(txns)
+    map.set(key, {
+      totalSpend: stats.totalSpend,
+      txnCount: stats.txnCount,
+      lastTxnDate: stats.lastTxnDate,
+      currency: stats.currency
+    })
+  }
   return map
 }
 

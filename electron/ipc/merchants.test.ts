@@ -130,17 +130,23 @@ beforeEach(async () => {
 afterEach(() => sqlite.close())
 
 describe('merchants:list-tracked', () => {
-  it('returns merchant places with live ledger stats, skipping kind=place', () => {
+  it('returns merchant places with dominant-currency live ledger stats, skipping kind=place', () => {
     seedPlace()
     seedPlace({ externalId: 'derived:place:central park', name: 'Central Park', kind: 'place' })
     seedTxn({ date: '2026-01-05', amount: -10, merchant: 'blue bottle' })
     seedTxn({ date: '2026-02-05', amount: -12.5, merchant: 'blue bottle' })
     seedTxn({ date: '2026-02-06', amount: 3, merchant: 'blue bottle' }) // refund excluded from spend
+    seedTxn({ date: '2026-02-07', amount: -5000, merchant: 'blue bottle', currency: 'CRC' })
 
     const list = invoke('merchants:list-tracked') as TrackedMerchant[]
     expect(list).toHaveLength(1)
     expect(list[0].matchKey).toBe('blue bottle')
-    expect(list[0].live).toEqual({ totalSpend: 22.5, txnCount: 3, lastTxnDate: '2026-02-06' })
+    expect(list[0].live).toEqual({
+      totalSpend: 22.5,
+      txnCount: 4,
+      lastTxnDate: '2026-02-07',
+      currency: 'USD'
+    })
   })
 
   it('a merchant with no ledger rows gets live: null', () => {

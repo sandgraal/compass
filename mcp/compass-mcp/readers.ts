@@ -758,6 +758,7 @@ export interface MerchantSummary {
   matchKey: string
   category: string | null
   url: string | null
+  currency: string
   totalSpend: number
   txnCount: number
   avgTxn: number
@@ -785,6 +786,48 @@ function merchantKeyFor(externalId: string, name: string): string {
   const m = externalId.match(/^derived:(?:merchant|place):(.+)$/)
   if (m) return m[1]
   return normalizeMerchant(name)
+}
+
+type MerchantLedgerRow = { key: string; date: string; amount: number; currency: string }
+
+function dominantMerchantCurrency(txns: MerchantLedgerRow[]): string {
+  const counts = new Map<string, number>()
+  for (const txn of txns) {
+    const currency = txn.currency || 'USD'
+    counts.set(currency, (counts.get(currency) ?? 0) + 1)
+  }
+  let best = 'USD'
+  let bestCount = 0
+  for (const [currency, count] of counts) {
+    if (count > bestCount) {
+      best = currency
+      bestCount = count
+    }
+  }
+  return best
+}
+
+function merchantMonthly(
+  txns: MerchantLedgerRow[]
+): Array<{ month: string; spend: number; count: number }> {
+  const byMonth = new Map<string, { spend: number; count: number }>()
+  for (const txn of txns) {
+    if (txn.amount >= 0) continue
+    const month = txn.date.slice(0, 7)
+    if (month.length !== 7) continue
+    const bucket = byMonth.get(month) ?? { spend: 0, count: 0 }
+    bucket.spend += -txn.amount
+    bucket.count += 1
+    byMonth.set(month, bucket)
+  }
+  return [...byMonth.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .slice(0, 12)
+    .map(([month, bucket]) => ({
+      month,
+      spend: Math.round(bucket.spend * 100) / 100,
+      count: bucket.count
+    }))
 }
 
 /**
@@ -835,63 +878,58 @@ export function readMerchants(
   const statsByKey = new Map<
     string,
     {
+      currency: string
       totalSpend: number
       txnCount: number
       avgTxn: number
       firstTxnDate: string | null
       lastTxnDate: string | null
       last6MonthsSpend: number
+      monthly: Array<{ month: string; spend: number; count: number }>
     }
   >()
   if (hasLedger && keys.length > 0) {
-    const stats = db
+    const txns = db
       .prepare(
         `SELECT normalized_merchant AS key,
-                ROUND(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 2) AS totalSpend,
-                COUNT(*) AS txnCount,
-                ROUND(AVG(CASE WHEN amount < 0 THEN -amount END), 2) AS avgTxn,
-                MIN(date) AS firstTxnDate,
-                MAX(date) AS lastTxnDate,
-                ROUND(SUM(CASE WHEN amount < 0 AND date >= @sixMonthsAgo THEN -amount ELSE 0 END), 2) AS last6MonthsSpend
-           FROM finance_transactions
+               date,
+               amount,
+               currency
+          FROM finance_transactions
           WHERE normalized_merchant IN (${keys.map((_, i) => `@k${i}`).join(', ')})
-          GROUP BY normalized_merchant`
+          ORDER BY normalized_merchant, date`
       )
-      .all({
-        sixMonthsAgo,
-        ...Object.fromEntries(keys.map((k, i) => [`k${i}`, k]))
-      }) as Array<{
-      key: string
-      totalSpend: number
-      txnCount: number
-      avgTxn: number | null
-      firstTxnDate: string | null
-      lastTxnDate: string | null
-      last6MonthsSpend: number
-    }>
-    for (const s of stats) {
-      statsByKey.set(s.key, {
-        totalSpend: s.totalSpend,
-        txnCount: s.txnCount,
-        avgTxn: s.avgTxn ?? 0,
-        firstTxnDate: s.firstTxnDate,
-        lastTxnDate: s.lastTxnDate,
-        last6MonthsSpend: s.last6MonthsSpend
+      .all(Object.fromEntries(keys.map((k, i) => [`k${i}`, k]))) as MerchantLedgerRow[]
+    const byKey = new Map<string, MerchantLedgerRow[]>()
+    for (const txn of txns) {
+      const rowsForKey = byKey.get(txn.key) ?? []
+      rowsForKey.push(txn)
+      byKey.set(txn.key, rowsForKey)
+    }
+    for (const [key, rowsForKey] of byKey) {
+      const currency = dominantMerchantCurrency(rowsForKey)
+      const inCurrency = rowsForKey.filter((txn) => (txn.currency || 'USD') === currency)
+      const expenses = inCurrency.filter((txn) => txn.amount < 0)
+      const totalSpend = expenses.reduce((sum, txn) => sum + -txn.amount, 0)
+      const firstTxnDate = rowsForKey[0]?.date ?? null
+      const lastTxnDate = rowsForKey[rowsForKey.length - 1]?.date ?? null
+      const last6MonthsSpend = expenses
+        .filter((txn) => txn.date >= sixMonthsAgo)
+        .reduce((sum, txn) => sum + -txn.amount, 0)
+      statsByKey.set(key, {
+        currency,
+        totalSpend: Math.round(totalSpend * 100) / 100,
+        txnCount: rowsForKey.length,
+        avgTxn: expenses.length > 0 ? Math.round((totalSpend / expenses.length) * 100) / 100 : 0,
+        firstTxnDate,
+        lastTxnDate,
+        last6MonthsSpend: Math.round(last6MonthsSpend * 100) / 100,
+        monthly: merchantMonthly(expenses)
       })
     }
   }
 
   const detail = q != null && keyed.length <= MERCHANT_MONTHLY_DETAIL_MAX
-  const monthlyStmt =
-    detail && hasLedger
-      ? db.prepare(
-          `SELECT substr(date, 1, 7) AS month,
-                  ROUND(SUM(-amount), 2) AS spend, COUNT(*) AS count
-             FROM finance_transactions
-            WHERE normalized_merchant = ? AND amount < 0
-            GROUP BY substr(date, 1, 7) ORDER BY month DESC LIMIT 12`
-        )
-      : null
 
   const merchants = keyed.map<MerchantSummary>((r) => {
     const s = statsByKey.get(r.matchKey)
@@ -900,6 +938,7 @@ export function readMerchants(
       matchKey: r.matchKey,
       category: r.category,
       url: r.url,
+      currency: s?.currency ?? 'USD',
       totalSpend: s?.totalSpend ?? 0,
       txnCount: s?.txnCount ?? 0,
       avgTxn: s?.avgTxn ?? 0,
@@ -908,7 +947,7 @@ export function readMerchants(
       last6MonthsSpend: s?.last6MonthsSpend ?? 0
     }
     if (detail) {
-      base.monthly = (monthlyStmt?.all(r.matchKey) as MerchantSummary['monthly']) ?? []
+      base.monthly = s?.monthly ?? []
       base.notes = r.notes
       try {
         const meta = r.meta

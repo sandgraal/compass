@@ -65,7 +65,11 @@ export default function MerchantDetail({
   const { toast } = useToast()
 
   const load = useCallback(async (): Promise<void> => {
-    if (!isElectron()) return
+    if (!isElectron()) {
+      setProfile(null)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       setProfile(await window.api.merchants.profile(merchantId))
@@ -87,7 +91,7 @@ export default function MerchantDetail({
     const ok = await confirm({
       title: `Stop tracking ${profile.place.name}?`,
       description:
-        'The merchant moves back to Discovered. Your notes, category, and attached documents links are removed.',
+        'The merchant moves back to Discovered. Your saved details are removed. Attached documents stay linked and reappear if you track it again.',
       confirmLabel: 'Untrack',
       destructive: true
     })
@@ -647,8 +651,8 @@ function EditDetails({
           support:
             draft.supportEmail.trim() || draft.supportPhone.trim()
               ? { email: draft.supportEmail.trim(), phone: draft.supportPhone.trim() }
-              : null
-        } as MerchantMeta
+              : undefined
+        }
       })
       toast('Saved', 'success')
       onSaved()

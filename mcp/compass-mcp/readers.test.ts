@@ -635,28 +635,30 @@ describe('readMerchants', () => {
       `INSERT INTO places (external_id, kind, name, notes, meta, updated_at) VALUES (?, 'merchant', ?, ?, ?, 0)`
     ).run(externalId, name, over?.notes ?? null, over?.meta ?? null)
   }
-  function charge(merchant: string, date: string, amount: number): void {
+  function charge(merchant: string, date: string, amount: number, currency = 'USD'): void {
     db.prepare(
-      'INSERT INTO finance_transactions (date, amount, description, normalized_merchant) VALUES (?,?,?,?)'
-    ).run(date, amount, merchant, merchant)
+      'INSERT INTO finance_transactions (date, amount, currency, description, normalized_merchant) VALUES (?,?,?,?,?)'
+    ).run(date, amount, currency, merchant, merchant)
   }
 
-  it('lists tracked merchants with live ledger stats', () => {
+  it('lists tracked merchants with dominant-currency live ledger stats', () => {
     createMerchantTables()
     track('derived:merchant:blue bottle', 'Blue Bottle')
     charge('blue bottle', '2026-01-05', -10)
     charge('blue bottle', '2026-02-05', -14)
     charge('blue bottle', '2026-02-06', 4) // refund — excluded from spend
+    charge('blue bottle', '2026-02-07', -5000, 'CRC')
     const res = readMerchants(db)
     expect(res.count).toBe(1)
     expect(res.merchants[0]).toMatchObject({
       name: 'Blue Bottle',
       matchKey: 'blue bottle',
+      currency: 'USD',
       totalSpend: 24,
-      txnCount: 3,
+      txnCount: 4,
       avgTxn: 12,
       firstTxnDate: '2026-01-05',
-      lastTxnDate: '2026-02-06'
+      lastTxnDate: '2026-02-07'
     })
     // List mode carries no per-month detail.
     expect(res.merchants[0].monthly).toBeUndefined()

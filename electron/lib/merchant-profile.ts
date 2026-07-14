@@ -109,7 +109,7 @@ export function computeMerchantStats(txns: MerchantSlimTxn[], now = new Date()):
   const lastTxnDate = dates[dates.length - 1] ?? null
 
   const year = now.getFullYear()
-  const monthDay = now.toISOString().slice(5, 10) // 'MM-DD'
+  const monthDay = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}` // 'MM-DD'
   const spendIn = (from: string, to: string): number =>
     expenses.filter((t) => t.date >= from && t.date <= to).reduce((s, t) => s + -t.amount, 0)
   const thisYearSpend = spendIn(`${year}-01-01`, `${year}-${monthDay}`)
@@ -190,7 +190,7 @@ export function computePriceTrend(txns: MerchantSlimTxn[]): MerchantPriceTrend |
   if (historicalMedian <= 1) return null
   const delta = recentMedian - historicalMedian
   const pct = (delta / historicalMedian) * 100
-  if (Math.abs(delta) <= 0.5 || Math.abs(pct) <= 8) return null
+  if (Math.abs(delta) <= 0.5 && Math.abs(pct) <= 8) return null
   return {
     direction: delta > 0 ? 'up' : 'down',
     pct: round2(pct),

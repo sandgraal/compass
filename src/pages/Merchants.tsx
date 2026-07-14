@@ -63,13 +63,18 @@ export default function Merchants(): JSX.Element {
 
   // Spend-by-category rollup chips across the tracked set.
   const categories = useMemo(() => {
-    const byCat = new Map<string, number>()
+    const byCat = new Map<string, { category: string; currency: string; spend: number }>()
     for (const m of tracked) {
       const cat = m.category?.trim()
-      if (!cat) continue
-      byCat.set(cat, (byCat.get(cat) ?? 0) + (m.live?.totalSpend ?? 0))
+      if (!cat || !m.live) continue
+      const key = `${cat}\u0000${m.live.currency}`
+      const row = byCat.get(key) ?? { category: cat, currency: m.live.currency, spend: 0 }
+      row.spend += m.live.totalSpend
+      byCat.set(key, row)
     }
-    return [...byCat.entries()].sort((a, b) => b[1] - a[1])
+    return [...byCat.entries()]
+      .map(([key, row]) => ({ key, ...row }))
+      .sort((a, b) => b.spend - a.spend)
   }, [tracked])
 
   const shownTracked = useMemo(() => {
@@ -159,7 +164,7 @@ export default function Merchants(): JSX.Element {
         />
       )}
 
-      {tab !== 'discovered' &&
+      {tab === 'tracked' &&
         (trackedLoaded && tracked.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center text-sm text-muted-foreground">
             <Compass size={20} className="mx-auto mb-2 text-muted-foreground" />
@@ -187,20 +192,22 @@ export default function Merchants(): JSX.Element {
               />
               {categories.length > 1 && (
                 <div className="flex gap-1.5 flex-wrap">
-                  {categories.map(([cat, spend]) => (
+                  {categories.map(({ key, category, currency, spend }) => (
                     <button
-                      key={cat}
+                      key={key}
                       type="button"
-                      onClick={() => setCategoryFilter((prev) => (prev === cat ? null : cat))}
-                      title={`${formatMoney(spend)} across ${cat}`}
+                      onClick={() =>
+                        setCategoryFilter((prev) => (prev === category ? null : category))
+                      }
+                      title={`${formatMoney(spend, currency)} across ${category}`}
                       className={cn(
                         'text-[11px] px-2 py-0.5 rounded-full border transition-colors',
-                        categoryFilter === cat
+                        categoryFilter === category
                           ? 'border-primary/60 bg-primary/10 text-primary'
                           : 'border-border text-muted-foreground hover:text-foreground'
                       )}
                     >
-                      {cat} · {formatMoney(spend, 'USD', { decimals: 0, compact: true })}
+                      {category} · {formatMoney(spend, currency, { decimals: 0, compact: true })}
                     </button>
                   ))}
                 </div>
@@ -224,7 +231,7 @@ export default function Merchants(): JSX.Element {
                         </span>
                         {m.live && (
                           <span className="text-xs text-foreground shrink-0 tabular-nums">
-                            {formatMoney(m.live.totalSpend, 'USD', {
+                            {formatMoney(m.live.totalSpend, m.live.currency, {
                               decimals: 0,
                               compact: true
                             })}

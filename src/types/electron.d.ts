@@ -818,7 +818,12 @@ declare global {
   interface TrackedMerchant extends PlaceRecord {
     matchKey: string
     meta: MerchantMeta | null
-    live: { totalSpend: number; txnCount: number; lastTxnDate: string | null } | null
+    live: {
+      totalSpend: number
+      txnCount: number
+      lastTxnDate: string | null
+      currency: string
+    } | null
   }
 
   interface MerchantStats {

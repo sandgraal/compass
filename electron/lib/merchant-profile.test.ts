@@ -51,6 +51,22 @@ describe('computeMerchantStats', () => {
     expect(stats.trendPct).toBe(50)
   })
 
+  it('uses the local month/day for the comparison window', () => {
+    const fakeNow = {
+      getFullYear: () => 2026,
+      getMonth: () => 0,
+      getDate: () => 1,
+      toISOString: () => '2025-12-31T10:30:00.000Z'
+    } as unknown as Date
+    const stats = computeMerchantStats(
+      [txn('2025-01-01', -10), txn('2025-12-31', -900), txn('2026-01-01', -15)],
+      fakeNow
+    )
+    expect(stats.thisYearSpend).toBe(15)
+    expect(stats.lastYearSameSpanSpend).toBe(10)
+    expect(stats.trendPct).toBe(50)
+  })
+
   it('trendPct is null when last year had no spend in the span', () => {
     const stats = computeMerchantStats([txn('2026-03-01', -150)], NOW)
     expect(stats.trendPct).toBeNull()
@@ -126,6 +142,17 @@ describe('computePriceTrend', () => {
   it('ignores sub-$0.50 / sub-8% drift and short histories', () => {
     expect(computePriceTrend([...steady(4, 10), txn('2026-05-05', -10.3)])).toBeNull()
     expect(computePriceTrend(steady(3, 10))).toBeNull()
+  })
+
+  it('keeps real changes when only one drift threshold is small', () => {
+    const t = computePriceTrend([
+      ...steady(4, 10),
+      txn('2026-05-05', -10.6),
+      txn('2026-06-05', -10.6)
+    ])
+    expect(t).not.toBeNull()
+    expect(t?.direction).toBe('up')
+    expect(t?.pct).toBe(6)
   })
 })
 
