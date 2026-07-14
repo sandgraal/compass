@@ -19,6 +19,7 @@ import { type RawTxn, categorize, hashTxn } from '../integrations/finance'
 import { tagGeoAndPurpose } from '../integrations/finance-geo'
 import { tagTax } from '../integrations/finance-tax'
 import { localYmd } from '../lib/dates'
+import { normalizeMerchant } from '../lib/normalize'
 import { KNOWLEDGE_DIR } from '../paths'
 
 export type QuickCaptureKind = 'task' | 'note' | 'expense'
@@ -143,6 +144,7 @@ function captureExpense(text: string): QuickCaptureResult {
       taxTag: txn.taxTag ?? 'tax:none',
       taxTagSource: 'auto',
       taxYear: txn.taxYear ?? null,
+      normalizedMerchant: normalizeMerchant(txn.description),
       sourceFile: txn.sourceFile,
       ingestedAt: new Date()
     })

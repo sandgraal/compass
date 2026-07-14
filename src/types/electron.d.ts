@@ -320,6 +320,16 @@ declare global {
         pct: number
       }>
     }
+    merchantCharges: {
+      count: number
+      items: Array<{
+        merchant: string
+        date: string
+        amount: number
+        typical: number
+        description: string
+      }>
+    }
     summary: string
   }
 
@@ -797,6 +807,115 @@ declare global {
     totalSpend: number | null
     notes: string | null
     source: string
+  }
+
+  // ---- Tracked merchants (merchants redesign) — see electron/ipc/merchants.ts ----
+  interface MerchantMeta {
+    support?: { email?: string; phone?: string }
+    enrichment?: Record<string, unknown>
+  }
+
+  interface TrackedMerchant extends PlaceRecord {
+    matchKey: string
+    meta: MerchantMeta | null
+    live: {
+      totalSpend: number
+      txnCount: number
+      lastTxnDate: string | null
+      currency: string
+    } | null
+  }
+
+  interface MerchantStats {
+    totalSpend: number
+    refundTotal: number
+    txnCount: number
+    spendCount: number
+    avgTxn: number
+    firstTxnDate: string | null
+    lastTxnDate: string | null
+    thisYearSpend: number
+    lastYearSameSpanSpend: number
+    trendPct: number | null
+    monthlyMedian: number | null
+    cadence: string | null
+    currency: string
+  }
+
+  interface MerchantMonthlyBucket {
+    month: string
+    spend: number
+    count: number
+  }
+
+  interface MerchantPriceTrend {
+    direction: 'up' | 'down'
+    pct: number
+    recentMedian: number
+    historicalMedian: number
+  }
+
+  interface MerchantTxnListItem {
+    id: number
+    date: string
+    amount: number
+    currency: string
+    description: string
+    category: string | null
+    taxTag: string
+  }
+
+  interface MerchantActivityHit {
+    recordId: number
+    source: string
+    type: string
+    title: string
+    occurredAt: number | null
+  }
+
+  interface MerchantDocumentItem {
+    linkId: number
+    documentId: number
+    title: string
+    docDate: string | null
+    mimeType: string | null
+  }
+
+  interface MerchantTaxRow {
+    taxTag: string
+    taxYear: number | null
+    total: number
+    count: number
+  }
+
+  interface MerchantProfile {
+    place: PlaceRecord & { meta: MerchantMeta | null }
+    matchKey: string
+    stats: MerchantStats
+    monthly: MerchantMonthlyBucket[]
+    priceTrend: MerchantPriceTrend | null
+    transactions: MerchantTxnListItem[]
+    activity: MerchantActivityHit[]
+    subscription: {
+      id: number
+      name: string
+      cost: number
+      cadence: string
+      status: string
+      nextRenewal: string | null
+      cancelUrl: string | null
+    } | null
+    documents: MerchantDocumentItem[]
+    tax: MerchantTaxRow[]
+  }
+
+  interface MerchantUpdatePatch {
+    name?: string
+    category?: string | null
+    address?: string | null
+    url?: string | null
+    notes?: string | null
+    meta?: MerchantMeta | null
   }
 
   // Offline Places map — clustered GPS cells + the bundled country basemap.
@@ -1830,6 +1949,12 @@ declare global {
       places: {
         list(): Promise<PlaceRecord[]>
         delete(id: number): Promise<{ success: boolean }>
+      }
+      merchants: {
+        listTracked(): Promise<TrackedMerchant[]>
+        profile(id: number): Promise<MerchantProfile>
+        update(id: number, patch: MerchantUpdatePatch): Promise<{ success: boolean }>
+        untrack(id: number): Promise<{ success: boolean }>
       }
       overview: {
         summary(): Promise<OverviewSummary>

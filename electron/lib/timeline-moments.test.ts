@@ -20,7 +20,8 @@ beforeEach(() => {
       count INTEGER NOT NULL DEFAULT 0, first_seen INTEGER
     );
     CREATE TABLE finance_transactions (
-      id INTEGER PRIMARY KEY, date TEXT NOT NULL, amount REAL NOT NULL, description TEXT NOT NULL
+      id INTEGER PRIMARY KEY, date TEXT NOT NULL, amount REAL NOT NULL, description TEXT NOT NULL,
+      normalized_merchant TEXT
     );
     CREATE TABLE subscriptions (
       id INTEGER PRIMARY KEY, name TEXT NOT NULL, cost REAL NOT NULL DEFAULT 0,

@@ -20,6 +20,7 @@ import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
+import { normalizeMerchant } from '../lib/normalize'
 import { classifyGeo, classifyPurpose, upsertNotesTags } from './finance-geo'
 
 export const SPLIT_PROJECT = 0.7
@@ -145,6 +146,7 @@ export function applyAtmSplit(db: BetterSQLite3Database<typeof schema>): AtmSpli
             siblingGeo,
             siblingPurpose
           ),
+          normalizedMerchant: normalizeMerchant(row.description),
           sourceFile: row.sourceFile,
           ingestedAt: new Date()
         })

@@ -112,7 +112,8 @@ beforeEach(() => {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       category TEXT,
       tax_tag TEXT,
-      tax_tag_source TEXT
+      tax_tag_source TEXT,
+      normalized_merchant TEXT
     );
     CREATE TABLE habits (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

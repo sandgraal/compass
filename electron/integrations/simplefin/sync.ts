@@ -41,6 +41,7 @@ import {
   simplefinConnections,
   syncEvents
 } from '../../db/schema'
+import { normalizeMerchant } from '../../lib/normalize'
 import { type RawTxn, categorize } from '../finance'
 import { applyAtmSplit } from '../finance-atm-split'
 import { reconcileTransactionCurrency } from '../finance-currency'
@@ -320,6 +321,7 @@ export async function syncSimplefin(
         taxTag: t.taxTag ?? 'tax:none',
         taxTagSource: 'auto',
         taxYear: t.taxYear ?? null,
+        normalizedMerchant: normalizeMerchant(t.description),
         sourceFile: t.sourceFile,
         ingestedAt: new Date()
       })

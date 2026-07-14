@@ -276,7 +276,8 @@ describe('backfillTaxTags', () => {
         purpose TEXT,
         tax_tag TEXT NOT NULL DEFAULT 'tax:none',
         tax_tag_source TEXT NOT NULL DEFAULT 'auto',
-        tax_year INTEGER
+        tax_year INTEGER,
+        normalized_merchant TEXT
       );
     `)
     sqlite

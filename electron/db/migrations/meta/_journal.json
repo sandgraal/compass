@@ -288,6 +288,13 @@
       "when": 1783966721626,
       "tag": "0040_black_cobalt_man",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1784053121626,
+      "tag": "0041_merchant_columns",
+      "breakpoints": true
     }
   ]
 }

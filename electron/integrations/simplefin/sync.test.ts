@@ -85,7 +85,8 @@ beforeEach(() => {
       tax_tag_source TEXT NOT NULL DEFAULT 'auto',
       tax_year INTEGER,
       source_file TEXT,
-      ingested_at INTEGER
+      ingested_at INTEGER,
+      normalized_merchant TEXT
     );
     CREATE TABLE categorization_rules (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -181,6 +182,14 @@ describe('syncSimplefin — happy path', () => {
     ).map((r) => r.amount)
     // −42.50 stays negative (withdrawal), 1000 stays positive (deposit). No flip.
     expect(amounts).toEqual([-42.5, 1000])
+
+    // The persisted merchant merge key (merchants redesign) is set at ingest.
+    const merged = sqlite
+      .prepare(
+        "SELECT normalized_merchant AS nm FROM finance_transactions WHERE description = 'Blue Bottle'"
+      )
+      .get() as { nm: string }
+    expect(merged.nm).toBe('blue bottle')
 
     const acct = sqlite
       .prepare('SELECT * FROM finance_accounts WHERE simplefin_account_id = ?')

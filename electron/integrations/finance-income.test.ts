@@ -170,7 +170,8 @@ describe('forecast composition — real paystubs preferred over inferred deposit
       );
       CREATE TABLE finance_transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER, date TEXT NOT NULL,
-        amount REAL NOT NULL, description TEXT NOT NULL DEFAULT ''
+        amount REAL NOT NULL, description TEXT NOT NULL DEFAULT '',
+        normalized_merchant TEXT
       );
       CREATE TABLE argyle_paystubs (
         id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, employer TEXT,

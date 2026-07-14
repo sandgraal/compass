@@ -5,6 +5,7 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { backfillGeoFromNotes } from '../integrations/finance-geo'
 import { runSnapshotRepairIfNeeded } from '../integrations/finance-snapshot'
 import { backfillTaxTags } from '../integrations/finance-tax'
+import { ensureNormalizedMerchants } from '../lib/merchant-match'
 import {
   runDocumentSpineDatesIfNeeded,
   runGcalDedupeIfNeeded,
@@ -90,7 +91,12 @@ const DB_INIT_REPAIRS: Array<(sqlite: Database.Database) => void> = [
   // 2026-07: date undated document|file spine rows from the owned documents
   // table (doc_date, else import time) so they surface on the timeline's date
   // lenses.
-  (sqlite) => runDocumentSpineDatesIfNeeded(sqlite)
+  (sqlite) => runDocumentSpineDatesIfNeeded(sqlite),
+  // Merchants redesign (2026-07): persist normalizeMerchant(description) on
+  // every transaction row. Self-gating (targets NULL rows only) rather than
+  // runOnceGated — it doubles as the safety net for any insert path that
+  // misses the column.
+  (sqlite) => ensureNormalizedMerchants(sqlite)
 ]
 
 /**
@@ -762,6 +768,18 @@ function ensureNewTables(sqlite: Database.Database): void {
     ensureColumn(sqlite, 'contacts', 'enrichment', 'TEXT')
   } catch {
     /* contacts table absent on a pristine pre-migrate DB — migrate() adds it */
+  }
+  // Merchants redesign (2026-07, migration 0041) — persisted merchant merge key
+  // on transactions (backfilled via ensureNormalizedMerchants in DB_INIT_REPAIRS)
+  // + namespaced JSON `meta` on places.
+  ensureColumn(sqlite, 'finance_transactions', 'normalized_merchant', 'TEXT')
+  ensureColumn(sqlite, 'places', 'meta', 'TEXT')
+  try {
+    sqlite.exec(
+      'CREATE INDEX IF NOT EXISTS idx_finance_transactions_normalized_merchant ON finance_transactions(normalized_merchant)'
+    )
+  } catch {
+    /* ignore */
   }
 }
 

@@ -30,7 +30,8 @@ beforeEach(() => {
       date TEXT NOT NULL,
       amount REAL NOT NULL,
       description TEXT NOT NULL,
-      category TEXT DEFAULT 'Uncategorized'
+      category TEXT DEFAULT 'Uncategorized',
+      normalized_merchant TEXT
     );
     CREATE TABLE habits (
       id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, icon TEXT,

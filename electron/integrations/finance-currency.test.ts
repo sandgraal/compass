@@ -33,7 +33,8 @@ beforeEach(() => {
       amount REAL NOT NULL,
       currency TEXT NOT NULL DEFAULT 'USD',
       description TEXT NOT NULL,
-      account_id INTEGER
+      account_id INTEGER,
+      normalized_merchant TEXT
     );
   `)
   db = drizzle(sqlite, { schema })

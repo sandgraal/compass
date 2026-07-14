@@ -374,7 +374,8 @@ describe('initDb multi-currency schema (Phase 11.1)', () => {
           date TEXT NOT NULL,
           amount REAL NOT NULL,
           description TEXT NOT NULL,
-          notes TEXT
+          notes TEXT,
+          normalized_merchant TEXT
         );
       `)
     } finally {
