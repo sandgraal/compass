@@ -123,7 +123,7 @@ Plain markdown files at `~/Library/Application Support/Compass/knowledge-base/<c
 - Watched by `chokidar` — external edits re-index `knowledge_files` table + push `knowledge:file-changed` event
 - Auto-updated files (e.g. `calendar/upcoming.md`, `inbox/action-items.md`) get a `.prev` snapshot saved before each overwrite (PR #10), enabling the diff view
 
-## IPC handler map (~230 handlers)
+## IPC handler map (count with `grep -rc "ipcMain.handle(" electron/`)
 
 Registered in `electron/main.ts`:
 - `registerAuthHandlers` — OAuth flows + paste-once token handlers (`auth:connect-github-pat`; **`auth:connect-notion`** — Notion internal-integration token validated against `/v1/users/me`, encrypted via the standard `saveToken` path; Notion's own page-sharing model is the consent surface; **`auth:connect-linear`** — Linear personal API key validated against the GraphQL `viewer`, encrypted via `saveToken`; the key is sent in the `Authorization` header verbatim, not as a `Bearer` token; **`auth:connect-todoist`** — Todoist personal API token validated against the REST API, encrypted via `saveToken`, Bearer auth; **`auth:connect-oura`** — Oura Personal Access Token (paste-once, like Todoist), validated against `/v2/usercollection/personal_info`, encrypted via `saveToken`, Bearer auth; no OAuth app registration needed. Teardown for all paste-once integrations, incl. Oura, reuses the generic `auth:disconnect`.)
