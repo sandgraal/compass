@@ -406,12 +406,11 @@ export function registerSubscriptionsHandlers(ipcMain: IpcMain): void {
     const rows = db.select().from(subscriptions).all()
 
     // One detector read + one usage-records read, reused across every row
-    // below — never a per-row query.
+    // below — never a per-row DB query. Per-row matching against the
+    // in-memory audit arrays still goes through `findAuditMatch` (the same
+    // account-aware lookup `subscriptions:profile` uses) so a merchant
+    // billed on multiple accounts never shows a badge from the wrong one.
     const audit = auditSubscriptions(db)
-    const auditByMerchant = new Map<string, AuditedSubscription>()
-    for (const s of [...audit.active, ...audit.zombies, ...audit.expired]) {
-      if (!auditByMerchant.has(s.merchant)) auditByMerchant.set(s.merchant, s)
-    }
     const duplicateMerchants = new Set(audit.duplicates.map((d) => d.merchant))
 
     const activeUsage = rows
@@ -447,7 +446,7 @@ export function registerSubscriptionsHandlers(ipcMain: IpcMain): void {
     return rows
       .map((row) => {
         const matchKey = matchKeyForSubscription(row.externalId, row.name)
-        const auditMatch = auditByMerchant.get(matchKey)
+        const auditMatch = findAuditMatch(audit, matchKey, row.paymentAccount)
         return {
           ...rowToRecord(row),
           priceHike: auditMatch?.priceHike ?? false,

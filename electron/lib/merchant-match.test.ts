@@ -132,6 +132,12 @@ describe('matchKeyForSubscription', () => {
     expect(matchKeyForSubscription('detected:weird::key::Chase Checking', 'x')).toBe('weird::key')
   })
 
+  it('an account name with a single colon does not break the parse', () => {
+    expect(matchKeyForSubscription('detected:netflix::Chase: Business Checking', 'Netflix')).toBe(
+      'netflix'
+    )
+  })
+
   it('is the exact inverse of the detectedKey format merchants.ts resolves against', () => {
     const merchant = 'blue bottle coffee'
     const account = 'Amex Gold'

@@ -204,6 +204,10 @@ export default function SubscriptionDetail({
   const { subscription: s, totalPaid, signals, documents } = profile
   const trialDays = daysUntil(s.trialEndsAt)
   const renewalDays = daysUntil(s.nextRenewal)
+  // Only an UPCOMING trial end is actionable — a past trialEndsAt (the
+  // common case once a trial has already converted) must never claim the
+  // date is "today" or hide a genuine upcoming renewal below.
+  const trialUpcoming = trialDays != null && trialDays >= 0 && trialDays <= 14
   const usageRating = s.meta?.usage?.rating ?? null
   const hasSignalBanner =
     signals.priceHike ||
@@ -287,15 +291,15 @@ export default function SubscriptionDetail({
       )}
 
       {/* Trial / renewal countdown */}
-      {trialDays != null && trialDays <= 14 && (
-        <Banner tone={trialDays <= 3 ? 'destructive' : 'amber'} icon={<Calendar size={14} />}>
-          {trialDays <= 0
+      {trialUpcoming && (
+        <Banner tone={trialDays! <= 3 ? 'destructive' : 'amber'} icon={<Calendar size={14} />}>
+          {trialDays === 0
             ? 'Free trial ends today'
             : `Free trial ends in ${trialDays} day${trialDays === 1 ? '' : 's'}`}{' '}
           ({fmtDate(s.trialEndsAt)}) — decide before it converts to a paid plan.
         </Banner>
       )}
-      {trialDays == null && renewalDays != null && renewalDays >= 0 && renewalDays <= 14 && (
+      {!trialUpcoming && renewalDays != null && renewalDays >= 0 && renewalDays <= 14 && (
         <Banner tone="secondary" icon={<Calendar size={14} />}>
           Renews in {renewalDays} day{renewalDays === 1 ? '' : 's'} ({fmtDate(s.nextRenewal)})
         </Banner>

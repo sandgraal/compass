@@ -572,4 +572,36 @@ describe('subscriptions:list — cheap per-row badges', () => {
       unused: false
     })
   })
+
+  it('matches badges by (merchant, account) — a same-merchant duplicate on two accounts never bleeds badges across rows', async () => {
+    const chase = (await invoke('subscriptions:track-detected', {
+      merchant: 'netflix',
+      account: 'Chase',
+      cadence: 'monthly',
+      medianAmount: 17.99
+    })) as { id: number }
+    const amex = (await invoke('subscriptions:track-detected', {
+      merchant: 'netflix',
+      account: 'Amex',
+      cadence: 'monthly',
+      medianAmount: 17.99
+    })) as { id: number }
+    mockAudit.mockReturnValue({
+      totalActiveAnnual: 0,
+      active: [{ ...detected('netflix', 'Chase', 17.99), priceHike: true, priceHikePct: 20 }],
+      zombies: [{ ...detected('netflix', 'Amex', 17.99), status: 'zombie' }],
+      expired: [],
+      duplicates: [{ merchant: 'netflix', accounts: ['Chase', 'Amex'], combinedAnnual: 400 }]
+    })
+
+    const list = (await invoke('subscriptions:list')) as Array<{
+      id: number
+      priceHike: boolean
+      zombie: boolean
+    }>
+    const chaseRow = list.find((s) => s.id === chase.id)!
+    const amexRow = list.find((s) => s.id === amex.id)!
+    expect(chaseRow).toMatchObject({ priceHike: true, zombie: false })
+    expect(amexRow).toMatchObject({ priceHike: false, zombie: true })
+  })
 })

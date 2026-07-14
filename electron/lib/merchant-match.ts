@@ -36,9 +36,15 @@ export function matchKeyForPlace(externalId: string, name: string): string {
  * materialized from the ledger detector carry the key in their
  * `detected:<merchant>::<account>` external id; manual rows fall back to
  * normalizing the display name (same acceptable rename caveat as above).
+ *
+ * The account segment is matched with an unrestricted `.*` (not `[^:]*`) —
+ * the delimiter is the literal `::`, and an account name is free to contain a
+ * single colon (e.g. "Chase: Business Checking"). Greedy backtracking still
+ * splits on the LAST `::` in the string, so a merchant key that itself
+ * contains `::` (see the merchant-match.test.ts case) keeps working.
  */
 export function matchKeyForSubscription(externalId: string, name: string): string {
-  const m = externalId.match(/^detected:(.+)::[^:]*$/)
+  const m = externalId.match(/^detected:(.+)::.*$/)
   if (m) return m[1]
   return normalizeMerchant(name)
 }
