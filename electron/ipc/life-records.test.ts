@@ -63,6 +63,20 @@ beforeEach(async () => {
       title TEXT NOT NULL, fields TEXT, notes TEXT, has_secrets INTEGER NOT NULL DEFAULT 0,
       source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER
     );
+    CREATE TABLE life_record_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, life_record_id INTEGER NOT NULL,
+      target_kind TEXT NOT NULL, target_id INTEGER NOT NULL, created_at INTEGER
+    );
+    CREATE UNIQUE INDEX life_record_links_unique
+      ON life_record_links (life_record_id, target_kind, target_id);
+    CREATE TABLE contacts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'manual'
+    );
+    CREATE TABLE finance_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+      is_debt INTEGER DEFAULT 0, balance REAL DEFAULT 0
+    );
   `)
   for (const k of Object.keys(handlers)) delete handlers[k]
   for (const k of Object.keys(blobs)) delete blobs[k]
@@ -267,5 +281,74 @@ describe('buildLifeRecordsCsv', () => {
     const csv = buildLifeRecordsCsv()
     expect(csv).toContain('Chase')
     expect(csv).not.toContain('SECRET99')
+  })
+})
+
+describe('life record links', () => {
+  async function createRecord(): Promise<number> {
+    const r = (await invoke('life:create', {
+      category: 'foreign-accounts',
+      fields: { institution: 'BAC', maxValueUsd: '12000' }
+    })) as { id: number }
+    return r.id
+  }
+
+  it('links a record to an account, lists it with a resolved label, and unlinks', async () => {
+    const recordId = await createRecord()
+    sqlite.prepare("INSERT INTO finance_accounts (name) VALUES ('BAC CR Savings')").run()
+
+    expect(
+      await invoke('life:set-link', { lifeRecordId: recordId, targetKind: 'account', targetId: 1 })
+    ).toEqual({ success: true })
+    // Idempotent by the unique index.
+    await invoke('life:set-link', { lifeRecordId: recordId, targetKind: 'account', targetId: 1 })
+
+    const list = (await invoke('life:list')) as Array<{
+      id: number
+      links: Array<{ id: number; targetKind: string; targetId: number; label: string }>
+    }>
+    const rec = list.find((r) => r.id === recordId)
+    expect(rec?.links).toHaveLength(1)
+    expect(rec?.links[0]).toMatchObject({
+      targetKind: 'account',
+      targetId: 1,
+      label: 'BAC CR Savings'
+    })
+
+    await invoke('life:remove-link', rec?.links[0].id)
+    const after = (await invoke('life:list')) as Array<{ id: number; links: unknown[] }>
+    expect(after.find((r) => r.id === recordId)?.links).toEqual([])
+  })
+
+  it('resolves contact labels and rejects unknown kinds/targets', async () => {
+    const recordId = await createRecord()
+    sqlite
+      .prepare("INSERT INTO contacts (external_id, display_name) VALUES ('t/1', 'Dr. Mora')")
+      .run()
+    await invoke('life:set-link', { lifeRecordId: recordId, targetKind: 'contact', targetId: 1 })
+    const list = (await invoke('life:list')) as Array<{
+      id: number
+      links: Array<{ label: string }>
+    }>
+    expect(list.find((r) => r.id === recordId)?.links[0].label).toBe('Dr. Mora')
+
+    await expect(
+      invoke('life:set-link', { lifeRecordId: recordId, targetKind: 'place', targetId: 1 })
+    ).rejects.toThrow()
+    await expect(
+      invoke('life:set-link', { lifeRecordId: recordId, targetKind: 'account', targetId: 99 })
+    ).rejects.toThrow()
+    await expect(
+      invoke('life:set-link', { lifeRecordId: 999, targetKind: 'contact', targetId: 1 })
+    ).rejects.toThrow()
+  })
+
+  it('deleting a record removes its links', async () => {
+    const recordId = await createRecord()
+    sqlite.prepare("INSERT INTO finance_accounts (name) VALUES ('BAC')").run()
+    await invoke('life:set-link', { lifeRecordId: recordId, targetKind: 'account', targetId: 1 })
+    await invoke('life:delete', recordId)
+    const n = sqlite.prepare('SELECT COUNT(*) n FROM life_record_links').get() as { n: number }
+    expect(n.n).toBe(0)
   })
 })

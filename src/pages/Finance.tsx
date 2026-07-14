@@ -2361,6 +2361,14 @@ function ExpatTaxTab(): JSX.Element {
                           </td>
                           <td className="text-right w-28">
                             {acc.maxBaseUsd == null ? 'no rate' : usd(acc.maxBaseUsd)}
+                            {acc.maxUsdSource === 'user' && (
+                              <span
+                                title="From the maxValueUsd you entered on the linked foreign-accounts life record — used because it exceeds the snapshot-derived max"
+                                className="ml-1.5 text-[10px] px-1 py-px rounded bg-primary/10 text-primary"
+                              >
+                                entered
+                              </span>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -2560,6 +2568,18 @@ function ResidencyTab(): JSX.Element {
     }
   }
 
+  const rederiveCalendar = async () => {
+    if (!window.api?.finance) return
+    try {
+      const res = await window.api.finance.rederiveCalendarSegments()
+      showToast(`Calendar → ${res.derived} auto trip${res.derived === 1 ? '' : 's'}.`, 'success')
+      await refresh()
+    } catch (err) {
+      console.error('[residency] calendar rederive failed', err)
+      showToast('Failed to recompute from calendar.', 'error')
+    }
+  }
+
   if (loading)
     return <p className="text-sm text-muted-foreground p-4">Loading residency summary…</p>
   if (!summary)
@@ -2629,16 +2649,26 @@ function ResidencyTab(): JSX.Element {
 
       {/* Travel log */}
       <div className="bg-card border border-border rounded-xl p-5">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <h3 className="text-sm font-semibold">Travel log</h3>
-          <button
-            type="button"
-            onClick={() => void rederiveSegments()}
-            title="Rebuild auto trips from imported location history (OwnTracks / GPX / Google). Manual trips are kept."
-            className="px-2.5 py-1 text-xs border border-border rounded-md hover:bg-muted text-muted-foreground"
-          >
-            Recompute from location history
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => void rederiveSegments()}
+              title="Rebuild auto trips from imported location history (OwnTracks / GPX / Google). Manual trips are kept."
+              className="px-2.5 py-1 text-xs border border-border rounded-md hover:bg-muted text-muted-foreground"
+            >
+              Recompute from location history
+            </button>
+            <button
+              type="button"
+              onClick={() => void rederiveCalendar()}
+              title="Rebuild auto trips from multi-day calendar events that name a known country or city. Manual and location-derived trips are kept."
+              className="px-2.5 py-1 text-xs border border-border rounded-md hover:bg-muted text-muted-foreground"
+            >
+              Recompute from calendar
+            </button>
+          </div>
         </div>
         <p className="text-xs text-muted-foreground mb-3">
           Log trips outside your home country, or drop a location export in the Timeline Drop Zone

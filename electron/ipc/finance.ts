@@ -13,6 +13,7 @@ import {
   forecastOverrides,
   fxRates
 } from '../db/schema'
+import { deriveCalendarSegments } from '../integrations/calendar-residency'
 import { categorize, ingestCsvFolder, readCsv } from '../integrations/finance'
 import {
   countDuplicateTransactions,
@@ -1496,6 +1497,13 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
   // country/date segments are written.
   ipcMain.handle('finance:rederive-location-segments', () => {
     return deriveLocationSegments(getRawSqlite())
+  })
+
+  // Rebuild `source='calendar'` travel segments from calendar_events (the
+  // conservative multi-day + known-destination heuristic). Manual, location,
+  // and i94 rows are preserved.
+  ipcMain.handle('finance:rederive-calendar-segments', () => {
+    return deriveCalendarSegments(getRawSqlite())
   })
 
   ipcMain.handle(

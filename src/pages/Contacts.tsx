@@ -25,13 +25,15 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ContactsOverview from '../components/contacts/ContactsOverview'
-import MergeContactsDialog from '../components/contacts/MergeContactsDialog'
+import MergeContactsDialog, {
+  type MergeCandidate
+} from '../components/contacts/MergeContactsDialog'
 import SetRelationshipDialog from '../components/contacts/SetRelationshipDialog'
 import WebEnrichDialog from '../components/contacts/WebEnrichDialog'
 import BulkActionBar from '../components/ui/BulkActionBar'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
-import { cn, formatRelative } from '../lib/utils'
+import { WEB_ENRICH_STALE_MONTHS, cn, formatRelative, monthsSince } from '../lib/utils'
 
 type PhoneRow = { type?: string; value: string }
 type EmailRow = { type?: string; value: string }
@@ -89,6 +91,13 @@ const hostnameOf = (url: string): string => {
   }
 }
 
+/**
+ * Rows mounted per increment. Selection/sort/filter always operate on the full
+ * in-memory array — only the DOM is windowed, so select-all and shift-ranges
+ * stay exact while a many-thousand-contact book renders instantly.
+ */
+const RENDER_CHUNK = 200
+
 export default function Contacts(): JSX.Element {
   const [contacts, setContacts] = useState<ContactRecord[]>([])
   const [search, setSearch] = useState('')
@@ -112,7 +121,17 @@ export default function Contacts(): JSX.Element {
   const [selectedRows, setSelectedRows] = useState<Map<number, ContactRecord>>(new Map())
   const [bulkBusy, setBulkBusy] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
+  // A duplicates-panel pair under review — feeds MergeContactsDialog directly
+  // instead of hijacking the checkbox selection.
+  const [mergeCandidates, setMergeCandidates] = useState<MergeCandidate[] | null>(null)
   const [relationshipOpen, setRelationshipOpen] = useState(false)
+  // Bulk "Enrich from web": the queue is driven strictly one contact at a time —
+  // the IPC is single-flight with one cached run slot (contact-web-enrich.ts).
+  const [enrichQueue, setEnrichQueue] = useState<ContactRecord[] | null>(null)
+  const [enrichIndex, setEnrichIndex] = useState(0)
+  // How many rows are mounted — bumped by the list-end sentinel so a
+  // thousands-strong address book doesn't render thousands of DOM rows at once.
+  const [visibleCount, setVisibleCount] = useState(RENDER_CHUNK)
   const [sortBy, setSortBy] = useState<SortBy>('name')
   const [sourceFilter, setSourceFilter] = useState<string | null>(null)
   const { toast } = useToast()
@@ -122,6 +141,9 @@ export default function Contacts(): JSX.Element {
   // selection/activity of a newer one (openContact does async IPC).
   const openSeq = useRef(0)
   const selectAllRef = useRef<HTMLInputElement>(null)
+  // Last checkbox clicked — the anchor a shift-click ranges from.
+  const selectAnchor = useRef<number | null>(null)
+  const listEndRef = useRef<HTMLDivElement | null>(null)
 
   const openTimeline = (query: string): void => navigate(`/timeline?q=${encodeURIComponent(query)}`)
 
@@ -155,6 +177,25 @@ export default function Contacts(): JSX.Element {
     return [...m.entries()].sort((a, b) => b[1] - a[1])
   }, [contacts])
 
+  // Collapse the DOM window whenever the displayed list changes (search /
+  // filter / sort / reload) — the sentinel re-expands it as the user scrolls.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the list identity on purpose
+  useEffect(() => {
+    setVisibleCount(RENDER_CHUNK)
+  }, [shown])
+
+  useEffect(() => {
+    const el = listEndRef.current
+    if (!el || visibleCount >= shown.length) return
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) {
+        setVisibleCount((n) => Math.min(n + RENDER_CHUNK, shown.length))
+      }
+    })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [visibleCount, shown.length])
+
   const allShownSelected = shown.length > 0 && shown.every((c) => selectedRows.has(c.id))
   const someShownSelected = shown.some((c) => selectedRows.has(c.id))
   useEffect(() => {
@@ -163,13 +204,29 @@ export default function Contacts(): JSX.Element {
     }
   }, [someShownSelected, allShownSelected])
 
-  function toggleSelect(c: ContactRecord): void {
+  function toggleSelect(c: ContactRecord, shiftKey = false): void {
     setSelectedRows((prev) => {
       const next = new Map(prev)
+      if (shiftKey && selectAnchor.current != null && selectAnchor.current !== c.id) {
+        const ai = shown.findIndex((x) => x.id === selectAnchor.current)
+        const bi = shown.findIndex((x) => x.id === c.id)
+        if (ai !== -1 && bi !== -1) {
+          // The range takes the anchor's state: shift-click extends a selection
+          // when the anchor is checked, clears the run when it isn't.
+          const selecting = prev.has(selectAnchor.current)
+          const [from, to] = ai < bi ? [ai, bi] : [bi, ai]
+          for (let i = from; i <= to; i++) {
+            if (selecting) next.set(shown[i].id, shown[i])
+            else next.delete(shown[i].id)
+          }
+          return next
+        }
+      }
       if (next.has(c.id)) next.delete(c.id)
       else next.set(c.id, c)
       return next
     })
+    selectAnchor.current = c.id
   }
 
   function toggleSelectAllShown(): void {
@@ -243,10 +300,18 @@ export default function Contacts(): JSX.Element {
 
   async function onMerged(survivorId: number): Promise<void> {
     setMergeOpen(false)
+    setMergeCandidates(null)
     clearSelection()
     await load(search)
     await loadDupes()
     await openContact(survivorId)
+  }
+
+  /** Route a duplicates-panel pair into the merge dialog (survivor picker +
+   *  smart default) instead of the old blind keep-side-A merge. */
+  function reviewPair(pair: DuplicatePair): void {
+    setMergeCandidates([pair.a, pair.b])
+    setMergeOpen(true)
   }
 
   // Proactively surface the reconnect prompt on load if a contacts scope is missing.
@@ -266,43 +331,6 @@ export default function Contacts(): JSX.Element {
       setDupes(await window.api.contacts.duplicates())
     } catch (err) {
       console.error('[contacts] duplicates failed', err)
-    }
-  }
-
-  async function mergePair(pair: DuplicatePair, survivorId: number): Promise<void> {
-    if (!isElectron()) return
-    const survivorName = survivorId === pair.a.id ? pair.a.displayName : pair.b.displayName
-    const loserName = survivorId === pair.a.id ? pair.b.displayName : pair.a.displayName
-    const ok = await confirm({
-      title: 'Merge contacts?',
-      description: `"${loserName}" will be merged into "${survivorName}" and permanently deleted. This cannot be undone.`,
-      confirmLabel: 'Merge'
-    })
-    if (!ok) return
-    setDupesBusy(true)
-    try {
-      const loserId = survivorId === pair.a.id ? pair.b.id : pair.a.id
-      const r = await window.api.contacts.merge(survivorId, [loserId])
-      if (r.success) {
-        toast(
-          `Merged into ${survivorId === pair.a.id ? pair.a.displayName : pair.b.displayName}.`,
-          'success'
-        )
-        setDupes((prev) => prev.filter((p) => p.a.id !== loserId && p.b.id !== loserId))
-        await load(search)
-        await loadDupes()
-        if (selectedId === loserId) {
-          setSelectedId(null)
-          setSelected(null)
-        }
-      } else {
-        toast('Merge failed.', 'error')
-      }
-    } catch (err) {
-      console.error('[contacts] merge failed', err)
-      toast('Merge failed.', 'error')
-    } finally {
-      setDupesBusy(false)
     }
   }
 
@@ -363,6 +391,45 @@ export default function Contacts(): JSX.Element {
       }
     } finally {
       if (openSeq.current === seq) setActivityLoading(false)
+    }
+  }
+
+  /** Bulk "Enrich from web": strictly sequential — one consent→review dialog
+   *  per selected contact (the enrichment IPC holds a single cached run). */
+  async function startBulkEnrich(): Promise<void> {
+    if (!isElectron() || selectedRows.size === 0) return
+    try {
+      const s = await window.api.assistant.getStatus()
+      if (!s.configuredProviders.includes('anthropic')) {
+        toast(
+          'Web enrichment needs an Anthropic API key — add one in Settings → AI assist.',
+          'info'
+        )
+        return
+      }
+    } catch {
+      /* the dialog re-checks per contact */
+    }
+    const n = selectedRows.size
+    const ok = await confirm({
+      title: `Search the web for ${n} contact${n === 1 ? '' : 's'}?`,
+      description:
+        'Each contact runs one Anthropic web search on your API key and asks for your review — nothing is saved without it. You can stop the run at any point.',
+      confirmLabel: 'Start'
+    })
+    if (!ok) return
+    setEnrichQueue([...selectedRows.values()])
+    setEnrichIndex(0)
+  }
+
+  function advanceEnrichQueue(): void {
+    if (!enrichQueue) return
+    const next = enrichIndex + 1
+    if (next >= enrichQueue.length) {
+      setEnrichQueue(null)
+      setEnrichIndex(0)
+    } else {
+      setEnrichIndex(next)
     }
   }
 
@@ -658,6 +725,16 @@ export default function Contacts(): JSX.Element {
               </button>
               <button
                 type="button"
+                onClick={() => void startBulkEnrich()}
+                disabled={bulkBusy || enrichQueue != null}
+                aria-label="Enrich selection from web"
+                title="Enrich from web, one at a time (uses your Anthropic key)"
+                className="flex items-center gap-1 text-xs px-2 py-1.5 bg-secondary hover:bg-secondary/80 text-foreground rounded-lg transition-colors disabled:opacity-50"
+              >
+                <Sparkles size={12} />
+              </button>
+              <button
+                type="button"
                 onClick={bulkDelete}
                 disabled={bulkBusy}
                 aria-label="Delete selection"
@@ -692,13 +769,16 @@ export default function Contacts(): JSX.Element {
               {search || sourceFilter ? 'No matches.' : 'No contacts yet.'}
             </p>
           ) : (
-            shown.map((c) => (
+            shown.slice(0, visibleCount).map((c) => (
               <div key={c.id} className="flex items-center gap-0.5">
                 <label className="pl-1.5 py-2 shrink-0 flex items-center cursor-pointer">
                   <input
                     type="checkbox"
                     checked={selectedRows.has(c.id)}
-                    onChange={() => toggleSelect(c)}
+                    // onClick (not onChange) so shift-click ranges work —
+                    // change events don't carry modifier keys.
+                    onClick={(e) => toggleSelect(c, e.shiftKey)}
+                    readOnly
                     aria-label={`Select ${c.displayName}`}
                     className="h-3.5 w-3.5 accent-primary cursor-pointer"
                   />
@@ -731,6 +811,11 @@ export default function Contacts(): JSX.Element {
                 </button>
               </div>
             ))
+          )}
+          {!loading && visibleCount < shown.length && (
+            <div ref={listEndRef} className="py-3 text-center text-xs text-muted-foreground">
+              {shown.length - visibleCount} more…
+            </div>
           )}
         </div>
 
@@ -918,11 +1003,11 @@ export default function Contacts(): JSX.Element {
                       <button
                         type="button"
                         disabled={dupesBusy}
-                        onClick={() => mergePair(pair, pair.a.id)}
-                        title={`Keep ${pair.a.displayName}, fold the other in`}
+                        onClick={() => reviewPair(pair)}
+                        title="Pick which contact survives, then merge"
                         className="text-xs px-2.5 py-1.5 bg-primary/15 hover:bg-primary/25 text-primary rounded-lg transition-colors disabled:opacity-50"
                       >
-                        Merge
+                        Merge…
                       </button>
                       <button
                         type="button"
@@ -973,9 +1058,12 @@ export default function Contacts(): JSX.Element {
       </div>
 
       <MergeContactsDialog
-        contacts={[...selectedRows.values()]}
+        contacts={mergeCandidates ?? [...selectedRows.values()]}
         open={mergeOpen}
-        onClose={() => setMergeOpen(false)}
+        onClose={() => {
+          setMergeOpen(false)
+          setMergeCandidates(null)
+        }}
         onMerged={onMerged}
       />
       <SetRelationshipDialog
@@ -985,11 +1073,27 @@ export default function Contacts(): JSX.Element {
         onClose={() => setRelationshipOpen(false)}
         onSubmit={bulkSetRelationship}
       />
-      {selected && (
+      {selected && !enrichQueue && (
         <WebEnrichDialog
           contact={selected}
           open={webEnrichOpen}
           onClose={() => setWebEnrichOpen(false)}
+          onApplied={async () => {
+            await load(search)
+            if (selectedId != null) await openContact(selectedId)
+          }}
+        />
+      )}
+      {enrichQueue?.[enrichIndex] && (
+        <WebEnrichDialog
+          // Remount per contact so the dialog's phase machine resets (its
+          // reset effect keys on `open`, which stays true across the queue).
+          key={enrichQueue[enrichIndex].id}
+          contact={enrichQueue[enrichIndex]}
+          open
+          progress={{ index: enrichIndex + 1, total: enrichQueue.length }}
+          onClose={advanceEnrichQueue}
+          onStopAll={() => setEnrichQueue(null)}
           onApplied={async () => {
             await load(search)
             if (selectedId != null) await openContact(selectedId)
@@ -1207,8 +1311,18 @@ function ContactDetail({
             <p className="text-xs text-muted-foreground">No web findings were kept.</p>
           )}
           <div className="flex items-center justify-between pt-1">
-            <p className="text-xs text-muted-foreground" title={`Searched as: ${web.searchedAs}`}>
-              Refreshed {formatRelative(web.refreshedAt)}
+            <p
+              className={cn(
+                'text-xs',
+                monthsSince(web.refreshedAt) >= WEB_ENRICH_STALE_MONTHS
+                  ? 'text-amber-600 dark:text-amber-400'
+                  : 'text-muted-foreground'
+              )}
+              title={`Searched as: ${web.searchedAs}`}
+            >
+              {monthsSince(web.refreshedAt) >= WEB_ENRICH_STALE_MONTHS
+                ? `Refreshed ${monthsSince(web.refreshedAt)} months ago — worth a refresh`
+                : `Refreshed ${formatRelative(web.refreshedAt)}`}
             </p>
             <button
               type="button"

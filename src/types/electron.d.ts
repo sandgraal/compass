@@ -61,6 +61,14 @@ declare global {
     fields: LifeCategoryField[]
   }
 
+  /** A resolved link on a life record (contact / finance account it documents). */
+  interface LifeRecordLink {
+    id: number
+    targetKind: 'contact' | 'account'
+    targetId: number
+    label: string
+  }
+
   interface LifeRecord {
     id: number
     externalId: string
@@ -72,6 +80,7 @@ declare global {
     source: string
     createdAt: number | null
     updatedAt: number | null
+    links: LifeRecordLink[]
   }
 
   interface LifeRecordInput {
@@ -1880,6 +1889,12 @@ declare global {
         delete(id: number): Promise<{ success: boolean }>
         getSecrets(id: number): Promise<Record<string, string>>
         exportCsv(): Promise<ExportResult>
+        setLink(input: {
+          lifeRecordId: number
+          targetKind: 'contact' | 'account'
+          targetId: number
+        }): Promise<{ success: boolean }>
+        removeLink(linkId: number): Promise<{ success: boolean }>
       }
       habits: {
         list(includeInactive?: boolean): Promise<Habit[]>
@@ -2728,6 +2743,8 @@ declare global {
               currency: string
               maxNative: number
               maxBaseUsd: number | null
+              /** 'user' = from a linked life record's maxValueUsd (current year). */
+              maxUsdSource?: 'snapshot' | 'user'
             }>
             aggregateMaxUsd: number
             exceedsThreshold: boolean
@@ -3034,6 +3051,7 @@ declare global {
         }): Promise<{ success: boolean; id?: number; error?: string }>
         deleteTravelSegment(id: number): Promise<{ success: boolean; error?: string }>
         rederiveLocationSegments(): Promise<{ derived: number; removed: number }>
+        rederiveCalendarSegments(): Promise<{ derived: number; removed: number }>
         setResidencyConfig(
           input: Record<string, string | number | null>
         ): Promise<{ success: boolean; error?: string }>

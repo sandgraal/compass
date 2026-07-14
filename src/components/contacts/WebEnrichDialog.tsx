@@ -54,13 +54,18 @@ export default function WebEnrichDialog({
   contact,
   open,
   onClose,
-  onApplied
+  onApplied,
+  progress,
+  onStopAll
 }: {
   contact: ContactRecord
   open: boolean
   onClose: () => void
   /** Called after a successful apply; the parent re-fetches the contact. */
   onApplied: () => Promise<void>
+  /** Bulk-queue chrome: "contact k of n". Close advances; onStopAll aborts. */
+  progress?: { index: number; total: number }
+  onStopAll?: () => void
 }): JSX.Element {
   const [phase, setPhase] = useState<Phase>('consent')
   const [hints, setHints] = useState('')
@@ -215,6 +220,23 @@ export default function WebEnrichDialog({
           <AlertDialog.Title className="text-base font-semibold text-foreground mb-2 flex items-center gap-2">
             <Globe size={16} className="text-primary" />
             Enrich from web
+            {progress && (
+              <span className="ml-auto flex items-center gap-2 text-xs font-normal text-muted-foreground">
+                {progress.index} of {progress.total}
+                {onStopAll && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void window.api.contacts.webEnrichCancel().catch(() => {})
+                      onStopAll()
+                    }}
+                    className="text-destructive hover:underline"
+                  >
+                    Stop all
+                  </button>
+                )}
+              </span>
+            )}
           </AlertDialog.Title>
 
           {phase === 'no-key' && (

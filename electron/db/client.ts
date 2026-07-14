@@ -11,6 +11,7 @@ import {
   runGcalDedupeIfNeeded,
   runRecordsDateRepairIfNeeded
 } from '../lib/records-repair'
+import { retireMigratedVaultBlobsIfNeeded } from '../lib/vault-blob-retirement'
 import { DATA_DIR } from '../paths'
 import { reconcileMigrationState } from './reconcile'
 import * as schema from './schema'
@@ -96,7 +97,11 @@ const DB_INIT_REPAIRS: Array<(sqlite: Database.Database) => void> = [
   // every transaction row. Self-gating (targets NULL rows only) rather than
   // runOnceGated — it doubles as the safety net for any insert path that
   // misses the column.
-  (sqlite) => ensureNormalizedMerchants(sqlite)
+  (sqlite) => ensureNormalizedMerchants(sqlite),
+  // 2026-07: delete the `<category>.migrated.enc` backups the vault split left
+  // behind — the promised release-or-two safety margin has elapsed. Skips
+  // (without consuming its gate) until the migration itself has committed.
+  (sqlite) => retireMigratedVaultBlobsIfNeeded(sqlite)
 ]
 
 /**
@@ -536,6 +541,17 @@ function ensureNewTables(sqlite: Database.Database): void {
       updated_at INTEGER
     );
     CREATE UNIQUE INDEX IF NOT EXISTS life_records_external_id_unique ON life_records (external_id);
+    -- Life-record links: ties a life record to the contact / finance account
+    -- it documents — mirrors migration 0044 (packaged builds skip migrations).
+    CREATE TABLE IF NOT EXISTS life_record_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      life_record_id INTEGER NOT NULL REFERENCES life_records(id),
+      target_kind TEXT NOT NULL,
+      target_id INTEGER NOT NULL,
+      created_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS life_record_links_unique
+      ON life_record_links (life_record_id, target_kind, target_id);
   `)
 
   // Backfill the FTS index for rows that predate it (the triggers only fire on

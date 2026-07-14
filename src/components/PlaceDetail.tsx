@@ -402,7 +402,10 @@ export default function PlaceDetail({
       {/* Web presence (accepted web-enrichment findings) */}
       {profile.place.meta?.enrichment?.web && (
         <Section icon={<Globe size={14} />} title="Web presence">
-          <WebPresenceCard web={profile.place.meta.enrichment.web} />
+          <WebPresenceCard
+            web={profile.place.meta.enrichment.web}
+            onRefresh={() => setWebEnrichOpen(true)}
+          />
         </Section>
       )}
 

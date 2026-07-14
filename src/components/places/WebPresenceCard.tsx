@@ -5,6 +5,7 @@
  * enrichment dialog replaces the whole namespace).
  */
 import { ExternalLink } from 'lucide-react'
+import { WEB_ENRICH_STALE_MONTHS, cn, monthsSince } from '../../lib/utils'
 
 const safeHref = (value: string): string | undefined =>
   /^https?:\/\//i.test(value) ? value : undefined
@@ -17,7 +18,14 @@ const hostOf = (url: string): string => {
   }
 }
 
-export default function WebPresenceCard({ web }: { web: PlaceWebEnrichment }): JSX.Element {
+export default function WebPresenceCard({
+  web,
+  onRefresh
+}: {
+  web: PlaceWebEnrichment
+  /** Re-opens the enrichment dialog (a re-run replaces the whole namespace). */
+  onRefresh?: () => void
+}): JSX.Element {
   return (
     <div className="rounded-lg border border-border bg-card px-3 py-2.5 space-y-2">
       {web.description && <p className="text-sm text-foreground">{web.description}</p>}
@@ -67,11 +75,31 @@ export default function WebPresenceCard({ web }: { web: PlaceWebEnrichment }): J
           ))}
         </ul>
       )}
-      <p className="text-[11px] text-muted-foreground pt-0.5 border-t border-border">
-        Searched as “{web.searchedAs}” ·{' '}
-        {new Date(web.refreshedAt).toLocaleDateString('en-US', { dateStyle: 'medium' })} ·{' '}
-        {web.sources.length} source{web.sources.length === 1 ? '' : 's'}
-      </p>
+      <div className="flex items-center justify-between gap-2 pt-0.5 border-t border-border">
+        <p
+          className={cn(
+            'text-[11px]',
+            monthsSince(web.refreshedAt) >= WEB_ENRICH_STALE_MONTHS
+              ? 'text-amber-600 dark:text-amber-400'
+              : 'text-muted-foreground'
+          )}
+        >
+          Searched as “{web.searchedAs}” ·{' '}
+          {monthsSince(web.refreshedAt) >= WEB_ENRICH_STALE_MONTHS
+            ? `${monthsSince(web.refreshedAt)} months ago — worth a refresh`
+            : new Date(web.refreshedAt).toLocaleDateString('en-US', { dateStyle: 'medium' })}{' '}
+          · {web.sources.length} source{web.sources.length === 1 ? '' : 's'}
+        </p>
+        {onRefresh && (
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="shrink-0 text-[11px] text-primary hover:underline"
+          >
+            Re-run
+          </button>
+        )}
+      </div>
     </div>
   )
 }

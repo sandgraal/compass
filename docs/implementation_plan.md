@@ -24,7 +24,7 @@
 | **Phase 8** — Claude Integration (bidirectional) | 6 items | **100% — all shipped** (MCP read+propose tools, in-app Claude Inbox, one-click `.mcpb` Desktop bundle, end-user plugin, 5 skills, agentic Ask Compass) — see § Phase 8 + [`claude-integration.md`](claude-integration.md) |
 | **Phase 9** — The Storehouse (own everything, export anywhere) | 9 items | **~85%.** 9.0 Contacts + Universal Export ✅ · 9.1 archive importers ✅ (**live Google Contacts sync ✅** via the People API — needs a Google reconnect for `contacts.readonly`; **contact enrichment ✅** — widened Google fields + cross-source summary, see below; macOS Contacts live-sync open) · **9.2 Documents & files store ✅ (2026-07-11)** · 9.3 Subscriptions ✅ · **9.4 Medical records ✅ — shipped 2026-07-06, superseded (see below)** · **9.4b Lab & vital results ✅ — shipped 2026-07-12** (quantitative counterpart to `medical_records`, see below) · 9.5 Assets ✅ · 9.6 Storehouse overview ✅ · **9.7 reverse-connectors open** — see § Phase 9 |
 | **Phase 10** — The Acquisition Engine (go get everything) | 7 waves | **~55%.** 10.1 spine ✅ (Drop Zone + `records`/Timeline + **44 recognizers**, growing — crypto/WhatsApp/X/rideshare/Fitbit/Garmin landed 2026-07) · **live-sync projectors ✅ (finance + Gmail + Calendar + GitHub + Linear + medical → the `records` spine, so live-synced data reaches People/Merchants/Places/Timeline/Search — Gmail senders → People via an automated-sender filter, calendar locations → Places, GitHub authors → People (bots/self filtered), GitHub/Linear issues → Timeline/Search; migration `0026` added GitHub `author`+`updated_at` and Linear `updated_at` for real timeline dates)** · 10.5 Data-Rights Concierge ✅ (redesigned 2026-07 to **27 sources across 6 domains**, + tax/SSA PDF recognizers) · 10.6 CRED sandbox ✅ (SSA adapter, gated off by default) · 10.7 Converse/Connect/Curate ✅ · **10.8 Location→Residency autopilot ✅** (location export → offline point-in-polygon → auto `travel_segments`; raw coords kept OFF the AI-searchable spine) · **10.3 Health hub ✅** (unified steps/sleep/Oura-scores/workouts surface over already-ingested wearables + aggregates-only `compass_health_summary`) · **10.9 metered relay + all 8 aggregators code-shipped 2026-07-05/06** (Terra/Canopy/Argyle/Arcadia/Nylas/Metriport/Knot relay-fronted + BYO-direct SnapTrade — incl. Metriport FHIR clinical records → Medical hub and Terra's 500+-wearable coverage, closing out 10.3's "remaining wearables"; **live use of the relay-fronted seven needs a deployed relay + real paid API credentials — code-complete and unit-tested, not a missing-code gap**) · **genetics raw-data import shipped** (23andMe/AncestryDNA `.txt` → sealed `genetics` vault category, `electron/lib/genetics.ts`) · **10.2 LIVE crypto valuation/IRS transcripts, 10.4 Apple Data & Privacy, full 10.6 open** — see § Phase 10 + [`storehouse-roadmap.md`](storehouse-roadmap.md) |
-| **Phase 11** — Life Planning & Cross-Border (NEW) | 7 items | **✅ Complete (2026-06-30).** Output of the June expert panel ([`strategic-review-2026-06.md`](strategic-review-2026-06.md)): all 7 items shipped — 11.1 multi-currency, 11.2 expat tax (FBAR/FATCA), 11.3 Airbnb P&L, 11.4 long-horizon retirement, 11.5 residency/days-in-country, 11.6 goals, 11.7 estate. The optional 11.1 follow-ups (ingest-time txn currency, base-currency forecast rollup, unrealized FX gain/loss) are now implemented — PRs #268/#269 + the FX-gain/loss change. See § Phase 11 |
+| **Phase 11** — Life Planning & Cross-Border (NEW) | 7 items | **✅ Complete (2026-06-30).** Output of the June expert panel ([`strategic-review-2026-06.md`](strategic-review-2026-06.md)): all 7 items shipped — 11.1 multi-currency, 11.2 expat tax (FBAR/FATCA), 11.3 Airbnb P&L, 11.4 long-horizon retirement, 11.5 residency/days-in-country, 11.6 goals, 11.7 estate. The optional 11.1 follow-ups (ingest-time txn currency, base-currency forecast rollup, unrealized FX gain/loss) are now implemented — PRs #268/#269 + the FX-gain/loss change. **2026-07-14 addendum:** the 11.2 vault-split follow-ups (`.migrated.enc` blob retirement, `life_record_links` + Life Records link chips, FBAR user-entered-max override) shipped — see the dated addendum below. See § Phase 11 |
 
 PRD-completion of the running app: **~99%** (all Phases 1–3 + Phase 4.0–4.5 merged with UIs).
 
@@ -699,7 +699,11 @@ Apple Data & Privacy, Signal/Telegram), and full CRED beyond the SSA spike (10.6
   1116) ledger from a new `tax:foreign-tax` tag. IPC `finance:get-expat-tax-summary` ·
   `set-account-foreign` · `set-fatca-threshold`; a new **Expat Tax** tab. Account IDENTIFIERS go to a new
   encrypted vault category **`foreign-accounts`** (reuses the vault crypto; never flow through the summary
-  or exports). Passed the inline `security-review`; run `security-auditor` pre-merge.
+  or exports). Passed the inline `security-review`; run `security-auditor` pre-merge. *(Superseded 2026-07 by
+  the vault split — the `foreign-accounts` category is now the plaintext `life_records` table, identifiers
+  still vault-sealed in `record-secrets.enc`; see the `life_records` schema row in `architecture.md`. FBAR's
+  user-entered-max override — linking a `foreign-accounts` life record to its account — is the 2026-07-14
+  addendum below.)*
 - [x] **11.3 CR property / Airbnb P&L + depreciation** (M) — **shipped.** Pure assembly in
   `electron/integrations/finance-property.ts` over rows already tagged `geo`/`purpose`/`taxTag`: a
   base-currency property P&L (revenue from `tax:schedule-e-income` · operating from
@@ -739,7 +743,8 @@ Apple Data & Privacy, Signal/Telegram), and full CRED beyond the SSA spike (10.6
   defaults to the CR property net-worth value), and a **CAJA** estimate (% of declared income). IPC
   `finance:get-residency-summary` + `add`/`delete-travel-segment` + `set-residency-config`; a new **Residency**
   tab with a travel log, day-count-by-year, the SPT/CR results, the pathway checklist, and a settings card.
-  (Calendar/Timeline + CBP I-94 auto-fill via the `source` column remains a future feed.)
+  (Calendar auto-fill shipped 2026-07 — see the addendum below. CBP I-94 auto-fill via the `source`
+  column remains a future feed.)
 - [x] **11.6 Goals & milestones** (M) — **shipped.** A `financial_goals` table (migration `0022`, BOTH
   paths) + pure `electron/integrations/finance-goals.ts`: each goal has a target amount, optional target
   date, and a planned monthly contribution → `computeGoalProgress` derives remaining / % / required-monthly
@@ -965,6 +970,69 @@ undo any of it:
   correctly. New `electron/ipc/sync-github-commits.test.ts` covers events-feed capture, the per-repo
   supplement finding a commit the events feed missed (the actual reliability gap), dedup across both
   pulls, and best-effort failure isolation.
+
+---
+
+## Addendum (2026-07-14) — Calendar trip auto-fill + Web-Mercator map projection
+
+> Two previously-deferred items landed together in `feat/travel-autofill-mercator`.
+
+- [x] **Calendar trip auto-fill (`travel_segments.source='calendar'`)** — the long-reserved `source`
+  enum value called out as "a future feed" in the 11.5 entry above is now built. New pure module
+  `electron/integrations/calendar-residency.ts` mirrors `location-residency.ts`: `eventsToSegments` is a
+  heuristic over already-synced `calendar_events` — only MULTI-DAY events whose location or title matches
+  a curated country/city alias table qualify, the home country is dropped, and homograph-risk names
+  (Turkey, Georgia, Jordan) are deliberately excluded to avoid false positives; `deriveCalendarSegments`
+  replaces only `source='calendar'` rows in a transaction (manual rows and `source='location'` rows are
+  untouched — same replace-in-place contract as the location projector); `afterCalendarSync` is a
+  best-effort post-sync hook wired into both `syncGoogleCalendar` and `syncAppleCalendar` in
+  `electron/ipc/sync.ts` (calls it after events land, non-fatal on failure). New IPC
+  `finance:rederive-calendar-segments` (mirrors `finance:rederive-location-segments`;
+  `window.api.finance.rederiveCalendarSegments`) plus a "Recompute from calendar" button next to the
+  existing "Recompute from location history" button on the Finance → Residency → Travel log card.
+  Bugfixes riding along: Google Calendar sync now captures `end.date` for all-day events (previously only
+  timed events got an `endAt`, which starved the multi-day heuristic of candidates), and the upsert
+  conflict path now refreshes start/end/location/`allDay` on re-sync (previously only title+`syncedAt`).
+- [x] **Web-Mercator map projection** — `src/lib/geo-project.ts` upgraded from the equirectangular (flat
+  lat/lng) projection used since the Places map's first cut to Web-Mercator, resolving that file's own
+  "known v1 trade-off" comment. `project`/`unproject` now route through a Mercator y-transform clamped at
+  ±85.05113° (the standard square-Mercator cutoff); `WORLD` changed from `{x:-180,y:-90,w:360,h:180}` to
+  `{x:-180,y:-180,w:360,h:360}`; `polygonToPath` projects each vertex instead of inlining `-lat`;
+  `fitBounds` projects north/south through Mercator before computing the vertical center (previously
+  assumed a linear lat axis). `clampViewBox`/`zoomAt`/`panBy` are projection-agnostic and unchanged. The
+  sole consumer, `src/components/LocationMap.tsx` (the offline Places → Travel tab GPS map), needed no
+  changes — it only calls the public `geo-project.ts` API, whose signatures didn't change, just the
+  numeric output range.
+
+---
+
+## Addendum (2026-07-14) — Life-records deferrals: blob retirement, links, FBAR user-max
+
+> Three small follow-ups to the 2026-07 vault split (§11.2 above), closing out loose ends that split
+> deliberately deferred.
+
+- [x] **`.migrated.enc` blob retirement** — the vault-split migration (`runVaultLifeMigrationIfNeeded`)
+  renamed each processed legacy vault blob to `<category>.migrated.enc` instead of deleting it, for "a
+  release or two" of safety margin — no reader ever touched them and no restore path exists. A new one-shot
+  `retireMigratedVaultBlobsIfNeeded` (`electron/lib/vault-blob-retirement.ts`, gated on
+  `vaultMigratedBlobsRetired`, registered in `DB_INIT_REPAIRS` in `electron/db/client.ts`) deletes them for
+  good, now that two releases (1.11, 1.12) have shipped since. Skips without consuming its gate until the
+  migration gate (`vaultLifeRecordsMigrated`) has itself committed, so a fresh upgrade doesn't race ahead of
+  the migration it depends on.
+- [x] **Life-record links (`life_record_links`)** — new table (migration `0044`, mirrored in
+  `ensureNewTables`) ties a `life_records` row to the contact or finance account it documents:
+  `target_kind` ∈ `contact` \| `account` + `target_id`, `UNIQUE(life_record_id, target_kind, target_id)`
+  (mirrors `document_links`' generic shape). New IPC `life:set-link` / `life:remove-link`; `life:list` rows
+  now carry a resolved `links: LifeRecordLink[]` (label denormalized from `contacts`/`finance_accounts` so
+  the renderer never needs a second lookup); `life:delete` cascades link deletion. UI: link chips + an
+  inline picker on each Life Records page card.
+- [x] **FBAR reads a linked record's user-entered max** — `buildFbarByYear`
+  (`electron/integrations/finance-expat.ts`) now loads `foreign-accounts` life records LINKED to a finance
+  account and, for the CURRENT year only, lets a user-entered `fields.maxValueUsd` override the
+  snapshot-derived USD max when it's higher (or rescue an account with no FX rate to convert at all) — the
+  official FBAR figure is often read off a statement rather than derivable from Compass's own balance
+  snapshots. `FbarAccountYear.maxUsdSource` (`'snapshot'` \| `'user'`) marks which won; the Finance → Expat
+  Tax FBAR table shows an "entered" badge with a tooltip explaining the override.
 
 ---
 
