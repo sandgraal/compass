@@ -109,7 +109,7 @@ export default function Integrations(): JSX.Element {
       lastSyncedAt: number | null
       errorCode: string | null
       historyOldestDate: string | null
-      historyBackfillStatus: string | null
+      historyBackfillStatus: 'complete' | 'partial' | 'error' | null
     }>
   >([])
   const [simplefinTokenInput, setSimplefinTokenInput] = useState<string | null>(null)
