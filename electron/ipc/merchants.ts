@@ -37,6 +37,7 @@ import {
   computeTaxSummary
 } from '../lib/merchant-profile'
 import { normalizeMerchant } from '../lib/normalize'
+import type { PlaceWebEnrichment } from '../lib/place-web-enrichment'
 import { searchRecords } from '../lib/records-search'
 import {
   MAX_LEN,
@@ -50,8 +51,11 @@ import {
 /** Namespaced JSON extras on a places row (`places.meta`). */
 export interface MerchantMeta {
   support?: { email?: string; phone?: string }
-  /** Reserved for the future consent-gated web-enrichment flow. */
-  enrichment?: Record<string, unknown>
+  /**
+   * Consent-gated web enrichment — written by the SHARED places surface
+   * (electron/ipc/place-web-enrich.ts), which serves both kinds.
+   */
+  enrichment?: { web?: PlaceWebEnrichment }
 }
 
 export interface TrackedMerchant extends PlaceRecord {

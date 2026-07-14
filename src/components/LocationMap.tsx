@@ -3,15 +3,32 @@
  *
  * Basemap: the bundled country boundaries (ships with the app, same asset the
  * residency engine uses). Pins: clustered GPS cells from `location:map-data`
- * (bounded in the main process; raw points never cross IPC). Pan by drag, zoom
- * by wheel (cursor-anchored), auto-fit to the data on load. All projection math
- * lives in the pure, tested `src/lib/geo-project.ts`.
+ * (bounded in the main process; raw points never cross IPC). Optional named
+ * markers (tracked places with a derived coordinate) render on top. Pan by
+ * drag, zoom by wheel (cursor-anchored), auto-fit to the data on load; a
+ * `focus` prop zooms to one coordinate. All projection math lives in the pure,
+ * tested `src/lib/geo-project.ts`.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { type ViewBox, fitBounds, panBy, polygonToPath, project, zoomAt } from '../lib/geo-project'
+import {
+  type ViewBox,
+  clampViewBox,
+  fitBounds,
+  panBy,
+  polygonToPath,
+  project,
+  zoomAt
+} from '../lib/geo-project'
 
 const ASPECT = 2 // width/height of the map area
 const MIN_ZOOM_SPAN = 0.5 // degrees — deepest zoom-in
+const FOCUS_SPAN = 4 // degrees wide when zooming to a focused marker
+
+export interface LocationMapMarker {
+  name: string
+  lat: number
+  lng: number
+}
 
 function fmtDate(ms: number | null): string {
   if (ms == null) return ''
@@ -23,12 +40,23 @@ function fmtDate(ms: number | null): string {
 }
 
 interface Hover {
-  cell: LocationMapCell
+  label: string
+  sub?: string
   cx: number // screen px within the container
   cy: number
 }
 
-export default function LocationMap({ data }: { data: LocationMapData }): JSX.Element {
+export default function LocationMap({
+  data,
+  markers,
+  focus
+}: {
+  data: LocationMapData
+  /** Tracked places with a derived coordinate — rendered as named pins on top. */
+  markers?: LocationMapMarker[]
+  /** Zoom the view to this coordinate when set (e.g. "Show on map"). */
+  focus?: { lat: number; lng: number } | null
+}): JSX.Element {
   const [viewBox, setViewBox] = useState<ViewBox>(() => fitBounds(data.bounds, ASPECT))
   const [hover, setHover] = useState<Hover | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
@@ -38,6 +66,21 @@ export default function LocationMap({ data }: { data: LocationMapData }): JSX.El
   useEffect(() => {
     setViewBox(fitBounds(data.bounds, ASPECT))
   }, [data.bounds])
+
+  // Focus wins over the auto-fit (declared after it so a mount with both set
+  // lands on the focused place).
+  useEffect(() => {
+    if (!focus) return
+    const p = project(focus.lng, focus.lat)
+    setViewBox(
+      clampViewBox({
+        x: p.x - FOCUS_SPAN / 2,
+        y: p.y - FOCUS_SPAN / ASPECT / 2,
+        w: FOCUS_SPAN,
+        h: FOCUS_SPAN / ASPECT
+      })
+    )
+  }, [focus])
 
   // Wheel-zoom needs a NON-passive native listener: React 18 registers `onWheel`
   // as passive on the root, so preventDefault() there is ignored and the page
@@ -98,16 +141,29 @@ export default function LocationMap({ data }: { data: LocationMapData }): JSX.El
     return base * (viewBox.w / 100)
   }
 
-  function onPinHover(cell: LocationMapCell): void {
+  function hoverAt(lng: number, lat: number, label: string, sub?: string): void {
     const svg = svgRef.current
     if (!svg) return
     const rect = svg.getBoundingClientRect()
-    const p = project(cell.lng, cell.lat)
+    const p = project(lng, lat)
     setHover({
-      cell,
+      label,
+      sub,
       cx: ((p.x - viewBox.x) / viewBox.w) * rect.width,
       cy: ((p.y - viewBox.y) / viewBox.h) * rect.height
     })
+  }
+
+  function onPinHover(cell: LocationMapCell): void {
+    const dates =
+      cell.firstSeen != null
+        ? `${fmtDate(cell.firstSeen)}${
+            cell.lastSeen != null && cell.lastSeen !== cell.firstSeen
+              ? ` – ${fmtDate(cell.lastSeen)}`
+              : ''
+          }`
+        : undefined
+    hoverAt(cell.lng, cell.lat, `${cell.count} ${cell.count === 1 ? 'point' : 'points'}`, dates)
   }
 
   return (
@@ -150,6 +206,31 @@ export default function LocationMap({ data }: { data: LocationMapData }): JSX.El
             )
           })}
         </g>
+        {markers && markers.length > 0 && (
+          <g>
+            {markers.map((m) => {
+              const p = project(m.lng, m.lat)
+              const r = 0.8 * (viewBox.w / 100)
+              return (
+                // Ring + dot so tracked places read as pins, not density blobs.
+                <g
+                  key={`${m.name}@${m.lat},${m.lng}`}
+                  onPointerEnter={() => hoverAt(m.lng, m.lat, m.name, '≈ location')}
+                  onPointerLeave={() => setHover(null)}
+                >
+                  <circle
+                    cx={p.x}
+                    cy={p.y}
+                    r={r}
+                    className="fill-card stroke-primary"
+                    strokeWidth={viewBox.w / 800}
+                  />
+                  <circle cx={p.x} cy={p.y} r={r / 2.5} className="fill-primary" />
+                </g>
+              )
+            })}
+          </g>
+        )}
       </svg>
 
       {hover && (
@@ -160,17 +241,8 @@ export default function LocationMap({ data }: { data: LocationMapData }): JSX.El
             top: Math.max(hover.cy - 10, 4)
           }}
         >
-          <span className="font-semibold">{hover.cell.count}</span>{' '}
-          {hover.cell.count === 1 ? 'point' : 'points'}
-          {hover.cell.firstSeen != null && (
-            <span className="text-muted-foreground">
-              {' · '}
-              {fmtDate(hover.cell.firstSeen)}
-              {hover.cell.lastSeen != null &&
-                hover.cell.lastSeen !== hover.cell.firstSeen &&
-                ` – ${fmtDate(hover.cell.lastSeen)}`}
-            </span>
-          )}
+          <span className="font-semibold">{hover.label}</span>
+          {hover.sub && <span className="text-muted-foreground"> · {hover.sub}</span>}
         </div>
       )}
     </div>

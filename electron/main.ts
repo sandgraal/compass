@@ -42,6 +42,7 @@ import { registerNylasHandlers } from './ipc/nylas'
 import { registerObsidianHandlers } from './ipc/obsidian'
 import { registerOverviewHandlers } from './ipc/overview'
 import { registerPeopleHandlers } from './ipc/people'
+import { registerPlaceWebEnrichHandlers } from './ipc/place-web-enrich'
 import { registerPlacesHandlers } from './ipc/places'
 import { registerPlaidHandlers } from './ipc/plaid'
 import { registerQuickCaptureHandlers } from './ipc/quick-capture'
@@ -275,6 +276,7 @@ app.whenReady().then(async () => {
   registerPeopleHandlers(ipcMain)
   registerEntitiesHandlers(ipcMain)
   registerPlacesHandlers(ipcMain)
+  registerPlaceWebEnrichHandlers(ipcMain)
   registerMerchantsHandlers(ipcMain)
   registerLocationHandlers(ipcMain)
   registerOverviewHandlers(ipcMain)

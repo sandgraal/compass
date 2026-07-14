@@ -54,6 +54,12 @@ const DDL = `
     occurred_at INTEGER, title TEXT NOT NULL, body TEXT, payload TEXT,
     dedup_hash TEXT NOT NULL UNIQUE, provenance TEXT, ingested_at INTEGER
   );
+  CREATE TABLE location_points (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, occurred_at INTEGER NOT NULL,
+    lat REAL NOT NULL, lng REAL NOT NULL, accuracy REAL,
+    src TEXT NOT NULL, dedup_hash TEXT NOT NULL UNIQUE, ingested_at INTEGER
+  );
+  CREATE INDEX idx_location_points_occurred_at ON location_points (occurred_at);
   CREATE VIRTUAL TABLE records_fts USING fts5(
     title, body, payload, content='records', content_rowid='id',
     tokenize='unicode61 remove_diacritics 2'
@@ -176,6 +182,60 @@ describe('places:list-tracked', () => {
     const list = invoke('places:list-tracked') as TrackedPlace[]
     expect(list[0].matchKey).toBe('blue bottle cafe')
     expect(list[0].live?.visitCount).toBe(1)
+  })
+
+  it('derives and caches meta.geo from GPS clusters around visits', () => {
+    const id = seedPlace()
+    const insPt = sqlite.prepare(
+      `INSERT INTO location_points (occurred_at, lat, lng, accuracy, src, dedup_hash)
+       VALUES (?, ?, ?, 10, 'gpx', ?)`
+    )
+    let pt = 0
+    for (const day of ['2026-01-10', '2026-01-17', '2026-01-24']) {
+      const t = ms(`${day}T18:00:00Z`)
+      seedRecord({
+        source: 'gcal',
+        type: 'event',
+        title: 'Class',
+        body: 'Blue Bottle Cafe',
+        occurredAt: t
+      })
+      for (let i = 0; i < 4; i++) {
+        insPt.run(t + i * 600_000, 9.8644 + i * 0.0002, -83.9194 - i * 0.0002, `pt${pt++}`)
+      }
+    }
+
+    const list = invoke('places:list-tracked') as TrackedPlace[]
+    expect(list[0].meta?.geo).toMatchObject({ lat: 9.86, lng: -83.92, visitCount: 3 })
+    // Persisted — the row now carries the cached coordinate.
+    const row = sqlite.prepare('SELECT meta FROM places WHERE id = ?').get(id) as { meta: string }
+    expect(JSON.parse(row.meta).geo.lat).toBe(9.86)
+  })
+
+  it('caches a negative geo result so it is not recomputed every load', () => {
+    seedPlace()
+    // One visit, no GPS points near it — correlation fails, but points exist
+    // elsewhere so the geo pass runs.
+    seedRecord({
+      source: 'gcal',
+      type: 'event',
+      title: 'Class',
+      body: 'Blue Bottle Cafe',
+      occurredAt: ms('2026-01-10T18:00:00Z')
+    })
+    sqlite
+      .prepare(
+        `INSERT INTO location_points (occurred_at, lat, lng, accuracy, src, dedup_hash)
+         VALUES (?, 26.71, -80.05, 10, 'gpx', 'far')`
+      )
+      .run(ms('2025-06-01'))
+
+    const list = invoke('places:list-tracked') as TrackedPlace[]
+    expect(list[0].meta?.geo?.lat).toBeUndefined()
+    expect(list[0].meta?.geo?.visitCount).toBe(1)
+    // Second load returns the cached attempt unchanged (same computedAt).
+    const again = invoke('places:list-tracked') as TrackedPlace[]
+    expect(again[0].meta?.geo?.computedAt).toBe(list[0].meta?.geo?.computedAt)
   })
 
   it('an undated visit does not corrupt firstVisit/lastVisit when dated visits exist', () => {

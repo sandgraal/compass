@@ -775,16 +775,23 @@ export const travelSegments = sqliteTable('travel_segments', {
 // The derived, coarse `travel_segments` (country + date window) DO project onto
 // the spine. Re-import is idempotent via the UNIQUE `dedup_hash` (same
 // content-addressed idiom as `records`/`finance_transactions`).
-export const locationPoints = sqliteTable('location_points', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  occurredAt: integer('occurred_at', { mode: 'timestamp_ms' }).notNull(), // when the point was recorded
-  lat: real('lat').notNull(),
-  lng: real('lng').notNull(),
-  accuracy: real('accuracy'), // meters, when the export provides it
-  src: text('src').notNull(), // 'owntracks' | 'gpx' | 'google'
-  dedupHash: text('dedup_hash').notNull().unique(), // content-addressed dedup key
-  ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
-})
+export const locationPoints = sqliteTable(
+  'location_points',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    occurredAt: integer('occurred_at', { mode: 'timestamp_ms' }).notNull(), // when the point was recorded
+    lat: real('lat').notNull(),
+    lng: real('lng').notNull(),
+    accuracy: real('accuracy'), // meters, when the export provides it
+    src: text('src').notNull(), // 'owntracks' | 'gpx' | 'google'
+    dedupHash: text('dedup_hash').notNull().unique(), // content-addressed dedup key
+    ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+  },
+  (t) => ({
+    // Per-visit ±window queries for the places geo-correlation (migration 0042).
+    occurredAtIdx: index('idx_location_points_occurred_at').on(t.occurredAt)
+  })
+)
 
 // ---- Argyle paystubs (Phase 10.9 — "Argyle → forecast") ----
 // Real payroll paystubs from the Argyle aggregator, feeding the cash-flow

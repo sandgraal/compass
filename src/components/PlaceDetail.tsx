@@ -15,17 +15,21 @@ import {
   EyeOff,
   FileText,
   Globe,
+  Map as MapIcon,
   MapPin,
   Paperclip,
   Pencil,
   Plane,
   RefreshCw,
+  Sparkles,
   X
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { cn } from '../lib/utils'
+import PlaceWebEnrichDialog from './places/PlaceWebEnrichDialog'
+import WebPresenceCard from './places/WebPresenceCard'
 import { useConfirm } from './ui/ConfirmDialog'
 import { useToast } from './ui/Toast'
 
@@ -54,16 +58,20 @@ const visitSourceLabel = (source: string): string => VISIT_SOURCE_META[source]?.
 export default function PlaceDetail({
   placeId,
   onChanged,
-  onUntracked
+  onUntracked,
+  onShowOnMap
 }: {
   placeId: number
   /** Fired after an edit persisted — the parent list refreshes names/categories. */
   onChanged: () => void
   onUntracked: () => void
+  /** Jump to the Travel map focused on this place's derived coordinate. */
+  onShowOnMap?: (geo: { lat: number; lng: number }) => void
 }): JSX.Element {
   const [profile, setProfile] = useState<PlaceProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
+  const [webEnrichOpen, setWebEnrichOpen] = useState(false)
   const navigate = useNavigate()
   const confirm = useConfirm()
   const { toast } = useToast()
@@ -215,6 +223,32 @@ export default function PlaceDetail({
           >
             <Clock size={16} />
           </button>
+          {onShowOnMap &&
+            profile.place.meta?.geo?.lat != null &&
+            profile.place.meta.geo.lng != null && (
+              <button
+                type="button"
+                onClick={() => {
+                  const geo = profile.place.meta?.geo
+                  if (geo?.lat != null && geo.lng != null)
+                    onShowOnMap({ lat: geo.lat, lng: geo.lng })
+                }}
+                title="Show approximate location on your map"
+                aria-label="Show on map"
+                className="p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-secondary transition-colors"
+              >
+                <MapIcon size={16} />
+              </button>
+            )}
+          <button
+            type="button"
+            onClick={() => setWebEnrichOpen(true)}
+            title="Enrich from web (uses your Anthropic key, review before saving)"
+            aria-label="Enrich from web"
+            className="p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-secondary transition-colors"
+          >
+            <Sparkles size={16} />
+          </button>
           <button
             type="button"
             onClick={() => setEditing((v) => !v)}
@@ -365,6 +399,13 @@ export default function PlaceDetail({
         </Section>
       )}
 
+      {/* Web presence (accepted web-enrichment findings) */}
+      {profile.place.meta?.enrichment?.web && (
+        <Section icon={<Globe size={14} />} title="Web presence">
+          <WebPresenceCard web={profile.place.meta.enrichment.web} />
+        </Section>
+      )}
+
       {/* Documents */}
       <Section
         icon={<FileText size={14} />}
@@ -442,6 +483,22 @@ export default function PlaceDetail({
           </div>
         </Section>
       )}
+
+      <PlaceWebEnrichDialog
+        place={{
+          id: place.id,
+          name: place.name,
+          kind: place.kind,
+          category: place.category,
+          address: place.address
+        }}
+        open={webEnrichOpen}
+        onClose={() => setWebEnrichOpen(false)}
+        onApplied={async () => {
+          await load()
+          onChanged()
+        }}
+      />
     </div>
   )
 }

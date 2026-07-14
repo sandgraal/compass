@@ -13,11 +13,13 @@
  *   places:untrack       → delete the places row and clear the projection
  *     row's promoted flags so the place reappears in Discovered immediately
  *
- * PRIVACY BOUNDARY: these handlers read the records spine + owned tables
- * only — NEVER `location_points` (raw GPS is the one data-access-policy
- * exclusion; see electron/ipc/location.ts). Like `location:map-data`, this
- * namespace is a renderer-local UI read and must never be registered as an
- * assistant or MCP tool.
+ * PRIVACY BOUNDARY: these handlers read the records spine + owned tables —
+ * raw `location_points` are touched ONLY through lib/location-place-geo.ts,
+ * which returns a single ~1.1 km-rounded coordinate per tracked place (the
+ * same granularity `location:map-data`'s cells already expose); raw points
+ * never cross IPC. Like `location:map-data`, this namespace is a
+ * renderer-local UI read and must never be registered as an assistant or
+ * MCP tool.
  *
  * Also exports the shared places-row validators merchants.ts builds on
  * (dependency direction: merchants.ts → places.ts, never the reverse).
@@ -29,6 +31,7 @@ import type { IpcMain } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
 import { derivedEntities, documentLinks, documents, places } from '../db/schema'
 import { placeExternalId } from '../lib/entities'
+import { computePlaceGeo } from '../lib/location-place-geo'
 import {
   type PlaceCandidateRow,
   type PlaceMonthlyBucket,
@@ -40,6 +43,7 @@ import {
   indexVisitsByKey,
   placeMatchKey
 } from '../lib/place-profile'
+import type { PlaceWebEnrichment } from '../lib/place-web-enrichment'
 import { searchRecords } from '../lib/records-search'
 
 export interface PlaceRecord {
@@ -57,10 +61,14 @@ export interface PlaceRecord {
 
 /** Namespaced JSON extras on a places row (`places.meta`, kind='place'). */
 export interface PlaceMeta {
-  /** Reserved: offline GPS-derived approximate coordinates (future follow-up). */
-  geo?: { lat: number; lng: number; confidence?: number; visitCount?: number; computedAt?: number }
-  /** Reserved for the future consent-gated web-enrichment flow. */
-  enrichment?: Record<string, unknown>
+  /**
+   * GPS-derived approximate coordinate (lib/location-place-geo.ts), rounded to
+   * ~1.1 km. A geo WITHOUT lat/lng is a cached negative result — recomputed
+   * only when `visitCount` (dated, non-trip visits at compute time) changes.
+   */
+  geo?: { lat?: number; lng?: number; confidence?: number; visitCount: number; computedAt: number }
+  /** Consent-gated web enrichment (electron/ipc/place-web-enrich.ts). */
+  enrichment?: { web?: PlaceWebEnrichment }
 }
 
 export interface TrackedPlace extends PlaceRecord {
@@ -235,6 +243,70 @@ function loadVisitCandidates(): PlaceCandidateRow[] {
     .all(...params) as PlaceCandidateRow[]
 }
 
+/**
+ * Persist an accepted web-enrichment run (electron/ipc/place-web-enrich.ts):
+ * accepted core columns re-validated through the same cleaners as
+ * places:update, the accepted findings into meta.enrichment.web (replacing
+ * the whole namespace — rejected leftovers never linger), other meta
+ * namespaces (geo) untouched. Deliberately NOT kind-filtered: this is the
+ * shared enrichment writer for both tracked places and tracked merchants.
+ */
+export function applyPlaceWebEnrichment(
+  placeId: number,
+  fields: Partial<Record<'category' | 'address' | 'url', string>>,
+  web: PlaceWebEnrichment
+): boolean {
+  const db = getDb()
+  const row = db.select().from(places).where(eq(places.id, placeId)).all()[0]
+  if (!row) return false
+  const meta = parseMeta<PlaceMeta>(row.meta) ?? {}
+  const updates: Partial<PlaceRow> = {
+    meta: JSON.stringify({ ...meta, enrichment: { ...(meta.enrichment ?? {}), web } }),
+    updatedAt: new Date()
+  }
+  const category = cleanString(fields.category, MAX_LEN.category)
+  if (category != null) updates.category = category
+  const address = cleanString(fields.address, MAX_LEN.address)
+  if (address != null) updates.address = address
+  const url = cleanUrl(fields.url)
+  if (url != null) updates.url = url
+  db.update(places).set(updates).where(eq(places.id, placeId)).run()
+  return true
+}
+
+/**
+ * Lazily (re)derive a tracked place's approximate coordinate from the GPS
+ * history and cache it in meta.geo. Recomputes only when the dated-visit
+ * count changed (a negative result is cached the same way, so a place with
+ * no GPS overlap doesn't re-scan every page load). Trip visits are excluded —
+ * a country-level "Trip to X" pins nothing. Deliberately does NOT bump
+ * updatedAt: this is a derived cache, not a user edit (and the tracked list
+ * orders by updatedAt).
+ */
+function ensurePlaceGeo(
+  db: ReturnType<typeof getDb>,
+  row: PlaceRow,
+  meta: PlaceMeta | null,
+  visits: PlaceVisit[]
+): PlaceMeta | null {
+  const times = visits
+    .filter((v) => v.source !== 'travel')
+    .map((v) => v.occurredAt)
+    .filter((t): t is number => t != null)
+  if (times.length === 0) return meta
+  if (meta?.geo && meta.geo.visitCount === times.length) return meta
+  const result = computePlaceGeo(getRawSqlite(), row.name, times)
+  const next: PlaceMeta = {
+    ...(meta ?? {}),
+    geo: { ...(result ?? {}), visitCount: times.length, computedAt: Date.now() }
+  }
+  db.update(places)
+    .set({ meta: JSON.stringify(next) })
+    .where(eq(places.id, row.id))
+    .run()
+  return next
+}
+
 export function registerPlacesHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('places:list-tracked', (): TrackedPlace[] => {
     const db = getDb()
@@ -249,9 +321,12 @@ export function registerPlacesHandlers(ipcMain: IpcMain): void {
       loadVisitCandidates(),
       new Set(keyed.map((k) => k.matchKey).filter((k) => k.length > 0))
     )
+    // One cheap probe gates all geo work — most stores have no GPS import.
+    const hasPoints = getRawSqlite().prepare('SELECT 1 FROM location_points LIMIT 1').get() != null
     return keyed.map(({ row, matchKey }) => {
       const visits = byKey.get(matchKey)
       let live: TrackedPlace['live'] = null
+      let meta = parseMeta<PlaceMeta>(row.meta)
       if (visits && visits.length > 0) {
         // computeVisitStats ignores undated visits when picking first/last, so
         // a null-occurredAt row (sorted first by indexVisitsByKey) can't make
@@ -263,8 +338,9 @@ export function registerPlacesHandlers(ipcMain: IpcMain): void {
           lastVisit: stats.lastVisit,
           topSource: stats.bySource[0]?.source ?? null
         }
+        if (hasPoints) meta = ensurePlaceGeo(db, row, meta, visits)
       }
-      return { ...rowToRecord(row), matchKey, meta: parseMeta<PlaceMeta>(row.meta), live }
+      return { ...rowToRecord(row), matchKey, meta, live }
     })
   })
 

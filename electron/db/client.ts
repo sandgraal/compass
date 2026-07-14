@@ -270,6 +270,7 @@ function ensureNewTables(sqlite: Database.Database): void {
       ingested_at INTEGER
     );
     CREATE UNIQUE INDEX IF NOT EXISTS location_points_dedup_hash_unique ON location_points (dedup_hash);
+    CREATE INDEX IF NOT EXISTS idx_location_points_occurred_at ON location_points (occurred_at);
     -- Argyle paystubs (Phase 10.9). Here (always-run fallback) as well as the
     -- migration because packaged builds skip migrations. Projects onto the records
     -- spine (data-access policy — full-detail paystub tools); feeds the forecast.
