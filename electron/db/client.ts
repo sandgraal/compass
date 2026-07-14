@@ -798,6 +798,17 @@ function ensureNewTables(sqlite: Database.Database): void {
   // + namespaced JSON `meta` on places.
   ensureColumn(sqlite, 'finance_transactions', 'normalized_merchant', 'TEXT')
   ensureColumn(sqlite, 'places', 'meta', 'TEXT')
+  // Subscriptions redesign (2026-07, migration 0045) — trial-end tracking +
+  // namespaced JSON `meta` (usage self-check-in). `subscriptions` is created
+  // only by migration 0013 (not in the pure-ensure CREATE path below), so
+  // guard the same way `contacts` does above in case the table doesn't exist
+  // on a pathological build.
+  try {
+    ensureColumn(sqlite, 'subscriptions', 'trial_ends_at', 'TEXT')
+    ensureColumn(sqlite, 'subscriptions', 'meta', 'TEXT')
+  } catch {
+    /* subscriptions table absent on a pristine pre-migrate DB — migrate() adds it */
+  }
   try {
     sqlite.exec(
       'CREATE INDEX IF NOT EXISTS idx_finance_transactions_normalized_merchant ON finance_transactions(normalized_merchant)'

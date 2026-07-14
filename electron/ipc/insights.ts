@@ -31,6 +31,12 @@ import {
   utilityBills
 } from '../db/schema'
 import { localYm, localYmd } from '../lib/dates'
+import {
+  type SubscriptionUsageMatch,
+  matchSubscriptionUsage,
+  usagePairKey,
+  wasSubscriptionUsed
+} from '../lib/subscription-usage'
 
 export interface Insight {
   kind:
@@ -160,19 +166,6 @@ export const DISCRETIONARY_CATEGORIES = new Set([
 const HEALTH_SPEND_RE =
   /\b(pharmacy|medical|health|clinic|doctor|hospital|dental|dentist|optom|vision|rx|drug\s?store|walgreens|cvs|labcorp|quest)\b/i
 
-/**
- * Which media-usage records "count" as using a subscription. Keyed by a
- * name-match against the subscription — only sources we actually recognize on
- * the spine, so a match is meaningful (no false "unused" on data we never see).
- */
-const STREAMING_USAGE: Array<{ match: RegExp; sources: string[]; types: string[] }> = [
-  { match: /netflix/i, sources: ['netflix'], types: ['watch'] },
-  { match: /spotify/i, sources: ['spotify'], types: ['listen'] },
-  { match: /you\s?tube/i, sources: ['youtube'], types: ['watch'] },
-  { match: /prime\s?video|amazon\s?prime/i, sources: ['prime-video'], types: ['watch'] },
-  { match: /kindle|prime\s?reading/i, sources: ['kindle'], types: ['read'] },
-  { match: /amazon\s?music/i, sources: ['amazon-music'], types: ['listen', 'like', 'save'] }
-]
 /** Mirror namespaces (Notion/Obsidian imports) aren't user-authored notes. */
 const MIRROR_PREFIXES = ['notion/', 'obsidian/']
 
@@ -540,10 +533,9 @@ function detectUnusedSubscriptions(db: Db, now: Date): Insight[] {
   if (subs.length === 0) return []
   const since = new Date(now.getTime() - UNUSED_SUB_DAYS * 24 * 3600 * 1000)
   const mapped = subs
-    .map((sub) => ({ sub, map: STREAMING_USAGE.find((m) => m.match.test(sub.name)) }))
-    .filter(
-      (entry): entry is { sub: (typeof subs)[number]; map: (typeof STREAMING_USAGE)[number] } =>
-        Boolean(entry.map)
+    .map((sub) => ({ sub, map: matchSubscriptionUsage(sub.name) }))
+    .filter((entry): entry is { sub: (typeof subs)[number]; map: SubscriptionUsageMatch } =>
+      Boolean(entry.map)
     )
   if (mapped.length === 0) return []
   const sources = [...new Set(mapped.flatMap((entry) => entry.map.sources))]
@@ -560,14 +552,11 @@ function detectUnusedSubscriptions(db: Db, now: Date): Insight[] {
         )
       )
       .all()
-      .map((row) => `${row.source}\u0000${row.type}`)
+      .map((row) => usagePairKey(row.source, row.type))
   )
   const out: Insight[] = []
   for (const { sub, map } of mapped) {
-    const used = map.sources.some((source) =>
-      map.types.some((type) => usedPairs.has(`${source}\u0000${type}`))
-    )
-    if (used) continue
+    if (wasSubscriptionUsed(map, usedPairs)) continue
     out.push({
       kind: 'unused-subscription',
       severity: 'info',

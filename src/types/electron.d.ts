@@ -632,7 +632,13 @@ declare global {
     error?: string
   }
 
-  // --- Subscriptions (Phase 9.3 — "The Storehouse") ---
+  // --- Subscriptions (Phase 9.3 — "The Storehouse"; redesign 2026-07) ---
+  type UsageRating = 'love' | 'use' | 'rarely' | 'barely'
+  interface SubscriptionMeta {
+    /** The user's own "is this worth it" self-check-in. No usage-tracking API
+     * exists or should exist — this is an explicit, cheap, user-driven signal. */
+    usage?: { rating: UsageRating; ratedAt: number }
+  }
   interface SubscriptionRecord {
     id: number
     externalId: string
@@ -642,13 +648,24 @@ declare global {
     category: string | null
     status: string
     nextRenewal: string | null
+    trialEndsAt: string | null
     paymentAccount: string | null
     cancelUrl: string | null
     notes: string | null
     source: string
+    meta: SubscriptionMeta | null
     annualCost: number
     createdAt: number | null
     updatedAt: number | null
+  }
+  /** `subscriptions:list`'s return shape — the record plus cheap per-row
+   * badges cross-referenced from one shared ledger-audit + usage-records read
+   * (never a per-row query). */
+  interface SubscriptionListItem extends SubscriptionRecord {
+    priceHike: boolean
+    zombie: boolean
+    isDuplicate: boolean
+    unused: boolean
   }
   interface SubscriptionInput {
     name: string
@@ -657,6 +674,7 @@ declare global {
     category?: string | null
     status?: string
     nextRenewal?: string | null
+    trialEndsAt?: string | null
     paymentAccount?: string | null
     cancelUrl?: string | null
     notes?: string | null
@@ -678,6 +696,46 @@ declare global {
     totalActiveAnnual: number
     active: DetectedSubscription[]
     zombies: DetectedSubscription[]
+  }
+  interface SubscriptionTotalPaid {
+    totalSpend: number
+    txnCount: number
+    lastTxnDate: string | null
+    currency: string
+    /** True when there was no ledger match and this is a cadence×time estimate. */
+    estimated: boolean
+  }
+  interface SubscriptionSignals {
+    matchKey: string
+    hasLedgerMatch: boolean
+    auditStatus: 'active' | 'zombie' | 'expired' | null
+    priceHike: boolean
+    priceHikeDelta: number
+    priceHikePct: number
+    recentMedian: number
+    historicalMedian: number
+    isDuplicate: boolean
+    duplicateAccounts: string[]
+    duplicateCombinedAnnual: number
+    unusedTrackable: boolean
+    unused: boolean
+    unusedWindowDays: number
+  }
+  interface SubscriptionDocumentItem {
+    linkId: number
+    documentId: number
+    title: string
+    docDate: string | null
+    mimeType: string | null
+  }
+  /** `subscriptions:profile`'s return shape — everything we know about one
+   * subscription: real (or estimated) spend, cross-referenced ledger signals,
+   * and attached documents. */
+  interface SubscriptionProfile {
+    subscription: SubscriptionRecord
+    totalPaid: SubscriptionTotalPaid
+    signals: SubscriptionSignals
+    documents: SubscriptionDocumentItem[]
   }
 
   // --- Household & Assets (Phase 9.5 — "The Storehouse") ---
@@ -2165,10 +2223,12 @@ declare global {
         exportCsv(): Promise<ExportResult>
       }
       subscriptions: {
-        list(): Promise<SubscriptionRecord[]>
+        list(): Promise<SubscriptionListItem[]>
         getDetected(): Promise<DetectedSubscriptions>
+        profile(id: number): Promise<SubscriptionProfile>
         create(input: SubscriptionInput): Promise<{ success: boolean; id: number }>
         update(id: number, updates: SubscriptionInput): Promise<{ success: boolean }>
+        setUsage(id: number, rating: UsageRating): Promise<{ success: boolean }>
         delete(id: number): Promise<{ success: boolean }>
         trackDetected(detected: {
           merchant: string

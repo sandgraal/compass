@@ -645,10 +645,17 @@ export const subscriptions = sqliteTable('subscriptions', {
   category: text('category'),
   status: text('status').notNull().default('active'), // active|paused|cancelled
   nextRenewal: text('next_renewal'), // ISO 'YYYY-MM-DD'
+  trialEndsAt: text('trial_ends_at'), // ISO 'YYYY-MM-DD' — free-trial conversion date
   paymentAccount: text('payment_account'),
   cancelUrl: text('cancel_url'),
   notes: text('notes'),
   source: text('source').notNull().default('manual'), // 'manual' | 'detected'
+  // Namespaced JSON extras (subscriptions redesign, 2026-07) — mirrors `places.meta`.
+  // `usage`: the user's own "is this worth it" self-check-in (no usage-tracking API
+  // exists or should exist here — this is an explicit, cheap, user-driven signal).
+  // `enrichment`: reserved for a future consent-gated web-enrichment pass (pricing/
+  // cancellation/alternatives), mirroring the places/merchants web-enrichment shape.
+  meta: text('meta'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
