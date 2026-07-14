@@ -241,7 +241,7 @@ export default function LocationMap({
             top: Math.max(hover.cy - 10, 4)
           }}
         >
-          <span className="font-semibold capitalize">{hover.label}</span>
+          <span className="font-semibold">{hover.label}</span>
           {hover.sub && <span className="text-muted-foreground"> · {hover.sub}</span>}
         </div>
       )}

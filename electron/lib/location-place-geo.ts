@@ -124,10 +124,13 @@ export function computePlaceGeo(
     .slice(0, MAX_WINDOWS)
   if (dated.length === 0) return null
 
+  // ORDER BY keeps the 500-point cap deterministic: a dense window samples
+  // its earliest fixes instead of whatever the scan happens to return.
   const select = sqlite.prepare(
     `SELECT lat, lng FROM location_points
       WHERE occurred_at BETWEEN ? AND ?
         AND (accuracy IS NULL OR accuracy <= ${MAX_ACCURACY_M})
+      ORDER BY occurred_at
       LIMIT 500`
   )
   const windows = dated.map((t) => select.all(t - WINDOW_MS, t + WINDOW_MS) as GeoWindowPoint[])
