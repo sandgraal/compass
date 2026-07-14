@@ -22,6 +22,7 @@ import {
   Pencil,
   Receipt,
   RefreshCw,
+  Sparkles,
   Store,
   TrendingDown,
   TrendingUp,
@@ -32,6 +33,8 @@ import { useNavigate } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { formatMoney } from '../lib/money'
 import { cn } from '../lib/utils'
+import PlaceWebEnrichDialog from './places/PlaceWebEnrichDialog'
+import WebPresenceCard from './places/WebPresenceCard'
 import { useConfirm } from './ui/ConfirmDialog'
 import { useToast } from './ui/Toast'
 
@@ -60,6 +63,7 @@ export default function MerchantDetail({
   const [profile, setProfile] = useState<MerchantProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
+  const [webEnrichOpen, setWebEnrichOpen] = useState(false)
   const navigate = useNavigate()
   const confirm = useConfirm()
   const { toast } = useToast()
@@ -209,6 +213,15 @@ export default function MerchantDetail({
               <CreditCard size={16} />
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setWebEnrichOpen(true)}
+            title="Enrich from web (uses your Anthropic key, review before saving)"
+            aria-label="Enrich from web"
+            className="p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-secondary transition-colors"
+          >
+            <Sparkles size={16} />
+          </button>
           <button
             type="button"
             onClick={() => setEditing((v) => !v)}
@@ -434,6 +447,13 @@ export default function MerchantDetail({
         </Section>
       )}
 
+      {/* Web presence (accepted web-enrichment findings) */}
+      {profile.place.meta?.enrichment?.web && (
+        <Section icon={<Globe size={14} />} title="Web presence">
+          <WebPresenceCard web={profile.place.meta.enrichment.web} />
+        </Section>
+      )}
+
       {/* Documents */}
       <Section
         icon={<FileText size={14} />}
@@ -543,6 +563,22 @@ export default function MerchantDetail({
           </div>
         </Section>
       )}
+
+      <PlaceWebEnrichDialog
+        place={{
+          id: place.id,
+          name: place.name,
+          kind: place.kind,
+          category: place.category,
+          address: place.address
+        }}
+        open={webEnrichOpen}
+        onClose={() => setWebEnrichOpen(false)}
+        onApplied={async () => {
+          await load()
+          onChanged()
+        }}
+      />
     </div>
   )
 }

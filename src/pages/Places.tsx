@@ -66,6 +66,7 @@ export default function Places(): JSX.Element {
   const [adding, setAdding] = useState(false)
   const [mapData, setMapData] = useState<LocationMapData | null>(null)
   const [trips, setTrips] = useState<TripBundle[]>([])
+  const [mapFocus, setMapFocus] = useState<{ lat: number; lng: number } | null>(null)
   const navigate = useNavigate()
   const { toast } = useToast()
 
@@ -127,6 +128,22 @@ export default function Places(): JSX.Element {
     }
     return best
   }, [tracked])
+
+  // Tracked places with a GPS-derived coordinate — pinned on the Travel map.
+  const placeMarkers = useMemo(
+    () =>
+      tracked.flatMap((p) =>
+        p.meta?.geo?.lat != null && p.meta.geo.lng != null
+          ? [{ name: p.name, lat: p.meta.geo.lat, lng: p.meta.geo.lng }]
+          : []
+      ),
+    [tracked]
+  )
+
+  function showOnMap(geo: { lat: number; lng: number }): void {
+    setMapFocus(geo)
+    setTab('travel')
+  }
 
   const selected = tracked.find((p) => p.id === selectedId) ?? null
 
@@ -357,6 +374,7 @@ export default function Places(): JSX.Element {
                   placeId={selected.id}
                   onChanged={() => void loadTracked()}
                   onUntracked={handleUntracked}
+                  onShowOnMap={showOnMap}
                 />
               ) : (
                 <p className="text-sm text-muted-foreground pt-8 text-center">
@@ -371,7 +389,7 @@ export default function Places(): JSX.Element {
         <div className="space-y-6">
           {mapData && mapData.cells.length > 0 ? (
             <div>
-              <LocationMap data={mapData} />
+              <LocationMap data={mapData} markers={placeMarkers} focus={mapFocus} />
               <p className="mt-1.5 text-[11px] text-muted-foreground">
                 <span className="font-medium text-foreground">
                   {mapData.totalPoints.toLocaleString()}

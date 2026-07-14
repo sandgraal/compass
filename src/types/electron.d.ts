@@ -812,7 +812,8 @@ declare global {
   // ---- Tracked merchants (merchants redesign) — see electron/ipc/merchants.ts ----
   interface MerchantMeta {
     support?: { email?: string; phone?: string }
-    enrichment?: Record<string, unknown>
+    /** Written by the shared places web-enrichment surface. */
+    enrichment?: { web?: PlaceWebEnrichment }
   }
 
   interface TrackedMerchant extends PlaceRecord {
@@ -920,17 +921,69 @@ declare global {
 
   // ---- Tracked places (places redesign) — see electron/ipc/places.ts ----
   interface PlaceMeta {
-    /** Reserved: offline GPS-derived approximate coordinates (future follow-up). */
+    /**
+     * GPS-derived approximate coordinate (~1.1 km rounded). A geo WITHOUT
+     * lat/lng is a cached negative result; recomputed when visitCount changes.
+     */
     geo?: {
-      lat: number
-      lng: number
+      lat?: number
+      lng?: number
       confidence?: number
-      visitCount?: number
-      computedAt?: number
+      visitCount: number
+      computedAt: number
     }
-    /** Reserved for the future consent-gated web-enrichment flow. */
-    enrichment?: Record<string, unknown>
+    /** Consent-gated web enrichment — see electron/ipc/place-web-enrich.ts. */
+    enrichment?: { web?: PlaceWebEnrichment }
   }
+
+  /** Persisted accepted web findings for a place/merchant (meta.enrichment.web). */
+  interface PlaceWebEnrichment {
+    searchedAs: string
+    matchConfidence: 'high' | 'medium' | 'low'
+    description: string | null
+    phone: string | null
+    hours: string | null
+    links: WebLink[]
+    facts: WebFact[]
+    sources: WebSource[]
+    refreshedAt: number
+    model?: string
+  }
+
+  interface PlaceWebEnrichProposal {
+    id: number
+    kind: 'category' | 'address' | 'url' | 'phone' | 'hours' | 'description' | 'link' | 'fact'
+    label?: string
+    currentValue: string | null
+    proposedValue: string
+    sourceUrl?: string
+    sourceVerified: boolean
+    confidence: 'high' | 'medium' | 'low'
+    writesToPlace: boolean
+  }
+
+  type PlaceWebEnrichRunResult =
+    | { success: false; error: string; needsKey?: boolean; cancelled?: boolean }
+    | ({
+        success: true
+        outcome: 'none'
+        searchedAs: string
+        message: string
+      } & WebEnrichRunUsage)
+    | ({
+        success: true
+        outcome: 'candidates'
+        searchedAs: string
+        candidates: WebEnrichCandidate[]
+      } & WebEnrichRunUsage)
+    | ({
+        success: true
+        outcome: 'proposals'
+        runId: string
+        searchedAs: string
+        matchConfidence: 'high' | 'medium' | 'low'
+        proposals: PlaceWebEnrichProposal[]
+      } & WebEnrichRunUsage)
 
   interface TrackedPlace extends PlaceRecord {
     matchKey: string
@@ -2043,6 +2096,17 @@ declare global {
         update(id: number, patch: PlaceUpdatePatch): Promise<{ success: boolean }>
         createManual(input: PlaceCreateInput): Promise<{ success: boolean; id: number }>
         untrack(id: number): Promise<{ success: boolean }>
+        webEnrich(req: {
+          placeId: number
+          hints?: string
+          candidateHint?: string
+        }): Promise<PlaceWebEnrichRunResult>
+        webEnrichApply(req: { runId: string; accepted: number[] }): Promise<{
+          success: boolean
+          applied?: { fields: string[]; findings: number }
+          error?: string
+        }>
+        webEnrichCancel(): Promise<{ success: boolean; error?: string }>
       }
       merchants: {
         listTracked(): Promise<TrackedMerchant[]>
