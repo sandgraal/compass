@@ -270,7 +270,9 @@ const api = {
     getStatus: () => ipcRenderer.invoke('simplefin:get-status'),
     claimToken: (setupToken: string) => ipcRenderer.invoke('simplefin:claim-token', setupToken),
     listConnections: () => ipcRenderer.invoke('simplefin:list-connections'),
-    disconnect: (connectionId: string) => ipcRenderer.invoke('simplefin:disconnect', connectionId)
+    disconnect: (connectionId: string) => ipcRenderer.invoke('simplefin:disconnect', connectionId),
+    backfillHistory: (connectionId: string) =>
+      ipcRenderer.invoke('simplefin:backfill-history', connectionId)
   },
 
   // --- Vault (Sensitive Data) ---

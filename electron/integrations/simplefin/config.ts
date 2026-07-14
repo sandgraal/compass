@@ -38,3 +38,29 @@ export const SIMPLEFIN_LOOKBACK_DAYS = 90
  * the overlap, so re-pulling is a no-op.
  */
 export const SIMPLEFIN_INCREMENTAL_LOOKBACK_DAYS = 30
+
+/**
+ * Historical backfill ("Import full history" — a one-time, user-triggered
+ * action distinct from the recurring sync above). SimpleFIN's Bridge protocol
+ * has no documented hard limit on how far back `start-date` can go and no
+ * pagination — the only way to find out how much history an institution
+ * actually has is to walk backward in windows and see when it stops returning
+ * anything. These constants bound that walk.
+ */
+
+/** Size of each backward-walking window, in days. Same width as the
+ *  first-connect lookback — wide enough to be efficient, still within the
+ *  range most institutions tolerate (may emit the same non-fatal "exceeds
+ *  recommended range" warning `SIMPLEFIN_LOOKBACK_DAYS` already does). */
+export const SIMPLEFIN_BACKFILL_WINDOW_DAYS = 90
+
+/** Safety cap on windows per backfill run (~14.8 years at 90 days/window) —
+ *  not a real limit, just a bound so a bridge that never returns an empty
+ *  window can't turn one click into an unbounded request loop. Hitting it
+ *  yields `status: 'partial'`; a later run resumes from where this left off. */
+export const SIMPLEFIN_BACKFILL_MAX_WINDOWS = 60
+
+/** Delay between successive window requests, in ms — a light pacing courtesy
+ *  to the bridge/institution during a run that may otherwise fire dozens of
+ *  requests back to back. */
+export const SIMPLEFIN_BACKFILL_REQUEST_DELAY_MS = 300

@@ -108,9 +108,15 @@ export default function Integrations(): JSX.Element {
       orgDomain: string | null
       lastSyncedAt: number | null
       errorCode: string | null
+      historyOldestDate: string | null
+      historyBackfillStatus: string | null
     }>
   >([])
   const [simplefinTokenInput, setSimplefinTokenInput] = useState<string | null>(null)
+  // connectionId currently running an "Import full history" backfill (single
+  // request/response promise, no progress channel — see plan). Only one at a
+  // time; the button for that row shows a busy label and disables.
+  const [simplefinBackfillingId, setSimplefinBackfillingId] = useState<string | null>(null)
   // Obsidian vault bridge. Status mirrors `window.api.obsidian.getStatus()`;
   // the path input follows the same convention as the PAT / Plaid-secret
   // forms above: null = form collapsed, string = form open with that value.
@@ -668,6 +674,49 @@ export default function Integrations(): JSX.Element {
     await loadSimplefin()
   }
 
+  async function backfillSimplefinConnectionHistory(connectionId: string, orgName: string) {
+    const label = orgName || 'this connection'
+    const ok = await confirm({
+      title: `Import full history for ${label}?`,
+      description:
+        'Compass will walk backward through your transaction history in date-windowed requests to your SimpleFIN bridge until it runs out of data. This may take a minute and make several requests. Safe to run more than once — it resumes from where it left off.',
+      confirmLabel: 'Import',
+      destructive: false
+    })
+    if (!ok) return
+    setSimplefinBackfillingId(connectionId)
+    try {
+      const r = await window.api.simplefin.backfillHistory(connectionId)
+      if (r.status === 'error') {
+        toast(
+          `Historical import for ${label} stopped: ${r.errorMessage ?? 'unknown error'}`,
+          'error'
+        )
+      } else {
+        const oldest = r.oldestDateReached
+          ? new Date(`${r.oldestDateReached}T00:00:00Z`).toLocaleDateString(undefined, {
+              month: 'short',
+              year: 'numeric'
+            })
+          : 'the start'
+        const moreNote =
+          r.status === 'partial' ? ' — more history may exist; import again to continue' : ''
+        toast(
+          `Imported ${r.added} transaction${r.added === 1 ? '' : 's'} for ${label} back to ${oldest}${moreNote}.`,
+          'success'
+        )
+      }
+      await loadSimplefin()
+    } catch (err) {
+      toast(
+        `Couldn't import history for ${label}: ${err instanceof Error ? err.message : String(err)}`,
+        'error'
+      )
+    } finally {
+      setSimplefinBackfillingId(null)
+    }
+  }
+
   // Clear stored Google credentials and reopen the inline form. Used for
   // rotating a leaked secret or correcting a typo without disconnecting +
   // reconnecting the OAuth tokens themselves.
@@ -1059,16 +1108,43 @@ export default function Integrations(): JSX.Element {
                         'Never synced'
                       )}
                     </div>
+                    {conn.historyBackfillStatus === 'complete' && conn.historyOldestDate && (
+                      <div className="text-muted-foreground">
+                        Full history imported back to{' '}
+                        {new Date(`${conn.historyOldestDate}T00:00:00Z`).toLocaleDateString(
+                          undefined,
+                          { month: 'short', year: 'numeric' }
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void disconnectSimplefinConnection(conn.connectionId, conn.orgName)
-                    }
-                    className="shrink-0 text-xs px-2 py-1 text-muted-foreground hover:text-destructive transition-colors"
-                  >
-                    Disconnect
-                  </button>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {conn.historyBackfillStatus !== 'complete' && (
+                      <button
+                        type="button"
+                        disabled={simplefinBackfillingId === conn.connectionId}
+                        onClick={() =>
+                          void backfillSimplefinConnectionHistory(conn.connectionId, conn.orgName)
+                        }
+                        className="text-xs px-2 py-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                      >
+                        {simplefinBackfillingId === conn.connectionId
+                          ? 'Importing…'
+                          : conn.historyBackfillStatus === 'partial'
+                            ? 'Import more history'
+                            : 'Import full history'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void disconnectSimplefinConnection(conn.connectionId, conn.orgName)
+                      }
+                      className="text-xs px-2 py-1 text-muted-foreground hover:text-destructive transition-colors"
+                    >
+                      Disconnect
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
