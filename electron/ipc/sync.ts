@@ -87,6 +87,18 @@ type SyncResultInternal = SyncResult & {
   githubSuggestionInputs?: GitHubInputItem[]
 }
 
+/**
+ * Parse a Calendar API date-only string ('YYYY-MM-DD', used for all-day event
+ * start/end) as LOCAL midnight, not UTC midnight. `new Date('YYYY-MM-DD')`
+ * parses as UTC per the ES spec, which shifts the date back a day in any
+ * negative-UTC-offset timezone (i.e. most of the Americas) — the same
+ * local-midnight idiom used throughout the codebase (e.g. trip-bundles.ts,
+ * storehouse-projectors.ts: `new Date(`${d}T00:00:00`)`).
+ */
+function localMidnight(ymd: string): Date {
+  return new Date(`${ymd}T00:00:00`)
+}
+
 const SUPPORTED_SYNC_SERVICES = new Set([
   'google',
   'github',
@@ -541,14 +553,14 @@ export async function syncGoogle(
             startAt: ev.start?.dateTime
               ? new Date(ev.start.dateTime)
               : ev.start?.date
-                ? new Date(ev.start.date)
+                ? localMidnight(ev.start.date)
                 : null,
             // All-day events carry end.date (EXCLUSIVE, per the Calendar API) —
             // captured so multi-day spans are derivable (calendar-residency.ts).
             endAt: ev.end?.dateTime
               ? new Date(ev.end.dateTime)
               : ev.end?.date
-                ? new Date(ev.end.date)
+                ? localMidnight(ev.end.date)
                 : null,
             allDay: !!ev.start?.date,
             location: ev.location,
@@ -565,12 +577,12 @@ export async function syncGoogle(
               startAt: ev.start?.dateTime
                 ? new Date(ev.start.dateTime)
                 : ev.start?.date
-                  ? new Date(ev.start.date)
+                  ? localMidnight(ev.start.date)
                   : null,
               endAt: ev.end?.dateTime
                 ? new Date(ev.end.dateTime)
                 : ev.end?.date
-                  ? new Date(ev.end.date)
+                  ? localMidnight(ev.end.date)
                   : null,
               allDay: !!ev.start?.date,
               location: ev.location,

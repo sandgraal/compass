@@ -270,7 +270,9 @@ const api = {
     getStatus: () => ipcRenderer.invoke('simplefin:get-status'),
     claimToken: (setupToken: string) => ipcRenderer.invoke('simplefin:claim-token', setupToken),
     listConnections: () => ipcRenderer.invoke('simplefin:list-connections'),
-    disconnect: (connectionId: string) => ipcRenderer.invoke('simplefin:disconnect', connectionId)
+    disconnect: (connectionId: string) => ipcRenderer.invoke('simplefin:disconnect', connectionId),
+    backfillHistory: (connectionId: string) =>
+      ipcRenderer.invoke('simplefin:backfill-history', connectionId)
   },
 
   // --- Vault (Sensitive Data) ---
@@ -298,7 +300,13 @@ const api = {
       ipcRenderer.invoke('life:update', id, updates),
     delete: (id: number) => ipcRenderer.invoke('life:delete', id),
     getSecrets: (id: number) => ipcRenderer.invoke('life:get-secrets', id),
-    exportCsv: () => ipcRenderer.invoke('life:export-csv')
+    exportCsv: () => ipcRenderer.invoke('life:export-csv'),
+    setLink: (input: {
+      lifeRecordId: number
+      targetKind: 'contact' | 'account'
+      targetId: number
+    }) => ipcRenderer.invoke('life:set-link', input),
+    removeLink: (linkId: number) => ipcRenderer.invoke('life:remove-link', linkId)
   },
 
   // --- Checklist ---

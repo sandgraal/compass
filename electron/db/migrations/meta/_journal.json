@@ -302,6 +302,20 @@
       "when": 1784139521626,
       "tag": "0042_location_points_occurred_at",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1784225921626,
+      "tag": "0043_simplefin_history_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1784312321626,
+      "tag": "0044_life_record_links",
+      "breakpoints": true
     }
   ]
 }

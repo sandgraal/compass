@@ -16,12 +16,15 @@ import {
   Globe,
   HeartPulse,
   IdCard,
+  Link2,
   Lock,
   Pencil,
   Plus,
   Scale,
   ShieldCheck,
-  Trash2
+  Trash2,
+  UserRound,
+  X
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -132,6 +135,15 @@ export default function LifeRecords(): JSX.Element {
   const [secretsById, setSecretsById] = useState<Record<number, Record<string, string>>>({})
   const [revealed, setRevealed] = useState<Set<string>>(new Set())
   const [copiedField, setCopiedField] = useState<string | null>(null)
+  // Inline link picker: which record is being linked + the draft selection.
+  // Targets (contacts/accounts) load lazily on the first "Link" click.
+  const [linkingId, setLinkingId] = useState<number | null>(null)
+  const [linkKind, setLinkKind] = useState<'contact' | 'account'>('contact')
+  const [linkTargetId, setLinkTargetId] = useState<number | ''>('')
+  const [linkTargets, setLinkTargets] = useState<{
+    contacts: Array<{ id: number; name: string }>
+    accounts: Array<{ id: number; name: string }>
+  } | null>(null)
   const { toast } = useToast()
   const confirm = useConfirm()
   const navigate = useNavigate()
@@ -240,6 +252,59 @@ export default function LifeRecords(): JSX.Element {
       toast('Failed to save the record.', 'error')
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function startLinking(record: LifeRecord): Promise<void> {
+    // Financial-ish categories most often link the account; the rest a person.
+    setLinkKind(
+      record.category === 'financial' || record.category === 'foreign-accounts'
+        ? 'account'
+        : 'contact'
+    )
+    setLinkTargetId('')
+    setLinkingId(record.id)
+    if (linkTargets || !isElectron()) return
+    try {
+      const [cs, accts] = await Promise.all([
+        window.api.contacts.list(),
+        window.api.finance.getAccounts()
+      ])
+      setLinkTargets({
+        contacts: cs.map((c) => ({ id: c.id, name: c.displayName })),
+        accounts: accts.map((a) => ({ id: a.id, name: a.name }))
+      })
+    } catch (err) {
+      console.error('[life-records] link targets failed', err)
+      toast('Could not load link targets.', 'error')
+      setLinkingId(null)
+    }
+  }
+
+  async function addLink(recordId: number): Promise<void> {
+    if (!isElectron() || linkTargetId === '') return
+    try {
+      await window.api.life.setLink({
+        lifeRecordId: recordId,
+        targetKind: linkKind,
+        targetId: linkTargetId
+      })
+      setLinkingId(null)
+      await load()
+    } catch (err) {
+      console.error('[life-records] set-link failed', err)
+      toast('Could not add the link.', 'error')
+    }
+  }
+
+  async function removeLink(linkId: number): Promise<void> {
+    if (!isElectron()) return
+    try {
+      await window.api.life.removeLink(linkId)
+      await load()
+    } catch (err) {
+      console.error('[life-records] remove-link failed', err)
+      toast('Could not remove the link.', 'error')
     }
   }
 
@@ -575,6 +640,89 @@ export default function LifeRecords(): JSX.Element {
                         {record.notes}
                       </p>
                     )}
+
+                    {/* Links to the contact / account this record documents */}
+                    <div className="mt-3 pt-2.5 border-t border-border flex items-center gap-1.5 flex-wrap">
+                      {record.links.map((l) => (
+                        <span
+                          key={l.id}
+                          className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-secondary text-foreground"
+                        >
+                          {l.targetKind === 'contact' ? (
+                            <UserRound size={10} className="text-primary" />
+                          ) : (
+                            <Banknote size={10} className="text-primary" />
+                          )}
+                          {l.label}
+                          <button
+                            type="button"
+                            onClick={() => void removeLink(l.id)}
+                            title={`Unlink ${l.label}`}
+                            aria-label={`Unlink ${l.label}`}
+                            className="text-muted-foreground hover:text-destructive transition-colors"
+                          >
+                            <X size={10} />
+                          </button>
+                        </span>
+                      ))}
+                      {linkingId === record.id ? (
+                        <span className="flex items-center gap-1.5 flex-wrap">
+                          <select
+                            value={linkKind}
+                            onChange={(e) => {
+                              setLinkKind(e.target.value as 'contact' | 'account')
+                              setLinkTargetId('')
+                            }}
+                            aria-label="Link kind"
+                            className="text-[11px] bg-secondary border border-border rounded px-1.5 py-0.5 text-foreground"
+                          >
+                            <option value="contact">Contact</option>
+                            <option value="account">Account</option>
+                          </select>
+                          <select
+                            value={linkTargetId}
+                            onChange={(e) =>
+                              setLinkTargetId(e.target.value === '' ? '' : Number(e.target.value))
+                            }
+                            aria-label="Link target"
+                            className="max-w-44 text-[11px] bg-secondary border border-border rounded px-1.5 py-0.5 text-foreground"
+                          >
+                            <option value="">{linkTargets ? 'Pick…' : 'Loading…'}</option>
+                            {(linkKind === 'contact'
+                              ? (linkTargets?.contacts ?? [])
+                              : (linkTargets?.accounts ?? [])
+                            ).map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => void addLink(record.id)}
+                            disabled={linkTargetId === ''}
+                            className="text-[11px] text-primary hover:underline disabled:opacity-50"
+                          >
+                            Add
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setLinkingId(null)}
+                            className="text-[11px] text-muted-foreground hover:text-foreground"
+                          >
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void startLinking(record)}
+                          className="flex items-center gap-1 text-[11px] text-primary hover:underline"
+                        >
+                          <Link2 size={10} /> Link
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )
               )}

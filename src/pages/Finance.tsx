@@ -2361,6 +2361,14 @@ function ExpatTaxTab(): JSX.Element {
                           </td>
                           <td className="text-right w-28">
                             {acc.maxBaseUsd == null ? 'no rate' : usd(acc.maxBaseUsd)}
+                            {acc.maxUsdSource === 'user' && (
+                              <span
+                                title="From the maxValueUsd you entered on the linked foreign-accounts life record — used because it exceeds the snapshot-derived max"
+                                className="ml-1.5 text-[10px] px-1 py-px rounded bg-primary/10 text-primary"
+                              >
+                                entered
+                              </span>
+                            )}
                           </td>
                         </tr>
                       ))}

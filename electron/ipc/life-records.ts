@@ -16,10 +16,10 @@
 
 import { randomUUID } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
-import { lifeRecords } from '../db/schema'
+import { contacts, financeAccounts, lifeRecordLinks, lifeRecords } from '../db/schema'
 import { getOrCreateKey, readEncryptedJson, writeEncryptedJson } from '../lib/crypto-vault'
 import { serializeCsv } from '../lib/csv'
 import {
@@ -47,6 +47,16 @@ export interface LifeRecordInput {
 }
 
 type LifeRecordRow = typeof lifeRecords.$inferSelect
+
+/** A resolved link on a life record — label denormalized for display. */
+export interface LifeRecordLink {
+  id: number
+  targetKind: 'contact' | 'account'
+  targetId: number
+  label: string
+}
+
+const LINK_KINDS = new Set(['contact', 'account'])
 
 type SecretsMap = Record<string, Record<string, string>>
 
@@ -303,6 +313,60 @@ export function buildLifeRecordsCsv(): string {
   )
 }
 
+/**
+ * All links, id → resolved link list. Labels are joined here (one query per
+ * target table, scoped to the target ids actually referenced — NOT the whole
+ * table, so this stays cheap on a large address book/ledger) so the renderer
+ * never needs a second lookup to show a chip.
+ */
+function loadLinksByRecord(): Map<number, LifeRecordLink[]> {
+  const db = getDb()
+  const links = db.select().from(lifeRecordLinks).all()
+  const out = new Map<number, LifeRecordLink[]>()
+  if (links.length === 0) return out
+  const contactIds = [
+    ...new Set(links.filter((l) => l.targetKind === 'contact').map((l) => l.targetId))
+  ]
+  const accountIds = [
+    ...new Set(links.filter((l) => l.targetKind === 'account').map((l) => l.targetId))
+  ]
+  const contactNames = new Map(
+    contactIds.length === 0
+      ? []
+      : db
+          .select({ id: contacts.id, name: contacts.displayName })
+          .from(contacts)
+          .where(inArray(contacts.id, contactIds))
+          .all()
+          .map((c) => [c.id, c.name])
+  )
+  const accountNames = new Map(
+    accountIds.length === 0
+      ? []
+      : db
+          .select({ id: financeAccounts.id, name: financeAccounts.name })
+          .from(financeAccounts)
+          .where(inArray(financeAccounts.id, accountIds))
+          .all()
+          .map((a) => [a.id, a.name])
+  )
+  for (const l of links) {
+    const label =
+      l.targetKind === 'contact'
+        ? (contactNames.get(l.targetId) ?? '(deleted contact)')
+        : (accountNames.get(l.targetId) ?? '(deleted account)')
+    const list = out.get(l.lifeRecordId) ?? []
+    list.push({
+      id: l.id,
+      targetKind: l.targetKind as LifeRecordLink['targetKind'],
+      targetId: l.targetId,
+      label
+    })
+    out.set(l.lifeRecordId, list)
+  }
+  return out
+}
+
 export function registerLifeRecordsHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('life:categories', () => LIFE_CATEGORIES)
 
@@ -312,9 +376,62 @@ export function registerLifeRecordsHandlers(ipcMain: IpcMain): void {
       opts?.category && isLifeCategory(opts.category)
         ? db.select().from(lifeRecords).where(eq(lifeRecords.category, opts.category)).all()
         : db.select().from(lifeRecords).all()
+    const linksByRecord = loadLinksByRecord()
     return rows
-      .map(rowToRecord)
+      .map((r) => ({ ...rowToRecord(r), links: linksByRecord.get(r.id) ?? [] }))
       .sort((a, b) => a.category.localeCompare(b.category) || a.title.localeCompare(b.title))
+  })
+
+  // Link a life record to the contact / finance account it documents (e.g.
+  // a foreign-accounts record → the is_foreign bank account — the FBAR rollup
+  // trusts a user-entered maxValueUsd through this link).
+  ipcMain.handle(
+    'life:set-link',
+    (_event, input: { lifeRecordId?: unknown; targetKind?: unknown; targetId?: unknown }) => {
+      const { lifeRecordId, targetKind, targetId } = input ?? {}
+      if (!Number.isInteger(lifeRecordId) || !Number.isInteger(targetId)) {
+        throw new Error('life:set-link requires integer ids')
+      }
+      if (typeof targetKind !== 'string' || !LINK_KINDS.has(targetKind)) {
+        throw new Error('life:set-link: targetKind must be contact | account')
+      }
+      const db = getDb()
+      const record = db
+        .select({ id: lifeRecords.id })
+        .from(lifeRecords)
+        .where(eq(lifeRecords.id, lifeRecordId as number))
+        .all()[0]
+      if (!record) throw new Error('life:set-link: record not found')
+      const target =
+        targetKind === 'contact'
+          ? db
+              .select({ id: contacts.id })
+              .from(contacts)
+              .where(eq(contacts.id, targetId as number))
+              .all()[0]
+          : db
+              .select({ id: financeAccounts.id })
+              .from(financeAccounts)
+              .where(eq(financeAccounts.id, targetId as number))
+              .all()[0]
+      if (!target) throw new Error(`life:set-link: ${targetKind} not found`)
+      db.insert(lifeRecordLinks)
+        .values({
+          lifeRecordId: lifeRecordId as number,
+          targetKind,
+          targetId: targetId as number,
+          createdAt: new Date()
+        })
+        .onConflictDoNothing()
+        .run()
+      return { success: true }
+    }
+  )
+
+  ipcMain.handle('life:remove-link', (_event, linkId: number) => {
+    if (!Number.isInteger(linkId)) throw new Error('life:remove-link requires an integer id')
+    getDb().delete(lifeRecordLinks).where(eq(lifeRecordLinks.id, linkId)).run()
+    return { success: true }
   })
 
   ipcMain.handle('life:create', (_event, input: LifeRecordInput) => {
@@ -360,6 +477,7 @@ export function registerLifeRecordsHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('life:delete', (_event, id: number) => {
     if (!Number.isInteger(id)) throw new Error('life:delete requires an integer id')
     const db = getDb()
+    db.delete(lifeRecordLinks).where(eq(lifeRecordLinks.lifeRecordId, id)).run()
     db.delete(lifeRecords).where(eq(lifeRecords.id, id)).run()
     deleteSecretsFor(id)
     afterDomainWrite()
