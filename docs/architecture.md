@@ -68,7 +68,7 @@ CSP enforced in production builds (no eval, no remote scripts, allowlist for OAu
 | `checklist_items` | Daily/weekly/monthly tasks. Source = manual / github / calendar / gmail. |
 | `checklist_templates` | User-edited markdown templates per list type. |
 | `calendar_events` | Cached calendar events from any source. |
-| `github_items` | Issues + PRs + project items. |
+| `github_items` | Assigned issues + authored PRs + commits (`type: 'issue' \| 'pr' \| 'commit' \| 'task'`). Commits are captured two ways — the events feed (`/users/{login}/events` PushEvents) and a deterministic per-repo supplement (`/repos/{owner}/{repo}/commits`, top 10 recently-pushed repos, 90-day window) — both upsert on `externalId=sha` so they stay idempotent together; see `syncGitHub` in `electron/ipc/sync.ts`. |
 | `linear_issues` | Active Linear issues assigned to the user (identifier, state, priority, team). Synced via `syncLinear`; surfaced alongside GitHub on the dashboard. (Phase 7 Track B) |
 | `gmail_actions` | Action items extracted from Gmail. |
 | `drive_files` | Google Drive file index. |

@@ -87,6 +87,12 @@ type SyncResultInternal = SyncResult & {
   githubSuggestionInputs?: GitHubInputItem[]
 }
 
+// Bounds for the deterministic per-repo GitHub commit pull (syncGitHub) — see
+// its call site for the rationale (the events feed alone is lossy).
+const GITHUB_COMMIT_REPO_LIMIT = 10
+const GITHUB_COMMIT_PER_REPO_LIMIT = 30
+const GITHUB_COMMIT_LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000 // 90 days
+
 /**
  * Parse a Calendar API date-only string ('YYYY-MM-DD', used for all-day event
  * start/end) as LOCAL midnight, not UTC midnight. `new Date('YYYY-MM-DD')`
@@ -950,6 +956,9 @@ export async function syncGitHub(
       }
 
       // Recent commits from the events feed (PushEvents carry the commit list).
+      // Best-effort and lossy on its own — GitHub caps/delays this feed and it
+      // silently drops pushes it doesn't surface — so it's supplemented below
+      // by a deterministic per-repo pull.
       try {
         const evResp = await fetch(
           `https://api.github.com/users/${encodeURIComponent(login)}/events?per_page=100`,
@@ -983,7 +992,63 @@ export async function syncGitHub(
           }
         }
       } catch {
-        /* best-effort */
+        /* best-effort — the deterministic pull below still runs */
+      }
+
+      // Deterministic supplement: walk the user's recently-pushed repos and
+      // pull THEIR commit history directly (/repos/{owner}/{repo}/commits),
+      // rather than relying solely on the events feed above (capped at ~300
+      // events / 90 days, eventually-consistent, and silently drops pushes
+      // GitHub doesn't surface there). Bounded to a handful of repos and a
+      // recent window so a large account can't turn one sync into hundreds
+      // of requests; `upsertGh`'s externalId=sha conflict target makes this
+      // fully idempotent alongside the events-feed pull above.
+      try {
+        const reposResp = await fetch(
+          `https://api.github.com/user/repos?sort=pushed&per_page=${GITHUB_COMMIT_REPO_LIMIT}`,
+          {
+            headers
+          }
+        )
+        if (reposResp.ok) {
+          const repos = (await reposResp.json()) as Array<{ full_name?: string }>
+          const since = new Date(Date.now() - GITHUB_COMMIT_LOOKBACK_MS).toISOString()
+          for (const r of repos.slice(0, GITHUB_COMMIT_REPO_LIMIT)) {
+            const fullName = r.full_name
+            if (!fullName) continue
+            try {
+              const commitsResp = await fetch(
+                `https://api.github.com/repos/${fullName}/commits?author=${encodeURIComponent(login)}&since=${since}&per_page=${GITHUB_COMMIT_PER_REPO_LIMIT}`,
+                { headers }
+              )
+              if (!commitsResp.ok) continue // private-fork 409s, empty-repo 409s, etc. — skip, not fatal
+              const commits = (await commitsResp.json()) as Array<{
+                sha?: string
+                commit?: { message?: string; author?: { date?: string } }
+                html_url?: string
+              }>
+              for (const c of commits) {
+                if (!c.sha) continue
+                const message = c.commit?.message ?? ''
+                upsertGh({
+                  type: 'commit',
+                  repo: fullName,
+                  externalId: c.sha,
+                  title: message.split('\n')[0].slice(0, 200) || '(no message)',
+                  url: c.html_url ?? `https://github.com/${fullName}/commit/${c.sha}`,
+                  state: 'committed',
+                  body: message || null,
+                  author: login,
+                  updatedAt: c.commit?.author?.date ?? null
+                })
+              }
+            } catch {
+              /* one repo's commits failing must not abort the rest */
+            }
+          }
+        }
+      } catch {
+        /* best-effort — the events-feed pull above still covers recent pushes */
       }
     }
 
