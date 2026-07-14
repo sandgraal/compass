@@ -31,8 +31,13 @@ NAME="${REPO#*/}"
 echo "Watching ${REPO}#${PR} (grace=${GRACE_SECONDS}s, max-wait=${MAX_WAIT}s)"
 
 to_epoch() {
-  # Portable ISO-8601 -> epoch (GNU date vs BSD/macOS date)
-  date -d "$1" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s
+  # Portable ISO-8601 (UTC, trailing Z) -> epoch. GNU `date -d` is
+  # timezone-aware and handles the `Z` correctly on its own. BSD/macOS
+  # `date -j -f` does NOT infer UTC from a literal `Z` in the format string —
+  # without `-u` it silently parses the fields as local time, corrupting the
+  # result by the local UTC offset (caught live: produced a review timestamp
+  # in the future, which read as a negative "reviewed Ns ago").
+  date -d "$1" +%s 2>/dev/null || date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s
 }
 
 start=$(date +%s)
@@ -56,7 +61,25 @@ while true; do
   fi
 
   # 1. CI checks: any failure is an immediate NOT READY; any pending, keep waiting.
-  checks_json="$(gh pr checks "$PR" --json name,state,bucket 2>/dev/null || echo '[]')"
+  #    A `gh` failure (auth/network) is NOT the same as "no checks configured" —
+  #    conflating them by falling back to `[]` would let a fetch error look
+  #    identical to "all green," which is exactly the false-READY this script
+  #    exists to prevent. Only a genuine "no checks reported" response counts
+  #    as zero checks; anything else is retried, never assumed green.
+  checks_exit=0
+  checks_output="$(gh pr checks "$PR" --json name,state,bucket 2>&1)" || checks_exit=$?
+  if [ "$checks_exit" -ne 0 ]; then
+    if echo "$checks_output" | grep -qi "no checks reported"; then
+      checks_json='[]'
+    else
+      echo "[${elapsed}s] Couldn't fetch check status (gh exit ${checks_exit}): ${checks_output}"
+      echo "[${elapsed}s] Treating as unknown — retrying, not assuming green."
+      sleep "$POLL_INTERVAL"
+      continue
+    fi
+  else
+    checks_json="$checks_output"
+  fi
   failing="$(echo "$checks_json" | jq '[.[] | select(.bucket=="fail")] | length')"
   pending="$(echo "$checks_json" | jq '[.[] | select(.bucket=="pending")] | length')"
 
@@ -92,21 +115,41 @@ while true; do
     continue
   fi
 
-  # 4. Any unresolved review threads left?
-  unresolved_json="$(gh api graphql -f query='
-    query($owner:String!,$repo:String!,$pr:Int!) {
+  # 4. Any unresolved review threads left? `--paginate` walks every page via
+  #    $endCursor/pageInfo (verified live against a real >100-threads-forcing
+  #    page size) so a PR with more than 100 threads can't hide an unresolved
+  #    one past the first page. A fetch failure is retried, never treated as
+  #    "zero unresolved" — same fail-safe principle as the checks fetch above.
+  threads_exit=0
+  unresolved_paths="$(gh api graphql --paginate -f query='
+    query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String) {
       repository(owner:$owner,name:$repo){
         pullRequest(number:$pr){
-          reviewThreads(first:100){ nodes{ isResolved path } }
+          reviewThreads(first:100, after:$endCursor){
+            pageInfo { hasNextPage endCursor }
+            nodes { isResolved path }
+          }
         }
       }
     }' -F owner="$OWNER" -F repo="$NAME" -F pr="$PR" \
-    --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==false)]')"
-  unresolved_count="$(echo "$unresolved_json" | jq 'length')"
+    --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==false) | .path' \
+    2>&1)" || threads_exit=$?
+
+  if [ "$threads_exit" -ne 0 ]; then
+    echo "[${elapsed}s] Couldn't fetch review threads (gh exit ${threads_exit}): ${unresolved_paths}"
+    echo "[${elapsed}s] Treating as unknown — retrying, not assuming clean."
+    sleep "$POLL_INTERVAL"
+    continue
+  fi
+
+  unresolved_count=0
+  if [ -n "$unresolved_paths" ]; then
+    unresolved_count="$(printf '%s\n' "$unresolved_paths" | grep -c . || true)"
+  fi
 
   if [ "$unresolved_count" -gt 0 ]; then
     echo "NOT READY — ${unresolved_count} unresolved review thread(s):"
-    echo "$unresolved_json" | jq -r '.[] | "  - " + .path'
+    printf '%s\n' "$unresolved_paths" | sed 's/^/  - /'
     exit 1
   fi
 
