@@ -29,6 +29,14 @@
  * sync (debt balances stored positive = owed), but `name` / `type` /
  * `assetClass` / `isDebt` are set only on first insert so a user's later
  * re-classification in the Accounts UI is never clobbered.
+ *
+ * Historical backfill (`backfillSimplefinHistory`, below `syncSimplefin`) is a
+ * separate, user-triggered, one-time action that walks further back than the
+ * recurring sync ever does. It shares the account-upsert/normalize/categorize/
+ * insert logic via `ingestSimplefinResponse` but owns its own date-window walk
+ * and its own persisted progress (`historyOldestDate` / `historyBackfillStatus`
+ * on the connection row) — it never touches `lastSyncedAt`, which is reserved
+ * for the recurring sync's first-vs-incremental window choice.
  */
 
 import { and, eq, isNull } from 'drizzle-orm'
@@ -49,7 +57,13 @@ import { tagGeoAndPurpose } from '../finance-geo'
 import { tagTax } from '../finance-tax'
 import { classifySimplefinAccount } from './classify'
 import { type SimplefinAccountsResponse, fetchAccounts } from './client'
-import { SIMPLEFIN_INCREMENTAL_LOOKBACK_DAYS, SIMPLEFIN_LOOKBACK_DAYS } from './config'
+import {
+  SIMPLEFIN_BACKFILL_MAX_WINDOWS,
+  SIMPLEFIN_BACKFILL_REQUEST_DELAY_MS,
+  SIMPLEFIN_BACKFILL_WINDOW_DAYS,
+  SIMPLEFIN_INCREMENTAL_LOOKBACK_DAYS,
+  SIMPLEFIN_LOOKBACK_DAYS
+} from './config'
 import { findAccountMatch } from './match'
 import { normalizeSimplefinAccount } from './normalize'
 import { getAccessUrl } from './vault'
@@ -77,6 +91,218 @@ type FetchAccountsFn = (opts: {
   endDate: number
   pending?: boolean
 }) => Promise<SimplefinAccountsResponse>
+
+type CategorizationRuleRow = {
+  pattern: string
+  category: string
+  subcategory: string | null
+}
+
+/**
+ * Result of ingesting one `/accounts` response (one date window) into the DB.
+ * Shared by `syncSimplefin` (one window) and `backfillSimplefinHistory` (many
+ * windows, one call per window).
+ */
+type IngestResult = {
+  added: number
+  duplicates: number
+  accountsUpserted: number
+  accountsLinked: number
+  errors: Array<{ transactionId: string; message: string }>
+  /** Total transactions present in the raw response, pre-dedup — used by the
+   *  backfill loop to detect "this window had nothing" vs. "everything in it
+   *  was already a duplicate". */
+  txnCountInWindow: number
+}
+
+/**
+ * Upsert accounts, normalize + categorize + tag every transaction, and insert
+ * with `ON CONFLICT DO NOTHING`. Pure ingestion: does NOT write `sync_events`,
+ * does NOT touch `simplefin_connections` / `integrations`, and does NOT run
+ * the ATM-split / currency-reconcile passes — callers own those so a
+ * multi-window caller (the backfill loop) can batch them once instead of per
+ * window.
+ */
+function ingestSimplefinResponse(
+  db: ReturnType<typeof getDb>,
+  connRowId: number,
+  response: SimplefinAccountsResponse,
+  rules: CategorizationRuleRow[]
+): IngestResult {
+  // Upsert accounts + build the account-name lookup. Balance is refreshed
+  // every call; name/type/assetClass are classified on first insert only, so
+  // a user's later re-classification in the Accounts UI is never clobbered.
+  // For DEBT accounts the stored balance is the positive amount owed (schema
+  // convention; see finance-snapshot.ts), so we store |balance|.
+  const nameMap = new Map<string, string>()
+  // simplefinAccountId → finance_accounts.id, so the transactions below can be
+  // linked to their account (per-account views + account-scoped dedup).
+  const idMap = new Map<string, number>()
+  let accountsUpserted = 0
+  let accountsLinked = 0
+  for (const acct of response.accounts) {
+    const orgName = acct.org?.name ?? ''
+    const balanceNum = Number.parseFloat(acct.balance)
+    const balance = Number.isFinite(balanceNum) ? balanceNum : 0
+    const displayName =
+      (acct.name ?? '').trim() || `${orgName || 'SimpleFIN'} ·${acct.id.slice(-4)}`
+    const existing = db
+      .select({
+        id: financeAccounts.id,
+        name: financeAccounts.name,
+        isDebt: financeAccounts.isDebt
+      })
+      .from(financeAccounts)
+      .where(eq(financeAccounts.simplefinAccountId, acct.id))
+      .get()
+    if (existing) {
+      // Respect the account's current debt classification (which the user may
+      // have changed) when deciding the balance sign.
+      const storedBalance = existing.isDebt ? Math.abs(balance) : balance
+      db.update(financeAccounts)
+        .set({
+          balance: storedBalance,
+          institution: orgName,
+          simplefinConnectionId: connRowId,
+          updatedAt: new Date()
+        })
+        .where(eq(financeAccounts.id, existing.id))
+        .run()
+      nameMap.set(acct.id, existing.name)
+      idMap.set(acct.id, existing.id)
+      continue
+    }
+    // No prior SimpleFIN link. Before creating a (likely duplicate) row, try to
+    // ADOPT an existing UNLINKED account that matches by institution + last-4.
+    const candidates = db
+      .select({
+        id: financeAccounts.id,
+        name: financeAccounts.name,
+        institution: financeAccounts.institution,
+        mask: financeAccounts.mask
+      })
+      .from(financeAccounts)
+      .where(
+        and(
+          isNull(financeAccounts.simplefinAccountId),
+          isNull(financeAccounts.simplefinConnectionId),
+          isNull(financeAccounts.plaidItemId)
+        )
+      )
+      .all()
+    const matchId = findAccountMatch({ name: displayName, orgName }, candidates)
+    if (matchId !== null) {
+      // Adopt it: attach the SimpleFIN linkage + refresh balance, but KEEP the
+      // user's existing name / type / assetClass / isDebt.
+      const cur = db
+        .select({ name: financeAccounts.name, isDebt: financeAccounts.isDebt })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, matchId))
+        .get()
+      db.update(financeAccounts)
+        .set({
+          simplefinAccountId: acct.id,
+          simplefinConnectionId: connRowId,
+          balance: cur?.isDebt ? Math.abs(balance) : balance,
+          updatedAt: new Date()
+        })
+        .where(eq(financeAccounts.id, matchId))
+        .run()
+      accountsLinked++
+      nameMap.set(acct.id, cur?.name ?? displayName)
+      idMap.set(acct.id, matchId)
+      continue
+    }
+    // No confident match — create a new account.
+    const cls = classifySimplefinAccount(displayName, orgName)
+    const res = db
+      .insert(financeAccounts)
+      .values({
+        name: displayName,
+        type: cls.type,
+        isDebt: cls.isDebt,
+        institution: orgName,
+        assetClass: cls.assetClass,
+        balance: cls.isDebt ? Math.abs(balance) : balance,
+        simplefinConnectionId: connRowId,
+        simplefinAccountId: acct.id
+      })
+      .run()
+    accountsUpserted++
+    nameMap.set(acct.id, displayName)
+    idMap.set(acct.id, Number(res.lastInsertRowid))
+  }
+  const accountNameFor = (id: string): string => nameMap.get(id) ?? `SimpleFIN ·${id.slice(-4)}`
+
+  // Normalize every account's transactions to RawTxn, remembering which
+  // finance_accounts.id each one belongs to (parallel to allRaw, preserved
+  // through the order-stable categorize/tag pipeline below).
+  const allRaw: RawTxn[] = []
+  const rawAccountIds: Array<number | null> = []
+  const allErrors: Array<{ transactionId: string; message: string }> = []
+  for (const acct of response.accounts) {
+    const accountId = idMap.get(acct.id) ?? null
+    const { ok, errors } = normalizeSimplefinAccount(acct, accountNameFor)
+    for (const r of ok) {
+      allRaw.push(r)
+      rawAccountIds.push(accountId)
+    }
+    allErrors.push(...errors)
+  }
+
+  // Categorize + geo/tax tag. `rules` is read once per sync/backfill call by
+  // the caller, not once per window.
+  const tagged = tagTax(tagGeoAndPurpose(categorize(allRaw, rules)))
+
+  // Insert. The hash UNIQUE constraint is the entire idempotency guard. The
+  // loop pairs tagged[i] with rawAccountIds[i] by index, which assumes the
+  // categorize/geo/tax pipeline preserves order AND length. Assert it so a
+  // future filtering/reordering change fails fast here instead of silently
+  // mis-linking transactions to the wrong account.
+  if (tagged.length !== rawAccountIds.length) {
+    throw new Error(
+      `SimpleFIN sync: tag pipeline changed row count (${tagged.length} tagged vs ${rawAccountIds.length} account ids) — account linkage would be wrong`
+    )
+  }
+  let added = 0
+  let duplicates = 0
+  for (let i = 0; i < tagged.length; i++) {
+    const t = tagged[i]
+    const res = db
+      .insert(financeTransactions)
+      .values({
+        hash: t.hash,
+        date: t.date,
+        amount: t.amount,
+        description: t.description,
+        accountId: rawAccountIds[i],
+        category: t.category ?? 'Uncategorized',
+        subcategory: t.subcategory,
+        notes: t.notes,
+        geo: t.geo ?? 'US',
+        purpose: t.purpose ?? null,
+        taxTag: t.taxTag ?? 'tax:none',
+        taxTagSource: 'auto',
+        taxYear: t.taxYear ?? null,
+        normalizedMerchant: normalizeMerchant(t.description),
+        sourceFile: t.sourceFile,
+        ingestedAt: new Date()
+      })
+      .onConflictDoNothing()
+      .run()
+    if (res.changes === 1) added++
+    else duplicates++
+  }
+
+  return {
+    added,
+    duplicates,
+    accountsUpserted,
+    accountsLinked,
+    errors: allErrors,
+    txnCountInWindow: allRaw.length
+  }
+}
 
 /**
  * Sync one SimpleFIN connection end-to-end. Upserts accounts, ingests the
@@ -158,183 +384,14 @@ export async function syncSimplefin(
     return { ...base, errorMessage: message }
   }
 
-  // 5. Upsert accounts + build the account-name lookup. Balance is refreshed
-  //    every sync; name/type/assetClass are classified on first insert only, so
-  //    a user's later re-classification in the Accounts UI is never clobbered.
-  //    For DEBT accounts the stored balance is the positive amount owed (schema
-  //    convention; see finance-snapshot.ts), so we store |balance|.
-  const nameMap = new Map<string, string>()
-  // simplefinAccountId → finance_accounts.id, so the transactions below can be
-  // linked to their account (per-account views + account-scoped dedup).
-  const idMap = new Map<string, number>()
-  let accountsUpserted = 0
-  let accountsLinked = 0
-  for (const acct of response.accounts) {
-    const orgName = acct.org?.name ?? ''
-    const balanceNum = Number.parseFloat(acct.balance)
-    const balance = Number.isFinite(balanceNum) ? balanceNum : 0
-    const displayName =
-      (acct.name ?? '').trim() || `${orgName || 'SimpleFIN'} ·${acct.id.slice(-4)}`
-    const existing = db
-      .select({
-        id: financeAccounts.id,
-        name: financeAccounts.name,
-        isDebt: financeAccounts.isDebt
-      })
-      .from(financeAccounts)
-      .where(eq(financeAccounts.simplefinAccountId, acct.id))
-      .get()
-    if (existing) {
-      // Respect the account's current debt classification (which the user may
-      // have changed) when deciding the balance sign.
-      const storedBalance = existing.isDebt ? Math.abs(balance) : balance
-      db.update(financeAccounts)
-        .set({
-          balance: storedBalance,
-          institution: orgName,
-          simplefinConnectionId: conn.id,
-          updatedAt: new Date()
-        })
-        .where(eq(financeAccounts.id, existing.id))
-        .run()
-      nameMap.set(acct.id, existing.name)
-      idMap.set(acct.id, existing.id)
-      continue
-    }
-    // No prior SimpleFIN link. Before creating a (likely duplicate) row, try to
-    // ADOPT an existing UNLINKED account that matches by institution + last-4.
-    const candidates = db
-      .select({
-        id: financeAccounts.id,
-        name: financeAccounts.name,
-        institution: financeAccounts.institution,
-        mask: financeAccounts.mask
-      })
-      .from(financeAccounts)
-      .where(
-        and(
-          isNull(financeAccounts.simplefinAccountId),
-          isNull(financeAccounts.simplefinConnectionId),
-          isNull(financeAccounts.plaidItemId)
-        )
-      )
-      .all()
-    const matchId = findAccountMatch({ name: displayName, orgName }, candidates)
-    if (matchId !== null) {
-      // Adopt it: attach the SimpleFIN linkage + refresh balance, but KEEP the
-      // user's existing name / type / assetClass / isDebt.
-      const cur = db
-        .select({ name: financeAccounts.name, isDebt: financeAccounts.isDebt })
-        .from(financeAccounts)
-        .where(eq(financeAccounts.id, matchId))
-        .get()
-      db.update(financeAccounts)
-        .set({
-          simplefinAccountId: acct.id,
-          simplefinConnectionId: conn.id,
-          balance: cur?.isDebt ? Math.abs(balance) : balance,
-          updatedAt: new Date()
-        })
-        .where(eq(financeAccounts.id, matchId))
-        .run()
-      accountsLinked++
-      nameMap.set(acct.id, cur?.name ?? displayName)
-      idMap.set(acct.id, matchId)
-      continue
-    }
-    // No confident match — create a new account.
-    const cls = classifySimplefinAccount(displayName, orgName)
-    const res = db
-      .insert(financeAccounts)
-      .values({
-        name: displayName,
-        type: cls.type,
-        isDebt: cls.isDebt,
-        institution: orgName,
-        assetClass: cls.assetClass,
-        balance: cls.isDebt ? Math.abs(balance) : balance,
-        simplefinConnectionId: conn.id,
-        simplefinAccountId: acct.id
-      })
-      .run()
-    accountsUpserted++
-    nameMap.set(acct.id, displayName)
-    idMap.set(acct.id, Number(res.lastInsertRowid))
-  }
-  const accountNameFor = (id: string): string => nameMap.get(id) ?? `SimpleFIN ·${id.slice(-4)}`
+  // 5-8. Upsert accounts, normalize, categorize/tag, insert (shared with the
+  //      backfill loop below).
+  const rules = readCategorizationRules(db)
+  const ingest = ingestSimplefinResponse(db, conn.id, response, rules)
 
-  // 6. Normalize every account's transactions to RawTxn, remembering which
-  //    finance_accounts.id each one belongs to (parallel to allRaw, preserved
-  //    through the order-stable categorize/tag pipeline below).
-  const allRaw: RawTxn[] = []
-  const rawAccountIds: Array<number | null> = []
-  const allErrors: Array<{ transactionId: string; message: string }> = []
-  for (const acct of response.accounts) {
-    const accountId = idMap.get(acct.id) ?? null
-    const { ok, errors } = normalizeSimplefinAccount(acct, accountNameFor)
-    for (const r of ok) {
-      allRaw.push(r)
-      rawAccountIds.push(accountId)
-    }
-    allErrors.push(...errors)
-  }
-
-  // 7. Categorize + geo/tax tag. Rules read once for the whole sync.
-  const rules = db
-    .select({
-      pattern: categorizationRules.pattern,
-      category: categorizationRules.category,
-      subcategory: categorizationRules.subcategory
-    })
-    .from(categorizationRules)
-    .orderBy(categorizationRules.priority)
-    .all()
-  const tagged = tagTax(tagGeoAndPurpose(categorize(allRaw, rules)))
-
-  // 8. Insert. The hash UNIQUE constraint is the entire idempotency guard.
-  //    The loop pairs tagged[i] with rawAccountIds[i] by index, which assumes
-  //    the categorize/geo/tax pipeline preserves order AND length. Assert it so
-  //    a future filtering/reordering change fails fast here instead of silently
-  //    mis-linking transactions to the wrong account.
-  if (tagged.length !== rawAccountIds.length) {
-    throw new Error(
-      `SimpleFIN sync: tag pipeline changed row count (${tagged.length} tagged vs ${rawAccountIds.length} account ids) — account linkage would be wrong`
-    )
-  }
-  let added = 0
-  let duplicates = 0
-  for (let i = 0; i < tagged.length; i++) {
-    const t = tagged[i]
-    const res = db
-      .insert(financeTransactions)
-      .values({
-        hash: t.hash,
-        date: t.date,
-        amount: t.amount,
-        description: t.description,
-        accountId: rawAccountIds[i],
-        category: t.category ?? 'Uncategorized',
-        subcategory: t.subcategory,
-        notes: t.notes,
-        geo: t.geo ?? 'US',
-        purpose: t.purpose ?? null,
-        taxTag: t.taxTag ?? 'tax:none',
-        taxTagSource: 'auto',
-        taxYear: t.taxYear ?? null,
-        normalizedMerchant: normalizeMerchant(t.description),
-        sourceFile: t.sourceFile,
-        ingestedAt: new Date()
-      })
-      .onConflictDoNothing()
-      .run()
-    if (res.changes === 1) added++
-    else duplicates++
-  }
-
-  // 9. CR ATM split + currency reconcile (only if we added rows), mirroring
-  //    the Plaid + CSV paths. Reconcile runs after the split so the split
-  //    sibling rows inherit their account's currency too.
-  if (added > 0) {
+  // 9. ATM split + currency reconcile (only if we added rows), mirroring the
+  //    Plaid + CSV paths.
+  if (ingest.added > 0) {
     applyAtmSplit(db)
     reconcileTransactionCurrency(db)
   }
@@ -366,16 +423,16 @@ export async function syncSimplefin(
   // alarming); a hard failure's messages are already on the connection row.
   const eventLog = [
     ...(hardFailure ? messages : messages.map((m) => `warning: ${m}`)),
-    ...allErrors.map((e) => `${e.transactionId}: ${e.message}`)
+    ...ingest.errors.map((e) => `${e.transactionId}: ${e.message}`)
   ]
-  writeSyncEvent(integrationId, added, eventLog.length > 0 ? JSON.stringify(eventLog) : null)
+  writeSyncEvent(integrationId, ingest.added, eventLog.length > 0 ? JSON.stringify(eventLog) : null)
 
   return {
     connectionId,
-    added,
-    duplicates,
-    accountsUpserted,
-    accountsLinked,
+    added: ingest.added,
+    duplicates: ingest.duplicates,
+    accountsUpserted: ingest.accountsUpserted,
+    accountsLinked: ingest.accountsLinked,
     errorMessage: connError ?? undefined
   }
 }
@@ -400,6 +457,216 @@ export async function syncAllSimplefin(opts?: {
     results.push(await syncSimplefin(c.connectionId, opts))
   }
   return results
+}
+
+/**
+ * Outcome of a historical backfill run. Returned (not thrown) for non-fatal
+ * conditions, matching `SimplefinSyncResult`'s convention.
+ */
+export type SimplefinBackfillResult = {
+  connectionId: string
+  windowsFetched: number
+  added: number
+  duplicates: number
+  /** Oldest ISO date ('YYYY-MM-DD') successfully covered, across this run AND
+   *  any prior run (since a run resumes from the prior `historyOldestDate`). */
+  oldestDateReached: string | null
+  /** 'complete' = two consecutive windows added nothing new, assume history
+   *  is exhausted (non-fatal warnings in that window don't prevent this).
+   *  'partial' = hit the safety cap; a later run resumes further back.
+   *  'error' = a fetch failure stopped the loop before either of the above. */
+  status: 'complete' | 'partial' | 'error'
+  errorMessage?: string
+}
+
+function toIsoDate(epochSeconds: number): string {
+  return new Date(epochSeconds * 1000).toISOString().slice(0, 10)
+}
+
+function fromIsoDate(iso: string): number {
+  return Math.floor(new Date(`${iso}T00:00:00Z`).getTime() / 1000)
+}
+
+function readCategorizationRules(db: ReturnType<typeof getDb>): CategorizationRuleRow[] {
+  return db
+    .select({
+      pattern: categorizationRules.pattern,
+      category: categorizationRules.category,
+      subcategory: categorizationRules.subcategory
+    })
+    .from(categorizationRules)
+    .orderBy(categorizationRules.priority)
+    .all()
+}
+
+/**
+ * Walk backward from `historyOldestDate` (or now, on a first run) in
+ * `SIMPLEFIN_BACKFILL_WINDOW_DAYS`-wide windows, ingesting each one, until
+ * either two consecutive windows come back empty (assume the institution's
+ * history is exhausted), a fetch fails, or `SIMPLEFIN_BACKFILL_MAX_WINDOWS` is
+ * hit (safety cap — a later call resumes from here). A prior 'complete' run
+ * short-circuits with zero network calls: there's nothing further back to get.
+ *
+ * `fetchAccountsFn` / `now` / `sleepFn` are exposed for tests; production
+ * callers omit them (real vault fetcher, real clock, real `setTimeout`).
+ */
+export async function backfillSimplefinHistory(
+  connectionId: string,
+  opts?: { fetchAccountsFn?: FetchAccountsFn; now?: Date; sleepFn?: (ms: number) => Promise<void> }
+): Promise<SimplefinBackfillResult> {
+  const db = getDb()
+  const base = { connectionId, windowsFetched: 0, added: 0, duplicates: 0 }
+
+  const conn = db
+    .select({
+      id: simplefinConnections.id,
+      historyOldestDate: simplefinConnections.historyOldestDate,
+      historyBackfillStatus: simplefinConnections.historyBackfillStatus
+    })
+    .from(simplefinConnections)
+    .where(eq(simplefinConnections.connectionId, connectionId))
+    .get()
+  if (!conn) {
+    return {
+      ...base,
+      oldestDateReached: null,
+      status: 'error',
+      errorMessage: `No simplefin_connections row for connectionId=${connectionId}`
+    }
+  }
+  if (conn.historyBackfillStatus === 'complete') {
+    // Already walked back to the institution's actual history start (or a
+    // hard stop) on a prior run — nothing further back to fetch.
+    return {
+      ...base,
+      oldestDateReached: conn.historyOldestDate,
+      status: 'complete'
+    }
+  }
+
+  let fetchAccountsFn: FetchAccountsFn
+  if (opts?.fetchAccountsFn) {
+    fetchAccountsFn = opts.fetchAccountsFn
+  } else {
+    const accessUrl = getAccessUrl(connectionId)
+    if (!accessUrl) {
+      return {
+        ...base,
+        oldestDateReached: conn.historyOldestDate,
+        status: 'error',
+        errorMessage:
+          'No SimpleFIN access URL in vault — re-claim a Setup Token from the Integrations page.'
+      }
+    }
+    fetchAccountsFn = (o) => fetchAccounts(accessUrl, o)
+  }
+  const sleepFn = opts?.sleepFn ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)))
+
+  const integrationsRow = db
+    .select({ id: integrations.id })
+    .from(integrations)
+    .where(eq(integrations.service, 'simplefin'))
+    .get()
+  const integrationId = integrationsRow?.id ?? null
+
+  const rules = readCategorizationRules(db)
+
+  const now = opts?.now ?? new Date()
+  let endDate = conn.historyOldestDate
+    ? fromIsoDate(conn.historyOldestDate)
+    : Math.floor(now.getTime() / 1000)
+  let oldestDateReached = conn.historyOldestDate
+  let windowsFetched = 0
+  let added = 0
+  let duplicates = 0
+  let consecutiveEmpty = 0
+  let status: 'complete' | 'partial' | 'error' = 'partial'
+  let errorMessage: string | undefined
+
+  for (let i = 0; i < SIMPLEFIN_BACKFILL_MAX_WINDOWS; i++) {
+    const startDate = endDate - SIMPLEFIN_BACKFILL_WINDOW_DAYS * 86_400
+
+    let response: SimplefinAccountsResponse
+    try {
+      response = await fetchAccountsFn({ startDate, endDate })
+    } catch (err) {
+      errorMessage = err instanceof Error ? err.message : String(err)
+      status = 'error'
+      break
+    }
+    windowsFetched++
+
+    const hardFailure = response.accounts.length === 0 && response.errors.length > 0
+    if (hardFailure) {
+      errorMessage = response.errors.join('; ').slice(0, 200)
+      status = 'error'
+      break
+    }
+
+    const ingest = ingestSimplefinResponse(db, conn.id, response, rules)
+    added += ingest.added
+    duplicates += ingest.duplicates
+    oldestDateReached = toIsoDate(startDate)
+
+    // "Nothing new" — not "nothing in the raw response" — is the real signal
+    // that we've walked past useful history. Some bridges/institutions (seen
+    // live with USAA via MX) ignore an old `start-date` and just keep
+    // re-serving the same limited recent window every time, so
+    // `txnCountInWindow` alone never hits zero; `added` catches that because
+    // the hash UNIQUE constraint dedupes the repeat within this same run.
+    // Deliberately NOT conditioned on `response.errors` being empty: a
+    // non-fatal warning (e.g. USAA's "exceeds recommended range" — the same
+    // warning `syncSimplefin` already tolerates, and one every 90-day backfill
+    // window trips) still needs to count toward "empty" or this never fires —
+    // that combination is exactly what happened live and burned the full
+    // safety cap for nothing.
+    if (ingest.added === 0) {
+      consecutiveEmpty++
+    } else {
+      consecutiveEmpty = 0
+    }
+    if (consecutiveEmpty >= 2) {
+      status = 'complete'
+      break
+    }
+
+    endDate = startDate
+    if (i < SIMPLEFIN_BACKFILL_MAX_WINDOWS - 1) {
+      await sleepFn(SIMPLEFIN_BACKFILL_REQUEST_DELAY_MS)
+    }
+  }
+
+  if (added > 0) {
+    applyAtmSplit(db)
+    reconcileTransactionCurrency(db)
+  }
+
+  db.update(simplefinConnections)
+    .set({ historyOldestDate: oldestDateReached, historyBackfillStatus: status })
+    .where(eq(simplefinConnections.connectionId, connectionId))
+    .run()
+
+  const statusNote =
+    status === 'partial'
+      ? ' (partial — safety cap hit, more history may exist)'
+      : status === 'error'
+        ? ` (stopped on error: ${errorMessage})`
+        : ' (complete — institution history exhausted)'
+  writeSyncEvent(
+    integrationId,
+    added,
+    `Historical backfill: ${windowsFetched} window(s), ${added} added, oldest reached ${oldestDateReached ?? 'n/a'}${statusNote}`
+  )
+
+  return {
+    connectionId,
+    windowsFetched,
+    added,
+    duplicates,
+    oldestDateReached,
+    status,
+    errorMessage
+  }
 }
 
 /**

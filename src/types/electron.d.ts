@@ -1832,9 +1832,20 @@ declare global {
             orgDomain: string | null
             lastSyncedAt: number | null
             errorCode: string | null
+            historyOldestDate: string | null
+            historyBackfillStatus: string | null
           }>
         >
         disconnect(connectionId: string): Promise<{ ok: true }>
+        backfillHistory(connectionId: string): Promise<{
+          connectionId: string
+          windowsFetched: number
+          added: number
+          duplicates: number
+          oldestDateReached: string | null
+          status: 'complete' | 'partial' | 'error'
+          errorMessage?: string
+        }>
       }
       vault: {
         getCategories(): Promise<VaultCategory[]>

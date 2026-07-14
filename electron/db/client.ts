@@ -352,7 +352,9 @@ function ensureNewTables(sqlite: Database.Database): void {
       org_domain TEXT,
       last_synced_at INTEGER,
       error_code TEXT,
-      created_at INTEGER
+      created_at INTEGER,
+      history_oldest_date TEXT,
+      history_backfill_status TEXT
     );
     CREATE TABLE IF NOT EXISTS linear_issues (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -698,6 +700,11 @@ function ensureNewTables(sqlite: Database.Database): void {
     'INTEGER REFERENCES simplefin_connections(id)'
   )
   ensureColumn(sqlite, 'finance_accounts', 'simplefin_account_id', 'TEXT')
+  // "Import full history" backfill progress on the connection itself (not
+  // per-account): oldest ISO date successfully covered so far, and how the
+  // most recent backfill run ended ('complete' | 'partial' | 'error' | null).
+  ensureColumn(sqlite, 'simplefin_connections', 'history_oldest_date', 'TEXT')
+  ensureColumn(sqlite, 'simplefin_connections', 'history_backfill_status', 'TEXT')
   try {
     sqlite.exec(
       'CREATE INDEX IF NOT EXISTS idx_finance_accounts_simplefin ON finance_accounts(simplefin_account_id)'
@@ -981,7 +988,9 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       org_domain TEXT,
       last_synced_at INTEGER,
       error_code TEXT,
-      created_at INTEGER
+      created_at INTEGER,
+      history_oldest_date TEXT,
+      history_backfill_status TEXT
     );
 
     CREATE TABLE IF NOT EXISTS finance_balance_snapshots (
