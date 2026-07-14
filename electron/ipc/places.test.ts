@@ -71,7 +71,7 @@ function seedRecord(over: {
   type: string
   title: string
   body?: string | null
-  occurredAt?: number
+  occurredAt?: number | null
 }): void {
   seq++
   sqlite
@@ -82,7 +82,7 @@ function seedRecord(over: {
     .run(
       over.source,
       over.type,
-      over.occurredAt ?? 1700000000000 + seq,
+      over.occurredAt === undefined ? 1700000000000 + seq : over.occurredAt,
       over.title,
       over.body ?? null,
       `d${seq}`
@@ -176,6 +176,41 @@ describe('places:list-tracked', () => {
     const list = invoke('places:list-tracked') as TrackedPlace[]
     expect(list[0].matchKey).toBe('blue bottle cafe')
     expect(list[0].live?.visitCount).toBe(1)
+  })
+
+  it('an undated visit does not corrupt firstVisit/lastVisit when dated visits exist', () => {
+    // indexVisitsByKey sorts null occurredAt first (treated as epoch 0), so
+    // naively reading visits[0]/visits[last] would read a null firstVisit
+    // even though two dated visits exist — regression for that bug.
+    seedPlace()
+    seedRecord({
+      source: 'gcal',
+      type: 'event',
+      title: 'No date on this one',
+      body: 'Blue Bottle Cafe',
+      occurredAt: null
+    })
+    seedRecord({
+      source: 'gcal',
+      type: 'event',
+      title: 'Early visit',
+      body: 'Blue Bottle Cafe',
+      occurredAt: ms('2026-01-10')
+    })
+    seedRecord({
+      source: 'gcal',
+      type: 'event',
+      title: 'Late visit',
+      body: 'Blue Bottle Cafe',
+      occurredAt: ms('2026-03-02')
+    })
+    const list = invoke('places:list-tracked') as TrackedPlace[]
+    expect(list[0].live).toEqual({
+      visitCount: 3,
+      firstVisit: ms('2026-01-10'),
+      lastVisit: ms('2026-03-02'),
+      topSource: 'gcal'
+    })
   })
 })
 
@@ -274,6 +309,15 @@ describe('places:profile', () => {
   it('throws for an unknown id', () => {
     expect(() => invoke('places:profile', 999)).toThrow()
   })
+
+  it('does not leak a merchant row through the places surface', () => {
+    const merchantId = seedPlace({
+      externalId: 'derived:merchant:amazon',
+      name: 'Amazon',
+      kind: 'merchant'
+    })
+    expect(() => invoke('places:profile', merchantId)).toThrow()
+  })
 })
 
 describe('places:update', () => {
@@ -310,6 +354,19 @@ describe('places:update', () => {
     invoke('places:update', id, { category: 'Coffee shop' })
     invoke('places:update', id, { category: null })
     const row = sqlite.prepare('SELECT category FROM places WHERE id = ?').get(id) as {
+      category: string | null
+    }
+    expect(row.category).toBeNull()
+  })
+
+  it('cannot mutate a merchant row through the places surface', () => {
+    const merchantId = seedPlace({
+      externalId: 'derived:merchant:amazon',
+      name: 'Amazon',
+      kind: 'merchant'
+    })
+    expect(() => invoke('places:update', merchantId, { category: 'Shopping' })).toThrow()
+    const row = sqlite.prepare('SELECT category FROM places WHERE id = ?').get(merchantId) as {
       category: string | null
     }
     expect(row.category).toBeNull()
@@ -366,5 +423,15 @@ describe('places:untrack', () => {
     const id = seedPlace({ externalId: 'manual:xyz', name: 'Corner Spot' })
     expect(invoke('places:untrack', id)).toEqual({ success: true })
     expect(invoke('places:untrack', 999)).toEqual({ success: true })
+  })
+
+  it('cannot delete a tracked merchant through the places surface', () => {
+    const merchantId = seedPlace({
+      externalId: 'derived:merchant:amazon',
+      name: 'Amazon',
+      kind: 'merchant'
+    })
+    expect(invoke('places:untrack', merchantId)).toEqual({ success: true })
+    expect(sqlite.prepare('SELECT COUNT(*) n FROM places').get()).toEqual({ n: 1 })
   })
 })

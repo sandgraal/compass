@@ -478,6 +478,7 @@ function CreatePlaceForm({
   const { toast } = useToast()
 
   async function save(): Promise<void> {
+    if (!isElectron()) return
     if (!draft.name.trim()) {
       toast('Name is required', 'error')
       return

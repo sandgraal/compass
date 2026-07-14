@@ -139,7 +139,7 @@ export function parseMeta<T>(raw: string | null): T | null {
 export function cleanString(v: unknown, max: number): string | null | undefined {
   if (v === undefined) return undefined
   if (v === null) return null
-  if (typeof v !== 'string') throw new Error('update: expected a string')
+  if (typeof v !== 'string') throw new Error('expected a string')
   const t = v.trim()
   return t.length === 0 ? null : t.slice(0, max)
 }
@@ -147,7 +147,7 @@ export function cleanString(v: unknown, max: number): string | null | undefined 
 export function cleanUrl(v: unknown): string | null | undefined {
   const s = cleanString(v, MAX_LEN.url)
   if (s === undefined || s === null) return s
-  if (!/^https?:\/\//i.test(s)) throw new Error('update: url must start with http(s)://')
+  if (!/^https?:\/\//i.test(s)) throw new Error('url must start with http(s)://')
   return s
 }
 
@@ -253,21 +253,15 @@ export function registerPlacesHandlers(ipcMain: IpcMain): void {
       const visits = byKey.get(matchKey)
       let live: TrackedPlace['live'] = null
       if (visits && visits.length > 0) {
-        const counts = new Map<string, number>()
-        for (const v of visits) counts.set(v.source, (counts.get(v.source) ?? 0) + 1)
-        let topSource: string | null = null
-        let best = 0
-        for (const [s, n] of counts) {
-          if (n > best) {
-            best = n
-            topSource = s
-          }
-        }
+        // computeVisitStats ignores undated visits when picking first/last, so
+        // a null-occurredAt row (sorted first by indexVisitsByKey) can't make
+        // firstVisit/lastVisit read null when dated visits exist.
+        const stats = computeVisitStats(visits)
         live = {
-          visitCount: visits.length,
-          firstVisit: visits[0].occurredAt,
-          lastVisit: visits[visits.length - 1].occurredAt,
-          topSource
+          visitCount: stats.visitCount,
+          firstVisit: stats.firstVisit,
+          lastVisit: stats.lastVisit,
+          topSource: stats.bySource[0]?.source ?? null
         }
       }
       return { ...rowToRecord(row), matchKey, meta: parseMeta<PlaceMeta>(row.meta), live }
@@ -277,7 +271,13 @@ export function registerPlacesHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('places:profile', (_event, id: number): PlaceProfile => {
     if (!Number.isInteger(id)) throw new Error('places:profile requires an integer id')
     const db = getDb()
-    const row = db.select().from(places).where(eq(places.id, id)).all()[0]
+    // kind='place' — the table is shared with merchants; without this filter
+    // a merchant id would leak through the places surface.
+    const row = db
+      .select()
+      .from(places)
+      .where(and(eq(places.id, id), eq(places.kind, 'place')))
+      .all()[0]
     if (!row) throw new Error('places:profile: not found')
     const matchKey = placeMatchKey(row.externalId, row.name)
 
@@ -332,7 +332,13 @@ export function registerPlacesHandlers(ipcMain: IpcMain): void {
     if (!Number.isInteger(id)) throw new Error('places:update requires an integer id')
     if (!patch || typeof patch !== 'object') throw new Error('places:update: patch required')
     const db = getDb()
-    const row = db.select().from(places).where(eq(places.id, id)).all()[0]
+    // kind='place' — see places:profile; keeps this handler from mutating a
+    // merchant row if called with the wrong id.
+    const row = db
+      .select()
+      .from(places)
+      .where(and(eq(places.id, id), eq(places.kind, 'place')))
+      .all()[0]
     if (!row) throw new Error('places:update: not found')
 
     const updates: Partial<PlaceRow> = {}
@@ -385,7 +391,13 @@ export function registerPlacesHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('places:untrack', (_event, id: number) => {
     if (!Number.isInteger(id)) throw new Error('places:untrack requires an integer id')
     const db = getDb()
-    const row = db.select().from(places).where(eq(places.id, id)).all()[0]
+    // kind='place' — see places:profile; keeps this handler from deleting a
+    // tracked merchant if called with the wrong id.
+    const row = db
+      .select()
+      .from(places)
+      .where(and(eq(places.id, id), eq(places.kind, 'place')))
+      .all()[0]
     if (!row) return { success: true }
     db.delete(places).where(eq(places.id, id)).run()
     clearPromotedFlags(db, row.externalId)
