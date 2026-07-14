@@ -55,7 +55,7 @@ export type SimplefinConnectionSummary = {
    *  reached so far, across all runs. Null if never run. */
   historyOldestDate: string | null
   /** Most recent backfill run's stopping reason — see `backfillSimplefinHistory`. */
-  historyBackfillStatus: string | null
+  historyBackfillStatus: 'complete' | 'partial' | 'error' | null
 }
 
 export type SimplefinClaimResult = {
