@@ -40,6 +40,13 @@ export type FbarAccountYear = {
   currency: string
   maxNative: number // max balance during the year, native currency
   maxBaseUsd: number | null // converted to base currency (null = no FX rate)
+  /**
+   * Where the USD figure came from: snapshot-derived, or a user-entered
+   * `maxValueUsd` on a linked foreign-accounts life record (used when it
+   * exceeds the computed max — FBAR wants the true peak). Current year only;
+   * the life-record field has no year dimension.
+   */
+  maxUsdSource?: 'snapshot' | 'user'
 }
 
 export type FbarYear = {
@@ -86,6 +93,46 @@ type ForeignAccountRow = { id: number; name: string; currency: string; balance: 
 type SnapshotRow = { account_id: number; captured_at: number; balance: number }
 
 /**
+ * User-attested max values: `fields.maxValueUsd` from `foreign-accounts` life
+ * records, keyed by the finance account they are LINKED to (life_record_links,
+ * targetKind 'account'). The official FBAR number is often read off statements
+ * rather than derivable from snapshots, so an explicit entry is authoritative
+ * when it exceeds the computed max. Tolerates "$12,345.67"-style input; older
+ * stores without the link table just contribute nothing.
+ */
+function loadAttestedMaxByAccount(sqlite: SqliteForFx): Map<number, number> {
+  const out = new Map<number, number>()
+  try {
+    const rows = sqlite
+      .prepare(
+        `SELECT lr.fields AS fields, lrl.target_id AS accountId
+           FROM life_records lr
+           JOIN life_record_links lrl
+             ON lrl.life_record_id = lr.id AND lrl.target_kind = 'account'
+          WHERE lr.category = 'foreign-accounts'`
+      )
+      .all() as Array<{ fields: string | null; accountId: number }>
+    for (const r of rows) {
+      if (!r.fields) continue
+      let raw: unknown
+      try {
+        raw = (JSON.parse(r.fields) as Record<string, unknown>).maxValueUsd
+      } catch {
+        continue
+      }
+      if (typeof raw !== 'string') continue
+      const value = Number.parseFloat(raw.replace(/[$,\s]/g, ''))
+      if (!Number.isFinite(value) || value <= 0) continue
+      const cur = out.get(r.accountId)
+      if (cur == null || value > cur) out.set(r.accountId, value)
+    }
+  } catch {
+    /* life-record tables absent on an old store — snapshots-only */
+  }
+  return out
+}
+
+/**
  * FBAR max-aggregate-foreign-balance by year. `currentYear` is injected so the
  * live balance can seed the current year (a freshly-marked account with no
  * snapshot still shows) and so the function stays deterministic in tests.
@@ -125,6 +172,8 @@ export function buildFbarByYear(
   // Seed the current year with each account's live balance.
   for (const a of accounts) note(currentYear, a.id, a.balance ?? 0)
 
+  const attested = loadAttestedMaxByAccount(sqlite)
+
   const out: FbarYear[] = []
   for (const year of [...years].sort((a, b) => a - b)) {
     const accs: FbarAccountYear[] = []
@@ -137,8 +186,17 @@ export function buildFbarByYear(
       const currency = (a.currency || base).toUpperCase()
       const maxNative = round2(max)
       const rate = yearEndRate(rates, currency, base, year)
-      const maxBaseUsd = rate == null ? null : round2(maxNative * rate)
-      accs.push({ accountId: a.id, name: a.name, currency, maxNative, maxBaseUsd })
+      let maxBaseUsd = rate == null ? null : round2(maxNative * rate)
+      let maxUsdSource: FbarAccountYear['maxUsdSource'] = 'snapshot'
+      // A user-entered maxValueUsd on a linked life record wins when it
+      // exceeds the computed max (or rescues a no-FX-rate account) — FBAR
+      // wants the true peak, and the entered figure is the attested one.
+      const entered = year === currentYear ? attested.get(a.id) : undefined
+      if (entered != null && (maxBaseUsd == null || entered > maxBaseUsd)) {
+        maxBaseUsd = round2(entered)
+        maxUsdSource = 'user'
+      }
+      accs.push({ accountId: a.id, name: a.name, currency, maxNative, maxBaseUsd, maxUsdSource })
       if (maxBaseUsd == null) unconvertedCount++
       else aggregate += maxBaseUsd
     }

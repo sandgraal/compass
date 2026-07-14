@@ -300,7 +300,13 @@ const api = {
       ipcRenderer.invoke('life:update', id, updates),
     delete: (id: number) => ipcRenderer.invoke('life:delete', id),
     getSecrets: (id: number) => ipcRenderer.invoke('life:get-secrets', id),
-    exportCsv: () => ipcRenderer.invoke('life:export-csv')
+    exportCsv: () => ipcRenderer.invoke('life:export-csv'),
+    setLink: (input: {
+      lifeRecordId: number
+      targetKind: 'contact' | 'account'
+      targetId: number
+    }) => ipcRenderer.invoke('life:set-link', input),
+    removeLink: (linkId: number) => ipcRenderer.invoke('life:remove-link', linkId)
   },
 
   // --- Checklist ---

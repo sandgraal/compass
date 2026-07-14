@@ -122,5 +122,9 @@ are in-app-assistant-only"): the five document categories moved out of the
 vault into the plaintext `life_records` table, closing the in-app/MCP
 asymmetry for their metadata. Only true secrets remain encrypted — see the
 current exception 4. A user's pre-split category blobs are migrated once at
-boot (`electron/integrations/vault-life-migration.ts`) and retired as
-`<category>.migrated.enc` backups.
+boot (`electron/integrations/vault-life-migration.ts`) and renamed to
+`<category>.migrated.enc` backups; a follow-up one-shot pass
+(`retireMigratedVaultBlobsIfNeeded` in `electron/lib/vault-blob-retirement.ts`)
+deletes those backups for good once the migration has committed — see
+`docs/architecture.md`'s `life_records` schema row and the 2026-07-14
+addendum in `docs/implementation_plan.md`.

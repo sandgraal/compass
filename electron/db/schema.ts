@@ -704,6 +704,27 @@ export const lifeRecords = sqliteTable('life_records', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
+// ---- Life-record links (deferred from the vault split, 2026-07) ----
+// Ties a life record to the domain rows it documents: the bank account behind
+// a `financial`/`foreign-accounts` record, the provider/agent contact behind a
+// `medical`/`legal` one. Mirrors document_links' shape (migration 0044); the
+// FBAR rollup uses the account link to trust a user-entered maxValueUsd.
+export const lifeRecordLinks = sqliteTable(
+  'life_record_links',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    lifeRecordId: integer('life_record_id')
+      .notNull()
+      .references(() => lifeRecords.id),
+    targetKind: text('target_kind').notNull(), // 'contact' | 'account'
+    targetId: integer('target_id').notNull(), // contacts.id | finance_accounts.id
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+  },
+  (t) => ({
+    linkUnique: uniqueIndex('life_record_links_unique').on(t.lifeRecordId, t.targetKind, t.targetId)
+  })
+)
+
 // ---- Derived entities (cross-reference engine) ----
 // A CACHE, not user data: the people / merchants / places / subscription
 // candidates the engine (`electron/lib/entities.ts`) derives from the `records`
