@@ -58,6 +58,20 @@ export type SimplefinConnectionSummary = {
   historyBackfillStatus: 'complete' | 'partial' | 'error' | null
 }
 
+const BACKFILL_STATUSES = new Set(['complete', 'partial', 'error'])
+
+/** Narrow the plain-`text` DB column to the renderer contract at runtime —
+ *  only `backfillSimplefinHistory` ever writes this column, but an older
+ *  build, a manual DB edit, or corruption could leave something else there,
+ *  and a blind cast would ship that straight to the renderer. */
+function toBackfillStatus(
+  value: string | null
+): SimplefinConnectionSummary['historyBackfillStatus'] {
+  return value !== null && BACKFILL_STATUSES.has(value)
+    ? (value as SimplefinConnectionSummary['historyBackfillStatus'])
+    : null
+}
+
 export type SimplefinClaimResult = {
   ok: true
   connectionId: string
@@ -161,7 +175,8 @@ export function registerSimplefinHandlers(ipcMain: IpcMain): void {
     return rows.map((r) => ({
       ...r,
       // Serialize Date → epoch ms; the preload bridge can't ship Date objects.
-      lastSyncedAt: r.lastSyncedAt ? r.lastSyncedAt.getTime() : null
+      lastSyncedAt: r.lastSyncedAt ? r.lastSyncedAt.getTime() : null,
+      historyBackfillStatus: toBackfillStatus(r.historyBackfillStatus)
     }))
   })
 

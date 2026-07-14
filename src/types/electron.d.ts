@@ -1833,7 +1833,7 @@ declare global {
             lastSyncedAt: number | null
             errorCode: string | null
             historyOldestDate: string | null
-            historyBackfillStatus: string | null
+            historyBackfillStatus: 'complete' | 'partial' | 'error' | null
           }>
         >
         disconnect(connectionId: string): Promise<{ ok: true }>
