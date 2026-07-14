@@ -422,15 +422,16 @@ export default function Contacts(): JSX.Element {
     setEnrichIndex(0)
   }
 
-  function advanceEnrichQueue(): void {
-    setEnrichIndex((i) => {
-      if (!enrichQueue || i + 1 >= enrichQueue.length) {
-        setEnrichQueue(null)
-        return 0
-      }
-      return i + 1
-    })
+function advanceEnrichQueue(): void {
+  if (!enrichQueue) return
+  const next = enrichIndex + 1
+  if (next >= enrichQueue.length) {
+    setEnrichQueue(null)
+    setEnrichIndex(0)
+  } else {
+    setEnrichIndex(next)
   }
+}
 
   async function enrichAll(): Promise<void> {
     if (!isElectron()) return
