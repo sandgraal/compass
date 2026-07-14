@@ -364,6 +364,41 @@ describe('contacts:web-enrich-apply', () => {
     ).toMatchObject({ success: false })
   })
 
+  it('cancel invalidates the cached run — a discarded review can never apply', async () => {
+    callLlm.mockResolvedValue(foundResponse())
+    const id = addContact({ displayName: 'Jane Doe' })
+    const run = (await invoke('contacts:web-enrich', { contactId: id })) as { runId: string }
+
+    // "Discard"/close → cancel, even with nothing in flight, must succeed…
+    expect(await invoke('contacts:web-enrich-cancel')).toEqual({ success: true })
+    // …and the stale runId must no longer be applyable.
+    expect(
+      await invoke('contacts:web-enrich-apply', { runId: run.runId, accepted: [0] })
+    ).toMatchObject({ success: false })
+    const row = contactRow(id)
+    expect(row.job_title).toBeNull()
+    expect(row.enrichment).toBeNull()
+  })
+
+  it('caps a renderer-supplied accepted array before doing any work', async () => {
+    callLlm.mockResolvedValue(foundResponse())
+    const id = addContact({ displayName: 'Jane Doe' })
+    const run = (await invoke('contacts:web-enrich', { contactId: id })) as {
+      runId: string
+      proposals: Array<{ id: number; kind: string }>
+    }
+    // A huge hostile array still succeeds; ids beyond the cap are dropped, but
+    // the real proposal ids sit at the front so the apply is unaffected.
+    const jobTitleId = run.proposals.find((p) => p.kind === 'jobTitle')?.id as number
+    const huge = [jobTitleId, ...Array.from({ length: 100_000 }, (_, i) => i + 1000)]
+    const r = (await invoke('contacts:web-enrich-apply', {
+      runId: run.runId,
+      accepted: huge
+    })) as { success: boolean; applied: { fields: string[] } }
+    expect(r.success).toBe(true)
+    expect(r.applied.fields).toEqual(['jobTitle'])
+  })
+
   it('ignores non-integer accepted ids (renderer cannot smuggle values)', async () => {
     callLlm.mockResolvedValue(foundResponse())
     const id = addContact({ displayName: 'Jane Doe' })

@@ -56,6 +56,7 @@ import { applyWebEnrichment, syncRelationships } from './contacts'
 
 const MAX_HINTS_CHARS = 500
 const MAX_CANDIDATE_HINT_CHARS = 300
+const MAX_ACCEPTED_IDS = 256
 const MAX_PAUSE_CONTINUATIONS = 3
 const RUN_TIMEOUT_MS = 90_000
 /** A stale run can't be applied — the contact may have changed underneath it. */
@@ -331,17 +332,24 @@ export function registerContactWebEnrichHandlers(ipcMain: IpcMain): void {
       return { success: false, error: 'runId is required' }
     }
     const acceptedIds = Array.isArray(accepted)
-      ? accepted.filter((n): n is number => typeof n === 'number' && Number.isInteger(n))
+      ? accepted
+          // Renderer-controlled input — cap before any per-item work so a huge
+          // array can't burn main-process time (proposals are ≤ ~40 anyway).
+          .slice(0, MAX_ACCEPTED_IDS)
+          .filter((n): n is number => typeof n === 'number' && Number.isInteger(n))
       : []
     return applyPendingRun(runId, acceptedIds)
   })
 
+  // Cancel doubles as "discard": abort any in-flight search AND invalidate the
+  // cached run, so closing the review dialog leaves nothing applyable behind.
+  // Always succeeds — there is nothing meaningful to report when idle.
   ipcMain.handle('contacts:web-enrich-cancel', () => {
     if (currentController) {
       currentController.abort()
       currentController = null
-      return { success: true }
     }
-    return { success: false, error: 'No in-flight web enrichment' }
+    pendingRun = null
+    return { success: true }
   })
 }

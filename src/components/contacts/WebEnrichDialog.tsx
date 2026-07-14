@@ -182,7 +182,10 @@ export default function WebEnrichDialog({
   }
 
   function handleClose(): void {
-    if (phase === 'searching') void window.api.contacts.webEnrichCancel().catch(() => {})
+    // Cancel on EVERY close, not just mid-search: it also invalidates the
+    // main-process cached run, so a discarded review can never be applied
+    // later with a stale runId.
+    void window.api.contacts.webEnrichCancel().catch(() => {})
     onClose()
   }
 
