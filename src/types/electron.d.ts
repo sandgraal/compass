@@ -918,6 +918,97 @@ declare global {
     meta?: MerchantMeta | null
   }
 
+  // ---- Tracked places (places redesign) — see electron/ipc/places.ts ----
+  interface PlaceMeta {
+    /** Reserved: offline GPS-derived approximate coordinates (future follow-up). */
+    geo?: {
+      lat: number
+      lng: number
+      confidence?: number
+      visitCount?: number
+      computedAt?: number
+    }
+    /** Reserved for the future consent-gated web-enrichment flow. */
+    enrichment?: Record<string, unknown>
+  }
+
+  interface TrackedPlace extends PlaceRecord {
+    matchKey: string
+    meta: PlaceMeta | null
+    live: {
+      visitCount: number
+      firstVisit: number | null
+      lastVisit: number | null
+      topSource: string | null
+    } | null
+  }
+
+  interface PlaceVisit {
+    recordId: number
+    source: string
+    type: string
+    title: string
+    occurredAt: number | null
+  }
+
+  interface PlaceVisitStats {
+    visitCount: number
+    firstVisit: number | null
+    lastVisit: number | null
+    thisYearVisits: number
+    lastYearSameSpanVisits: number
+    trendPct: number | null
+    cadence: string | null
+    bySource: Array<{ source: string; count: number }>
+  }
+
+  interface PlaceMonthlyBucket {
+    month: string
+    visits: number
+  }
+
+  interface PlaceActivityHit {
+    recordId: number
+    source: string
+    type: string
+    title: string
+    occurredAt: number | null
+  }
+
+  interface PlaceDocumentItem {
+    linkId: number
+    documentId: number
+    title: string
+    docDate: string | null
+    mimeType: string | null
+  }
+
+  interface PlaceProfile {
+    place: PlaceRecord & { meta: PlaceMeta | null }
+    matchKey: string
+    stats: PlaceVisitStats
+    monthly: PlaceMonthlyBucket[]
+    visits: PlaceVisit[]
+    activity: PlaceActivityHit[]
+    documents: PlaceDocumentItem[]
+  }
+
+  interface PlaceUpdatePatch {
+    name?: string
+    category?: string | null
+    address?: string | null
+    url?: string | null
+    notes?: string | null
+  }
+
+  interface PlaceCreateInput {
+    name: string
+    category?: string | null
+    address?: string | null
+    url?: string | null
+    notes?: string | null
+  }
+
   // Offline Places map — clustered GPS cells + the bundled country basemap.
   // Renderer-only; raw location points never cross IPC (see electron/ipc/location.ts).
   interface LocationMapCell {
@@ -1947,8 +2038,11 @@ declare global {
         mapData(): Promise<LocationMapData>
       }
       places: {
-        list(): Promise<PlaceRecord[]>
-        delete(id: number): Promise<{ success: boolean }>
+        listTracked(): Promise<TrackedPlace[]>
+        profile(id: number): Promise<PlaceProfile>
+        update(id: number, patch: PlaceUpdatePatch): Promise<{ success: boolean }>
+        createManual(input: PlaceCreateInput): Promise<{ success: boolean; id: number }>
+        untrack(id: number): Promise<{ success: boolean }>
       }
       merchants: {
         listTracked(): Promise<TrackedMerchant[]>

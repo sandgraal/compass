@@ -23,7 +23,7 @@
 import { and, desc, eq, like } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
-import { derivedEntities, documentLinks, documents, places, subscriptions } from '../db/schema'
+import { documentLinks, documents, places, subscriptions } from '../db/schema'
 import { matchKeyForPlace } from '../lib/merchant-match'
 import {
   type MerchantPriceTrend,
@@ -38,7 +38,14 @@ import {
 } from '../lib/merchant-profile'
 import { normalizeMerchant } from '../lib/normalize'
 import { searchRecords } from '../lib/records-search'
-import type { PlaceRecord } from './places'
+import {
+  MAX_LEN,
+  type PlaceRecord,
+  cleanString,
+  cleanUrl,
+  clearPromotedFlags,
+  parseMeta
+} from './places'
 
 /** Namespaced JSON extras on a places row (`places.meta`). */
 export interface MerchantMeta {
@@ -119,15 +126,6 @@ const ACTIVITY_LIMIT = 20
 // Ledger rows already have their own canonical view (the transaction list) —
 // keep them out of the cross-source activity feed or every purchase shows twice.
 const FINANCE_SOURCES = new Set(['finance'])
-
-function parseMeta(raw: string | null): MerchantMeta | null {
-  if (!raw) return null
-  try {
-    return JSON.parse(raw) as MerchantMeta
-  } catch {
-    return null
-  }
-}
 
 type PlaceRow = typeof places.$inferSelect
 
@@ -238,23 +236,8 @@ function findLinkedSubscription(matchKey: string): MerchantProfile['subscription
   }
 }
 
-const MAX_LEN = { name: 2000, category: 200, address: 500, url: 500, notes: 5000 } as const
-
-function cleanString(v: unknown, max: number): string | null | undefined {
-  if (v === undefined) return undefined
-  if (v === null) return null
-  if (typeof v !== 'string') throw new Error('merchants:update: expected a string')
-  const t = v.trim()
-  return t.length === 0 ? null : t.slice(0, max)
-}
-
-function cleanUrl(v: unknown): string | null | undefined {
-  const s = cleanString(v, MAX_LEN.url)
-  if (s === undefined || s === null) return s
-  if (!/^https?:\/\//i.test(s)) throw new Error('merchants:update: url must start with http(s)://')
-  return s
-}
-
+// Field length caps + string/url validators are shared with places.ts (the
+// two namespaces edit the same table).
 function cleanMeta(v: unknown, existing: MerchantMeta | null): string | null | undefined {
   if (v === undefined) return undefined
   if (v === null) return null
@@ -291,7 +274,7 @@ export function registerMerchantsHandlers(ipcMain: IpcMain): void {
     return keyed.map(({ row, matchKey }) => ({
       ...rowToRecord(row),
       matchKey,
-      meta: parseMeta(row.meta),
+      meta: parseMeta<MerchantMeta>(row.meta),
       live: live.get(matchKey) ?? null
     }))
   })
@@ -353,7 +336,7 @@ export function registerMerchantsHandlers(ipcMain: IpcMain): void {
       .all()
 
     return {
-      place: { ...rowToRecord(row), meta: parseMeta(row.meta) },
+      place: { ...rowToRecord(row), meta: parseMeta<MerchantMeta>(row.meta) },
       matchKey,
       stats,
       monthly: computeMonthlyBuckets(inDominant),
@@ -387,7 +370,7 @@ export function registerMerchantsHandlers(ipcMain: IpcMain): void {
     if (url !== undefined) updates.url = url
     const notes = cleanString(patch.notes, MAX_LEN.notes)
     if (notes !== undefined) updates.notes = notes
-    const meta = cleanMeta(patch.meta, parseMeta(row.meta))
+    const meta = cleanMeta(patch.meta, parseMeta<MerchantMeta>(row.meta))
     if (meta !== undefined) updates.meta = meta
 
     if (Object.keys(updates).length === 0) return { success: true }
@@ -397,22 +380,16 @@ export function registerMerchantsHandlers(ipcMain: IpcMain): void {
   })
 
   // Untrack = delete the owned row AND clear the projection row's promoted
-  // flags inline — refreshDerivedEntities recomputes them from owned tables,
-  // but that only runs on the next import; without this the merchant would
-  // stay hidden from Discovered until then.
+  // flags inline (see clearPromotedFlags in places.ts) — refreshDerivedEntities
+  // recomputes them from owned tables, but that only runs on the next import;
+  // without this the merchant would stay hidden from Discovered until then.
   ipcMain.handle('merchants:untrack', (_event, id: number) => {
     if (!Number.isInteger(id)) throw new Error('merchants:untrack requires an integer id')
     const db = getDb()
     const row = db.select().from(places).where(eq(places.id, id)).all()[0]
     if (!row) return { success: true }
     db.delete(places).where(eq(places.id, id)).run()
-    const derived = row.externalId.match(/^derived:(merchant|place):(.+)$/)
-    if (derived) {
-      db.update(derivedEntities)
-        .set({ promotedKind: null, promotedId: null })
-        .where(and(eq(derivedEntities.kind, derived[1]), eq(derivedEntities.matchKey, derived[2])))
-        .run()
-    }
+    clearPromotedFlags(db, row.externalId)
     return { success: true }
   })
 }

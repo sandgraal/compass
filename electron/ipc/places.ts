@@ -1,17 +1,46 @@
 /**
- * Places & merchants IPC — the owned home for a merchant/place the user promotes
- * out of the derived-entity cache (`entities:promote`). Mirrors the assets/contacts
- * shape: a flat table with a `kind` discriminator, idempotent by a stable
- * `derived:<kind>:<key>` external id so re-promoting is a no-op.
+ * Places IPC (places redesign, 2026-07) — the owned home for a merchant/place
+ * the user promotes out of the derived-entity cache (`entities:promote`), plus
+ * the tracked-place profile surface (the place analogue of merchants.ts):
  *
- * Local-only, no vault, no network.
+ *   places:list-tracked  → every tracked place (kind='place') + LIVE visit
+ *     stats matched from the records spine via the place extractors
+ *   places:profile       → everything we know about one place: visit stats,
+ *     monthly visit buckets, recent visits, cross-source timeline activity,
+ *     attached documents
+ *   places:update        → the user-editable fields on the places row
+ *   places:create-manual → a manual place (no derived projection)
+ *   places:untrack       → delete the places row and clear the projection
+ *     row's promoted flags so the place reappears in Discovered immediately
+ *
+ * PRIVACY BOUNDARY: these handlers read the records spine + owned tables
+ * only — NEVER `location_points` (raw GPS is the one data-access-policy
+ * exclusion; see electron/ipc/location.ts). Like `location:map-data`, this
+ * namespace is a renderer-local UI read and must never be registered as an
+ * assistant or MCP tool.
+ *
+ * Also exports the shared places-row validators merchants.ts builds on
+ * (dependency direction: merchants.ts → places.ts, never the reverse).
  */
 
-import { eq } from 'drizzle-orm'
+import { randomUUID } from 'node:crypto'
+import { and, desc, eq } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
-import { getDb } from '../db/client'
-import { places } from '../db/schema'
+import { getDb, getRawSqlite } from '../db/client'
+import { derivedEntities, documentLinks, documents, places } from '../db/schema'
 import { placeExternalId } from '../lib/entities'
+import {
+  type PlaceCandidateRow,
+  type PlaceMonthlyBucket,
+  type PlaceVisit,
+  type PlaceVisitStats,
+  VISIT_SOURCES,
+  computeVisitMonthly,
+  computeVisitStats,
+  indexVisitsByKey,
+  placeMatchKey
+} from '../lib/place-profile'
+import { searchRecords } from '../lib/records-search'
 
 export interface PlaceRecord {
   id: number
@@ -24,6 +53,117 @@ export interface PlaceRecord {
   totalSpend: number | null
   notes: string | null
   source: string
+}
+
+/** Namespaced JSON extras on a places row (`places.meta`, kind='place'). */
+export interface PlaceMeta {
+  /** Reserved: offline GPS-derived approximate coordinates (future follow-up). */
+  geo?: { lat: number; lng: number; confidence?: number; visitCount?: number; computedAt?: number }
+  /** Reserved for the future consent-gated web-enrichment flow. */
+  enrichment?: Record<string, unknown>
+}
+
+export interface TrackedPlace extends PlaceRecord {
+  matchKey: string
+  meta: PlaceMeta | null
+  live: {
+    visitCount: number
+    firstVisit: number | null
+    lastVisit: number | null
+    topSource: string | null
+  } | null
+}
+
+export interface PlaceActivityHit {
+  recordId: number
+  source: string
+  type: string
+  title: string
+  occurredAt: number | null
+}
+
+export interface PlaceDocumentItem {
+  linkId: number
+  documentId: number
+  title: string
+  docDate: string | null
+  mimeType: string | null
+}
+
+export interface PlaceUpdatePatch {
+  name?: string
+  category?: string | null
+  address?: string | null
+  url?: string | null
+  notes?: string | null
+}
+
+export interface PlaceCreateInput {
+  name: string
+  category?: string | null
+  address?: string | null
+  url?: string | null
+  notes?: string | null
+}
+
+export interface PlaceProfile {
+  place: PlaceRecord & { meta: PlaceMeta | null }
+  matchKey: string
+  stats: PlaceVisitStats
+  monthly: PlaceMonthlyBucket[]
+  visits: PlaceVisit[]
+  activity: PlaceActivityHit[]
+  documents: PlaceDocumentItem[]
+}
+
+const VISIT_LIST_LIMIT = 50
+const ACTIVITY_LIMIT = 20
+// Visit rows already have their own canonical view (the recent-visits list) —
+// keep their sources out of the cross-source activity feed or every calendar
+// event / ride shows twice.
+const VISIT_SOURCE_IDS = new Set(VISIT_SOURCES.map((v) => v.source))
+
+// ── Shared places-row helpers (merchants.ts imports these) ──────────────────
+
+export const MAX_LEN = { name: 2000, category: 200, address: 500, url: 500, notes: 5000 } as const
+
+export function parseMeta<T>(raw: string | null): T | null {
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    return null
+  }
+}
+
+export function cleanString(v: unknown, max: number): string | null | undefined {
+  if (v === undefined) return undefined
+  if (v === null) return null
+  if (typeof v !== 'string') throw new Error('update: expected a string')
+  const t = v.trim()
+  return t.length === 0 ? null : t.slice(0, max)
+}
+
+export function cleanUrl(v: unknown): string | null | undefined {
+  const s = cleanString(v, MAX_LEN.url)
+  if (s === undefined || s === null) return s
+  if (!/^https?:\/\//i.test(s)) throw new Error('update: url must start with http(s)://')
+  return s
+}
+
+/**
+ * Clear the projection row's promoted flags for a deleted owned row —
+ * refreshDerivedEntities recomputes them from owned tables, but that only
+ * runs on the next import; without this the entity would stay hidden from
+ * Discovered until then.
+ */
+export function clearPromotedFlags(db: ReturnType<typeof getDb>, externalId: string): void {
+  const derived = externalId.match(/^derived:(merchant|place):(.+)$/)
+  if (!derived) return
+  db.update(derivedEntities)
+    .set({ promotedKind: null, promotedId: null })
+    .where(and(eq(derivedEntities.kind, derived[1]), eq(derivedEntities.matchKey, derived[2])))
+    .run()
 }
 
 type PlaceRow = typeof places.$inferSelect
@@ -79,15 +219,176 @@ export function promoteDerivedPlace(
   return { id: Number(result.lastInsertRowid), alreadyExisted: false }
 }
 
+/**
+ * The candidate rows a visit can come from — the four place-extractor record
+ * shapes, loaded once per call (calendar/rides/trips are bounded sources, not
+ * the record firehose).
+ */
+function loadVisitCandidates(): PlaceCandidateRow[] {
+  const where = VISIT_SOURCES.map(() => '(source = ? AND type = ?)').join(' OR ')
+  const params = VISIT_SOURCES.flatMap((v) => [v.source, v.type])
+  return getRawSqlite()
+    .prepare(
+      `SELECT id, source, type, title, body, occurred_at AS occurredAt
+         FROM records WHERE ${where}`
+    )
+    .all(...params) as PlaceCandidateRow[]
+}
+
 export function registerPlacesHandlers(ipcMain: IpcMain): void {
-  ipcMain.handle('places:list', (): PlaceRecord[] => {
+  ipcMain.handle('places:list-tracked', (): TrackedPlace[] => {
     const db = getDb()
-    return db.select().from(places).all().map(rowToRecord)
+    const rows = db
+      .select()
+      .from(places)
+      .where(eq(places.kind, 'place'))
+      .orderBy(desc(places.updatedAt))
+      .all()
+    const keyed = rows.map((r) => ({ row: r, matchKey: placeMatchKey(r.externalId, r.name) }))
+    const byKey = indexVisitsByKey(
+      loadVisitCandidates(),
+      new Set(keyed.map((k) => k.matchKey).filter((k) => k.length > 0))
+    )
+    return keyed.map(({ row, matchKey }) => {
+      const visits = byKey.get(matchKey)
+      let live: TrackedPlace['live'] = null
+      if (visits && visits.length > 0) {
+        const counts = new Map<string, number>()
+        for (const v of visits) counts.set(v.source, (counts.get(v.source) ?? 0) + 1)
+        let topSource: string | null = null
+        let best = 0
+        for (const [s, n] of counts) {
+          if (n > best) {
+            best = n
+            topSource = s
+          }
+        }
+        live = {
+          visitCount: visits.length,
+          firstVisit: visits[0].occurredAt,
+          lastVisit: visits[visits.length - 1].occurredAt,
+          topSource
+        }
+      }
+      return { ...rowToRecord(row), matchKey, meta: parseMeta<PlaceMeta>(row.meta), live }
+    })
   })
 
-  ipcMain.handle('places:delete', (_event, id: number) => {
-    if (!Number.isInteger(id)) throw new Error('places:delete requires an integer id')
-    getDb().delete(places).where(eq(places.id, id)).run()
+  ipcMain.handle('places:profile', (_event, id: number): PlaceProfile => {
+    if (!Number.isInteger(id)) throw new Error('places:profile requires an integer id')
+    const db = getDb()
+    const row = db.select().from(places).where(eq(places.id, id)).all()[0]
+    if (!row) throw new Error('places:profile: not found')
+    const matchKey = placeMatchKey(row.externalId, row.name)
+
+    const visits =
+      matchKey.length > 0
+        ? (indexVisitsByKey(loadVisitCandidates(), new Set([matchKey])).get(matchKey) ?? [])
+        : []
+
+    // Cross-source activity: emails, notes, finance — the timeline hits for
+    // this place's name, minus the visit sources (see VISIT_SOURCE_IDS) which
+    // the recent-visits list already covers.
+    const activity: PlaceActivityHit[] = searchRecords(getRawSqlite(), {
+      q: row.name,
+      limit: ACTIVITY_LIMIT * 2
+    })
+      .filter((h) => !VISIT_SOURCE_IDS.has(h.source))
+      .sort((a, b) => (b.occurredAt ?? 0) - (a.occurredAt ?? 0))
+      .slice(0, ACTIVITY_LIMIT)
+      .map((h) => ({
+        recordId: h.id,
+        source: h.source,
+        type: h.type,
+        title: h.title,
+        occurredAt: h.occurredAt
+      }))
+
+    const docs = db
+      .select({
+        linkId: documentLinks.id,
+        documentId: documents.id,
+        title: documents.title,
+        docDate: documents.docDate,
+        mimeType: documents.mimeType
+      })
+      .from(documentLinks)
+      .innerJoin(documents, eq(documents.id, documentLinks.documentId))
+      .where(and(eq(documentLinks.targetKind, 'place'), eq(documentLinks.targetId, row.externalId)))
+      .all()
+
+    return {
+      place: { ...rowToRecord(row), meta: parseMeta<PlaceMeta>(row.meta) },
+      matchKey,
+      stats: computeVisitStats(visits),
+      monthly: computeVisitMonthly(visits),
+      visits: visits.slice(-VISIT_LIST_LIMIT).reverse(),
+      activity,
+      documents: docs
+    }
+  })
+
+  ipcMain.handle('places:update', (_event, id: number, patch: PlaceUpdatePatch) => {
+    if (!Number.isInteger(id)) throw new Error('places:update requires an integer id')
+    if (!patch || typeof patch !== 'object') throw new Error('places:update: patch required')
+    const db = getDb()
+    const row = db.select().from(places).where(eq(places.id, id)).all()[0]
+    if (!row) throw new Error('places:update: not found')
+
+    const updates: Partial<PlaceRow> = {}
+    const name = cleanString(patch.name, MAX_LEN.name)
+    // A place can't be nameless; dropping the name entirely is rejected
+    // rather than silently keeping the old one.
+    if (name === null) throw new Error('places:update: name cannot be empty')
+    if (name !== undefined) updates.name = name
+    const category = cleanString(patch.category, MAX_LEN.category)
+    if (category !== undefined) updates.category = category
+    const address = cleanString(patch.address, MAX_LEN.address)
+    if (address !== undefined) updates.address = address
+    const url = cleanUrl(patch.url)
+    if (url !== undefined) updates.url = url
+    const notes = cleanString(patch.notes, MAX_LEN.notes)
+    if (notes !== undefined) updates.notes = notes
+
+    if (Object.keys(updates).length === 0) return { success: true }
+    updates.updatedAt = new Date()
+    db.update(places).set(updates).where(eq(places.id, id)).run()
+    return { success: true }
+  })
+
+  ipcMain.handle('places:create-manual', (_event, input: PlaceCreateInput) => {
+    if (!input || typeof input !== 'object') throw new Error('places:create-manual: input required')
+    const name = cleanString(input.name, MAX_LEN.name)
+    if (!name) throw new Error('places:create-manual: name is required')
+    const db = getDb()
+    const result = db
+      .insert(places)
+      .values({
+        externalId: `manual:${randomUUID()}`,
+        kind: 'place',
+        name,
+        category: cleanString(input.category, MAX_LEN.category) ?? null,
+        address: cleanString(input.address, MAX_LEN.address) ?? null,
+        url: cleanUrl(input.url) ?? null,
+        notes: cleanString(input.notes, MAX_LEN.notes) ?? null,
+        source: 'manual',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      })
+      .run()
+    return { success: true, id: Number(result.lastInsertRowid) }
+  })
+
+  // Untrack = delete the owned row AND clear the projection row's promoted
+  // flags inline (see clearPromotedFlags) — identical contract to
+  // merchants:untrack.
+  ipcMain.handle('places:untrack', (_event, id: number) => {
+    if (!Number.isInteger(id)) throw new Error('places:untrack requires an integer id')
+    const db = getDb()
+    const row = db.select().from(places).where(eq(places.id, id)).all()[0]
+    if (!row) return { success: true }
+    db.delete(places).where(eq(places.id, id)).run()
+    clearPromotedFlags(db, row.externalId)
     return { success: true }
   })
 }

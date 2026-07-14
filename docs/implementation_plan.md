@@ -867,6 +867,44 @@ undo any of it:
 
 ---
 
+## Addendum (2026-07-13) — Places redesign: tracked-place profiles
+
+> Follow-up to the merchants redesign above and the 2026-07-10 curation addendum's "Merchants & Places
+> split" (#342): `/places` gets the same tracked-profile treatment merchants just got — a Contacts-style
+> master–detail over promoted `places` rows, instead of just the Discovered list + travel map.
+
+- **IPC** — `electron/ipc/places.ts` (`registerPlacesHandlers`) drops the orphaned `places:list` /
+  `places:delete` handlers (no renderer consumers) and adds `places:list-tracked` (tracked `kind='place'`
+  rows + LIVE visit stats), `places:profile` (visit stats / monthly buckets / recent visits / cross-source
+  activity via `searchRecords`/`documents`), `places:update` (validated field allowlist),
+  `places:create-manual`, `places:untrack` (delete + clear the projection row's promoted flags).
+  `promoteDerivedPlace` is unchanged. The shared places-row validators (`cleanString`/`cleanUrl`/`MAX_LEN`/
+  `parseMeta`/`clearPromotedFlags`) now live in `places.ts` and are imported by `merchants.ts`
+  (dependency direction merchants.ts → places.ts, mirroring the merchants redesign note above). Exposed as
+  `window.api.places.{listTracked,profile,update,createManual,untrack}`.
+- **Privacy** — the new handlers read the `records` spine + owned tables only — NEVER `location_points` —
+  and, like `location:map-data`, are renderer-only: not registered as an assistant or MCP tool (banner
+  comment in the file). No MCP changes shipped with this wave.
+- **New pure lib** — `electron/lib/place-profile.ts`: `placeMatchKey` (normalizeName-based, NOT
+  `matchKeyForPlace` from `merchant-match.ts`, whose manual-row fallback is merchant-flavored normalization
+  that would strip corporate suffixes a place name should keep), `VISIT_SOURCES` (derived from the four
+  place extractors — `gcal-place`/`uber-place`/`lyft-place`/`travel-place` in `electron/lib/entities.ts`),
+  `extractPlaceRefs` (reuses the `ENTITY_EXTRACTORS` registry rather than re-implementing matching),
+  `computeVisitStats` (YTD-vs-same-span-last-year trend + `detectCadence`), `computeVisitMonthly`,
+  `indexVisitsByKey`. Unit tests in `place-profile.test.ts`; `electron/ipc/places.test.ts` extended for the
+  new handlers.
+- **UI** — `src/pages/Places.tsx` rewritten: a stat strip (tracked count, countries visited from trip
+  bundles, location-points span, most visited) atop three tabs — **Tracked** (master–detail with new
+  `src/components/PlaceDetail.tsx`: visit stat cards, a monthly Recharts visits chart, recent visits,
+  cross-source activity, document attach via `targetKind:'place'`, inline edit, untrack), **Discovered**
+  (`DerivedEntityList` `kind="place"` with Track/Tracked labels), **Travel** (existing `LocationMap` +
+  trip-bundles list with per-trip spend + a deep link to Finance → Residency via
+  `FINANCE_TAB_STORAGE_KEY`). Manual "Add place" create form. `PlaceMeta` reserves `geo` (future
+  GPS-correlation) and `enrichment` (future web-enrich) namespaces on `places.meta`, mirroring
+  `MerchantMeta`.
+
+---
+
 ## Backlog (deferred, considered but out of scope this round)
 
 ## Phase 5 — Strategic-review follow-ups (May 2026)
