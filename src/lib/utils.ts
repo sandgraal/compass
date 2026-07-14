@@ -31,6 +31,14 @@ export function formatRelative(date: Date | string | number | null | undefined):
   return `${days}d ago`
 }
 
+/** Whole ~months since a past ms timestamp (30-day months; 0 when under one). */
+export function monthsSince(ts: number, now = Date.now()): number {
+  return Math.max(0, Math.floor((now - ts) / (30 * 86_400_000)))
+}
+
+/** Web-enrichment results older than this many months get a refresh nudge. */
+export const WEB_ENRICH_STALE_MONTHS = 6
+
 /**
  * Local-calendar `YYYY-MM-DD` key for a date. Built from local Y/M/D — never
  * `toISOString()` (which is UTC and shifts the day boundary ±1 for users
