@@ -428,9 +428,10 @@ declare global {
     country?: string
     pref?: boolean
   }
-  // Contact enrichment — mirrors electron/lib/contact-enrichment.ts. Two
-  // namespaces so the Google sync (`google`) and the cross-source pass
-  // (`crossSource`) never clobber each other.
+  // Contact enrichment — mirrors electron/lib/contact-enrichment.ts.
+  // Independently-owned namespaces so the Google sync (`google`), the
+  // cross-source pass (`crossSource`), and the opt-in web enrichment
+  // (`web`) never clobber each other.
   interface GoogleEnrichment {
     nicknames?: string[]
     biography?: string | null
@@ -462,10 +463,82 @@ declare global {
     matchedBy: ('name' | 'email' | 'phone')[]
     refreshedAt: number
   }
+  interface WebSource {
+    url: string
+    title?: string
+  }
+  interface WebFact {
+    text: string
+    sourceUrl?: string
+    confidence: 'high' | 'medium' | 'low'
+  }
+  interface WebLink {
+    type?: string
+    value: string
+    sourceUrl?: string
+  }
+  interface WebEnrichment {
+    searchedAs: string
+    matchConfidence: 'high' | 'medium' | 'low'
+    bio?: string | null
+    location?: string | null
+    links: WebLink[]
+    facts: WebFact[]
+    sources: WebSource[]
+    refreshedAt: number
+    model?: string
+  }
   interface ContactEnrichment {
     google?: GoogleEnrichment
     crossSource?: CrossSourceSummary
+    web?: WebEnrichment
   }
+  // Web enrichment run — mirrors electron/lib/contact-web-enrichment.ts +
+  // electron/ipc/contact-web-enrich.ts. Proposals are reviewed in the dialog
+  // and applied BY ID against the main-process cached run.
+  interface WebEnrichProposal {
+    id: number
+    kind: 'jobTitle' | 'org' | 'birthday' | 'url' | 'location' | 'bio' | 'link' | 'fact'
+    label?: string
+    currentValue: string | null
+    proposedValue: string
+    sourceUrl?: string
+    sourceVerified: boolean
+    confidence: 'high' | 'medium' | 'low'
+    writesToContact: boolean
+  }
+  interface WebEnrichCandidate {
+    name: string
+    descriptor: string
+    sourceUrl?: string
+  }
+  interface WebEnrichRunUsage {
+    searchCount: number
+    inputTokens: number
+    outputTokens: number
+  }
+  type WebEnrichRunResult =
+    | { success: false; error: string; needsKey?: boolean; cancelled?: boolean }
+    | ({
+        success: true
+        outcome: 'none'
+        searchedAs: string
+        message: string
+      } & WebEnrichRunUsage)
+    | ({
+        success: true
+        outcome: 'candidates'
+        searchedAs: string
+        candidates: WebEnrichCandidate[]
+      } & WebEnrichRunUsage)
+    | ({
+        success: true
+        outcome: 'proposals'
+        runId: string
+        searchedAs: string
+        matchConfidence: 'high' | 'medium' | 'low'
+        proposals: WebEnrichProposal[]
+      } & WebEnrichRunUsage)
   interface ContactActivityHit {
     recordId: number
     source: string
@@ -1700,6 +1773,17 @@ declare global {
         }>
         enrichStatus(): Promise<{ needsReconnect: boolean }>
         activity(id: number): Promise<ContactActivityHit[]>
+        webEnrich(req: {
+          contactId: number
+          hints?: string
+          candidateHint?: string
+        }): Promise<WebEnrichRunResult>
+        webEnrichApply(req: { runId: string; accepted: number[] }): Promise<{
+          success: boolean
+          applied?: { fields: string[]; findings: number }
+          error?: string
+        }>
+        webEnrichCancel(): Promise<{ success: boolean; error?: string }>
         duplicates(): Promise<DuplicatePair[]>
         merge(survivorId: number, loserIds: number[]): Promise<{ success: boolean }>
         dismissDuplicate(aExternalId: string, bExternalId: string): Promise<{ success: boolean }>

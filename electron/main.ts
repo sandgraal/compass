@@ -15,6 +15,7 @@ import { registerBackupHandlers } from './ipc/backup'
 import { registerCanopyHandlers } from './ipc/canopy'
 import { registerClaudeHandlers } from './ipc/claude'
 import { registerContactEnrichHandlers } from './ipc/contact-enrich'
+import { registerContactWebEnrichHandlers } from './ipc/contact-web-enrich'
 import { registerContactsHandlers } from './ipc/contacts'
 import { registerCredHandlers } from './ipc/cred'
 import { registerCurationHandlers } from './ipc/curation'
@@ -261,6 +262,7 @@ app.whenReady().then(async () => {
   registerKnotHandlers(ipcMain)
   registerContactsHandlers(ipcMain)
   registerContactEnrichHandlers(ipcMain)
+  registerContactWebEnrichHandlers(ipcMain)
   registerCurationHandlers(ipcMain)
   registerExportHandlers(ipcMain)
   registerSubscriptionsHandlers(ipcMain)
