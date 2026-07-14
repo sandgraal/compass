@@ -4,6 +4,7 @@ import type { AssetInput } from './ipc/assets'
 import type { ContactInput } from './ipc/contacts'
 import type { LifeRecordInput } from './ipc/life-records'
 import type { MerchantUpdatePatch } from './ipc/merchants'
+import type { PlaceCreateInput, PlaceUpdatePatch } from './ipc/places'
 import type { SubscriptionInput } from './ipc/subscriptions'
 import type { UpdaterStatusPayload } from './ipc/updater'
 import type { EntityKind } from './lib/entities'
@@ -530,9 +531,14 @@ const api = {
   location: {
     mapData: () => ipcRenderer.invoke('location:map-data')
   },
+  // Tracked places (places redesign) — the rich profile surface over promoted
+  // `places` rows (kind='place'). See electron/ipc/places.ts.
   places: {
-    list: () => ipcRenderer.invoke('places:list'),
-    delete: (id: number) => ipcRenderer.invoke('places:delete', id)
+    listTracked: () => ipcRenderer.invoke('places:list-tracked'),
+    profile: (id: number) => ipcRenderer.invoke('places:profile', id),
+    update: (id: number, patch: PlaceUpdatePatch) => ipcRenderer.invoke('places:update', id, patch),
+    createManual: (input: PlaceCreateInput) => ipcRenderer.invoke('places:create-manual', input),
+    untrack: (id: number) => ipcRenderer.invoke('places:untrack', id)
   },
   // Tracked merchants (merchants redesign) — the rich profile surface over
   // promoted `places` rows. See electron/ipc/merchants.ts.
