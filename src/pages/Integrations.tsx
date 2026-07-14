@@ -1122,7 +1122,7 @@ export default function Integrations(): JSX.Element {
                     {conn.historyBackfillStatus !== 'complete' && (
                       <button
                         type="button"
-                        disabled={simplefinBackfillingId === conn.connectionId}
+disabled={simplefinBackfillingId !== null}
                         onClick={() =>
                           void backfillSimplefinConnectionHistory(conn.connectionId, conn.orgName)
                         }
