@@ -5,7 +5,7 @@ import type { ContactInput } from './ipc/contacts'
 import type { LifeRecordInput } from './ipc/life-records'
 import type { MerchantUpdatePatch } from './ipc/merchants'
 import type { PlaceCreateInput, PlaceUpdatePatch } from './ipc/places'
-import type { SubscriptionInput } from './ipc/subscriptions'
+import type { SubscriptionInput, UsageRating } from './ipc/subscriptions'
 import type { UpdaterStatusPayload } from './ipc/updater'
 import type { EntityKind } from './lib/entities'
 
@@ -590,9 +590,12 @@ const api = {
   subscriptions: {
     list: () => ipcRenderer.invoke('subscriptions:list'),
     getDetected: () => ipcRenderer.invoke('subscriptions:get-detected'),
+    profile: (id: number) => ipcRenderer.invoke('subscriptions:profile', id),
     create: (input: SubscriptionDraft) => ipcRenderer.invoke('subscriptions:create', input),
     update: (id: number, updates: SubscriptionDraft) =>
       ipcRenderer.invoke('subscriptions:update', id, updates),
+    setUsage: (id: number, rating: UsageRating) =>
+      ipcRenderer.invoke('subscriptions:set-usage', id, rating),
     delete: (id: number) => ipcRenderer.invoke('subscriptions:delete', id),
     trackDetected: (detected: DetectedSubscriptionInput) =>
       ipcRenderer.invoke('subscriptions:track-detected', detected),

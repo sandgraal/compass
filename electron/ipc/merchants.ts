@@ -148,8 +148,14 @@ function rowToRecord(r: PlaceRow): PlaceRecord {
   }
 }
 
-/** Slim rows for one merchant key, oldest-first (the aggregates sort anyway). */
-function loadSlimTxns(matchKey: string): MerchantSlimTxn[] {
+/**
+ * Slim rows for one merchant key, oldest-first (the aggregates sort anyway).
+ * Exported for reuse by `subscriptions:profile` (electron/ipc/subscriptions.ts),
+ * which resolves the same merge key via `matchKeyForSubscription` — the exact
+ * inverse of `findLinkedSubscription` below — to compute a subscription's
+ * "total paid to date" without re-deriving the transaction query.
+ */
+export function loadSlimTxnsByMerchantKey(matchKey: string): MerchantSlimTxn[] {
   if (!matchKey) return []
   return getRawSqlite()
     .prepare(
@@ -290,7 +296,7 @@ export function registerMerchantsHandlers(ipcMain: IpcMain): void {
     if (!row) throw new Error('merchants:profile: not found')
     const matchKey = matchKeyForPlace(row.externalId, row.name)
 
-    const slim = loadSlimTxns(matchKey)
+    const slim = loadSlimTxnsByMerchantKey(matchKey)
     const stats = computeMerchantStats(slim)
     const inDominant = slim.filter((t) => (t.currency || 'USD') === stats.currency)
 

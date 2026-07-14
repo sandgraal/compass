@@ -19,6 +19,7 @@ import {
   Wallet
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Area,
   AreaChart,
@@ -4506,6 +4507,7 @@ function CrSubsTab({
   subscriptions: SubscriptionsData | null
 }): JSX.Element {
   const totalGeo = geoSummary?.geo.reduce((s, g) => s + g.amount, 0) ?? 0
+  const navigate = useNavigate()
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-6">
@@ -4575,12 +4577,21 @@ function CrSubsTab({
       <div className="bg-card border border-border rounded-xl p-5">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold">Active subscriptions</h3>
-          {subscriptions && (
-            <span className="text-xs text-muted-foreground">
-              {subscriptions.active.length} active · {fmtMoney(subscriptions.totalActiveAnnual)}/yr
-              · {fmtMoney(subscriptions.totalActiveAnnual / 12)}/mo
-            </span>
-          )}
+          <div className="flex items-center gap-3">
+            {subscriptions && (
+              <span className="text-xs text-muted-foreground">
+                {subscriptions.active.length} active · {fmtMoney(subscriptions.totalActiveAnnual)}
+                /yr · {fmtMoney(subscriptions.totalActiveAnnual / 12)}/mo
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => navigate('/subscriptions')}
+              className="text-xs text-primary hover:underline shrink-0"
+            >
+              See full detail →
+            </button>
+          </div>
         </div>
         {!subscriptions || subscriptions.active.length === 0 ? (
           <p className="text-sm text-muted-foreground">

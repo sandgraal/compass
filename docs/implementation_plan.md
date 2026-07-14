@@ -22,7 +22,7 @@
 | **Phase 6** — Code-health debt (May 2026) | 5 items | 100% — 6.1 IPC test backfill (vault/auth/finance×3/sync/knowledge/settings/spotlight/habits/updater), 6.2 knowledge tests, 6.3 empty-catch sweep, 6.4 Biome 0-warning + `--error-on-warnings` CI gate (#139), 6.5 type-safety audit all shipped |
 | **Phase 7** — Daily-Driver & Platform Roadmap | 6 tracks | **In progress.** Track A ✅ (Morning Brief + low-cash/price-hike alerts, weekly/monthly review, multi-type capture; voice deferred) · Track B 🟡 (Obsidian + Notion-import + Linear + Todoist + Things + Email-receipts shipped; Apple Reminders = spike in #376 (notarization-gated), see [`docs/apple-reminders.md`](apple-reminders.md); Slack/Jira/Outlook+CalDAV/IMAP/web-clipper open) · Track C 🟡 (MCP surface expanded; webhooks/plugin-API/marketplace/Zapier open) · Track D 🟡 (device sync: snapshot+LWW via relay mailbox shipped; per-table merge, mobile, sharing open) · Track E ✅ (proactive insights + agentic plan-my-week) · Track F 🟡 (theming shipped; mobile-responsive + a11y open). See § Phase 7. |
 | **Phase 8** — Claude Integration (bidirectional) | 6 items | **100% — all shipped** (MCP read+propose tools, in-app Claude Inbox, one-click `.mcpb` Desktop bundle, end-user plugin, 5 skills, agentic Ask Compass) — see § Phase 8 + [`claude-integration.md`](claude-integration.md) |
-| **Phase 9** — The Storehouse (own everything, export anywhere) | 9 items | **~85%.** 9.0 Contacts + Universal Export ✅ · 9.1 archive importers ✅ (**live Google Contacts sync ✅** via the People API — needs a Google reconnect for `contacts.readonly`; **contact enrichment ✅** — widened Google fields + cross-source summary, see below; macOS Contacts live-sync open) · **9.2 Documents & files store ✅ (2026-07-11)** · 9.3 Subscriptions ✅ · **9.4 Medical records ✅ — shipped 2026-07-06, superseded (see below)** · **9.4b Lab & vital results ✅ — shipped 2026-07-12** (quantitative counterpart to `medical_records`, see below) · 9.5 Assets ✅ · 9.6 Storehouse overview ✅ · **9.7 reverse-connectors open** — see § Phase 9 |
+| **Phase 9** — The Storehouse (own everything, export anywhere) | 9 items | **~85%.** 9.0 Contacts + Universal Export ✅ · 9.1 archive importers ✅ (**live Google Contacts sync ✅** via the People API — needs a Google reconnect for `contacts.readonly`; **contact enrichment ✅** — widened Google fields + cross-source summary, see below; macOS Contacts live-sync open) · **9.2 Documents & files store ✅ (2026-07-11)** · **9.3 Subscriptions ✅ — redesign phase 1 shipped 2026-07-14 (tracked-subscription profiles, see addendum below; phase 2 web enrichment deferred)** · **9.4 Medical records ✅ — shipped 2026-07-06, superseded (see below)** · **9.4b Lab & vital results ✅ — shipped 2026-07-12** (quantitative counterpart to `medical_records`, see below) · 9.5 Assets ✅ · 9.6 Storehouse overview ✅ · **9.7 reverse-connectors open** — see § Phase 9 |
 | **Phase 10** — The Acquisition Engine (go get everything) | 7 waves | **~55%.** 10.1 spine ✅ (Drop Zone + `records`/Timeline + **44 recognizers**, growing — crypto/WhatsApp/X/rideshare/Fitbit/Garmin landed 2026-07) · **live-sync projectors ✅ (finance + Gmail + Calendar + GitHub + Linear + medical → the `records` spine, so live-synced data reaches People/Merchants/Places/Timeline/Search — Gmail senders → People via an automated-sender filter, calendar locations → Places, GitHub authors → People (bots/self filtered), GitHub/Linear issues → Timeline/Search; migration `0026` added GitHub `author`+`updated_at` and Linear `updated_at` for real timeline dates)** · 10.5 Data-Rights Concierge ✅ (redesigned 2026-07 to **27 sources across 6 domains**, + tax/SSA PDF recognizers) · 10.6 CRED sandbox ✅ (SSA adapter, gated off by default) · 10.7 Converse/Connect/Curate ✅ · **10.8 Location→Residency autopilot ✅** (location export → offline point-in-polygon → auto `travel_segments`; raw coords kept OFF the AI-searchable spine) · **10.3 Health hub ✅** (unified steps/sleep/Oura-scores/workouts surface over already-ingested wearables + aggregates-only `compass_health_summary`) · **10.9 metered relay + all 8 aggregators code-shipped 2026-07-05/06** (Terra/Canopy/Argyle/Arcadia/Nylas/Metriport/Knot relay-fronted + BYO-direct SnapTrade — incl. Metriport FHIR clinical records → Medical hub and Terra's 500+-wearable coverage, closing out 10.3's "remaining wearables"; **live use of the relay-fronted seven needs a deployed relay + real paid API credentials — code-complete and unit-tested, not a missing-code gap**) · **genetics raw-data import shipped** (23andMe/AncestryDNA `.txt` → sealed `genetics` vault category, `electron/lib/genetics.ts`) · **10.2 LIVE crypto valuation/IRS transcripts, 10.4 Apple Data & Privacy, full 10.6 open** — see § Phase 10 + [`storehouse-roadmap.md`](storehouse-roadmap.md) |
 | **Phase 11** — Life Planning & Cross-Border (NEW) | 7 items | **✅ Complete (2026-06-30).** Output of the June expert panel ([`strategic-review-2026-06.md`](strategic-review-2026-06.md)): all 7 items shipped — 11.1 multi-currency, 11.2 expat tax (FBAR/FATCA), 11.3 Airbnb P&L, 11.4 long-horizon retirement, 11.5 residency/days-in-country, 11.6 goals, 11.7 estate. The optional 11.1 follow-ups (ingest-time txn currency, base-currency forecast rollup, unrealized FX gain/loss) are now implemented — PRs #268/#269 + the FX-gain/loss change. **2026-07-14 addendum:** the 11.2 vault-split follow-ups (`.migrated.enc` blob retirement, `life_record_links` + Life Records link chips, FBAR user-entered-max override) shipped — see the dated addendum below. See § Phase 11 |
 
@@ -1033,6 +1033,53 @@ undo any of it:
   official FBAR figure is often read off a statement rather than derivable from Compass's own balance
   snapshots. `FbarAccountYear.maxUsdSource` (`'snapshot'` \| `'user'`) marks which won; the Finance → Expat
   Tax FBAR table shows an "entered" badge with a tooltip explaining the override.
+
+---
+
+## Addendum (2026-07-14) — Subscriptions redesign phase 1: tracked-subscription profiles
+
+> Follow-up to the 2026-07-13/14 Merchants/Places redesign addenda above: `/subscriptions` gets the same
+> tracked-profile treatment merchants/places just got, over the ORIGINAL Phase 9.3 owned `subscriptions`
+> table (§9.3 above) rather than the cross-reference engine's promote-and-forget list.
+
+- [x] **Schema** — `subscriptions` gained `trial_ends_at` (ISO date, first-class alongside `next_renewal`)
+  and `meta` (namespaced JSON, mirrors `places.meta`) — migration `0045_spooky_lifeguard.sql` (+
+  `ensureColumn` fallback in `ensureNewTables`, guarded in a try/catch like `contacts` since the
+  `subscriptions` table itself is created by migration `0013`, not the pure-ensure CREATE path).
+  `meta.usage: { rating: 'love'|'use'|'rarely'|'barely', ratedAt }` is the user's manual "is this worth it"
+  self-check-in; `meta.enrichment` is reserved, unwritten, for the deferred phase-2 web-enrichment feature
+  below.
+- [x] **New pure lib modules** — `electron/lib/subscription-usage.ts` extracts `STREAMING_USAGE` +
+  the usage-match predicate out of `electron/ipc/insights.ts`'s unused-subscription detector (behavior-
+  preserving refactor) so both the Insights sweep and the new per-subscription profile share one source of
+  truth. `electron/lib/merchant-match.ts` gained `matchKeyForSubscription(externalId, name)` — the inverse
+  of `findLinkedSubscription` in `electron/ipc/merchants.ts`.
+- [x] **IPC** (`electron/ipc/subscriptions.ts`) — new `subscriptions:profile` (exported as
+  `buildSubscriptionProfile` for direct testing) returns `{ subscription, totalPaid, signals, documents }`:
+  total paid to date (a real ledger match via `computeMerchantStats`/`loadSlimTxnsByMerchantKey`, now
+  exported from `electron/ipc/merchants.ts`, or an "estimated" cadence×elapsed-time fallback when there's no
+  ledger match), signals cross-referenced from the EXISTING `auditSubscriptions()` detector (price-hike,
+  zombie/expired, duplicate-account billing) and the usage detector (unused-subscription flag) — never
+  recomputed. New `subscriptions:set-usage` writes `meta.usage`; a generic `:update` never touches `meta`,
+  so it can't clobber the usage self-check-in or the reserved `enrichment` namespace. `subscriptions:list`
+  now returns per-row `priceHike`/`zombie`/`isDuplicate`/`unused` badges computed from ONE shared
+  `auditSubscriptions()` call + one shared usage-records query, not per-row. Documents can now be attached
+  via the already-existing `document_links` `targetKind:'subscription'` (allowed value existed since the
+  documents store shipped; just never wired up in the UI before). CSV export gained a `trial_ends_at`
+  column.
+- [x] **Preload/types** — `window.api.subscriptions.{profile,setUsage}`; new types `SubscriptionListItem`,
+  `SubscriptionProfile`, `SubscriptionSignals`, `SubscriptionTotalPaid`, `SubscriptionDocumentItem`,
+  `SubscriptionMeta`, `UsageRating` in `src/types/electron.d.ts`.
+- [x] **UI** — `src/pages/Subscriptions.tsx` rewritten from a flat CRUD list into **Tracked / Discovered**
+  tabs, mirroring `src/pages/Merchants.tsx`'s shape: Tracked is a search+list master column + a top overview
+  strip (active annual total, renewing-soon count, trials-ending-soon count, low-value-flagged count),
+  opening the new `src/components/SubscriptionDetail.tsx` (stat cards, price-hike/zombie/duplicate/unused
+  signal banners, the "Is this worth it?" rating control, documents attach/detach). Discovered is the prior
+  "detected in transactions" + "from your timeline" promote flows, relocated here unchanged.
+  `src/pages/Finance.tsx`'s CR & Subs tab gained a "See full detail →" link to `/subscriptions`.
+- **Deferred to a separate phase-2 PR** — consent-gated web-search enrichment (pricing/plans, cancellation
+  steps, alternatives), analogous to the Places/Merchants "Enrich from web" feature. Scoped out
+  deliberately, not stubbed for; `meta.enrichment` stays reserved but unwritten until that PR.
 
 ---
 

@@ -17,14 +17,28 @@
 
 import { randomUUID } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
-import { eq } from 'drizzle-orm'
+import { and, eq, gte, inArray } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
-import { subscriptions } from '../db/schema'
-import { auditSubscriptions } from '../integrations/finance-subscriptions'
+import { documentLinks, documents, records, subscriptions } from '../db/schema'
+import {
+  type Subscription as AuditedSubscription,
+  type SubscriptionAudit,
+  auditSubscriptions
+} from '../integrations/finance-subscriptions'
 import { serializeCsv } from '../lib/csv'
 import { addExclusions, loadExclusionSet } from '../lib/curation'
-import { annualizeCost } from '../lib/normalize'
+import { matchKeyForSubscription } from '../lib/merchant-match'
+import { type MerchantSlimTxn, computeMerchantStats } from '../lib/merchant-profile'
+import { type Cadence, PER_YEAR, annualizeCost } from '../lib/normalize'
+import {
+  type SubscriptionUsageMatch,
+  matchSubscriptionUsage,
+  usagePairKey,
+  wasSubscriptionUsed
+} from '../lib/subscription-usage'
+import { UNUSED_SUB_DAYS } from './insights'
+import { loadSlimTxnsByMerchantKey } from './merchants'
 
 // Re-exported for the Storehouse summary (electron/ipc/storehouse.ts), which
 // annualizes the same subscription costs.
@@ -87,6 +101,7 @@ const CSV_HEADERS = [
   'category',
   'status',
   'next_renewal',
+  'trial_ends_at',
   'payment_account',
   'cancel_url',
   'source',
@@ -106,6 +121,7 @@ export function buildSubscriptionsCsv(): string {
       category: r.category ?? '',
       status: r.status,
       next_renewal: r.nextRenewal ?? '',
+      trial_ends_at: r.trialEndsAt ?? '',
       payment_account: r.paymentAccount ?? '',
       cancel_url: r.cancelUrl ?? '',
       source: r.source,
@@ -122,9 +138,34 @@ export interface SubscriptionInput {
   category?: string | null
   status?: string
   nextRenewal?: string | null
+  trialEndsAt?: string | null
   paymentAccount?: string | null
   cancelUrl?: string | null
   notes?: string | null
+}
+
+/**
+ * Namespaced JSON extras on a subscriptions row (`subscriptions.meta`) —
+ * mirrors `places.meta`. `usage` is the user's own "is this worth it"
+ * self-check-in (no usage-tracking API exists or should exist here — this is
+ * an explicit, cheap, user-driven signal). `enrichment` is reserved for a
+ * future consent-gated web-enrichment pass (pricing/cancellation/alternatives).
+ */
+export interface SubscriptionMeta {
+  usage?: { rating: UsageRating; ratedAt: number }
+}
+
+export type UsageRating = 'love' | 'use' | 'rarely' | 'barely'
+const USAGE_RATINGS: ReadonlySet<string> = new Set<UsageRating>(['love', 'use', 'rarely', 'barely'])
+
+function parseSubMeta(raw: string | null): SubscriptionMeta | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? (parsed as SubscriptionMeta) : null
+  } catch {
+    return null
+  }
 }
 
 type SubRow = typeof subscriptions.$inferSelect
@@ -150,17 +191,21 @@ function rowToRecord(row: SubRow) {
     category: row.category,
     status: row.status,
     nextRenewal: row.nextRenewal,
+    trialEndsAt: row.trialEndsAt,
     paymentAccount: row.paymentAccount,
     cancelUrl: row.cancelUrl,
     notes: row.notes,
     source: row.source,
+    meta: parseSubMeta(row.meta),
     annualCost: annualizeCost(row.cost, row.cadence),
     createdAt: row.createdAt ? row.createdAt.getTime() : null,
     updatedAt: row.updatedAt ? row.updatedAt.getTime() : null
   }
 }
 
-/** Build the writable column set from renderer input. */
+/** Build the writable column set from renderer input. Never touches `meta` —
+ * that's written only via `subscriptions:set-usage`, so a generic edit can
+ * never clobber the usage self-check-in (or a future enrichment namespace). */
 function toStorage(input: SubscriptionInput) {
   return {
     name: clamp(input.name, MAX_TEXT) || 'Untitled subscription',
@@ -169,23 +214,269 @@ function toStorage(input: SubscriptionInput) {
     category: clamp(input.category, MAX_TEXT),
     status: clamp(input.status, 32) || 'active',
     nextRenewal: clamp(input.nextRenewal, 32),
+    trialEndsAt: clamp(input.trialEndsAt, 32),
     paymentAccount: clamp(input.paymentAccount, MAX_TEXT),
     cancelUrl: clamp(input.cancelUrl, MAX_TEXT),
     notes: clamp(input.notes, MAX_NOTES)
   }
 }
 
+/** Find this subscription's audit record — never recomputed, straight off the
+ * existing ledger detector. Prefers an exact (merchant, account) match when
+ * the subscription has a known payment account, else the first match on
+ * merchant alone. */
+function findAuditMatch(
+  audit: SubscriptionAudit,
+  matchKey: string,
+  accountHint: string | null
+): AuditedSubscription | null {
+  const all = [...audit.active, ...audit.zombies, ...audit.expired]
+  if (accountHint) {
+    const exact = all.find((s) => s.merchant === matchKey && s.account === accountHint)
+    if (exact) return exact
+  }
+  return all.find((s) => s.merchant === matchKey) ?? null
+}
+
+const MS_PER_YEAR = 365.25 * 24 * 3600 * 1000
+
+/** Cash-paid or manual subscription with no ledger match — estimate from
+ * cadence × elapsed time since it was added, using the same PER_YEAR table
+ * `annualizeCost` already uses so the estimate never invents its own math. */
+function estimateTotalPaid(row: SubRow, now: Date): SubscriptionTotalPaid {
+  const perYear = PER_YEAR[row.cadence as Cadence] ?? 12
+  const start = row.createdAt ?? now
+  const elapsedYears = Math.max(0, (now.getTime() - start.getTime()) / MS_PER_YEAR)
+  const periods = Math.floor(elapsedYears * perYear)
+  return {
+    totalSpend: Math.round(row.cost * periods * 100) / 100,
+    txnCount: 0,
+    lastTxnDate: null,
+    currency: 'USD',
+    estimated: true
+  }
+}
+
+export interface SubscriptionTotalPaid {
+  totalSpend: number
+  txnCount: number
+  lastTxnDate: string | null
+  currency: string
+  /** True when there was no ledger match and this is a cadence×time estimate. */
+  estimated: boolean
+}
+
+export interface SubscriptionSignals {
+  matchKey: string
+  hasLedgerMatch: boolean
+  auditStatus: AuditedSubscription['status'] | null
+  priceHike: boolean
+  priceHikeDelta: number
+  priceHikePct: number
+  recentMedian: number
+  historicalMedian: number
+  isDuplicate: boolean
+  duplicateAccounts: string[]
+  duplicateCombinedAnnual: number
+  /** False when this subscription isn't a usage-trackable streaming service. */
+  unusedTrackable: boolean
+  unused: boolean
+  unusedWindowDays: number
+}
+
+export interface SubscriptionDocumentItem {
+  linkId: number
+  documentId: number
+  title: string
+  docDate: string | null
+  mimeType: string | null
+}
+
+export interface SubscriptionProfile {
+  subscription: ReturnType<typeof rowToRecord>
+  totalPaid: SubscriptionTotalPaid
+  signals: SubscriptionSignals
+  documents: SubscriptionDocumentItem[]
+}
+
+/**
+ * "Everything we know about one subscription" — total paid to date (a real
+ * ledger match when we have one, an honest estimate otherwise), price-hike /
+ * zombie / duplicate signals cross-referenced from the existing
+ * `auditSubscriptions()` detector (never recomputed here), whether Compass
+ * has SEEN this subscription actually used recently, and attached documents.
+ * Exported (not just registered as an IPC handler) so it's directly testable.
+ */
+export function buildSubscriptionProfile(id: number, now: Date = new Date()): SubscriptionProfile {
+  if (!Number.isInteger(id)) throw new Error('subscriptions:profile requires an integer id')
+  const db = getDb()
+  const row = db.select().from(subscriptions).where(eq(subscriptions.id, id)).all()[0]
+  if (!row) throw new Error('subscriptions:profile: not found')
+
+  const matchKey = matchKeyForSubscription(row.externalId, row.name)
+
+  const slim: MerchantSlimTxn[] = matchKey ? loadSlimTxnsByMerchantKey(matchKey) : []
+  const stats = computeMerchantStats(slim)
+  const totalPaid: SubscriptionTotalPaid =
+    stats.txnCount > 0
+      ? {
+          totalSpend: stats.totalSpend,
+          txnCount: stats.txnCount,
+          lastTxnDate: stats.lastTxnDate,
+          currency: stats.currency,
+          estimated: false
+        }
+      : estimateTotalPaid(row, now)
+
+  const audit = auditSubscriptions(db)
+  const auditMatch = findAuditMatch(audit, matchKey, row.paymentAccount)
+  const duplicateEntry = audit.duplicates.find((d) => d.merchant === matchKey)
+
+  const usageMatch = matchSubscriptionUsage(row.name)
+  let unusedTrackable = false
+  let unused = false
+  if (usageMatch && row.status === 'active') {
+    unusedTrackable = true
+    const since = new Date(now.getTime() - UNUSED_SUB_DAYS * 24 * 3600 * 1000)
+    const usedPairs = new Set(
+      db
+        .select({ source: records.source, type: records.type })
+        .from(records)
+        .where(
+          and(
+            inArray(records.source, usageMatch.sources),
+            inArray(records.type, usageMatch.types),
+            gte(records.occurredAt, since)
+          )
+        )
+        .all()
+        .map((r) => usagePairKey(r.source, r.type))
+    )
+    unused = !wasSubscriptionUsed(usageMatch, usedPairs)
+  }
+
+  const docs = db
+    .select({
+      linkId: documentLinks.id,
+      documentId: documents.id,
+      title: documents.title,
+      docDate: documents.docDate,
+      mimeType: documents.mimeType
+    })
+    .from(documentLinks)
+    .innerJoin(documents, eq(documents.id, documentLinks.documentId))
+    .where(
+      and(eq(documentLinks.targetKind, 'subscription'), eq(documentLinks.targetId, row.externalId))
+    )
+    .all()
+
+  return {
+    subscription: rowToRecord(row),
+    totalPaid,
+    signals: {
+      matchKey,
+      hasLedgerMatch: Boolean(auditMatch),
+      auditStatus: auditMatch?.status ?? null,
+      priceHike: auditMatch?.priceHike ?? false,
+      priceHikeDelta: auditMatch?.priceHikeDelta ?? 0,
+      priceHikePct: auditMatch?.priceHikePct ?? 0,
+      recentMedian: auditMatch?.recentMedian ?? 0,
+      historicalMedian: auditMatch?.historicalMedian ?? 0,
+      isDuplicate: Boolean(duplicateEntry),
+      duplicateAccounts: duplicateEntry?.accounts ?? [],
+      duplicateCombinedAnnual: duplicateEntry?.combinedAnnual ?? 0,
+      unusedTrackable,
+      unused,
+      unusedWindowDays: UNUSED_SUB_DAYS
+    },
+    documents: docs
+  }
+}
+
+export type SubscriptionListItem = ReturnType<typeof rowToRecord> & {
+  priceHike: boolean
+  zombie: boolean
+  isDuplicate: boolean
+  unused: boolean
+}
+
 export function registerSubscriptionsHandlers(ipcMain: IpcMain): void {
-  ipcMain.handle('subscriptions:list', () => {
+  ipcMain.handle('subscriptions:list', (): SubscriptionListItem[] => {
     const db = getDb()
     const rows = db.select().from(subscriptions).all()
+
+    // One detector read + one usage-records read, reused across every row
+    // below — never a per-row DB query. Per-row matching against the
+    // in-memory audit arrays still goes through `findAuditMatch` (the same
+    // account-aware lookup `subscriptions:profile` uses) so a merchant
+    // billed on multiple accounts never shows a badge from the wrong one.
+    const audit = auditSubscriptions(db)
+    const duplicateMerchants = new Set(audit.duplicates.map((d) => d.merchant))
+
+    const activeUsage = rows
+      .filter((r) => r.status === 'active')
+      .map((r) => ({ id: r.id, match: matchSubscriptionUsage(r.name) }))
+      .filter((e): e is { id: number; match: SubscriptionUsageMatch } => Boolean(e.match))
+    let usedPairs = new Set<string>()
+    if (activeUsage.length > 0) {
+      const sources = [...new Set(activeUsage.flatMap((e) => e.match.sources))]
+      const types = [...new Set(activeUsage.flatMap((e) => e.match.types))]
+      const since = new Date(Date.now() - UNUSED_SUB_DAYS * 24 * 3600 * 1000)
+      usedPairs = new Set(
+        db
+          .select({ source: records.source, type: records.type })
+          .from(records)
+          .where(
+            and(
+              inArray(records.source, sources),
+              inArray(records.type, types),
+              gte(records.occurredAt, since)
+            )
+          )
+          .all()
+          .map((r) => usagePairKey(r.source, r.type))
+      )
+    }
+    const unusedIds = new Set(
+      activeUsage.filter((e) => !wasSubscriptionUsed(e.match, usedPairs)).map((e) => e.id)
+    )
+
     // Active first, then by descending annual cost — the biggest live spend on top.
     const order: Record<string, number> = { active: 0, paused: 1, cancelled: 2 }
     return rows
-      .map(rowToRecord)
+      .map((row) => {
+        const matchKey = matchKeyForSubscription(row.externalId, row.name)
+        const auditMatch = findAuditMatch(audit, matchKey, row.paymentAccount)
+        return {
+          ...rowToRecord(row),
+          priceHike: auditMatch?.priceHike ?? false,
+          zombie: auditMatch?.status === 'zombie' || auditMatch?.status === 'expired',
+          isDuplicate: duplicateMerchants.has(matchKey),
+          unused: unusedIds.has(row.id)
+        }
+      })
       .sort(
         (a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || b.annualCost - a.annualCost
       )
+  })
+
+  ipcMain.handle('subscriptions:profile', (_event, id: number) => buildSubscriptionProfile(id))
+
+  ipcMain.handle('subscriptions:set-usage', (_event, id: number, rating: string) => {
+    if (!Number.isInteger(id)) throw new Error('subscriptions:set-usage requires an integer id')
+    if (!USAGE_RATINGS.has(rating)) throw new Error('subscriptions:set-usage: invalid rating')
+    const db = getDb()
+    const row = db.select().from(subscriptions).where(eq(subscriptions.id, id)).all()[0]
+    if (!row) throw new Error('subscriptions:set-usage: not found')
+    const next: SubscriptionMeta = {
+      ...(parseSubMeta(row.meta) ?? {}),
+      usage: { rating: rating as UsageRating, ratedAt: Date.now() }
+    }
+    db.update(subscriptions)
+      .set({ meta: JSON.stringify(next), updatedAt: new Date() })
+      .where(eq(subscriptions.id, id))
+      .run()
+    return { success: true }
   })
 
   // Live detector, read-only — flags which detected charges are already tracked.

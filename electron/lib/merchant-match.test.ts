@@ -4,7 +4,11 @@
  */
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ensureNormalizedMerchants, matchKeyForPlace } from './merchant-match'
+import {
+  ensureNormalizedMerchants,
+  matchKeyForPlace,
+  matchKeyForSubscription
+} from './merchant-match'
 import { normalizeMerchant } from './normalize'
 
 let sqlite: Database.Database
@@ -106,5 +110,38 @@ describe('matchKeyForPlace', () => {
 
   it('keys with colons survive the parse', () => {
     expect(matchKeyForPlace('derived:merchant:weird: key', 'x')).toBe('weird: key')
+  })
+})
+
+describe('matchKeyForSubscription', () => {
+  it('parses the merchant out of a detected external id', () => {
+    expect(matchKeyForSubscription('detected:netflix::Chase Checking', 'Netflix')).toBe('netflix')
+  })
+
+  it('handles the default "—" account suffix', () => {
+    expect(matchKeyForSubscription('detected:spotify::—', 'Spotify')).toBe('spotify')
+  })
+
+  it('falls back to normalizeMerchant(name) for manual rows', () => {
+    expect(matchKeyForSubscription('manual:abc-123', 'Payment to Blue Bottle Inc')).toBe(
+      normalizeMerchant('Payment to Blue Bottle Inc')
+    )
+  })
+
+  it('keys with double colons survive the parse (greedy up to the last "::")', () => {
+    expect(matchKeyForSubscription('detected:weird::key::Chase Checking', 'x')).toBe('weird::key')
+  })
+
+  it('an account name with a single colon does not break the parse', () => {
+    expect(matchKeyForSubscription('detected:netflix::Chase: Business Checking', 'Netflix')).toBe(
+      'netflix'
+    )
+  })
+
+  it('is the exact inverse of the detectedKey format merchants.ts resolves against', () => {
+    const merchant = 'blue bottle coffee'
+    const account = 'Amex Gold'
+    const externalId = `detected:${merchant}::${account}`
+    expect(matchKeyForSubscription(externalId, 'Blue Bottle')).toBe(merchant)
   })
 })

@@ -49,9 +49,9 @@ const DDL = `
   CREATE TABLE subscriptions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
     cost REAL NOT NULL DEFAULT 0, cadence TEXT NOT NULL DEFAULT 'monthly', category TEXT,
-    status TEXT NOT NULL DEFAULT 'active', next_renewal TEXT, payment_account TEXT,
-    cancel_url TEXT, notes TEXT, source TEXT NOT NULL DEFAULT 'manual',
-    created_at INTEGER, updated_at INTEGER
+    status TEXT NOT NULL DEFAULT 'active', next_renewal TEXT, trial_ends_at TEXT,
+    payment_account TEXT, cancel_url TEXT, notes TEXT, source TEXT NOT NULL DEFAULT 'manual',
+    meta TEXT, created_at INTEGER, updated_at INTEGER
   );
   CREATE TABLE documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, file_name TEXT NOT NULL,

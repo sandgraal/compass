@@ -30,6 +30,26 @@ export function matchKeyForPlace(externalId: string, name: string): string {
 }
 
 /**
+ * Resolve the merchant merge key for an owned `subscriptions` row — the exact
+ * inverse of `findLinkedSubscription` (`electron/ipc/merchants.ts`), kept next
+ * to `matchKeyForPlace` so the two link directions can't drift apart. Rows
+ * materialized from the ledger detector carry the key in their
+ * `detected:<merchant>::<account>` external id; manual rows fall back to
+ * normalizing the display name (same acceptable rename caveat as above).
+ *
+ * The account segment is matched with an unrestricted `.*` (not `[^:]*`) —
+ * the delimiter is the literal `::`, and an account name is free to contain a
+ * single colon (e.g. "Chase: Business Checking"). Greedy backtracking still
+ * splits on the LAST `::` in the string, so a merchant key that itself
+ * contains `::` (see the merchant-match.test.ts case) keeps working.
+ */
+export function matchKeyForSubscription(externalId: string, name: string): string {
+  const m = externalId.match(/^detected:(.+)::.*$/)
+  if (m) return m[1]
+  return normalizeMerchant(name)
+}
+
+/**
  * Backfill `finance_transactions.normalized_merchant` for rows that predate
  * the column (or slipped past an insert site). Batched (5k rows per
  * transaction) so a huge ledger can't hold a write lock for seconds;
