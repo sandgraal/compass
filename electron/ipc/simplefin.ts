@@ -14,6 +14,11 @@
  *  - `simplefin:list-connections`  → connection summaries for the card.
  *  - `simplefin:disconnect`        → tombstone the vault entry, unlink owned
  *                                    accounts, delete the connection row.
+ *  - `simplefin:backfill-history`  → one-time "Import full history" action:
+ *                                    walk backward in date windows beyond what
+ *                                    the recurring sync ever fetches, until the
+ *                                    institution's history runs out (see
+ *                                    `backfillSimplefinHistory` in sync.ts).
  *
  * The Access URL embeds HTTP Basic credentials and lives only in
  * `.vault/simplefin.enc` — it is never returned to the renderer.
@@ -25,7 +30,11 @@ import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
 import { financeAccounts, integrations, simplefinConnections } from '../db/schema'
 import { claimSetupToken, fetchAccounts } from '../integrations/simplefin/client'
-import { syncSimplefin } from '../integrations/simplefin/sync'
+import {
+  type SimplefinBackfillResult,
+  backfillSimplefinHistory,
+  syncSimplefin
+} from '../integrations/simplefin/sync'
 import { listConnectionIds, removeAccessUrl, setAccessUrl } from '../integrations/simplefin/vault'
 import { afterFinanceSync } from './storehouse-sync'
 
@@ -42,6 +51,25 @@ export type SimplefinConnectionSummary = {
   orgDomain: string | null
   lastSyncedAt: number | null
   errorCode: string | null
+  /** Oldest ISO date ('YYYY-MM-DD') the "Import full history" backfill has
+   *  reached so far, across all runs. Null if never run. */
+  historyOldestDate: string | null
+  /** Most recent backfill run's stopping reason — see `backfillSimplefinHistory`. */
+  historyBackfillStatus: 'complete' | 'partial' | 'error' | null
+}
+
+const BACKFILL_STATUSES = new Set(['complete', 'partial', 'error'])
+
+/** Narrow the plain-`text` DB column to the renderer contract at runtime —
+ *  only `backfillSimplefinHistory` ever writes this column, but an older
+ *  build, a manual DB edit, or corruption could leave something else there,
+ *  and a blind cast would ship that straight to the renderer. */
+function toBackfillStatus(
+  value: string | null
+): SimplefinConnectionSummary['historyBackfillStatus'] {
+  return value !== null && BACKFILL_STATUSES.has(value)
+    ? (value as SimplefinConnectionSummary['historyBackfillStatus'])
+    : null
 }
 
 export type SimplefinClaimResult = {
@@ -138,16 +166,33 @@ export function registerSimplefinHandlers(ipcMain: IpcMain): void {
         orgName: simplefinConnections.orgName,
         orgDomain: simplefinConnections.orgDomain,
         lastSyncedAt: simplefinConnections.lastSyncedAt,
-        errorCode: simplefinConnections.errorCode
+        errorCode: simplefinConnections.errorCode,
+        historyOldestDate: simplefinConnections.historyOldestDate,
+        historyBackfillStatus: simplefinConnections.historyBackfillStatus
       })
       .from(simplefinConnections)
       .all()
     return rows.map((r) => ({
       ...r,
       // Serialize Date → epoch ms; the preload bridge can't ship Date objects.
-      lastSyncedAt: r.lastSyncedAt ? r.lastSyncedAt.getTime() : null
+      lastSyncedAt: r.lastSyncedAt ? r.lastSyncedAt.getTime() : null,
+      historyBackfillStatus: toBackfillStatus(r.historyBackfillStatus)
     }))
   })
+
+  ipcMain.handle(
+    'simplefin:backfill-history',
+    async (_e, connectionId: unknown): Promise<SimplefinBackfillResult> => {
+      if (typeof connectionId !== 'string' || connectionId.length === 0) {
+        throw new Error('simplefin:backfill-history: connectionId must be a non-empty string')
+      }
+      const result = await backfillSimplefinHistory(connectionId)
+      // Project any newly-ingested older transactions into the Storehouse
+      // spine / net-worth snapshot immediately, same as claim-token does.
+      afterFinanceSync()
+      return result
+    }
+  )
 
   ipcMain.handle('simplefin:disconnect', (_e, connectionId: unknown): { ok: true } => {
     if (typeof connectionId !== 'string' || connectionId.length === 0) {

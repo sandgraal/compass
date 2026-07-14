@@ -350,7 +350,17 @@ export const simplefinConnections = sqliteTable('simplefin_connections', {
   // failure (e.g. 403 after the user revoked the Access URL). When non-null,
   // the Integrations card prompts the user to re-claim a fresh Setup Token.
   errorCode: text('error_code'),
-  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
+  // Historical backfill progress (one-time "Import full history" action,
+  // distinct from the regular date-windowed sync above). Oldest ISO date
+  // ('YYYY-MM-DD') successfully covered so far, so a re-run resumes further
+  // back instead of restarting from now.
+  historyOldestDate: text('history_oldest_date'),
+  // Most recent backfill run's stopping reason: 'complete' (two consecutive
+  // empty windows — assume the institution's history is exhausted), 'partial'
+  // (hit the safety cap; more history may exist, a later run resumes), or
+  // 'error' (a fetch failure stopped the loop). Null = never run.
+  historyBackfillStatus: text('history_backfill_status')
 })
 
 export const financeTransactions = sqliteTable(
