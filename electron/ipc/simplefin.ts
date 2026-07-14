@@ -161,7 +161,12 @@ export function registerSimplefinHandlers(ipcMain: IpcMain): void {
     return rows.map((r) => ({
       ...r,
       // Serialize Date → epoch ms; the preload bridge can't ship Date objects.
-      lastSyncedAt: r.lastSyncedAt ? r.lastSyncedAt.getTime() : null
+      lastSyncedAt: r.lastSyncedAt ? r.lastSyncedAt.getTime() : null,
+      // The column is plain `text` (matching every other enum-like column in
+      // this schema — see e.g. `taxTag`); narrowed here because only
+      // `backfillSimplefinHistory` ever writes it, and only ever one of these.
+      historyBackfillStatus:
+        r.historyBackfillStatus as SimplefinConnectionSummary['historyBackfillStatus']
     }))
   })
 
