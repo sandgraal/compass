@@ -357,7 +357,9 @@ function ensureNewTables(sqlite: Database.Database): void {
       org_domain TEXT,
       last_synced_at INTEGER,
       error_code TEXT,
-      created_at INTEGER
+      created_at INTEGER,
+      history_oldest_date TEXT,
+      history_backfill_status TEXT
     );
     CREATE TABLE IF NOT EXISTS linear_issues (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -540,7 +542,7 @@ function ensureNewTables(sqlite: Database.Database): void {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS life_records_external_id_unique ON life_records (external_id);
     -- Life-record links: ties a life record to the contact / finance account
-    -- it documents — mirrors migration 0043 (packaged builds skip migrations).
+    -- it documents — mirrors migration 0044 (packaged builds skip migrations).
     CREATE TABLE IF NOT EXISTS life_record_links (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       life_record_id INTEGER NOT NULL REFERENCES life_records(id),
@@ -714,6 +716,11 @@ function ensureNewTables(sqlite: Database.Database): void {
     'INTEGER REFERENCES simplefin_connections(id)'
   )
   ensureColumn(sqlite, 'finance_accounts', 'simplefin_account_id', 'TEXT')
+  // "Import full history" backfill progress on the connection itself (not
+  // per-account): oldest ISO date successfully covered so far, and how the
+  // most recent backfill run ended ('complete' | 'partial' | 'error' | null).
+  ensureColumn(sqlite, 'simplefin_connections', 'history_oldest_date', 'TEXT')
+  ensureColumn(sqlite, 'simplefin_connections', 'history_backfill_status', 'TEXT')
   try {
     sqlite.exec(
       'CREATE INDEX IF NOT EXISTS idx_finance_accounts_simplefin ON finance_accounts(simplefin_account_id)'
@@ -997,7 +1004,9 @@ function createTablesIfNeeded(sqlite: Database.Database): void {
       org_domain TEXT,
       last_synced_at INTEGER,
       error_code TEXT,
-      created_at INTEGER
+      created_at INTEGER,
+      history_oldest_date TEXT,
+      history_backfill_status TEXT
     );
 
     CREATE TABLE IF NOT EXISTS finance_balance_snapshots (

@@ -16,7 +16,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
 import { contacts, financeAccounts, lifeRecordLinks, lifeRecords } from '../db/schema'
@@ -315,26 +315,40 @@ export function buildLifeRecordsCsv(): string {
 
 /**
  * All links, id → resolved link list. Labels are joined here (one query per
- * target table) so the renderer never needs a second lookup to show a chip.
+ * target table, scoped to the target ids actually referenced — NOT the whole
+ * table, so this stays cheap on a large address book/ledger) so the renderer
+ * never needs a second lookup to show a chip.
  */
 function loadLinksByRecord(): Map<number, LifeRecordLink[]> {
   const db = getDb()
   const links = db.select().from(lifeRecordLinks).all()
   const out = new Map<number, LifeRecordLink[]>()
   if (links.length === 0) return out
+  const contactIds = [
+    ...new Set(links.filter((l) => l.targetKind === 'contact').map((l) => l.targetId))
+  ]
+  const accountIds = [
+    ...new Set(links.filter((l) => l.targetKind === 'account').map((l) => l.targetId))
+  ]
   const contactNames = new Map(
-    db
-      .select({ id: contacts.id, name: contacts.displayName })
-      .from(contacts)
-      .all()
-      .map((c) => [c.id, c.name])
+    contactIds.length === 0
+      ? []
+      : db
+          .select({ id: contacts.id, name: contacts.displayName })
+          .from(contacts)
+          .where(inArray(contacts.id, contactIds))
+          .all()
+          .map((c) => [c.id, c.name])
   )
   const accountNames = new Map(
-    db
-      .select({ id: financeAccounts.id, name: financeAccounts.name })
-      .from(financeAccounts)
-      .all()
-      .map((a) => [a.id, a.name])
+    accountIds.length === 0
+      ? []
+      : db
+          .select({ id: financeAccounts.id, name: financeAccounts.name })
+          .from(financeAccounts)
+          .where(inArray(financeAccounts.id, accountIds))
+          .all()
+          .map((a) => [a.id, a.name])
   )
   for (const l of links) {
     const label =

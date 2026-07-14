@@ -657,6 +657,7 @@ export default function LifeRecords(): JSX.Element {
                           <button
                             type="button"
                             onClick={() => void removeLink(l.id)}
+                            title={`Unlink ${l.label}`}
                             aria-label={`Unlink ${l.label}`}
                             className="text-muted-foreground hover:text-destructive transition-colors"
                           >

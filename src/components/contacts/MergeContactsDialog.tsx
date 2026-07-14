@@ -11,13 +11,29 @@ import { useEffect, useMemo, useState } from 'react'
 import { cn } from '../../lib/utils'
 import { useToast } from '../ui/Toast'
 
+/**
+ * The slice of a contact the dialog actually renders — structural, so the
+ * duplicates panel can feed `DuplicateContactSummary` pairs straight in
+ * without materializing full ContactRecords. Emails/phones are only counted,
+ * so the element type is deliberately opaque (ContactRecord carries objects,
+ * the duplicate summaries carry strings).
+ */
+export type MergeCandidate = {
+  id: number
+  displayName: string
+  source: string
+  emails: readonly unknown[]
+  phones: readonly unknown[]
+  createdAt?: number | null
+}
+
 export default function MergeContactsDialog({
   contacts,
   open,
   onClose,
   onMerged
 }: {
-  contacts: ContactRecord[]
+  contacts: MergeCandidate[]
   open: boolean
   onClose: () => void
   /** Called after a successful merge; the parent reloads and opens the survivor. */

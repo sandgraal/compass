@@ -213,6 +213,23 @@ Both write `sync_events` + `integrations.lastSyncedAt`, run on a daily 06:00 cro
 same `finance_transactions.hash` UNIQUE constraint as a manual CSV drop (so a CSV→bank-sync migration
 never double-counts).
 
+**SimpleFIN "Import full history" backfill.** The recurring sync above is date-windowed (90 days on
+first connect, 30-day overlap thereafter) — it isn't meant to pull a connection's entire history.
+For that, `backfillSimplefinHistory(connectionId, opts?)` in
+`electron/integrations/simplefin/sync.ts` is a one-time, user-triggered action (`simplefin:backfill-history`
+IPC handler, "Import full history" / "Import more history" button on the SimpleFIN connection row in
+Integrations) that walks backward from `now` (or resumes from a previously-persisted
+`historyOldestDate`) in `SIMPLEFIN_BACKFILL_WINDOW_DAYS` (90-day) windows, paced
+`SIMPLEFIN_BACKFILL_REQUEST_DELAY_MS` (300ms) apart, up to a `SIMPLEFIN_BACKFILL_MAX_WINDOWS` (60,
+~14.8 years) safety cap, and stops early once two consecutive windows add zero new transactions.
+It shares the same account-upsert/normalize/categorize/insert logic as the regular sync via the
+extracted `ingestSimplefinResponse` helper. Returns a `SimplefinBackfillResult`
+(`{connectionId, windowsFetched, added, duplicates, oldestDateReached, status, errorMessage?}`,
+`status` ∈ `'complete' | 'partial' | 'error'`); `status`/`oldestDateReached` persist on
+`simplefin_connections.historyBackfillStatus`/`historyOldestDate` so a later click resumes rather
+than re-walking from scratch, and the UI switches to static "Full history imported back to
+&lt;month year&gt;" text once `status === 'complete'`.
+
 ## Where the data lives
 
 | What | Where | Encrypted |
