@@ -652,6 +652,7 @@ describe('readMerchants', () => {
     expect(res.merchants[0]).toMatchObject({
       name: 'Blue Bottle',
       matchKey: 'blue bottle',
+      currency: 'USD',
       totalSpend: 24,
       txnCount: 3,
       avgTxn: 12,
@@ -660,6 +661,23 @@ describe('readMerchants', () => {
     })
     // List mode carries no per-month detail.
     expect(res.merchants[0].monthly).toBeUndefined()
+  })
+
+  it('sums totalSpend/avgTxn in the DOMINANT currency only, but counts every touchpoint', () => {
+    createMerchantTables()
+    track('derived:merchant:blue bottle', 'Blue Bottle')
+    charge('blue bottle', '2026-01-05', -10)
+    charge('blue bottle', '2026-02-05', -12)
+    db.prepare(
+      'INSERT INTO finance_transactions (date, amount, description, normalized_merchant, currency) VALUES (?,?,?,?,?)'
+    ).run('2026-03-05', -5000, 'blue bottle', 'blue bottle', 'CRC')
+    const res = readMerchants(db)
+    expect(res.merchants[0]).toMatchObject({
+      currency: 'USD',
+      totalSpend: 22, // CRC row excluded — USD has more rows
+      txnCount: 3, // every currency counts toward touchpoints
+      lastTxnDate: '2026-03-05' // date span is currency-agnostic
+    })
   })
 
   it('q filter adds monthly detail, notes, and support for small result sets', () => {

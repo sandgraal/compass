@@ -810,15 +810,76 @@ declare global {
   }
 
   // ---- Tracked merchants (merchants redesign) — see electron/ipc/merchants.ts ----
+  interface MerchantWebEnrichment {
+    searchedAs: string
+    matchConfidence: 'high' | 'medium' | 'low'
+    description: string | null
+    links: WebLink[]
+    facts: WebFact[]
+    sources: WebSource[]
+    refreshedAt: number
+    model?: string
+  }
+
   interface MerchantMeta {
     support?: { email?: string; phone?: string }
-    enrichment?: Record<string, unknown>
+    enrichment?: MerchantWebEnrichment
   }
+
+  // Merchant web-enrichment run — mirrors electron/lib/merchant-web-enrichment.ts
+  // + electron/ipc/merchant-web-enrich.ts (the contacts pattern applied to a
+  // tracked merchant).
+  interface MerchantWebProposal {
+    id: number
+    kind:
+      | 'url'
+      | 'category'
+      | 'address'
+      | 'supportEmail'
+      | 'supportPhone'
+      | 'description'
+      | 'link'
+      | 'fact'
+    label?: string
+    currentValue: string | null
+    proposedValue: string
+    sourceUrl?: string
+    sourceVerified: boolean
+    confidence: 'high' | 'medium' | 'low'
+    writesToMerchant: boolean
+  }
+  type MerchantWebEnrichRunResult =
+    | { success: false; error: string; needsKey?: boolean; cancelled?: boolean }
+    | ({
+        success: true
+        outcome: 'none'
+        searchedAs: string
+        message: string
+      } & WebEnrichRunUsage)
+    | ({
+        success: true
+        outcome: 'candidates'
+        searchedAs: string
+        candidates: WebEnrichCandidate[]
+      } & WebEnrichRunUsage)
+    | ({
+        success: true
+        outcome: 'proposals'
+        runId: string
+        searchedAs: string
+        matchConfidence: 'high' | 'medium' | 'low'
+        proposals: MerchantWebProposal[]
+      } & WebEnrichRunUsage)
 
   interface TrackedMerchant extends PlaceRecord {
     matchKey: string
     meta: MerchantMeta | null
-    live: { totalSpend: number; txnCount: number; lastTxnDate: string | null } | null
+    live: {
+      totalSpend: number
+      txnCount: number
+      lastTxnDate: string | null
+      currency: string
+    } | null
   }
 
   interface MerchantStats {
@@ -1950,6 +2011,17 @@ declare global {
         profile(id: number): Promise<MerchantProfile>
         update(id: number, patch: MerchantUpdatePatch): Promise<{ success: boolean }>
         untrack(id: number): Promise<{ success: boolean }>
+        webEnrich(req: {
+          merchantId: number
+          hints?: string
+          candidateHint?: string
+        }): Promise<MerchantWebEnrichRunResult>
+        webEnrichApply(req: { runId: string; accepted: number[] }): Promise<{
+          success: boolean
+          applied?: { fields: string[]; findings: number }
+          error?: string
+        }>
+        webEnrichCancel(): Promise<{ success: boolean; error?: string }>
       }
       overview: {
         summary(): Promise<OverviewSummary>

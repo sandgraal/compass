@@ -22,6 +22,7 @@ import {
   Pencil,
   Receipt,
   RefreshCw,
+  Sparkles,
   Store,
   TrendingDown,
   TrendingUp,
@@ -32,6 +33,7 @@ import { useNavigate } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { formatMoney } from '../lib/money'
 import { cn } from '../lib/utils'
+import MerchantWebEnrichDialog from './MerchantWebEnrichDialog'
 import { useConfirm } from './ui/ConfirmDialog'
 import { useToast } from './ui/Toast'
 
@@ -60,12 +62,16 @@ export default function MerchantDetail({
   const [profile, setProfile] = useState<MerchantProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
+  const [webEnrichOpen, setWebEnrichOpen] = useState(false)
   const navigate = useNavigate()
   const confirm = useConfirm()
   const { toast } = useToast()
 
   const load = useCallback(async (): Promise<void> => {
-    if (!isElectron()) return
+    if (!isElectron()) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       setProfile(await window.api.merchants.profile(merchantId))
@@ -87,7 +93,7 @@ export default function MerchantDetail({
     const ok = await confirm({
       title: `Stop tracking ${profile.place.name}?`,
       description:
-        'The merchant moves back to Discovered. Your notes, category, and attached documents links are removed.',
+        'The merchant moves back to Discovered, and your notes and category are cleared. Attached documents stay linked and reappear if you track it again.',
       confirmLabel: 'Untrack',
       destructive: true
     })
@@ -205,6 +211,15 @@ export default function MerchantDetail({
               <CreditCard size={16} />
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setWebEnrichOpen(true)}
+            title="Enrich from web"
+            aria-label="Enrich from web"
+            className="p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-secondary transition-colors"
+          >
+            <Sparkles size={16} />
+          </button>
           <button
             type="button"
             onClick={() => setEditing((v) => !v)}
@@ -501,6 +516,9 @@ export default function MerchantDetail({
         </Section>
       )}
 
+      {/* Web presence (accepted "Enrich from web" findings) */}
+      {profile.place.meta?.enrichment && <WebPresenceSection web={profile.place.meta.enrichment} />}
+
       {/* Details (read view) */}
       {!editing && (place.address || place.notes || profile.place.meta?.support || place.url) && (
         <Section icon={<Store size={14} />} title="Details">
@@ -539,7 +557,83 @@ export default function MerchantDetail({
           </div>
         </Section>
       )}
+
+      <MerchantWebEnrichDialog
+        merchant={place}
+        open={webEnrichOpen}
+        onClose={() => setWebEnrichOpen(false)}
+        onApplied={async () => {
+          await load()
+          onChanged()
+        }}
+      />
     </div>
+  )
+}
+
+/** Accepted "Enrich from web" findings — description, official links, facts. */
+function WebPresenceSection({ web }: { web: MerchantWebEnrichment }): JSX.Element {
+  const safeHref = (value: string): string | undefined =>
+    /^https?:\/\//i.test(value) ? value : undefined
+  return (
+    <Section icon={<Sparkles size={14} />} title="Web presence">
+      <div className="space-y-2">
+        {web.description && <p className="text-sm text-foreground">{web.description}</p>}
+        {web.links.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {web.links.map((l) => {
+              const href = safeHref(l.value)
+              if (!href) return null
+              let host = l.value
+              try {
+                host = new URL(href).hostname.replace(/^www\./, '')
+              } catch {
+                /* show the raw value */
+              }
+              return (
+                <a
+                  key={l.value}
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={href}
+                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-full border border-border text-primary hover:border-primary/40 transition-colors"
+                >
+                  <ExternalLink size={10} />
+                  {l.type ? `${l.type} · ${host}` : host}
+                </a>
+              )
+            })}
+          </div>
+        )}
+        {web.facts.length > 0 && (
+          <ul className="space-y-1">
+            {web.facts.map((f) => (
+              <li key={f.text} className="text-sm text-foreground flex items-baseline gap-2">
+                <span className="text-muted-foreground shrink-0">·</span>
+                <span className="min-w-0">
+                  {f.text}
+                  {f.sourceUrl && safeHref(f.sourceUrl) && (
+                    <a
+                      href={f.sourceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-primary hover:underline ml-1.5"
+                    >
+                      source
+                    </a>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="text-[11px] text-muted-foreground">
+          Searched as “{web.searchedAs}” · {new Date(web.refreshedAt).toLocaleDateString()} ·{' '}
+          {web.sources.length} source{web.sources.length === 1 ? '' : 's'}
+        </p>
+      </div>
+    </Section>
   )
 }
 
@@ -647,8 +741,8 @@ function EditDetails({
           support:
             draft.supportEmail.trim() || draft.supportPhone.trim()
               ? { email: draft.supportEmail.trim(), phone: draft.supportPhone.trim() }
-              : null
-        } as MerchantMeta
+              : undefined
+        }
       })
       toast('Saved', 'success')
       onSaved()

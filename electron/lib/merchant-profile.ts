@@ -109,7 +109,9 @@ export function computeMerchantStats(txns: MerchantSlimTxn[], now = new Date()):
   const lastTxnDate = dates[dates.length - 1] ?? null
 
   const year = now.getFullYear()
-  const monthDay = now.toISOString().slice(5, 10) // 'MM-DD'
+  // Local calendar date, not UTC — a UTC slice can land on the wrong side of
+  // midnight near the day boundary in non-UTC time zones and skew the span.
+  const monthDay = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   const spendIn = (from: string, to: string): number =>
     expenses.filter((t) => t.date >= from && t.date <= to).reduce((s, t) => s + -t.amount, 0)
   const thisYearSpend = spendIn(`${year}-01-01`, `${year}-${monthDay}`)
@@ -173,8 +175,10 @@ export function computeMonthlyBuckets(txns: MerchantSlimTxn[]): MonthlyBucket[] 
  * Recent-vs-historical price movement — the subscription audit's hike detector
  * (electron/integrations/finance-subscriptions.ts) generalized to any merchant
  * and both directions. Splits off the last ~3 charges (or 1/3 of the stream
- * when shorter) and compares medians; below $0.50 absolute AND 8% relative is
- * plausibly tax/surcharge drift, not a real change. Needs ≥4 charges.
+ * when shorter) and compares medians. A move counts as real only when it
+ * clears BOTH bars — over $0.50 absolute AND over 8% relative; failing either
+ * bar alone is plausibly tax/surcharge drift, not a genuine change (mirrors
+ * the source detector's `delta > 0.5 && pct > 8` gate). Needs ≥4 charges.
  */
 export function computePriceTrend(txns: MerchantSlimTxn[]): MerchantPriceTrend | null {
   const amounts = txns

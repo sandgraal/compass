@@ -35,6 +35,7 @@ import { registerKnowledgeHandlers } from './ipc/knowledge'
 import { registerLifeRecordsHandlers } from './ipc/life-records'
 import { registerLocationHandlers } from './ipc/location'
 import { registerMedicalHandlers } from './ipc/medical'
+import { registerMerchantWebEnrichHandlers } from './ipc/merchant-web-enrich'
 import { registerMerchantsHandlers } from './ipc/merchants'
 import { registerMonthlyRollupHandlers } from './ipc/monthly-rollup'
 import { registerMorningBriefHandlers } from './ipc/morning-brief'
@@ -276,6 +277,7 @@ app.whenReady().then(async () => {
   registerEntitiesHandlers(ipcMain)
   registerPlacesHandlers(ipcMain)
   registerMerchantsHandlers(ipcMain)
+  registerMerchantWebEnrichHandlers(ipcMain)
   registerLocationHandlers(ipcMain)
   registerOverviewHandlers(ipcMain)
   registerCredHandlers(ipcMain)

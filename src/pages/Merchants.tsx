@@ -61,15 +61,32 @@ export default function Merchants(): JSX.Element {
     })
   }, [loadTracked])
 
-  // Spend-by-category rollup chips across the tracked set.
+  // Spend-by-category rollup chips across the tracked set. Merchants in a
+  // category can carry different live.currency values (never fake-converted
+  // elsewhere in this feature) — sum per currency, then show each category's
+  // DOMINANT currency total rather than mixing denominations into one number.
   const categories = useMemo(() => {
-    const byCat = new Map<string, number>()
+    const byCat = new Map<string, Map<string, number>>()
     for (const m of tracked) {
       const cat = m.category?.trim()
-      if (!cat) continue
-      byCat.set(cat, (byCat.get(cat) ?? 0) + (m.live?.totalSpend ?? 0))
+      if (!cat || !m.live) continue
+      const byCurrency = byCat.get(cat) ?? new Map<string, number>()
+      byCurrency.set(m.live.currency, (byCurrency.get(m.live.currency) ?? 0) + m.live.totalSpend)
+      byCat.set(cat, byCurrency)
     }
-    return [...byCat.entries()].sort((a, b) => b[1] - a[1])
+    const rollups: Array<[string, number, string]> = []
+    for (const [cat, byCurrency] of byCat) {
+      let bestCurrency = 'USD'
+      let bestSpend = Number.NEGATIVE_INFINITY
+      for (const [currency, spend] of byCurrency) {
+        if (spend > bestSpend) {
+          bestSpend = spend
+          bestCurrency = currency
+        }
+      }
+      rollups.push([cat, bestSpend, bestCurrency])
+    }
+    return rollups.sort((a, b) => b[1] - a[1])
   }, [tracked])
 
   const shownTracked = useMemo(() => {
@@ -160,7 +177,13 @@ export default function Merchants(): JSX.Element {
       )}
 
       {tab !== 'discovered' &&
-        (trackedLoaded && tracked.length === 0 ? (
+        (!trackedLoaded ? (
+          <div className="space-y-2">
+            {[1, 2, 3].map((n) => (
+              <div key={n} className="h-14 bg-secondary/30 rounded-lg animate-pulse" />
+            ))}
+          </div>
+        ) : tracked.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center text-sm text-muted-foreground">
             <Compass size={20} className="mx-auto mb-2 text-muted-foreground" />
             Nothing tracked yet. Head to{' '}
@@ -187,12 +210,12 @@ export default function Merchants(): JSX.Element {
               />
               {categories.length > 1 && (
                 <div className="flex gap-1.5 flex-wrap">
-                  {categories.map(([cat, spend]) => (
+                  {categories.map(([cat, spend, currency]) => (
                     <button
                       key={cat}
                       type="button"
                       onClick={() => setCategoryFilter((prev) => (prev === cat ? null : cat))}
-                      title={`${formatMoney(spend)} across ${cat}`}
+                      title={`${formatMoney(spend, currency)} across ${cat}`}
                       className={cn(
                         'text-[11px] px-2 py-0.5 rounded-full border transition-colors',
                         categoryFilter === cat
@@ -200,7 +223,7 @@ export default function Merchants(): JSX.Element {
                           : 'border-border text-muted-foreground hover:text-foreground'
                       )}
                     >
-                      {cat} · {formatMoney(spend, 'USD', { decimals: 0, compact: true })}
+                      {cat} · {formatMoney(spend, currency, { decimals: 0, compact: true })}
                     </button>
                   ))}
                 </div>
@@ -224,7 +247,7 @@ export default function Merchants(): JSX.Element {
                         </span>
                         {m.live && (
                           <span className="text-xs text-foreground shrink-0 tabular-nums">
-                            {formatMoney(m.live.totalSpend, 'USD', {
+                            {formatMoney(m.live.totalSpend, m.live.currency, {
                               decimals: 0,
                               compact: true
                             })}

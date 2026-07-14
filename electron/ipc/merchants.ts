@@ -36,6 +36,7 @@ import {
   computePriceTrend,
   computeTaxSummary
 } from '../lib/merchant-profile'
+import type { MerchantAcceptedFields, MerchantWebEnrichment } from '../lib/merchant-web-enrichment'
 import { normalizeMerchant } from '../lib/normalize'
 import { searchRecords } from '../lib/records-search'
 import type { PlaceRecord } from './places'
@@ -43,14 +44,20 @@ import type { PlaceRecord } from './places'
 /** Namespaced JSON extras on a places row (`places.meta`). */
 export interface MerchantMeta {
   support?: { email?: string; phone?: string }
-  /** Reserved for the future consent-gated web-enrichment flow. */
-  enrichment?: Record<string, unknown>
+  /** "Enrich from web" results — written only via `applyMerchantWebEnrichment`. */
+  enrichment?: MerchantWebEnrichment
 }
 
 export interface TrackedMerchant extends PlaceRecord {
   matchKey: string
   meta: MerchantMeta | null
-  live: { totalSpend: number; txnCount: number; lastTxnDate: string | null } | null
+  live: {
+    totalSpend: number
+    txnCount: number
+    lastTxnDate: string | null
+    /** The dominant currency `totalSpend` is denominated in (never converted). */
+    currency: string
+  } | null
 }
 
 export interface MerchantTxnListItem {
@@ -153,36 +160,57 @@ function loadSlimTxns(matchKey: string): MerchantSlimTxn[] {
 }
 
 /**
- * Live ledger stats for many merchants in one grouped query. Keys with no
- * matching rows are absent from the result map.
+ * Live ledger stats for many merchants in one grouped query. Groups by
+ * (merchant, currency) so a mixed-currency merchant's `totalSpend` stays in
+ * its DOMINANT currency (most rows) rather than summing denominations
+ * together — same rule as `computeMerchantStats`. `txnCount`/`lastTxnDate`
+ * are currency-agnostic (every touchpoint counts, regardless of currency).
+ * Keys with no matching rows are absent from the result map.
  */
 function liveStatsFor(
   keys: string[]
-): Map<string, { totalSpend: number; txnCount: number; lastTxnDate: string | null }> {
+): Map<
+  string,
+  { totalSpend: number; txnCount: number; lastTxnDate: string | null; currency: string }
+> {
   const map = new Map<
     string,
-    { totalSpend: number; txnCount: number; lastTxnDate: string | null }
+    { totalSpend: number; txnCount: number; lastTxnDate: string | null; currency: string }
   >()
   const unique = [...new Set(keys.filter((k) => k.length > 0))]
   if (unique.length === 0) return map
   const rows = getRawSqlite()
     .prepare(
-      `SELECT normalized_merchant AS key,
-              ROUND(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 2) AS totalSpend,
-              COUNT(*) AS txnCount,
+      `SELECT normalized_merchant AS key, currency,
+              ROUND(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 2) AS spend,
+              COUNT(*) AS n,
               MAX(date) AS lastTxnDate
          FROM finance_transactions
         WHERE normalized_merchant IN (${unique.map(() => '?').join(', ')})
-        GROUP BY normalized_merchant`
+        GROUP BY normalized_merchant, currency`
     )
     .all(...unique) as Array<{
     key: string
-    totalSpend: number
-    txnCount: number
+    currency: string
+    spend: number
+    n: number
     lastTxnDate: string | null
   }>
-  for (const r of rows)
-    map.set(r.key, { totalSpend: r.totalSpend, txnCount: r.txnCount, lastTxnDate: r.lastTxnDate })
+  const byKey = new Map<string, typeof rows>()
+  for (const r of rows) {
+    const list = byKey.get(r.key) ?? []
+    list.push(r)
+    byKey.set(r.key, list)
+  }
+  for (const [key, group] of byKey) {
+    const dominant = group.reduce((best, r) => (r.n > best.n ? r : best))
+    const txnCount = group.reduce((s, r) => s + r.n, 0)
+    const lastTxnDate = group.reduce<string | null>(
+      (max, r) => (r.lastTxnDate && (!max || r.lastTxnDate > max) ? r.lastTxnDate : max),
+      null
+    )
+    map.set(key, { totalSpend: dominant.spend, txnCount, lastTxnDate, currency: dominant.currency })
+  }
   return map
 }
 
@@ -253,6 +281,40 @@ function cleanMeta(v: unknown, existing: MerchantMeta | null): string | null | u
   }
   const hasContent = next.support || next.enrichment
   return hasContent ? JSON.stringify(next) : null
+}
+
+/**
+ * Owned writer for "Enrich from web" (called by merchant-web-enrich.ts with
+ * proposals the user accepted — never with renderer-supplied values). Record
+ * fields land on the places columns / meta.support; the web namespace
+ * replaces `meta.enrichment` wholesale so rejected leftovers never linger.
+ */
+export function applyMerchantWebEnrichment(
+  placeId: number,
+  fields: MerchantAcceptedFields,
+  web: MerchantWebEnrichment
+): boolean {
+  const db = getDb()
+  const row = db.select().from(places).where(eq(places.id, placeId)).all()[0]
+  if (!row) return false
+  const meta = parseMeta(row.meta) ?? {}
+  const support = { ...(meta.support ?? {}) }
+  if (fields.supportEmail !== undefined) support.email = fields.supportEmail.slice(0, 200)
+  if (fields.supportPhone !== undefined) support.phone = fields.supportPhone.slice(0, 50)
+  const nextMeta: MerchantMeta = {
+    ...meta,
+    support: Object.keys(support).length > 0 ? support : undefined,
+    enrichment: web
+  }
+  const set: Partial<PlaceRow> = { meta: JSON.stringify(nextMeta), updatedAt: new Date() }
+  // The engine sanitized these already — re-clamp at the write boundary anyway.
+  if (fields.url !== undefined && /^https?:\/\//i.test(fields.url)) {
+    set.url = fields.url.slice(0, MAX_LEN.url)
+  }
+  if (fields.category !== undefined) set.category = fields.category.slice(0, MAX_LEN.category)
+  if (fields.address !== undefined) set.address = fields.address.slice(0, MAX_LEN.address)
+  db.update(places).set(set).where(eq(places.id, placeId)).run()
+  return true
 }
 
 export function registerMerchantsHandlers(ipcMain: IpcMain): void {

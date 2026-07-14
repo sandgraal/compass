@@ -541,7 +541,14 @@ const api = {
     profile: (id: number) => ipcRenderer.invoke('merchants:profile', id),
     update: (id: number, patch: MerchantUpdatePatch) =>
       ipcRenderer.invoke('merchants:update', id, patch),
-    untrack: (id: number) => ipcRenderer.invoke('merchants:untrack', id)
+    untrack: (id: number) => ipcRenderer.invoke('merchants:untrack', id),
+    // "Enrich from web" — consent-gated Anthropic web_search (BYO key), same
+    // run/apply/cancel contract as contacts.webEnrich*.
+    webEnrich: (req: { merchantId: number; hints?: string; candidateHint?: string }) =>
+      ipcRenderer.invoke('merchants:web-enrich', req),
+    webEnrichApply: (req: { runId: string; accepted: number[] }) =>
+      ipcRenderer.invoke('merchants:web-enrich-apply', req),
+    webEnrichCancel: () => ipcRenderer.invoke('merchants:web-enrich-cancel')
   },
   overview: {
     summary: () => ipcRenderer.invoke('overview:summary')

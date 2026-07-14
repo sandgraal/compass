@@ -758,6 +758,8 @@ export interface MerchantSummary {
   matchKey: string
   category: string | null
   url: string | null
+  /** The dominant currency `totalSpend`/`avgTxn`/`last6MonthsSpend` are denominated in (never converted). */
+  currency: string
   totalSpend: number
   txnCount: number
   avgTxn: number
@@ -841,42 +843,64 @@ export function readMerchants(
       firstTxnDate: string | null
       lastTxnDate: string | null
       last6MonthsSpend: number
+      currency: string
     }
   >()
   if (hasLedger && keys.length > 0) {
+    // Grouped by (merchant, currency) so a mixed-currency merchant's spend
+    // figures stay in its DOMINANT currency (most rows) rather than summing
+    // denominations together — same rule as electron/lib/merchant-profile.ts.
+    // txnCount/first/lastTxnDate are currency-agnostic (every touchpoint counts).
     const stats = db
       .prepare(
-        `SELECT normalized_merchant AS key,
-                ROUND(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 2) AS totalSpend,
-                COUNT(*) AS txnCount,
+        `SELECT normalized_merchant AS key, currency,
+                ROUND(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 2) AS spend,
+                COUNT(*) AS n,
                 ROUND(AVG(CASE WHEN amount < 0 THEN -amount END), 2) AS avgTxn,
                 MIN(date) AS firstTxnDate,
                 MAX(date) AS lastTxnDate,
                 ROUND(SUM(CASE WHEN amount < 0 AND date >= @sixMonthsAgo THEN -amount ELSE 0 END), 2) AS last6MonthsSpend
            FROM finance_transactions
           WHERE normalized_merchant IN (${keys.map((_, i) => `@k${i}`).join(', ')})
-          GROUP BY normalized_merchant`
+          GROUP BY normalized_merchant, currency`
       )
       .all({
         sixMonthsAgo,
         ...Object.fromEntries(keys.map((k, i) => [`k${i}`, k]))
       }) as Array<{
       key: string
-      totalSpend: number
-      txnCount: number
+      currency: string
+      spend: number
+      n: number
       avgTxn: number | null
       firstTxnDate: string | null
       lastTxnDate: string | null
       last6MonthsSpend: number
     }>
+    const byKey = new Map<string, typeof stats>()
     for (const s of stats) {
-      statsByKey.set(s.key, {
-        totalSpend: s.totalSpend,
-        txnCount: s.txnCount,
-        avgTxn: s.avgTxn ?? 0,
-        firstTxnDate: s.firstTxnDate,
-        lastTxnDate: s.lastTxnDate,
-        last6MonthsSpend: s.last6MonthsSpend
+      const list = byKey.get(s.key) ?? []
+      list.push(s)
+      byKey.set(s.key, list)
+    }
+    for (const [key, group] of byKey) {
+      const dominant = group.reduce((best, r) => (r.n > best.n ? r : best))
+      const firstTxnDate = group.reduce<string | null>(
+        (min, r) => (r.firstTxnDate && (!min || r.firstTxnDate < min) ? r.firstTxnDate : min),
+        null
+      )
+      const lastTxnDate = group.reduce<string | null>(
+        (max, r) => (r.lastTxnDate && (!max || r.lastTxnDate > max) ? r.lastTxnDate : max),
+        null
+      )
+      statsByKey.set(key, {
+        totalSpend: dominant.spend,
+        txnCount: group.reduce((sum, r) => sum + r.n, 0),
+        avgTxn: dominant.avgTxn ?? 0,
+        firstTxnDate,
+        lastTxnDate,
+        last6MonthsSpend: dominant.last6MonthsSpend,
+        currency: dominant.currency
       })
     }
   }
@@ -888,18 +912,20 @@ export function readMerchants(
           `SELECT substr(date, 1, 7) AS month,
                   ROUND(SUM(-amount), 2) AS spend, COUNT(*) AS count
              FROM finance_transactions
-            WHERE normalized_merchant = ? AND amount < 0
+            WHERE normalized_merchant = ? AND amount < 0 AND currency = ?
             GROUP BY substr(date, 1, 7) ORDER BY month DESC LIMIT 12`
         )
       : null
 
   const merchants = keyed.map<MerchantSummary>((r) => {
     const s = statsByKey.get(r.matchKey)
+    const currency = s?.currency ?? 'USD'
     const base: MerchantSummary = {
       name: r.name,
       matchKey: r.matchKey,
       category: r.category,
       url: r.url,
+      currency,
       totalSpend: s?.totalSpend ?? 0,
       txnCount: s?.txnCount ?? 0,
       avgTxn: s?.avgTxn ?? 0,
@@ -908,7 +934,7 @@ export function readMerchants(
       last6MonthsSpend: s?.last6MonthsSpend ?? 0
     }
     if (detail) {
-      base.monthly = (monthlyStmt?.all(r.matchKey) as MerchantSummary['monthly']) ?? []
+      base.monthly = (monthlyStmt?.all(r.matchKey, currency) as MerchantSummary['monthly']) ?? []
       base.notes = r.notes
       try {
         const meta = r.meta

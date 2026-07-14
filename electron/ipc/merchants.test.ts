@@ -140,7 +140,27 @@ describe('merchants:list-tracked', () => {
     const list = invoke('merchants:list-tracked') as TrackedMerchant[]
     expect(list).toHaveLength(1)
     expect(list[0].matchKey).toBe('blue bottle')
-    expect(list[0].live).toEqual({ totalSpend: 22.5, txnCount: 3, lastTxnDate: '2026-02-06' })
+    expect(list[0].live).toEqual({
+      totalSpend: 22.5,
+      txnCount: 3,
+      lastTxnDate: '2026-02-06',
+      currency: 'USD'
+    })
+  })
+
+  it('sums totalSpend in the DOMINANT currency only, but counts every touchpoint', () => {
+    seedPlace()
+    seedTxn({ date: '2026-01-05', amount: -10, merchant: 'blue bottle', currency: 'USD' })
+    seedTxn({ date: '2026-02-05', amount: -12, merchant: 'blue bottle', currency: 'USD' })
+    seedTxn({ date: '2026-03-05', amount: -5000, merchant: 'blue bottle', currency: 'CRC' })
+
+    const list = invoke('merchants:list-tracked') as TrackedMerchant[]
+    expect(list[0].live).toEqual({
+      totalSpend: 22, // CRC row excluded — USD has more rows
+      txnCount: 3, // every currency counts toward touchpoints
+      lastTxnDate: '2026-03-05', // date span is currency-agnostic
+      currency: 'USD'
+    })
   })
 
   it('a merchant with no ledger rows gets live: null', () => {
