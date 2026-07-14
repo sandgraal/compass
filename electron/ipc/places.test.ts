@@ -28,7 +28,8 @@ beforeEach(async () => {
     CREATE TABLE places (
       id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE, kind TEXT NOT NULL DEFAULT 'merchant',
       name TEXT NOT NULL, category TEXT, address TEXT, url TEXT, total_spend REAL, notes TEXT,
-      source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER
+      source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER,
+      meta TEXT
     );
   `)
   for (const k of Object.keys(handlers)) delete handlers[k]

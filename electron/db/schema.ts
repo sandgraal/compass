@@ -353,37 +353,52 @@ export const simplefinConnections = sqliteTable('simplefin_connections', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
-export const financeTransactions = sqliteTable('finance_transactions', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  hash: text('hash').notNull().unique(), // dedup key
-  date: text('date').notNull(), // ISO 'YYYY-MM-DD'
-  amount: real('amount').notNull(), // negative = expense
-  // ISO 4217 currency this `amount` is denominated in (Phase 11.1). Inherited
-  // from the owning account at ingest; default 'USD'. Lets a colón-priced CR
-  // charge report its true base-currency (USD) cost via the `fx_rates` snapshot.
-  currency: text('currency').notNull().default('USD'),
-  description: text('description').notNull(),
-  accountId: integer('account_id').references(() => financeAccounts.id),
-  category: text('category').default('Uncategorized'),
-  subcategory: text('subcategory'),
-  notes: text('notes'),
-  // Geo + purpose are first-class indexed columns (promoted from notes tokens in 4.2).
-  // 'CR' | 'US' | 'SPAIN' | 'COLOMBIA' | 'PANAMA' | 'OTHER'. Default 'US'.
-  geo: text('geo').notNull().default('US'),
-  // Only set for CR transactions: 'capex' | 'household' | 'operating' | 'travel' | 'other'.
-  purpose: text('purpose'),
-  // Tax disposition (Phase 4.3). 'tax:capex-airbnb' | 'tax:schedule-c-income' |
-  // 'tax:schedule-c-expense' | 'tax:schedule-e-income' | 'tax:schedule-e-expense' |
-  // 'tax:charitable' | 'tax:medical' | 'tax:home-office' | 'tax:personal' |
-  // 'tax:investment' | 'tax:none'. Indexed with taxYear for year-end aggregation.
-  taxTag: text('tax_tag').notNull().default('tax:none'),
-  // 'auto' (set by classifier at ingest) or 'user' (manual override — never overwritten).
-  taxTagSource: text('tax_tag_source').notNull().default('auto'),
-  // Derived from `date` (year only) so year-end queries can use the index.
-  taxYear: integer('tax_year'),
-  sourceFile: text('source_file'),
-  ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
-})
+export const financeTransactions = sqliteTable(
+  'finance_transactions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    hash: text('hash').notNull().unique(), // dedup key
+    date: text('date').notNull(), // ISO 'YYYY-MM-DD'
+    amount: real('amount').notNull(), // negative = expense
+    // ISO 4217 currency this `amount` is denominated in (Phase 11.1). Inherited
+    // from the owning account at ingest; default 'USD'. Lets a colón-priced CR
+    // charge report its true base-currency (USD) cost via the `fx_rates` snapshot.
+    currency: text('currency').notNull().default('USD'),
+    description: text('description').notNull(),
+    accountId: integer('account_id').references(() => financeAccounts.id),
+    category: text('category').default('Uncategorized'),
+    subcategory: text('subcategory'),
+    notes: text('notes'),
+    // Geo + purpose are first-class indexed columns (promoted from notes tokens in 4.2).
+    // 'CR' | 'US' | 'SPAIN' | 'COLOMBIA' | 'PANAMA' | 'OTHER'. Default 'US'.
+    geo: text('geo').notNull().default('US'),
+    // Only set for CR transactions: 'capex' | 'household' | 'operating' | 'travel' | 'other'.
+    purpose: text('purpose'),
+    // Tax disposition (Phase 4.3). 'tax:capex-airbnb' | 'tax:schedule-c-income' |
+    // 'tax:schedule-c-expense' | 'tax:schedule-e-income' | 'tax:schedule-e-expense' |
+    // 'tax:charitable' | 'tax:medical' | 'tax:home-office' | 'tax:personal' |
+    // 'tax:investment' | 'tax:none'. Indexed with taxYear for year-end aggregation.
+    taxTag: text('tax_tag').notNull().default('tax:none'),
+    // 'auto' (set by classifier at ingest) or 'user' (manual override — never overwritten).
+    taxTagSource: text('tax_tag_source').notNull().default('auto'),
+    // Derived from `date` (year only) so year-end queries can use the index.
+    taxYear: integer('tax_year'),
+    // Persisted normalizeMerchant(description) — the merchant merge key (merchants
+    // redesign, 2026-07). A derived cache of `description`: set at every insert
+    // site, backfilled at startup (ensureNormalizedMerchants), and indexed so
+    // merchant profiles/stats can GROUP BY in SQL. normalizeMerchant's output is a
+    // frozen contract (electron/lib/normalize.ts) — changing it requires a
+    // re-backfill migration here too.
+    normalizedMerchant: text('normalized_merchant'),
+    sourceFile: text('source_file'),
+    ingestedAt: integer('ingested_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+  },
+  (t) => ({
+    normalizedMerchantIdx: index('idx_finance_transactions_normalized_merchant').on(
+      t.normalizedMerchant
+    )
+  })
+)
 
 export const budgetRules = sqliteTable('budget_rules', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -724,6 +739,11 @@ export const places = sqliteTable('places', {
   url: text('url'),
   totalSpend: real('total_spend'),
   notes: text('notes'),
+  // Namespaced JSON extras (mirrors contacts.enrichment): `{ support?: { email?,
+  // phone? }, enrichment?: {...} }`. Support contacts are user-entered on the
+  // merchant profile; the `enrichment` namespace is reserved for the future
+  // consent-gated web-enrichment flow.
+  meta: text('meta'),
   source: text('source').notNull().default('manual'), // 'manual' | 'derived'
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date()),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())

@@ -17,6 +17,7 @@ import {
   readLabResults,
   readLifeRecords,
   readMedicalRecords,
+  readMerchants,
   readPaystubs,
   readRecentNotes,
   readTasksRange,
@@ -267,7 +268,8 @@ describe('readTransactions', () => {
     db.exec(`
       CREATE TABLE finance_transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT, date TEXT NOT NULL, amount REAL NOT NULL,
-        currency TEXT NOT NULL DEFAULT 'USD', description TEXT NOT NULL DEFAULT '', category TEXT
+        currency TEXT NOT NULL DEFAULT 'USD', description TEXT NOT NULL DEFAULT '', category TEXT,
+        normalized_merchant TEXT
       );
     `)
   }
@@ -609,5 +611,87 @@ describe('readHealthSummary', () => {
     expect(s.restingHrLatest).toBeNull()
     expect(s.workouts30).toBe(0)
     expect(s.activeDays30).toBe(0)
+  })
+})
+
+describe('readMerchants', () => {
+  function createMerchantTables(): void {
+    db.exec(`
+      CREATE TABLE places (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL DEFAULT 'merchant', name TEXT NOT NULL, category TEXT,
+        address TEXT, url TEXT, total_spend REAL, notes TEXT, meta TEXT,
+        source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER
+      );
+      CREATE TABLE finance_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT, date TEXT NOT NULL, amount REAL NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'USD', description TEXT NOT NULL DEFAULT '', category TEXT,
+        normalized_merchant TEXT
+      );
+    `)
+  }
+  function track(externalId: string, name: string, over?: { notes?: string; meta?: string }): void {
+    db.prepare(
+      `INSERT INTO places (external_id, kind, name, notes, meta, updated_at) VALUES (?, 'merchant', ?, ?, ?, 0)`
+    ).run(externalId, name, over?.notes ?? null, over?.meta ?? null)
+  }
+  function charge(merchant: string, date: string, amount: number): void {
+    db.prepare(
+      'INSERT INTO finance_transactions (date, amount, description, normalized_merchant) VALUES (?,?,?,?)'
+    ).run(date, amount, merchant, merchant)
+  }
+
+  it('lists tracked merchants with live ledger stats', () => {
+    createMerchantTables()
+    track('derived:merchant:blue bottle', 'Blue Bottle')
+    charge('blue bottle', '2026-01-05', -10)
+    charge('blue bottle', '2026-02-05', -14)
+    charge('blue bottle', '2026-02-06', 4) // refund — excluded from spend
+    const res = readMerchants(db)
+    expect(res.count).toBe(1)
+    expect(res.merchants[0]).toMatchObject({
+      name: 'Blue Bottle',
+      matchKey: 'blue bottle',
+      totalSpend: 24,
+      txnCount: 3,
+      avgTxn: 12,
+      firstTxnDate: '2026-01-05',
+      lastTxnDate: '2026-02-06'
+    })
+    // List mode carries no per-month detail.
+    expect(res.merchants[0].monthly).toBeUndefined()
+  })
+
+  it('q filter adds monthly detail, notes, and support for small result sets', () => {
+    createMerchantTables()
+    track('derived:merchant:blue bottle', 'Blue Bottle', {
+      notes: 'oat milk',
+      meta: JSON.stringify({ support: { email: 'help@bb.com' } })
+    })
+    charge('blue bottle', '2026-01-05', -10)
+    charge('blue bottle', '2026-02-05', -14)
+    const res = readMerchants(db, { q: 'blue' })
+    expect(res.count).toBe(1)
+    expect(res.merchants[0].monthly).toEqual([
+      { month: '2026-02', spend: 14, count: 1 },
+      { month: '2026-01', spend: 10, count: 1 }
+    ])
+    expect(res.merchants[0].notes).toBe('oat milk')
+    expect(res.merchants[0].support).toEqual({ email: 'help@bb.com' })
+  })
+
+  it('handles no tracked merchants and missing tables gracefully', () => {
+    expect(readMerchants(db).count).toBe(0) // no places table at all
+    createMerchantTables()
+    expect(readMerchants(db).note).toContain('No merchants tracked')
+  })
+
+  it('skips kind=place rows', () => {
+    createMerchantTables()
+    track('derived:merchant:blue bottle', 'Blue Bottle')
+    db.prepare(
+      `INSERT INTO places (external_id, kind, name, updated_at) VALUES ('derived:place:park', 'place', 'Park', 0)`
+    ).run()
+    expect(readMerchants(db).count).toBe(1)
   })
 })

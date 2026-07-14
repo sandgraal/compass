@@ -46,6 +46,7 @@ import {
   readLabResults,
   readLifeRecords,
   readMedicalRecords,
+  readMerchants,
   readPaystubs,
   readRecentNotes,
   readTasksRange,
@@ -215,6 +216,19 @@ const TOOLS = [
         category: { type: 'string', description: 'Exact category, e.g. "Dining"' },
         q: { type: 'string', description: 'Description substring, e.g. a merchant name' },
         limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'compass_merchants',
+    description:
+      "The user's TRACKED merchants (businesses they follow on the Merchants page) with live ledger stats — total/6-month spend, transaction count, average charge, first/last seen, category, website. Pass q (name substring) to filter; small filtered results also include 12-month spend history, notes, and support contacts. For individual transaction rows use compass_transactions. Read-only.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        q: { type: 'string', description: 'Merchant name substring, e.g. "netflix"' },
+        limit: { type: 'integer', minimum: 1, maximum: 50, default: 25 }
       },
       additionalProperties: false
     }
@@ -914,6 +928,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           limit: Number.isFinite(Number(args?.limit)) ? Number(args?.limit) : undefined
         })
         if (res.error) return errorResult(res.error)
+        return textResult(JSON.stringify(res, null, 2))
+      } finally {
+        db.close()
+      }
+    }
+
+    if (name === 'compass_merchants') {
+      const db = openDb()
+      if (!db) return errorResult('Compass DB not found')
+      try {
+        const res = readMerchants(db, {
+          q: args?.q ? String(args.q) : undefined,
+          limit: Number.isFinite(Number(args?.limit)) ? Number(args?.limit) : undefined
+        })
         return textResult(JSON.stringify(res, null, 2))
       } finally {
         db.close()

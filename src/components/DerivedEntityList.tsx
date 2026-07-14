@@ -28,12 +28,20 @@ export default function DerivedEntityList({
   kind,
   searchPlaceholder,
   emptyState,
-  onCount
+  onCount,
+  promoteLabel = 'Save',
+  promotedLabel = 'Saved',
+  onPromoted
 }: {
   kind: 'merchant' | 'place'
   searchPlaceholder: string
   emptyState: React.ReactNode
   onCount?: (n: number) => void
+  /** Verb on the promote button — the Merchants page says "Track". */
+  promoteLabel?: string
+  promotedLabel?: string
+  /** Fired after a successful promote with the owned `places` row id. */
+  onPromoted?: (promotedId: number, entity: DerivedEntity) => void
 }): JSX.Element {
   const [items, setItems] = useState<DerivedEntity[]>([])
   const [query, setQuery] = useState('')
@@ -67,7 +75,8 @@ export default function DerivedEntityList({
       const res = await window.api.entities.promote({ kind: e.kind, key: e.key })
       if (res.success) {
         setItems((prev) => prev.map((x) => (x.key === e.key ? { ...x, promotedKind: 'place' } : x)))
-        toast(`Saved ${e.name}`, 'success')
+        toast(`${promotedLabel} ${e.name}`, 'success')
+        if (res.promotedId != null) onPromoted?.(res.promotedId, e)
       } else {
         toast(res.error ?? 'Could not save', 'error')
       }
@@ -204,18 +213,18 @@ export default function DerivedEntityList({
             </button>
             {e.promotedKind === 'place' ? (
               <span className="shrink-0 flex items-center gap-1 text-[11px] text-primary px-2 py-1">
-                <Check size={12} /> Saved
+                <Check size={12} /> {promotedLabel}
               </span>
             ) : (
               <button
                 type="button"
                 onClick={() => save(e)}
                 disabled={promoting === e.key}
-                title={`Save ${e.name}`}
-                aria-label={`Save ${e.name}`}
+                title={`${promoteLabel} ${e.name}`}
+                aria-label={`${promoteLabel} ${e.name}`}
                 className="shrink-0 flex items-center gap-1 text-[11px] text-primary border border-primary/30 rounded px-2 py-1 hover:bg-primary/10 disabled:opacity-50 transition-colors"
               >
-                <Plus size={12} /> Save
+                <Plus size={12} /> {promoteLabel}
               </button>
             )}
           </li>

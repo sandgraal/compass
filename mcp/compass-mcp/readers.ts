@@ -7,6 +7,7 @@
  */
 import type Database from 'better-sqlite3'
 import { DAY_MS, localYmd } from './dates.js'
+import { normalizeMerchant } from './normalize.js'
 
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/
 /** Range cap so a careless agent can't ask for years of tasks at once. */
@@ -748,4 +749,177 @@ export function readHealthSummary(db: Database.Database, now: Date = new Date())
     workouts30,
     activeDays30: activeDays.size
   }
+}
+
+// ---- Tracked merchants (merchants redesign, 2026-07) ----
+
+export interface MerchantSummary {
+  name: string
+  matchKey: string
+  category: string | null
+  url: string | null
+  totalSpend: number
+  txnCount: number
+  avgTxn: number
+  firstTxnDate: string | null
+  lastTxnDate: string | null
+  /** Spend over the trailing 6 calendar months (including the current one). */
+  last6MonthsSpend: number
+  /** Only in filtered (q) results: per-month spend, trailing 12 months. */
+  monthly?: Array<{ month: string; spend: number; count: number }>
+  notes?: string | null
+  support?: { email?: string; phone?: string } | null
+}
+
+export interface MerchantsResult {
+  count: number
+  merchants: MerchantSummary[]
+  note?: string
+}
+
+export const MERCHANTS_MAX = 50
+const MERCHANT_MONTHLY_DETAIL_MAX = 5
+
+/** The merchant merge key for a places row (mirrors electron/lib/merchant-match.ts). */
+function merchantKeyFor(externalId: string, name: string): string {
+  const m = externalId.match(/^derived:(?:merchant|place):(.+)$/)
+  if (m) return m[1]
+  return normalizeMerchant(name)
+}
+
+/**
+ * Tracked merchants (owned `places` rows, kind='merchant') with live ledger
+ * stats via the persisted `normalized_merchant` key. Optional `q` filters by
+ * name substring and — for small result sets — adds 12-month spend detail,
+ * notes, and support contacts.
+ */
+export function readMerchants(
+  db: Database.Database,
+  opts: { q?: string; limit?: number } = {}
+): MerchantsResult {
+  if (!hasObject(db, 'places')) {
+    return { count: 0, merchants: [], note: 'No merchants tracked yet.' }
+  }
+  const q = opts.q?.trim().toLowerCase() || null
+  const limit = Math.max(1, Math.min(Math.floor(opts.limit ?? 25), MERCHANTS_MAX))
+  const rows = db
+    .prepare(
+      `SELECT external_id AS externalId, name, category, url, notes, meta FROM places
+        WHERE kind = 'merchant' AND (@q IS NULL OR instr(lower(name), @q) > 0)
+        ORDER BY updated_at DESC LIMIT @limit`
+    )
+    .all({ q, limit }) as Array<{
+    externalId: string
+    name: string
+    category: string | null
+    url: string | null
+    notes: string | null
+    meta: string | null
+  }>
+  if (rows.length === 0) {
+    return {
+      count: 0,
+      merchants: [],
+      note: q
+        ? 'No tracked merchant matches.'
+        : 'No merchants tracked yet — track one on the Merchants page.'
+    }
+  }
+
+  const hasLedger = hasObject(db, 'finance_transactions')
+  const keyed = rows.map((r) => ({ ...r, matchKey: merchantKeyFor(r.externalId, r.name) }))
+  const keys = [...new Set(keyed.map((k) => k.matchKey).filter((k) => k.length > 0))]
+
+  const now = new Date()
+  const sixMonthsAgo = `${new Date(now.getFullYear(), now.getMonth() - 5, 1).getFullYear()}-${String(new Date(now.getFullYear(), now.getMonth() - 5, 1).getMonth() + 1).padStart(2, '0')}-01`
+  const statsByKey = new Map<
+    string,
+    {
+      totalSpend: number
+      txnCount: number
+      avgTxn: number
+      firstTxnDate: string | null
+      lastTxnDate: string | null
+      last6MonthsSpend: number
+    }
+  >()
+  if (hasLedger && keys.length > 0) {
+    const stats = db
+      .prepare(
+        `SELECT normalized_merchant AS key,
+                ROUND(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 2) AS totalSpend,
+                COUNT(*) AS txnCount,
+                ROUND(AVG(CASE WHEN amount < 0 THEN -amount END), 2) AS avgTxn,
+                MIN(date) AS firstTxnDate,
+                MAX(date) AS lastTxnDate,
+                ROUND(SUM(CASE WHEN amount < 0 AND date >= @sixMonthsAgo THEN -amount ELSE 0 END), 2) AS last6MonthsSpend
+           FROM finance_transactions
+          WHERE normalized_merchant IN (${keys.map((_, i) => `@k${i}`).join(', ')})
+          GROUP BY normalized_merchant`
+      )
+      .all({
+        sixMonthsAgo,
+        ...Object.fromEntries(keys.map((k, i) => [`k${i}`, k]))
+      }) as Array<{
+      key: string
+      totalSpend: number
+      txnCount: number
+      avgTxn: number | null
+      firstTxnDate: string | null
+      lastTxnDate: string | null
+      last6MonthsSpend: number
+    }>
+    for (const s of stats) {
+      statsByKey.set(s.key, {
+        totalSpend: s.totalSpend,
+        txnCount: s.txnCount,
+        avgTxn: s.avgTxn ?? 0,
+        firstTxnDate: s.firstTxnDate,
+        lastTxnDate: s.lastTxnDate,
+        last6MonthsSpend: s.last6MonthsSpend
+      })
+    }
+  }
+
+  const detail = q != null && keyed.length <= MERCHANT_MONTHLY_DETAIL_MAX
+  const monthlyStmt =
+    detail && hasLedger
+      ? db.prepare(
+          `SELECT substr(date, 1, 7) AS month,
+                  ROUND(SUM(-amount), 2) AS spend, COUNT(*) AS count
+             FROM finance_transactions
+            WHERE normalized_merchant = ? AND amount < 0
+            GROUP BY substr(date, 1, 7) ORDER BY month DESC LIMIT 12`
+        )
+      : null
+
+  const merchants = keyed.map<MerchantSummary>((r) => {
+    const s = statsByKey.get(r.matchKey)
+    const base: MerchantSummary = {
+      name: r.name,
+      matchKey: r.matchKey,
+      category: r.category,
+      url: r.url,
+      totalSpend: s?.totalSpend ?? 0,
+      txnCount: s?.txnCount ?? 0,
+      avgTxn: s?.avgTxn ?? 0,
+      firstTxnDate: s?.firstTxnDate ?? null,
+      lastTxnDate: s?.lastTxnDate ?? null,
+      last6MonthsSpend: s?.last6MonthsSpend ?? 0
+    }
+    if (detail) {
+      base.monthly = (monthlyStmt?.all(r.matchKey) as MerchantSummary['monthly']) ?? []
+      base.notes = r.notes
+      try {
+        const meta = r.meta
+          ? (JSON.parse(r.meta) as { support?: { email?: string; phone?: string } })
+          : null
+        base.support = meta?.support ?? null
+      } catch {
+        base.support = null
+      }
+    }
+    return base
+  })
+  return { count: merchants.length, merchants }
 }

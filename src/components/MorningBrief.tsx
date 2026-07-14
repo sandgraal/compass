@@ -117,6 +117,27 @@ export function MorningBrief(): JSX.Element | null {
           </span>
         </Link>
       )}
+      {brief.merchantCharges.count > 0 && brief.merchantCharges.items[0] && (
+        <Link
+          to="/merchants"
+          className="flex items-center gap-2 px-5 py-2.5 bg-orange-500/10 border-b border-orange-500/30 hover:bg-orange-500/15 transition-colors"
+        >
+          <TrendingUp size={14} className="text-orange-400 shrink-0" />
+          <span className="text-xs text-orange-200">
+            <span className="font-semibold">Unusual charge:</span>{' '}
+            <span className="capitalize">{brief.merchantCharges.items[0].merchant}</span> $
+            {brief.merchantCharges.items[0].amount.toLocaleString('en-US', {
+              maximumFractionDigits: 0
+            })}{' '}
+            vs ~$
+            {brief.merchantCharges.items[0].typical.toLocaleString('en-US', {
+              maximumFractionDigits: 0
+            })}{' '}
+            typical
+            {brief.merchantCharges.count > 1 && ` · ${brief.merchantCharges.count} charges`}
+          </span>
+        </Link>
+      )}
       <div className="grid grid-cols-4 divide-x divide-border">
         {sections.map((s) => (
           <Link

@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AssetInput } from './ipc/assets'
 import type { ContactInput } from './ipc/contacts'
 import type { LifeRecordInput } from './ipc/life-records'
+import type { MerchantUpdatePatch } from './ipc/merchants'
 import type { SubscriptionInput } from './ipc/subscriptions'
 import type { UpdaterStatusPayload } from './ipc/updater'
 import type { EntityKind } from './lib/entities'
@@ -526,6 +527,15 @@ const api = {
   places: {
     list: () => ipcRenderer.invoke('places:list'),
     delete: (id: number) => ipcRenderer.invoke('places:delete', id)
+  },
+  // Tracked merchants (merchants redesign) — the rich profile surface over
+  // promoted `places` rows. See electron/ipc/merchants.ts.
+  merchants: {
+    listTracked: () => ipcRenderer.invoke('merchants:list-tracked'),
+    profile: (id: number) => ipcRenderer.invoke('merchants:profile', id),
+    update: (id: number, patch: MerchantUpdatePatch) =>
+      ipcRenderer.invoke('merchants:update', id, patch),
+    untrack: (id: number) => ipcRenderer.invoke('merchants:untrack', id)
   },
   overview: {
     summary: () => ipcRenderer.invoke('overview:summary')

@@ -13,6 +13,7 @@ import { basename, dirname, isAbsolute, join, parse, relative, resolve } from 'n
 import { eq, inArray } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import * as schema from '../db/schema'
+import { normalizeMerchant } from '../lib/normalize'
 import { applyAtmSplit } from './finance-atm-split'
 import { reconcileTransactionCurrency } from './finance-currency'
 import { tagGeoAndPurpose } from './finance-geo'
@@ -558,6 +559,7 @@ export async function ingestCsvFolder(
           taxTag: t.taxTag ?? 'tax:none',
           taxTagSource: 'auto',
           taxYear: t.taxYear ?? null,
+          normalizedMerchant: normalizeMerchant(t.description),
           sourceFile: t.sourceFile,
           ingestedAt: new Date()
         })
@@ -1313,6 +1315,7 @@ export async function ingestFinanceFiles(
           taxTag: t.taxTag ?? 'tax:none',
           taxTagSource: 'auto',
           taxYear: t.taxYear ?? null,
+          normalizedMerchant: normalizeMerchant(t.description),
           sourceFile: t.sourceFile,
           ingestedAt: new Date()
         })

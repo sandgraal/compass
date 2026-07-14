@@ -36,7 +36,8 @@ function makeDb(): Database.Database {
       date TEXT NOT NULL,
       amount REAL NOT NULL,
       currency TEXT NOT NULL DEFAULT 'USD',
-      description TEXT NOT NULL DEFAULT ''
+      description TEXT NOT NULL DEFAULT '',
+      normalized_merchant TEXT
     );
     CREATE TABLE finance_balance_snapshots (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

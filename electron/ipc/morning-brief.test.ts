@@ -690,3 +690,92 @@ describe('price-hike in the assembled brief', () => {
     expect(notificationCtorMock).toHaveBeenCalledOnce()
   })
 })
+
+describe('computeMerchantChargeAlert', () => {
+  function createMerchantTables(): void {
+    sqlite.exec(`
+      CREATE TABLE places (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL DEFAULT 'merchant', name TEXT NOT NULL, category TEXT,
+        address TEXT, url TEXT, total_spend REAL, notes TEXT, meta TEXT,
+        source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER
+      );
+      CREATE TABLE finance_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT, date TEXT NOT NULL, amount REAL NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'USD', description TEXT NOT NULL DEFAULT '',
+        normalized_merchant TEXT
+      );
+    `)
+  }
+  function charge(merchant: string, date: string, amount: number): void {
+    sqlite
+      .prepare(
+        'INSERT INTO finance_transactions (date, amount, description, normalized_merchant) VALUES (?,?,?,?)'
+      )
+      .run(date, amount, merchant, merchant)
+  }
+  function trackMerchant(key: string, name: string): void {
+    sqlite
+      .prepare("INSERT INTO places (external_id, kind, name) VALUES (?, 'merchant', ?)")
+      .run(`derived:merchant:${key}`, name)
+  }
+
+  it('flags a recent charge over 2× the typical amount at a tracked merchant', async () => {
+    const { computeMerchantChargeAlert } = await import('./morning-brief')
+    createMerchantTables()
+    trackMerchant('blue bottle', 'Blue Bottle')
+    // 5 historical charges around $10 …
+    for (let m = 1; m <= 5; m++) charge('blue bottle', `2026-0${m}-05`, -10)
+    // … then a $45 charge yesterday.
+    charge('blue bottle', '2026-06-14', -45)
+    const alert = computeMerchantChargeAlert(sqlite, NOW)
+    expect(alert.count).toBe(1)
+    expect(alert.items[0]).toMatchObject({
+      merchant: 'Blue Bottle',
+      date: '2026-06-14',
+      amount: 45,
+      typical: 10
+    })
+  })
+
+  it('stays quiet for normal charges, thin history, and untracked merchants', async () => {
+    const { computeMerchantChargeAlert } = await import('./morning-brief')
+    createMerchantTables()
+    trackMerchant('blue bottle', 'Blue Bottle')
+    // Normal recent charge.
+    for (let m = 1; m <= 5; m++) charge('blue bottle', `2026-0${m}-05`, -10)
+    charge('blue bottle', '2026-06-14', -12)
+    // Thin history (2 charges) with a spike.
+    trackMerchant('new shop', 'New Shop')
+    charge('new shop', '2026-05-01', -10)
+    charge('new shop', '2026-06-14', -50)
+    // Untracked merchant with a spike.
+    for (let m = 1; m <= 5; m++) charge('other place', `2026-0${m}-05`, -10)
+    charge('other place', '2026-06-14', -80)
+    expect(computeMerchantChargeAlert(sqlite, NOW).count).toBe(0)
+  })
+
+  it('is empty (not an error) when the tables are missing', async () => {
+    const { computeMerchantChargeAlert } = await import('./morning-brief')
+    expect(computeMerchantChargeAlert(sqlite, NOW)).toEqual({ count: 0, items: [] })
+  })
+
+  it('buildMorningBrief embeds the alert and flags the summary', async () => {
+    const { buildMorningBrief } = await import('./morning-brief')
+    const ALERT = {
+      count: 1,
+      items: [
+        {
+          merchant: 'Blue Bottle',
+          date: '2026-06-14',
+          amount: 45,
+          typical: 10,
+          description: 'BLUE BOTTLE'
+        }
+      ]
+    }
+    const brief = buildMorningBrief(drizzle(sqlite, { schema }), NOW, undefined, undefined, ALERT)
+    expect(brief.merchantCharges).toEqual(ALERT)
+    expect(brief.summary).toContain('1 unusual charge')
+  })
+})

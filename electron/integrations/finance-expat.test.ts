@@ -30,7 +30,8 @@ function makeDb(): Database.Database {
     );
     CREATE TABLE finance_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, amount REAL NOT NULL,
-      currency TEXT NOT NULL DEFAULT 'USD', tax_tag TEXT NOT NULL DEFAULT 'tax:none'
+      currency TEXT NOT NULL DEFAULT 'USD', tax_tag TEXT NOT NULL DEFAULT 'tax:none',
+      normalized_merchant TEXT
     );
   `)
   return sqlite

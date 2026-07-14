@@ -92,7 +92,8 @@ function makeDb(): Database.Database {
     CREATE TABLE finance_transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, amount REAL NOT NULL,
       currency TEXT NOT NULL DEFAULT 'USD', tax_tag TEXT NOT NULL DEFAULT 'tax:none',
-      geo TEXT NOT NULL DEFAULT 'US', purpose TEXT
+      geo TEXT NOT NULL DEFAULT 'US', purpose TEXT,
+      normalized_merchant TEXT
     );
     CREATE TABLE financial_goals (
       id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'other',

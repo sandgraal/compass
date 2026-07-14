@@ -31,6 +31,8 @@ import {
 import { type ForecastResult, buildForecast } from '../integrations/finance-forecast'
 import { type Subscription, auditSubscriptions } from '../integrations/finance-subscriptions'
 import { localYmd } from '../lib/dates'
+import { matchKeyForPlace } from '../lib/merchant-match'
+import { median } from '../lib/normalize'
 
 const MAX_PER_SECTION = 5
 const PAYMENT_WINDOW_DAYS = 7
@@ -66,7 +68,29 @@ export interface MorningBrief {
   }
   lowCash: LowCashAlert
   priceHikes: PriceHikeAlert
+  merchantCharges: MerchantChargeAlert
   summary: string
+}
+
+/**
+ * Unusual charges at TRACKED merchants (merchants redesign): a charge in the
+ * last two days more than 2× that merchant's typical (median) charge. No
+ * settings gate — tracking a merchant IS the opt-in, and quiet merchants
+ * produce an empty alert.
+ */
+export interface MerchantChargeAlert {
+  count: number
+  items: Array<{
+    merchant: string
+    date: string
+    amount: number
+    typical: number
+    description: string
+  }>
+}
+
+function emptyMerchantCharges(): MerchantChargeAlert {
+  return { count: 0, items: [] }
 }
 
 /**
@@ -133,13 +157,16 @@ function buildSummary(
   payments: number,
   inbox: number,
   lowCash: LowCashAlert,
-  priceHikes: PriceHikeAlert
+  priceHikes: PriceHikeAlert,
+  merchantCharges: MerchantChargeAlert = emptyMerchantCharges()
 ): string {
   const parts = [`${pluralize(events, 'event')} today`, `${pluralize(tasks, 'task')} due`]
   if (payments > 0) parts.push(`${pluralize(payments, 'payment')} this week`)
   if (inbox > 0) parts.push(`${pluralize(inbox, 'inbox item')}`)
   if (lowCash.soonest) parts.push('⚠️ low cash ahead')
   if (priceHikes.count > 0) parts.push(`⚠️ ${pluralize(priceHikes.count, 'price hike')}`)
+  if (merchantCharges.count > 0)
+    parts.push(`⚠️ ${pluralize(merchantCharges.count, 'unusual charge')}`)
   return parts.join(' · ')
 }
 
@@ -293,6 +320,81 @@ export function computePriceHikeAlert(
   return buildPriceHikeAlert(audit.active, { enabled: true })
 }
 
+const MERCHANT_CHARGE_LOOKBACK_DAYS = 2
+const MERCHANT_CHARGE_FACTOR = 2
+const MERCHANT_CHARGE_MIN_HISTORY = 5
+
+/**
+ * Unusual-charge scan over the persisted `normalized_merchant` key: for every
+ * tracked merchant, flag charges in the last `MERCHANT_CHARGE_LOOKBACK_DAYS`
+ * days that exceed `MERCHANT_CHARGE_FACTOR`× the merchant's median charge.
+ * Needs ≥ MERCHANT_CHARGE_MIN_HISTORY historical charges so a second-ever
+ * purchase can't trip it. Best-effort: any failure returns an empty alert.
+ */
+export function computeMerchantChargeAlert(
+  sqlite: ReturnType<typeof getRawSqlite> = getRawSqlite(),
+  now: Date = new Date()
+): MerchantChargeAlert {
+  try {
+    const tracked = sqlite
+      .prepare("SELECT external_id AS externalId, name FROM places WHERE kind = 'merchant'")
+      .all() as Array<{ externalId: string; name: string }>
+    if (tracked.length === 0) return emptyMerchantCharges()
+    const keyToName = new Map<string, string>()
+    for (const t of tracked) {
+      const key = matchKeyForPlace(t.externalId, t.name)
+      if (key) keyToName.set(key, t.name)
+    }
+    if (keyToName.size === 0) return emptyMerchantCharges()
+
+    const cutoffDate = new Date(now)
+    cutoffDate.setDate(cutoffDate.getDate() - MERCHANT_CHARGE_LOOKBACK_DAYS)
+    const cutoff = localYmd(cutoffDate)
+    const keys = [...keyToName.keys()]
+    const recent = sqlite
+      .prepare(
+        `SELECT normalized_merchant AS key, date, amount, description
+           FROM finance_transactions
+          WHERE amount < 0 AND date >= ? AND normalized_merchant IN (${keys.map(() => '?').join(', ')})
+          ORDER BY date DESC`
+      )
+      .all(cutoff, ...keys) as Array<{
+      key: string
+      date: string
+      amount: number
+      description: string
+    }>
+    if (recent.length === 0) return emptyMerchantCharges()
+
+    const items: MerchantChargeAlert['items'] = []
+    const medianStmt = sqlite.prepare(
+      `SELECT -amount AS charge FROM finance_transactions
+        WHERE normalized_merchant = ? AND amount < 0 AND date < ? ORDER BY charge`
+    )
+    for (const r of recent) {
+      const history = (medianStmt.all(r.key, cutoff) as Array<{ charge: number }>).map(
+        (h) => h.charge
+      )
+      if (history.length < MERCHANT_CHARGE_MIN_HISTORY) continue
+      const typical = median(history)
+      if (typical <= 1) continue
+      if (-r.amount > typical * MERCHANT_CHARGE_FACTOR) {
+        items.push({
+          merchant: keyToName.get(r.key) ?? r.key,
+          date: r.date,
+          amount: Math.round(-r.amount * 100) / 100,
+          typical: Math.round(typical * 100) / 100,
+          description: r.description
+        })
+      }
+    }
+    items.sort((a, b) => b.amount - a.amount)
+    return { count: items.length, items: items.slice(0, MAX_PER_SECTION) }
+  } catch {
+    return emptyMerchantCharges()
+  }
+}
+
 /**
  * Assemble the digest from current DB state. `now` is injectable for tests +
  * the future scheduled-notification caller; defaults to the live clock.
@@ -301,7 +403,8 @@ export function buildMorningBrief(
   db: ReturnType<typeof getDb> = getDb(),
   now: Date = new Date(),
   lowCash: LowCashAlert = emptyLowCash(),
-  priceHikes: PriceHikeAlert = emptyPriceHikes()
+  priceHikes: PriceHikeAlert = emptyPriceHikes(),
+  merchantCharges: MerchantChargeAlert = emptyMerchantCharges()
 ): MorningBrief {
   const today = localYmd(now)
 
@@ -398,13 +501,15 @@ export function buildMorningBrief(
     inbox,
     lowCash,
     priceHikes,
+    merchantCharges,
     summary: buildSummary(
       calendar.count,
       tasks.dueCount,
       payments.count,
       inbox.count,
       lowCash,
-      priceHikes
+      priceHikes,
+      merchantCharges
     )
   }
 }
@@ -417,7 +522,8 @@ export function registerMorningBriefHandlers(ipcMain: IpcMain): void {
       db,
       now,
       computeLowCashAlert(db, getRawSqlite(), now),
-      computePriceHikeAlert(db, now)
+      computePriceHikeAlert(db, now),
+      computeMerchantChargeAlert(getRawSqlite(), now)
     )
   })
 }
@@ -445,16 +551,18 @@ export function notifyMorningBrief(
   db: ReturnType<typeof getDb> = getDb(),
   now: Date = new Date(),
   lowCash: LowCashAlert = emptyLowCash(),
-  priceHikes: PriceHikeAlert = emptyPriceHikes()
+  priceHikes: PriceHikeAlert = emptyPriceHikes(),
+  merchantCharges: MerchantChargeAlert = emptyMerchantCharges()
 ): boolean {
-  const brief = buildMorningBrief(db, now, lowCash, priceHikes)
+  const brief = buildMorningBrief(db, now, lowCash, priceHikes, merchantCharges)
   const total =
     brief.calendar.count +
     brief.tasks.dueCount +
     brief.payments.count +
     brief.inbox.count +
     (brief.lowCash.soonest ? 1 : 0) +
-    brief.priceHikes.count
+    brief.priceHikes.count +
+    brief.merchantCharges.count
   if (total === 0) return false // nothing worth interrupting the user for
   if (!Notification.isSupported()) return false
 

@@ -130,7 +130,8 @@ describe('backfillGeoFromNotes', () => {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         notes TEXT,
         geo TEXT NOT NULL DEFAULT 'US',
-        purpose TEXT
+        purpose TEXT,
+        normalized_merchant TEXT
       );
     `)
     return db

@@ -86,7 +86,8 @@ beforeEach(async () => {
       category TEXT DEFAULT 'Uncategorized', subcategory TEXT, notes TEXT,
       geo TEXT NOT NULL DEFAULT 'US', purpose TEXT,
       tax_tag TEXT NOT NULL DEFAULT 'tax:none', tax_tag_source TEXT NOT NULL DEFAULT 'auto',
-      tax_year INTEGER, source_file TEXT, ingested_at INTEGER
+      tax_year INTEGER, source_file TEXT, ingested_at INTEGER,
+      normalized_merchant TEXT
     );
     CREATE TABLE subscriptions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
