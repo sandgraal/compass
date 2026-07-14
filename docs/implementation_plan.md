@@ -738,7 +738,8 @@ Apple Data & Privacy, Signal/Telegram), and full CRED beyond the SSA spike (10.6
   defaults to the CR property net-worth value), and a **CAJA** estimate (% of declared income). IPC
   `finance:get-residency-summary` + `add`/`delete-travel-segment` + `set-residency-config`; a new **Residency**
   tab with a travel log, day-count-by-year, the SPT/CR results, the pathway checklist, and a settings card.
-  (Calendar/Timeline + CBP I-94 auto-fill via the `source` column remains a future feed.)
+  (Calendar auto-fill shipped 2026-07 — see the addendum below. CBP I-94 auto-fill via the `source`
+  column remains a future feed.)
 - [x] **11.6 Goals & milestones** (M) — **shipped.** A `financial_goals` table (migration `0022`, BOTH
   paths) + pure `electron/integrations/finance-goals.ts`: each goal has a target amount, optional target
   date, and a planned monthly contribution → `computeGoalProgress` derives remaining / % / required-monthly
@@ -943,6 +944,39 @@ undo any of it:
   + `src/components/places/WebPresenceCard.tsx`; a Sparkles "Enrich from web" action in both
   `PlaceDetail.tsx` and `MerchantDetail.tsx`; `MerchantMeta.enrichment` narrowed from
   `Record<string, unknown>` to `{ web?: PlaceWebEnrichment }`.
+
+---
+
+## Addendum (2026-07-14) — Calendar trip auto-fill + Web-Mercator map projection
+
+> Two previously-deferred items landed together in `feat/travel-autofill-mercator`.
+
+- [x] **Calendar trip auto-fill (`travel_segments.source='calendar'`)** — the long-reserved `source`
+  enum value called out as "a future feed" in the 11.5 entry above is now built. New pure module
+  `electron/integrations/calendar-residency.ts` mirrors `location-residency.ts`: `eventsToSegments` is a
+  heuristic over already-synced `calendar_events` — only MULTI-DAY events whose location or title matches
+  a curated country/city alias table qualify, the home country is dropped, and homograph-risk names
+  (Turkey, Georgia, Jordan) are deliberately excluded to avoid false positives; `deriveCalendarSegments`
+  replaces only `source='calendar'` rows in a transaction (manual rows and `source='location'` rows are
+  untouched — same replace-in-place contract as the location projector); `afterCalendarSync` is a
+  best-effort post-sync hook wired into both `syncGoogleCalendar` and `syncAppleCalendar` in
+  `electron/ipc/sync.ts` (calls it after events land, non-fatal on failure). New IPC
+  `finance:rederive-calendar-segments` (mirrors `finance:rederive-location-segments`;
+  `window.api.finance.rederiveCalendarSegments`) plus a "Recompute from calendar" button next to the
+  existing "Recompute from location history" button on the Finance → Residency → Travel log card.
+  Bugfixes riding along: Google Calendar sync now captures `end.date` for all-day events (previously only
+  timed events got an `endAt`, which starved the multi-day heuristic of candidates), and the upsert
+  conflict path now refreshes start/end/location/`allDay` on re-sync (previously only title+`syncedAt`).
+- [x] **Web-Mercator map projection** — `src/lib/geo-project.ts` upgraded from the equirectangular (flat
+  lat/lng) projection used since the Places map's first cut to Web-Mercator, resolving that file's own
+  "known v1 trade-off" comment. `project`/`unproject` now route through a Mercator y-transform clamped at
+  ±85.05113° (the standard square-Mercator cutoff); `WORLD` changed from `{x:-180,y:-90,w:360,h:180}` to
+  `{x:-180,y:-180,w:360,h:360}`; `polygonToPath` projects each vertex instead of inlining `-lat`;
+  `fitBounds` projects north/south through Mercator before computing the vertical center (previously
+  assumed a linear lat axis). `clampViewBox`/`zoomAt`/`panBy` are projection-agnostic and unchanged. The
+  sole consumer, `src/components/LocationMap.tsx` (the offline Places → Travel tab GPS map), needed no
+  changes — it only calls the public `geo-project.ts` API, whose signatures didn't change, just the
+  numeric output range.
 
 ---
 

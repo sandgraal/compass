@@ -739,6 +739,7 @@ const api = {
     }) => ipcRenderer.invoke('finance:add-travel-segment', seg),
     deleteTravelSegment: (id: number) => ipcRenderer.invoke('finance:delete-travel-segment', id),
     rederiveLocationSegments: () => ipcRenderer.invoke('finance:rederive-location-segments'),
+    rederiveCalendarSegments: () => ipcRenderer.invoke('finance:rederive-calendar-segments'),
     setResidencyConfig: (input: Record<string, string | number | null>) =>
       ipcRenderer.invoke('finance:set-residency-config', input),
 

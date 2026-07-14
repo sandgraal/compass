@@ -1,11 +1,13 @@
 /**
  * Geo projection math for the offline Places map — PURE, unit-tested.
  *
- * Equirectangular projection: world x = longitude, world y = -latitude (so
- * north renders up in SVG's y-down space). The map component drives an SVG
- * viewBox in these world units; all pan/zoom/fit math lives here. High-latitude
- * stretch is a known v1 trade-off (a Web-Mercator y-transform is a small later
- * upgrade).
+ * Web-Mercator: world x = longitude (degrees), world y = -mercator(latitude)
+ * scaled to the same degree-ish units (so north renders up in SVG's y-down
+ * space and x/y spans stay comparable). Latitudes are clamped to ±85.05° —
+ * the standard square-Mercator cutoff — making the projected world a
+ * 360×360 box. The map component drives an SVG viewBox in these world units;
+ * all pan/zoom/fit math lives here and is projection-agnostic except for
+ * `project`/`unproject`/`fitBounds`/`polygonToPath`.
  */
 
 export interface ViewBox {
@@ -15,17 +17,37 @@ export interface ViewBox {
   h: number
 }
 
+/** Square-Mercator latitude cutoff: mercY(±85.05113°) = ±180 world units. */
+const MAX_LAT = 85.05113
+
+const RAD = Math.PI / 180
+
+/**
+ * Mercator y for a latitude, in degree-scale units (±180 at the cutoff).
+ * The asinh(tan φ) identity is used over ln(tan(π/4+φ/2)) because it is
+ * exactly 0 at the equator — no float residue polluting SVG paths.
+ */
+function mercY(lat: number): number {
+  const clamped = Math.min(Math.max(lat, -MAX_LAT), MAX_LAT)
+  return Math.asinh(Math.tan(clamped * RAD)) / RAD
+}
+
+/** Inverse of `mercY`. */
+function invMercY(y: number): number {
+  return Math.atan(Math.sinh(y * RAD)) / RAD
+}
+
 /** The whole world in projected units. */
-export const WORLD: ViewBox = { x: -180, y: -90, w: 360, h: 180 }
+export const WORLD: ViewBox = { x: -180, y: -180, w: 360, h: 360 }
 
 /** Project a [lng, lat] pair into world/SVG coordinates. */
 export function project(lng: number, lat: number): { x: number; y: number } {
-  return { x: lng, y: -lat }
+  return { x: lng, y: -mercY(lat) }
 }
 
-/** Inverse of `project`. */
+/** Inverse of `project` (up to the ±85.05° latitude clamp). */
 export function unproject(x: number, y: number): { lng: number; lat: number } {
-  return { lng: x, lat: -y }
+  return { lng: x, lat: invMercY(-y) }
 }
 
 /** Clamp a viewBox inside the world, capping the span at the full world. */
@@ -38,9 +60,12 @@ export function clampViewBox(vb: ViewBox): ViewBox {
 }
 
 /**
- * Fit a data bounds `[west, south, east, north]` into a viewBox of the given
- * aspect ratio (width/height), padded and with a minimum span so a single
- * cluster doesn't zoom to a microscopic box. Null bounds → the whole world.
+ * Fit a data bounds `[west, south, east, north]` (lat/lng degrees) into a
+ * viewBox of the given aspect ratio (width/height), padded and with a minimum
+ * span so a single cluster doesn't zoom to a microscopic box. North/south are
+ * run through the Mercator transform BEFORE centering — the vertical middle
+ * of a latitude range is not its arithmetic midpoint. Null bounds → the
+ * whole world.
  */
 export function fitBounds(
   bounds: [number, number, number, number] | null,
@@ -49,11 +74,13 @@ export function fitBounds(
 ): ViewBox {
   if (!bounds) return { ...WORLD }
   const paddingFrac = opts?.paddingFrac ?? 0.15
-  const minSpan = opts?.minSpan ?? 2 // degrees — a comfortable city-ish view
+  const minSpan = opts?.minSpan ?? 2 // world units — a comfortable city-ish view
   const [west, south, east, north] = bounds
+  const yTop = project(0, north).y // north = smaller y (y points down)
+  const yBottom = project(0, south).y
 
   let w = Math.max(east - west, minSpan)
-  let h = Math.max(north - south, minSpan)
+  let h = Math.max(yBottom - yTop, minSpan)
   w *= 1 + paddingFrac * 2
   h *= 1 + paddingFrac * 2
 
@@ -62,7 +89,7 @@ export function fitBounds(
   else h = w / aspect
 
   const cx = (west + east) / 2
-  const cy = -(south + north) / 2 // world y = -lat
+  const cy = (yTop + yBottom) / 2
   return clampViewBox({ x: cx - w / 2, y: cy - h / 2, w, h })
 }
 
@@ -89,9 +116,11 @@ export function polygonToPath(poly: number[][][]): string {
   let d = ''
   for (const ring of poly) {
     if (ring.length === 0) continue
-    d += `M${ring[0][0]},${-ring[0][1]}`
+    const first = project(ring[0][0], ring[0][1])
+    d += `M${first.x},${first.y}`
     for (let i = 1; i < ring.length; i++) {
-      d += `L${ring[i][0]},${-ring[i][1]}`
+      const p = project(ring[i][0], ring[i][1])
+      d += `L${p.x},${p.y}`
     }
     d += 'Z'
   }

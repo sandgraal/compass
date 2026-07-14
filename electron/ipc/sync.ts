@@ -16,6 +16,7 @@ import { readAppleCalendars } from '../integrations/apple-calendar'
 import { syncAppleReminders } from '../integrations/apple-reminders'
 import { syncArcadia } from '../integrations/arcadia'
 import { syncArgyle } from '../integrations/argyle'
+import { afterCalendarSync } from '../integrations/calendar-residency'
 import { syncCanopy } from '../integrations/canopy'
 import { syncEmailReceipts } from '../integrations/email-receipts'
 import {
@@ -442,6 +443,8 @@ export async function syncAppleCalendar(mainWindow?: BrowserWindow | null): Prom
         .run()
       recordsUpdated++
     }
+    // Best-effort: refresh calendar-derived travel segments (residency feed).
+    afterCalendarSync()
 
     // Update the integration row + log a sync event so the UI shows
     // last-synced / counts like every other service.
@@ -540,7 +543,13 @@ export async function syncGoogle(
               : ev.start?.date
                 ? new Date(ev.start.date)
                 : null,
-            endAt: ev.end?.dateTime ? new Date(ev.end.dateTime) : null,
+            // All-day events carry end.date (EXCLUSIVE, per the Calendar API) —
+            // captured so multi-day spans are derivable (calendar-residency.ts).
+            endAt: ev.end?.dateTime
+              ? new Date(ev.end.dateTime)
+              : ev.end?.date
+                ? new Date(ev.end.date)
+                : null,
             allDay: !!ev.start?.date,
             location: ev.location,
             description: ev.description,
@@ -549,12 +558,31 @@ export async function syncGoogle(
           })
           .onConflictDoUpdate({
             target: calendarEvents.externalId,
-            set: { title: ev.summary || '(No title)', syncedAt: new Date() }
+            // Refresh the fields an edited/moved event changes — older rows
+            // synced before end dates were captured pick them up here too.
+            set: {
+              title: ev.summary || '(No title)',
+              startAt: ev.start?.dateTime
+                ? new Date(ev.start.dateTime)
+                : ev.start?.date
+                  ? new Date(ev.start.date)
+                  : null,
+              endAt: ev.end?.dateTime
+                ? new Date(ev.end.dateTime)
+                : ev.end?.date
+                  ? new Date(ev.end.date)
+                  : null,
+              allDay: !!ev.start?.date,
+              location: ev.location,
+              syncedAt: new Date()
+            }
           })
           .run()
         recordsUpdated++
       }
       await updateCalendarKnowledge(events)
+      // Best-effort: refresh calendar-derived travel segments (residency feed).
+      afterCalendarSync()
     }
 
     // ---- Gmail ----

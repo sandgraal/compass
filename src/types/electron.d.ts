@@ -3023,6 +3023,7 @@ declare global {
         }): Promise<{ success: boolean; id?: number; error?: string }>
         deleteTravelSegment(id: number): Promise<{ success: boolean; error?: string }>
         rederiveLocationSegments(): Promise<{ derived: number; removed: number }>
+        rederiveCalendarSegments(): Promise<{ derived: number; removed: number }>
         setResidencyConfig(
           input: Record<string, string | number | null>
         ): Promise<{ success: boolean; error?: string }>
