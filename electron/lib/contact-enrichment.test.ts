@@ -130,6 +130,38 @@ describe('mergeEnrichment', () => {
     expect(merged.crossSource?.sources).toEqual(['gcal'])
     expect(merged.google?.biography).toBe('hi')
   })
+
+  const WEB = {
+    searchedAs: 'Jane Doe (Acme)',
+    matchConfidence: 'high' as const,
+    bio: null,
+    location: null,
+    links: [{ value: 'https://github.com/jane' }],
+    facts: [],
+    sources: [{ url: 'https://acme.com/team' }],
+    refreshedAt: 5
+  }
+
+  it('preserves google + crossSource when patching web', () => {
+    const existing = { google: { nicknames: ['Bob'] } }
+    const merged = mergeEnrichment(existing, { web: WEB })
+    expect(merged.google?.nicknames).toEqual(['Bob'])
+    expect(merged.web?.searchedAs).toBe('Jane Doe (Acme)')
+  })
+
+  it('preserves web when patching the other namespaces', () => {
+    const existing = { web: WEB }
+    const merged = mergeEnrichment(existing, { google: { biography: 'hi' } })
+    expect(merged.web?.links).toEqual([{ value: 'https://github.com/jane' }])
+    expect(merged.google?.biography).toBe('hi')
+  })
+
+  it('a fresh web patch replaces the previous web block wholesale', () => {
+    const existing = { web: WEB }
+    const merged = mergeEnrichment(existing, { web: { ...WEB, links: [], refreshedAt: 9 } })
+    expect(merged.web?.links).toEqual([])
+    expect(merged.web?.refreshedAt).toBe(9)
+  })
 })
 
 describe('parseEnrichment', () => {

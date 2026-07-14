@@ -14,9 +14,11 @@
  * reproject the spine, materialize Google photos into local data URIs, then deep
  * enrich, reporting via `sync:update` + a native notification.
  *
- * Everything stays LOCAL — the only outbound calls are to the user's own Google
- * account (via the existing sync path) and to Google's public contact-photo URLs.
- * No third-party people-search / data-broker lookups.
+ * Everything in THIS module stays LOCAL — the only outbound calls are to the
+ * user's own Google account (via the existing sync path) and to Google's public
+ * contact-photo URLs. No third-party people-search / data-broker lookups. The
+ * one deliberate web path lives in `contact-web-enrich.ts`: per-contact,
+ * consent-gated, BYO Anthropic key, review-before-write.
  */
 import { eq } from 'drizzle-orm'
 import { BrowserWindow, type IpcMain } from 'electron'

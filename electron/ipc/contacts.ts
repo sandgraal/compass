@@ -33,6 +33,7 @@ import {
 import {
   type ContactEnrichment,
   type CrossSourceSummary,
+  type WebEnrichment,
   mergeEnrichment,
   parseEnrichment
 } from '../lib/contact-enrichment'
@@ -498,6 +499,46 @@ export function addContactIdentifiers(
   return true
 }
 
+/**
+ * Apply a USER-REVIEWED web enrichment: the accepted core-column values plus
+ * the assembled `web` namespace (which replaces any previous web block while
+ * preserving `google`/`crossSource`). Only `contact-web-enrich.ts` calls this,
+ * and only with values the user accepted in the review dialog — never write
+ * model output through here directly. Recomputes `search_blob` when `org`
+ * changes (org is part of the LIKE haystack).
+ */
+export function applyWebEnrichment(
+  contactId: number,
+  fields: Partial<{ jobTitle: string; org: string; birthday: string; url: string }>,
+  web: WebEnrichment
+): boolean {
+  const db = getDb()
+  const row = db.select().from(contacts).where(eq(contacts.id, contactId)).all()[0]
+  if (!row) return false
+  const enr = parseEnrichment(row.enrichment)
+  const merged = mergeEnrichment(enr, { web })
+  const set: Record<string, unknown> = {
+    enrichment: JSON.stringify(merged),
+    updatedAt: new Date()
+  }
+  if (fields.jobTitle !== undefined) set.jobTitle = clamp(fields.jobTitle, MAX_TEXT)
+  if (fields.org !== undefined) set.org = clamp(fields.org, MAX_TEXT)
+  if (fields.birthday !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(fields.birthday))
+    set.birthday = fields.birthday
+  if (fields.url !== undefined) set.url = clamp(fields.url, MAX_TEXT)
+  if (fields.org !== undefined) {
+    set.searchBlob = computeSearchBlob({
+      displayName: row.displayName,
+      org: clamp(fields.org, MAX_TEXT),
+      emails: parseArr<ContactEmail>(row.emails),
+      phones: parseArr<ContactPhone>(row.phones),
+      nicknames: enr.google?.nicknames
+    })
+  }
+  db.update(contacts).set(set).where(eq(contacts.id, contactId)).run()
+  return true
+}
+
 // ─── Duplicate detection + merge ─────────────────────────────────────────────
 
 /** Rough completeness signal for survivor selection. */
@@ -621,10 +662,11 @@ export function mergeContacts(survivorId: number, loserIds: number[]): boolean {
     }
     if (!photo && loser.photo) photo = loser.photo
     const loserEnr = parseEnrichment(loser.enrichment)
-    // Namespace-merge, preferring the survivor's existing halves.
+    // Namespace-merge, preferring the survivor's existing namespaces.
     enrichment = {
       google: enrichment.google ?? loserEnr.google,
-      crossSource: enrichment.crossSource ?? loserEnr.crossSource
+      crossSource: enrichment.crossSource ?? loserEnr.crossSource,
+      web: enrichment.web ?? loserEnr.web
     }
   }
 
@@ -851,9 +893,10 @@ function fetchParsed(ids?: number[]): ParsedContact[] {
 /**
  * Best-effort regeneration of `profile/relationships.md` after any mutation, so
  * the knowledge base mirrors the contacts table. Never throws into a handler —
- * a markdown write failing shouldn't fail the underlying CRUD.
+ * a markdown write failing shouldn't fail the underlying CRUD. Exported for
+ * `contact-web-enrich.ts`, which mutates contacts from its own module.
  */
-function syncRelationships(): void {
+export function syncRelationships(): void {
   try {
     writeRelationships(fetchParsed())
   } catch (err) {

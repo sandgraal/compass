@@ -557,6 +557,33 @@ describe('contact dedupe (auto-merge + review queue)', () => {
     expect(((await invoke('contacts:list')) as unknown[]).length).toBe(1)
   })
 
+  it('mergeContacts folds the loser web enrichment into a survivor without one', async () => {
+    const { upsertContacts, mergeContacts } = await import('./contacts')
+    upsertContacts([
+      { externalId: 'w1', displayName: 'Pia Kim', source: 'google', emails: [] },
+      { externalId: 'w2', displayName: 'Pia Kim', source: 'csv', emails: [] }
+    ])
+    const listed = (await invoke('contacts:list')) as Array<{ id: number }>
+    const [survivor, loser] = listed
+    const web = {
+      searchedAs: 'Pia Kim',
+      matchConfidence: 'high',
+      links: [{ value: 'https://github.com/pia' }],
+      facts: [],
+      sources: [],
+      refreshedAt: 1
+    }
+    sqlite
+      .prepare('UPDATE contacts SET enrichment = ? WHERE id = ?')
+      .run(JSON.stringify({ web }), loser.id)
+    expect(mergeContacts(survivor.id, [loser.id])).toBe(true)
+    const row = sqlite.prepare('SELECT enrichment FROM contacts WHERE id = ?').get(survivor.id) as {
+      enrichment: string
+    }
+    const enr = JSON.parse(row.enrichment) as { web?: { searchedAs: string } }
+    expect(enr.web?.searchedAs).toBe('Pia Kim')
+  })
+
   it('name-only pairs appear in contacts:duplicates and dismiss hides them permanently', async () => {
     const { upsertContacts } = await import('./contacts')
     upsertContacts([
