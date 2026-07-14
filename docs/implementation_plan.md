@@ -945,6 +945,26 @@ undo any of it:
   `PlaceDetail.tsx` and `MerchantDetail.tsx`; `MerchantMeta.enrichment` narrowed from
   `Record<string, unknown>` to `{ web?: PlaceWebEnrichment }`.
 
+## Addendum (2026-07-14) — Reliable GitHub commit capture
+
+- [x] **Deterministic per-repo commit supplement (`electron/ipc/sync.ts`)** — `syncGitHub` already
+  upserted `github_items` rows of type `'commit'` from the user's GitHub **events feed**
+  (`/users/{login}/events`, PushEvents), but that feed is capped (~300 events / 90 days),
+  eventually-consistent, and silently drops pushes GitHub doesn't surface there — so commits reaching
+  the timeline were unreliable in practice. Fixed by adding a second, deterministic pull that runs
+  alongside the events-feed one (both stay in place): `GET /user/repos?sort=pushed&per_page=10`, then
+  for the top `GITHUB_COMMIT_REPO_LIMIT` (10) repos, `GET /repos/{owner}/{repo}/commits?author={login}
+  &since={90-days-ago}&per_page=GITHUB_COMMIT_PER_REPO_LIMIT(30)`. Both pulls feed the same `upsertGh`
+  closure keyed on `externalId=sha` (`onConflictDoUpdate`), so a commit seen by both is a no-op the
+  second time — fully idempotent. Bounds are module-level consts: `GITHUB_COMMIT_REPO_LIMIT=10`,
+  `GITHUB_COMMIT_PER_REPO_LIMIT=30`, `GITHUB_COMMIT_LOOKBACK_MS=90 days`. Each pull (repos list, and
+  each repo's commits) is wrapped in its own try/catch — a failing fetch is non-fatal and never aborts
+  the sync or the assigned-issues/authored-PRs pulls. No schema/projector changes needed —
+  `electron/lib/storehouse-projectors.ts`'s `projectGithub`/`GITHUB_TYPES` already handled `'commit'`
+  correctly. New `electron/ipc/sync-github-commits.test.ts` covers events-feed capture, the per-repo
+  supplement finding a commit the events feed missed (the actual reliability gap), dedup across both
+  pulls, and best-effort failure isolation.
+
 ---
 
 ## Backlog (deferred, considered but out of scope this round)
