@@ -846,7 +846,8 @@ undo any of it:
 - **Schema** — `finance_transactions.normalized_merchant` (indexed, the persisted `normalizeMerchant(description)`
   merge key, backfilled at startup via `ensureNormalizedMerchants` in `electron/lib/merchant-match.ts`) and
   `places.meta` (namespaced JSON — `support` contacts today, reserved for a future consent-gated
-  web-enrichment blob). Migration `0041` (+ `ensureNewTables` mirror).
+  web-enrichment blob — **built out in the 2026-07-14 geo + web-enrichment follow-up below**). Migration
+  `0041` (+ `ensureNewTables` mirror).
 - **New IPC namespace** — `electron/ipc/merchants.ts` registers `merchants:list-tracked`, `merchants:profile`,
   `merchants:update`, `merchants:untrack` (`window.api.merchants.{listTracked,profile,update,untrack}`),
   backed by `electron/lib/merchant-match.ts` (backfill + match-key) and `electron/lib/merchant-profile.ts`
@@ -901,7 +902,47 @@ undo any of it:
   trip-bundles list with per-trip spend + a deep link to Finance → Residency via
   `FINANCE_TAB_STORAGE_KEY`). Manual "Add place" create form. `PlaceMeta` reserves `geo` (future
   GPS-correlation) and `enrichment` (future web-enrich) namespaces on `places.meta`, mirroring
-  `MerchantMeta`.
+  `MerchantMeta`. **Both namespaces are now built — see the 2026-07-14 addendum below.**
+
+---
+
+## Addendum (2026-07-14) — Places GPS geo-correlation + web enrichment for places & merchants
+
+> Two follow-ups to the 2026-07-13 Merchants/Places redesign addenda above, landing together: they build
+> out the two `PlaceMeta` namespaces ("future GPS-correlation" and "future web-enrich") that were reserved
+> but empty when those redesigns shipped.
+
+- [x] **GPS geo-correlation (`PlaceMeta.geo`)** — migration `0042_location_points_occurred_at.sql` adds
+  `idx_location_points_occurred_at` (mirrored in `ensureNewTables` in `electron/db/client.ts`, declared in
+  `schema.ts`) so the new per-visit ±2h time-window queries are indexed range scans. New pure lib
+  `electron/lib/location-place-geo.ts` derives a tracked place's APPROXIMATE coordinate: median of
+  per-visit ±2h GPS-window medians, requiring ≥2 agreeing windows within a 1.5 km dispersion gate,
+  virtual-meeting names skipped, result rounded to 2 decimals (~1.1 km, roughly the `location:map-data`
+  cell granularity). This is now the ONLY module besides `electron/ipc/location.ts` that reads
+  `location_points` — raw points still never cross IPC, so the data-access-policy exclusion (raw GPS never
+  reaches records/any AI surface) is unchanged. `places:list-tracked` lazily computes and caches the
+  coordinate in `places.meta.geo` (negative results cached too; recompute keyed on the dated-visit count;
+  `updatedAt` deliberately NOT bumped since this is a derived cache, not a user edit). UI: `LocationMap`
+  gains `markers` (tracked-place pins with name tooltips) + a `focus` prop; `PlaceDetail` gains a "Show on
+  map" action that jumps to the Travel tab focused on the place.
+- [x] **Web enrichment for places AND merchants (`meta.enrichment.web`)** — mirrors the contact
+  "Enrich from web" flow (PR #395). New pure lib `electron/lib/place-web-enrichment.ts` (place-flavored
+  prompt/schema/validation; reuses `WEB_SEARCH_TOOL`/`sanitizeUrl`/`harvestSources` from
+  `contact-web-enrichment.ts` so safety behavior can't drift between the two flows). New IPC
+  `electron/ipc/place-web-enrich.ts`: `places:web-enrich` / `places:web-enrich-apply` /
+  `places:web-enrich-cancel` (registered in `main.ts`; preload under `window.api.places.webEnrich*`). Same
+  guardrails as contacts: BYO Anthropic key, consent dialog shows the exact outbound payload
+  (name/category/address — never notes or visit history), review-before-write apply-by-id against a
+  main-process `PendingRun` cache (30-min TTL, single-flight, 90s abort, `max_uses: 5`). Deliberately NOT
+  `kind`-filtered — it's the shared enrichment surface for both tracked places and tracked merchants (this
+  is what fulfills the "reserved for a future consent-gated web-enrichment blob" note in the merchants
+  redesign addendum above). Apply writer `applyPlaceWebEnrichment` in `electron/ipc/places.ts` (core
+  columns category/address/url re-validated via the shared cleaners; accepted findings replace
+  `meta.enrichment.web`; `meta.geo` preserved). UI: new `src/components/places/PlaceWebEnrichDialog.tsx`
+  (consent→searching→candidates→review→applied phase machine, unverified-source items default unchecked)
+  + `src/components/places/WebPresenceCard.tsx`; a Sparkles "Enrich from web" action in both
+  `PlaceDetail.tsx` and `MerchantDetail.tsx`; `MerchantMeta.enrichment` narrowed from
+  `Record<string, unknown>` to `{ web?: PlaceWebEnrichment }`.
 
 ---
 

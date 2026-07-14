@@ -538,7 +538,14 @@ const api = {
     profile: (id: number) => ipcRenderer.invoke('places:profile', id),
     update: (id: number, patch: PlaceUpdatePatch) => ipcRenderer.invoke('places:update', id, patch),
     createManual: (input: PlaceCreateInput) => ipcRenderer.invoke('places:create-manual', input),
-    untrack: (id: number) => ipcRenderer.invoke('places:untrack', id)
+    untrack: (id: number) => ipcRenderer.invoke('places:untrack', id),
+    // Opt-in web enrichment (BYO Anthropic key): search → review → apply-by-id.
+    // Shared by tracked places AND tracked merchants (same table).
+    webEnrich: (req: { placeId: number; hints?: string; candidateHint?: string }) =>
+      ipcRenderer.invoke('places:web-enrich', req),
+    webEnrichApply: (req: { runId: string; accepted: number[] }) =>
+      ipcRenderer.invoke('places:web-enrich-apply', req),
+    webEnrichCancel: () => ipcRenderer.invoke('places:web-enrich-cancel')
   },
   // Tracked merchants (merchants redesign) — the rich profile surface over
   // promoted `places` rows. See electron/ipc/merchants.ts.
