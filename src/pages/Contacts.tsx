@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import DerivedEntityList from '../components/DerivedEntityList'
 import ContactsOverview from '../components/contacts/ContactsOverview'
 import MergeContactsDialog, {
   type MergeCandidate
@@ -98,7 +99,13 @@ const hostnameOf = (url: string): string => {
  */
 const RENDER_CHUNK = 200
 
+type ContactsTab = 'tracked' | 'discovered'
+
 export default function Contacts(): JSX.Element {
+  // Mirrors Merchants/Places: undecided until the first load resolves, so a
+  // contactless first run lands on Discovered instead of a blank address book.
+  const [tab, setTab] = useState<ContactsTab | null>(null)
+  const [discoveredCount, setDiscoveredCount] = useState<number | null>(null)
   const [contacts, setContacts] = useState<ContactRecord[]>([])
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -155,6 +162,13 @@ export default function Contacts(): JSX.Element {
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search])
+
+  // Land on Tracked once it has content, otherwise show Discovered — same
+  // heuristic as Merchants/Places, decided once the first load resolves.
+  useEffect(() => {
+    if (tab != null || loading) return
+    setTab(contacts.length > 0 ? 'tracked' : 'discovered')
+  }, [tab, loading, contacts.length])
 
   /** The list as displayed: source-filtered, then sorted. Rows arrive name-sorted. */
   const shown = useMemo(() => {
@@ -312,6 +326,13 @@ export default function Contacts(): JSX.Element {
   function reviewPair(pair: DuplicatePair): void {
     setMergeCandidates([pair.a, pair.b])
     setMergeOpen(true)
+  }
+
+  /** A person promoted from Discovered — switch to Tracked and open the new contact. */
+  async function handlePersonPromoted(promotedId: number): Promise<void> {
+    setTab('tracked')
+    await load(search)
+    await openContact(promotedId)
   }
 
   // Proactively surface the reconnect prompt on load if a contacts scope is missing.
@@ -615,490 +636,548 @@ export default function Contacts(): JSX.Element {
   }
 
   return (
-    <div className="flex h-full pt-10">
-      {/* List panel */}
-      <div className="w-72 shrink-0 border-r border-border bg-card/40 flex flex-col pt-4">
-        <div className="px-4 pb-3 flex items-center gap-2">
-          <input
-            ref={selectAllRef}
-            type="checkbox"
-            checked={allShownSelected}
-            onChange={toggleSelectAllShown}
-            disabled={shown.length === 0}
-            aria-label="Select all shown contacts"
-            title="Select all shown"
-            className="h-3.5 w-3.5 accent-primary cursor-pointer disabled:cursor-default"
-          />
-          <Users size={14} className="text-primary" />
-          <span className="text-xs font-semibold text-foreground uppercase tracking-wider">
-            Contacts
-          </span>
-          <span className="ml-auto text-xs text-muted-foreground">{shown.length}</span>
-        </div>
-
-        <div className="px-3 pb-2">
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, email, phone…"
-            aria-label="Search contacts"
-            className="w-full bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
-          />
-        </div>
-
-        <div className="px-3 pb-2 flex items-center gap-1.5">
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as SortBy)}
-            aria-label="Sort contacts"
-            className="flex-1 bg-secondary border border-border rounded-lg px-2 py-1 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+    <div className="flex flex-col h-full">
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-border px-4 pt-3 shrink-0">
+        {(
+          [
+            { key: 'tracked' as ContactsTab, label: 'Tracked', count: contacts.length },
+            { key: 'discovered' as ContactsTab, label: 'Discovered', count: discoveredCount }
+          ] as const
+        ).map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => setTab(t.key)}
+            className={cn(
+              'px-3.5 py-2 text-sm border-b-2 -mb-px transition-colors',
+              tab === t.key
+                ? 'border-primary text-foreground font-medium'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            )}
           >
-            <option value="name">Sort: Name</option>
-            <option value="active">Sort: Recently active</option>
-            <option value="added">Sort: Recently added</option>
-            <option value="seen">Sort: Most seen</option>
-          </select>
-        </div>
-
-        {sourceCounts.length > 1 && (
-          <div className="px-3 pb-2 flex gap-1.5 overflow-x-auto">
-            <button
-              type="button"
-              onClick={() => setSourceFilter(null)}
-              className={cn(
-                'shrink-0 text-[11px] px-2 py-0.5 rounded-full border transition-colors',
-                sourceFilter === null
-                  ? 'border-primary/60 bg-primary/10 text-primary'
-                  : 'border-border text-muted-foreground hover:text-foreground'
-              )}
-            >
-              All
-            </button>
-            {sourceCounts.map(([source, count]) => (
-              <button
-                key={source}
-                type="button"
-                onClick={() => setSourceFilter((prev) => (prev === source ? null : source))}
-                title={`${count} from ${sourceLabel(source)}`}
-                className={cn(
-                  'shrink-0 text-[11px] px-2 py-0.5 rounded-full border transition-colors',
-                  sourceFilter === source
-                    ? 'border-primary/60 bg-primary/10 text-primary'
-                    : 'border-border text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {sourceLabel(source)} {count}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {selectedRows.size > 0 ? (
-          <div className="px-3">
-            <BulkActionBar
-              count={selectedRows.size}
-              onClear={clearSelection}
-              className="static px-3 py-2 gap-2"
-            >
-              <button
-                type="button"
-                onClick={() => setMergeOpen(true)}
-                disabled={selectedRows.size < 2 || bulkBusy}
-                aria-label={`Merge ${selectedRows.size} contacts`}
-                title={
-                  selectedRows.size < 2 ? 'Select at least two contacts to merge' : 'Merge into one'
-                }
-                className="flex items-center gap-1 text-xs px-2 py-1.5 bg-secondary hover:bg-secondary/80 text-foreground rounded-lg transition-colors disabled:opacity-50"
-              >
-                <GitMerge size={12} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setRelationshipOpen(true)}
-                disabled={bulkBusy}
-                aria-label="Set relationship on selection"
-                title="Set relationship (family, coworker…)"
-                className="flex items-center gap-1 text-xs px-2 py-1.5 bg-secondary hover:bg-secondary/80 text-foreground rounded-lg transition-colors disabled:opacity-50"
-              >
-                <Tag size={12} />
-              </button>
-              <button
-                type="button"
-                onClick={() => void startBulkEnrich()}
-                disabled={bulkBusy || enrichQueue != null}
-                aria-label="Enrich selection from web"
-                title="Enrich from web, one at a time (uses your Anthropic key)"
-                className="flex items-center gap-1 text-xs px-2 py-1.5 bg-secondary hover:bg-secondary/80 text-foreground rounded-lg transition-colors disabled:opacity-50"
-              >
-                <Sparkles size={12} />
-              </button>
-              <button
-                type="button"
-                onClick={bulkDelete}
-                disabled={bulkBusy}
-                aria-label="Delete selection"
-                title="Delete selected contacts"
-                className="flex items-center gap-1 text-xs px-2 py-1.5 bg-secondary hover:bg-destructive/20 text-foreground hover:text-destructive rounded-lg transition-colors disabled:opacity-50"
-              >
-                <Trash2 size={12} />
-              </button>
-            </BulkActionBar>
-          </div>
-        ) : (
-          <div className="px-3 pb-2">
-            <button
-              type="button"
-              onClick={() => importFrom('vcard')}
-              disabled={busy}
-              title="Import a .vcf exported from your phone (iCloud / Google / Outlook)"
-              className="w-full flex items-center justify-center gap-1.5 text-sm px-3 py-2 bg-primary/15 hover:bg-primary/25 text-primary rounded-lg transition-colors disabled:opacity-50"
-            >
-              <Smartphone size={14} /> Import from phone
-            </button>
-          </div>
-        )}
-
-        <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
-          {loading ? (
-            [1, 2, 3, 4].map((n) => (
-              <div key={n} className="h-12 bg-secondary/30 rounded-lg animate-pulse mb-1" />
-            ))
-          ) : shown.length === 0 ? (
-            <p className="text-xs text-muted-foreground px-3 py-6 text-center">
-              {search || sourceFilter ? 'No matches.' : 'No contacts yet.'}
-            </p>
-          ) : (
-            shown.slice(0, visibleCount).map((c) => (
-              <div key={c.id} className="flex items-center gap-0.5">
-                <label className="pl-1.5 py-2 shrink-0 flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={selectedRows.has(c.id)}
-                    // onClick (not onChange) so shift-click ranges work —
-                    // change events don't carry modifier keys.
-                    onClick={(e) => toggleSelect(c, e.shiftKey)}
-                    readOnly
-                    aria-label={`Select ${c.displayName}`}
-                    className="h-3.5 w-3.5 accent-primary cursor-pointer"
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={() => openContact(c.id)}
-                  className={cn(
-                    'flex-1 min-w-0 flex flex-col items-start gap-0.5 px-2 py-2 rounded-lg text-left transition-colors',
-                    selectedId === c.id
-                      ? 'bg-primary/10 text-primary'
-                      : 'text-foreground hover:bg-secondary/60'
-                  )}
-                >
-                  <span className="text-sm font-medium leading-tight truncate w-full">
-                    {c.displayName}
-                  </span>
-                  {(sortBy === 'active' || sortBy === 'seen') && c.lastSeen != null ? (
-                    <span className="text-xs text-muted-foreground truncate w-full">
-                      {formatRelative(c.lastSeen)}
-                      {c.touchpointCount > 0 && ` · ${c.touchpointCount} touchpoints`}
-                    </span>
-                  ) : (
-                    (c.org || c.relationship) && (
-                      <span className="text-xs text-muted-foreground truncate w-full">
-                        {[c.org, c.relationship].filter(Boolean).join(' · ')}
-                      </span>
-                    )
-                  )}
-                </button>
-              </div>
-            ))
-          )}
-          {!loading && visibleCount < shown.length && (
-            <div ref={listEndRef} className="py-3 text-center text-xs text-muted-foreground">
-              {shown.length - visibleCount} more…
-            </div>
-          )}
-        </div>
-
-        <div className="px-3 py-3 border-t border-border grid grid-cols-2 gap-1.5">
-          <HeaderButton
-            icon={<Upload size={11} />}
-            label="vCard"
-            onClick={() => importFrom('vcard')}
-            disabled={busy}
-            title="Import .vcf"
-          />
-          <HeaderButton
-            icon={<Upload size={11} />}
-            label="CSV"
-            onClick={() => importFrom('csv')}
-            disabled={busy}
-            title="Import .csv"
-          />
-          <HeaderButton
-            icon={<Download size={11} />}
-            label={selectedRows.size > 0 ? `vCard (${selectedRows.size})` : 'vCard'}
-            onClick={() => exportTo('vcard')}
-            disabled={busy}
-            title={selectedRows.size > 0 ? 'Export the selected contacts as .vcf' : 'Export .vcf'}
-          />
-          <HeaderButton
-            icon={<Download size={11} />}
-            label={selectedRows.size > 0 ? `CSV (${selectedRows.size})` : 'CSV'}
-            onClick={() => exportTo('csv')}
-            disabled={busy}
-            title={selectedRows.size > 0 ? 'Export the selected contacts as .csv' : 'Export .csv'}
-          />
-        </div>
-
-        <div className="px-3 pb-3">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1.5 px-0.5">
-            Import from a service
-          </p>
-          <div className="grid grid-cols-3 gap-1.5">
-            <HeaderButton
-              icon={<Building2 size={11} />}
-              label="LinkedIn"
-              onClick={() => importFrom('linkedin')}
-              disabled={busy}
-              title="Import LinkedIn Connections.csv (from 'Get a copy of your data')"
-            />
-            <HeaderButton
-              icon={<Users size={11} />}
-              label="Facebook"
-              onClick={() => importFrom('facebook')}
-              disabled={busy}
-              title="Import friends.json (from 'Download Your Information')"
-            />
-            <HeaderButton
-              icon={<Phone size={11} />}
-              label="Voice"
-              onClick={() => importFrom('gvoice')}
-              disabled={busy}
-              title="Import Google Voice numbers (pick your Takeout Voice folder)"
-            />
-          </div>
-        </div>
+            {t.label}
+            {t.count != null && (
+              <span className="ml-1.5 text-xs text-muted-foreground">{t.count}</span>
+            )}
+          </button>
+        ))}
       </div>
 
-      {/* Detail panel */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-          <h1 className="text-base font-semibold text-foreground">
-            {editing
-              ? selectedId == null
-                ? 'New contact'
-                : 'Edit contact'
-              : (selected?.displayName ?? 'Contacts')}
-          </h1>
-          <div className="flex items-center gap-2">
-            {!editing && (
-              <button
-                type="button"
-                onClick={enrichAll}
-                disabled={enriching || reconnecting}
-                title="Pull your whole Google address book + cross-reference every connected source"
-                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-primary/40 hover:border-primary text-primary rounded-lg transition-colors disabled:opacity-50"
-              >
-                <Sparkles size={12} className={cn(enriching && 'animate-pulse')} />
-                {enriching ? 'Pulling…' : 'Pull everything'}
-              </button>
-            )}
-            {!editing && selected && (
+      {tab === 'discovered' && (
+        <div className="flex-1 min-h-0 overflow-y-auto p-8 pt-6 max-w-3xl mx-auto w-full">
+          <DerivedEntityList
+            kind="person"
+            searchPlaceholder="Find a person…"
+            onCount={setDiscoveredCount}
+            promoteLabel="Add"
+            promotedLabel="Added"
+            onPromoted={handlePersonPromoted}
+            emptyState={
               <>
-                <button
-                  type="button"
-                  onClick={() => setWebEnrichOpen(true)}
-                  title="Search the public web for this person, then review what to keep"
-                  className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-primary/40 hover:border-primary text-primary rounded-lg transition-colors"
-                >
-                  <Globe size={12} /> Enrich from web
-                </button>
-                <button
-                  type="button"
-                  onClick={startEdit}
-                  aria-label="Edit contact"
-                  className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-border hover:border-primary/50 text-muted-foreground hover:text-foreground rounded-lg transition-colors"
-                >
-                  <Pencil size={12} /> Edit
-                </button>
-                <button
-                  type="button"
-                  onClick={remove}
-                  aria-label="Delete contact"
-                  className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-border hover:border-destructive/50 text-muted-foreground hover:text-destructive rounded-lg transition-colors"
-                >
-                  <Trash2 size={12} />
-                </button>
+                No people yet. Import your <span className="text-foreground">LinkedIn</span>,{' '}
+                <span className="text-foreground">Facebook</span>, or{' '}
+                <span className="text-foreground">Google Voice</span> archive on the Timeline, or
+                connect Gmail.
               </>
-            )}
-            <button
-              type="button"
-              onClick={startAdd}
-              className="flex items-center gap-1.5 text-sm px-3 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors"
-            >
-              <Plus size={14} /> Add
-            </button>
-          </div>
+            }
+          />
         </div>
+      )}
 
-        {needsReconnect && !editing && (
-          <div className="mx-6 mt-4 flex items-center gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
-            <Sparkles size={16} className="text-amber-500 shrink-0" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-foreground">
-                Reconnect Google to import your full address book
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Compass needs updated permission to pull in your Google "Other contacts" — everyone
-                you've emailed, not just your saved contacts.
-              </p>
+      {tab !== 'discovered' && (
+        <div className="flex h-full pt-10">
+          {/* List panel */}
+          <div className="w-72 shrink-0 border-r border-border bg-card/40 flex flex-col pt-4">
+            <div className="px-4 pb-3 flex items-center gap-2">
+              <input
+                ref={selectAllRef}
+                type="checkbox"
+                checked={allShownSelected}
+                onChange={toggleSelectAllShown}
+                disabled={shown.length === 0}
+                aria-label="Select all shown contacts"
+                title="Select all shown"
+                className="h-3.5 w-3.5 accent-primary cursor-pointer disabled:cursor-default"
+              />
+              <Users size={14} className="text-primary" />
+              <span className="text-xs font-semibold text-foreground uppercase tracking-wider">
+                Contacts
+              </span>
+              <span className="ml-auto text-xs text-muted-foreground">{shown.length}</span>
             </div>
-            <button
-              type="button"
-              onClick={reconnectGoogle}
-              disabled={reconnecting || enriching}
-              className="shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-600 dark:text-amber-400 rounded-lg transition-colors disabled:opacity-50"
-            >
-              {reconnecting ? 'Reconnecting…' : 'Reconnect Google'}
-            </button>
-          </div>
-        )}
 
-        {dupes.length > 0 && !editing && (
-          <div className="mx-6 mt-4 rounded-lg border border-border bg-card/40">
-            <button
-              type="button"
-              onClick={() => setShowDupes((v) => !v)}
-              aria-expanded={showDupes}
-              className="w-full flex items-center gap-2 px-4 py-3 text-left"
-            >
-              <Users size={14} className="text-primary shrink-0" />
-              <span className="text-sm font-medium text-foreground">
-                Possible duplicates ({dupes.length})
-              </span>
-              <span className="ml-auto text-xs text-muted-foreground">
-                {showDupes ? 'Hide' : 'Review'}
-              </span>
-            </button>
-            {showDupes && (
-              <div className="border-t border-border divide-y divide-border">
-                {dupes.slice(0, 20).map((pair) => (
-                  <div
-                    key={`${pair.a.externalId}::${pair.b.externalId}`}
-                    className="px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-2"
+            <div className="px-3 pb-2">
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search name, email, phone…"
+                aria-label="Search contacts"
+                className="w-full bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+
+            <div className="px-3 pb-2 flex items-center gap-1.5">
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortBy)}
+                aria-label="Sort contacts"
+                className="flex-1 bg-secondary border border-border rounded-lg px-2 py-1 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+              >
+                <option value="name">Sort: Name</option>
+                <option value="active">Sort: Recently active</option>
+                <option value="added">Sort: Recently added</option>
+                <option value="seen">Sort: Most seen</option>
+              </select>
+            </div>
+
+            {sourceCounts.length > 1 && (
+              <div className="px-3 pb-2 flex gap-1.5 overflow-x-auto">
+                <button
+                  type="button"
+                  onClick={() => setSourceFilter(null)}
+                  className={cn(
+                    'shrink-0 text-[11px] px-2 py-0.5 rounded-full border transition-colors',
+                    sourceFilter === null
+                      ? 'border-primary/60 bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  All
+                </button>
+                {sourceCounts.map(([source, count]) => (
+                  <button
+                    key={source}
+                    type="button"
+                    onClick={() => setSourceFilter((prev) => (prev === source ? null : source))}
+                    title={`${count} from ${sourceLabel(source)}`}
+                    className={cn(
+                      'shrink-0 text-[11px] px-2 py-0.5 rounded-full border transition-colors',
+                      sourceFilter === source
+                        ? 'border-primary/60 bg-primary/10 text-primary'
+                        : 'border-border text-muted-foreground hover:text-foreground'
+                    )}
                   >
-                    <div className="flex-1 min-w-0 grid grid-cols-2 gap-3">
-                      {[pair.a, pair.b].map((side) => (
-                        <div key={side.externalId} className="min-w-0">
-                          <p className="text-sm text-foreground truncate">{side.displayName}</p>
-                          <p className="text-xs text-muted-foreground truncate capitalize">
-                            {side.source}
-                            {side.emails[0] ? ` · ${side.emails[0]}` : ''}
-                            {!side.emails[0] && side.phones[0] ? ` · ${side.phones[0]}` : ''}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        disabled={dupesBusy}
-                        onClick={() => reviewPair(pair)}
-                        title="Pick which contact survives, then merge"
-                        className="text-xs px-2.5 py-1.5 bg-primary/15 hover:bg-primary/25 text-primary rounded-lg transition-colors disabled:opacity-50"
-                      >
-                        Merge…
-                      </button>
-                      <button
-                        type="button"
-                        disabled={dupesBusy}
-                        onClick={() => dismissPair(pair)}
-                        className="text-xs px-2.5 py-1.5 border border-border hover:border-primary/50 text-muted-foreground hover:text-foreground rounded-lg transition-colors disabled:opacity-50"
-                      >
-                        Not the same
-                      </button>
-                    </div>
-                  </div>
+                    {sourceLabel(source)} {count}
+                  </button>
                 ))}
               </div>
             )}
-          </div>
-        )}
 
-        <div className="flex-1 overflow-y-auto p-6">
-          {editing ? (
-            <ContactForm
-              draft={draft}
-              setDraft={setDraft}
-              onSave={save}
-              onCancel={() => setEditing(false)}
-              busy={busy}
-            />
-          ) : selected ? (
-            <ContactDetail
+            {selectedRows.size > 0 ? (
+              <div className="px-3">
+                <BulkActionBar
+                  count={selectedRows.size}
+                  onClear={clearSelection}
+                  className="static px-3 py-2 gap-2"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setMergeOpen(true)}
+                    disabled={selectedRows.size < 2 || bulkBusy}
+                    aria-label={`Merge ${selectedRows.size} contacts`}
+                    title={
+                      selectedRows.size < 2
+                        ? 'Select at least two contacts to merge'
+                        : 'Merge into one'
+                    }
+                    className="flex items-center gap-1 text-xs px-2 py-1.5 bg-secondary hover:bg-secondary/80 text-foreground rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <GitMerge size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRelationshipOpen(true)}
+                    disabled={bulkBusy}
+                    aria-label="Set relationship on selection"
+                    title="Set relationship (family, coworker…)"
+                    className="flex items-center gap-1 text-xs px-2 py-1.5 bg-secondary hover:bg-secondary/80 text-foreground rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <Tag size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void startBulkEnrich()}
+                    disabled={bulkBusy || enrichQueue != null}
+                    aria-label="Enrich selection from web"
+                    title="Enrich from web, one at a time (uses your Anthropic key)"
+                    className="flex items-center gap-1 text-xs px-2 py-1.5 bg-secondary hover:bg-secondary/80 text-foreground rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <Sparkles size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={bulkDelete}
+                    disabled={bulkBusy}
+                    aria-label="Delete selection"
+                    title="Delete selected contacts"
+                    className="flex items-center gap-1 text-xs px-2 py-1.5 bg-secondary hover:bg-destructive/20 text-foreground hover:text-destructive rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </BulkActionBar>
+              </div>
+            ) : (
+              <div className="px-3 pb-2">
+                <button
+                  type="button"
+                  onClick={() => importFrom('vcard')}
+                  disabled={busy}
+                  title="Import a .vcf exported from your phone (iCloud / Google / Outlook)"
+                  className="w-full flex items-center justify-center gap-1.5 text-sm px-3 py-2 bg-primary/15 hover:bg-primary/25 text-primary rounded-lg transition-colors disabled:opacity-50"
+                >
+                  <Smartphone size={14} /> Import from phone
+                </button>
+              </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
+              {loading ? (
+                [1, 2, 3, 4].map((n) => (
+                  <div key={n} className="h-12 bg-secondary/30 rounded-lg animate-pulse mb-1" />
+                ))
+              ) : shown.length === 0 ? (
+                <p className="text-xs text-muted-foreground px-3 py-6 text-center">
+                  {search || sourceFilter ? 'No matches.' : 'No contacts yet.'}
+                </p>
+              ) : (
+                shown.slice(0, visibleCount).map((c) => (
+                  <div key={c.id} className="flex items-center gap-0.5">
+                    <label className="pl-1.5 py-2 shrink-0 flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedRows.has(c.id)}
+                        // onClick (not onChange) so shift-click ranges work —
+                        // change events don't carry modifier keys.
+                        onClick={(e) => toggleSelect(c, e.shiftKey)}
+                        readOnly
+                        aria-label={`Select ${c.displayName}`}
+                        className="h-3.5 w-3.5 accent-primary cursor-pointer"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => openContact(c.id)}
+                      className={cn(
+                        'flex-1 min-w-0 flex flex-col items-start gap-0.5 px-2 py-2 rounded-lg text-left transition-colors',
+                        selectedId === c.id
+                          ? 'bg-primary/10 text-primary'
+                          : 'text-foreground hover:bg-secondary/60'
+                      )}
+                    >
+                      <span className="text-sm font-medium leading-tight truncate w-full">
+                        {c.displayName}
+                      </span>
+                      {(sortBy === 'active' || sortBy === 'seen') && c.lastSeen != null ? (
+                        <span className="text-xs text-muted-foreground truncate w-full">
+                          {formatRelative(c.lastSeen)}
+                          {c.touchpointCount > 0 && ` · ${c.touchpointCount} touchpoints`}
+                        </span>
+                      ) : (
+                        (c.org || c.relationship) && (
+                          <span className="text-xs text-muted-foreground truncate w-full">
+                            {[c.org, c.relationship].filter(Boolean).join(' · ')}
+                          </span>
+                        )
+                      )}
+                    </button>
+                  </div>
+                ))
+              )}
+              {!loading && visibleCount < shown.length && (
+                <div ref={listEndRef} className="py-3 text-center text-xs text-muted-foreground">
+                  {shown.length - visibleCount} more…
+                </div>
+              )}
+            </div>
+
+            <div className="px-3 py-3 border-t border-border grid grid-cols-2 gap-1.5">
+              <HeaderButton
+                icon={<Upload size={11} />}
+                label="vCard"
+                onClick={() => importFrom('vcard')}
+                disabled={busy}
+                title="Import .vcf"
+              />
+              <HeaderButton
+                icon={<Upload size={11} />}
+                label="CSV"
+                onClick={() => importFrom('csv')}
+                disabled={busy}
+                title="Import .csv"
+              />
+              <HeaderButton
+                icon={<Download size={11} />}
+                label={selectedRows.size > 0 ? `vCard (${selectedRows.size})` : 'vCard'}
+                onClick={() => exportTo('vcard')}
+                disabled={busy}
+                title={
+                  selectedRows.size > 0 ? 'Export the selected contacts as .vcf' : 'Export .vcf'
+                }
+              />
+              <HeaderButton
+                icon={<Download size={11} />}
+                label={selectedRows.size > 0 ? `CSV (${selectedRows.size})` : 'CSV'}
+                onClick={() => exportTo('csv')}
+                disabled={busy}
+                title={
+                  selectedRows.size > 0 ? 'Export the selected contacts as .csv' : 'Export .csv'
+                }
+              />
+            </div>
+
+            <div className="px-3 pb-3">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1.5 px-0.5">
+                Import from a service
+              </p>
+              <div className="grid grid-cols-3 gap-1.5">
+                <HeaderButton
+                  icon={<Building2 size={11} />}
+                  label="LinkedIn"
+                  onClick={() => importFrom('linkedin')}
+                  disabled={busy}
+                  title="Import LinkedIn Connections.csv (from 'Get a copy of your data')"
+                />
+                <HeaderButton
+                  icon={<Users size={11} />}
+                  label="Facebook"
+                  onClick={() => importFrom('facebook')}
+                  disabled={busy}
+                  title="Import friends.json (from 'Download Your Information')"
+                />
+                <HeaderButton
+                  icon={<Phone size={11} />}
+                  label="Voice"
+                  onClick={() => importFrom('gvoice')}
+                  disabled={busy}
+                  title="Import Google Voice numbers (pick your Takeout Voice folder)"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Detail panel */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
+              <h1 className="text-base font-semibold text-foreground">
+                {editing
+                  ? selectedId == null
+                    ? 'New contact'
+                    : 'Edit contact'
+                  : (selected?.displayName ?? 'Contacts')}
+              </h1>
+              <div className="flex items-center gap-2">
+                {!editing && (
+                  <button
+                    type="button"
+                    onClick={enrichAll}
+                    disabled={enriching || reconnecting}
+                    title="Pull your whole Google address book + cross-reference every connected source"
+                    className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-primary/40 hover:border-primary text-primary rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <Sparkles size={12} className={cn(enriching && 'animate-pulse')} />
+                    {enriching ? 'Pulling…' : 'Pull everything'}
+                  </button>
+                )}
+                {!editing && selected && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setWebEnrichOpen(true)}
+                      title="Search the public web for this person, then review what to keep"
+                      className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-primary/40 hover:border-primary text-primary rounded-lg transition-colors"
+                    >
+                      <Globe size={12} /> Enrich from web
+                    </button>
+                    <button
+                      type="button"
+                      onClick={startEdit}
+                      aria-label="Edit contact"
+                      className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-border hover:border-primary/50 text-muted-foreground hover:text-foreground rounded-lg transition-colors"
+                    >
+                      <Pencil size={12} /> Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={remove}
+                      aria-label="Delete contact"
+                      className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-border hover:border-destructive/50 text-muted-foreground hover:text-destructive rounded-lg transition-colors"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={startAdd}
+                  className="flex items-center gap-1.5 text-sm px-3 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors"
+                >
+                  <Plus size={14} /> Add
+                </button>
+              </div>
+            </div>
+
+            {needsReconnect && !editing && (
+              <div className="mx-6 mt-4 flex items-center gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+                <Sparkles size={16} className="text-amber-500 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-foreground">
+                    Reconnect Google to import your full address book
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Compass needs updated permission to pull in your Google "Other contacts" —
+                    everyone you've emailed, not just your saved contacts.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={reconnectGoogle}
+                  disabled={reconnecting || enriching}
+                  className="shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-600 dark:text-amber-400 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {reconnecting ? 'Reconnecting…' : 'Reconnect Google'}
+                </button>
+              </div>
+            )}
+
+            {dupes.length > 0 && !editing && (
+              <div className="mx-6 mt-4 rounded-lg border border-border bg-card/40">
+                <button
+                  type="button"
+                  onClick={() => setShowDupes((v) => !v)}
+                  aria-expanded={showDupes}
+                  className="w-full flex items-center gap-2 px-4 py-3 text-left"
+                >
+                  <Users size={14} className="text-primary shrink-0" />
+                  <span className="text-sm font-medium text-foreground">
+                    Possible duplicates ({dupes.length})
+                  </span>
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {showDupes ? 'Hide' : 'Review'}
+                  </span>
+                </button>
+                {showDupes && (
+                  <div className="border-t border-border divide-y divide-border">
+                    {dupes.slice(0, 20).map((pair) => (
+                      <div
+                        key={`${pair.a.externalId}::${pair.b.externalId}`}
+                        className="px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-2"
+                      >
+                        <div className="flex-1 min-w-0 grid grid-cols-2 gap-3">
+                          {[pair.a, pair.b].map((side) => (
+                            <div key={side.externalId} className="min-w-0">
+                              <p className="text-sm text-foreground truncate">{side.displayName}</p>
+                              <p className="text-xs text-muted-foreground truncate capitalize">
+                                {side.source}
+                                {side.emails[0] ? ` · ${side.emails[0]}` : ''}
+                                {!side.emails[0] && side.phones[0] ? ` · ${side.phones[0]}` : ''}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            disabled={dupesBusy}
+                            onClick={() => reviewPair(pair)}
+                            title="Pick which contact survives, then merge"
+                            className="text-xs px-2.5 py-1.5 bg-primary/15 hover:bg-primary/25 text-primary rounded-lg transition-colors disabled:opacity-50"
+                          >
+                            Merge…
+                          </button>
+                          <button
+                            type="button"
+                            disabled={dupesBusy}
+                            onClick={() => dismissPair(pair)}
+                            className="text-xs px-2.5 py-1.5 border border-border hover:border-primary/50 text-muted-foreground hover:text-foreground rounded-lg transition-colors disabled:opacity-50"
+                          >
+                            Not the same
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto p-6">
+              {editing ? (
+                <ContactForm
+                  draft={draft}
+                  setDraft={setDraft}
+                  onSave={save}
+                  onCancel={() => setEditing(false)}
+                  busy={busy}
+                />
+              ) : selected ? (
+                <ContactDetail
+                  contact={selected}
+                  activity={activity}
+                  activityLoading={activityLoading}
+                  onOpenTimeline={openTimeline}
+                  onEnrichWeb={() => setWebEnrichOpen(true)}
+                />
+              ) : contacts.length > 0 ? (
+                <ContactsOverview
+                  contacts={contacts}
+                  dupeCount={dupes.length}
+                  sourceLabel={sourceLabel}
+                  onFilterSource={(s) => setSourceFilter(s)}
+                  onOpenContact={(id) => void openContact(id)}
+                  onReviewDupes={() => setShowDupes(true)}
+                />
+              ) : (
+                <EmptyState onAdd={startAdd} onImport={() => importFrom('vcard')} />
+              )}
+            </div>
+          </div>
+
+          <MergeContactsDialog
+            contacts={mergeCandidates ?? [...selectedRows.values()]}
+            open={mergeOpen}
+            onClose={() => {
+              setMergeOpen(false)
+              setMergeCandidates(null)
+            }}
+            onMerged={onMerged}
+          />
+          <SetRelationshipDialog
+            count={selectedRows.size}
+            open={relationshipOpen}
+            busy={bulkBusy}
+            onClose={() => setRelationshipOpen(false)}
+            onSubmit={bulkSetRelationship}
+          />
+          {selected && !enrichQueue && (
+            <WebEnrichDialog
               contact={selected}
-              activity={activity}
-              activityLoading={activityLoading}
-              onOpenTimeline={openTimeline}
-              onEnrichWeb={() => setWebEnrichOpen(true)}
+              open={webEnrichOpen}
+              onClose={() => setWebEnrichOpen(false)}
+              onApplied={async () => {
+                await load(search)
+                if (selectedId != null) await openContact(selectedId)
+              }}
             />
-          ) : contacts.length > 0 ? (
-            <ContactsOverview
-              contacts={contacts}
-              dupeCount={dupes.length}
-              sourceLabel={sourceLabel}
-              onFilterSource={(s) => setSourceFilter(s)}
-              onOpenContact={(id) => void openContact(id)}
-              onReviewDupes={() => setShowDupes(true)}
+          )}
+          {enrichQueue?.[enrichIndex] && (
+            <WebEnrichDialog
+              // Remount per contact so the dialog's phase machine resets (its
+              // reset effect keys on `open`, which stays true across the queue).
+              key={enrichQueue[enrichIndex].id}
+              contact={enrichQueue[enrichIndex]}
+              open
+              progress={{ index: enrichIndex + 1, total: enrichQueue.length }}
+              onClose={advanceEnrichQueue}
+              onStopAll={() => setEnrichQueue(null)}
+              onApplied={async () => {
+                await load(search)
+                if (selectedId != null) await openContact(selectedId)
+              }}
             />
-          ) : (
-            <EmptyState onAdd={startAdd} onImport={() => importFrom('vcard')} />
           )}
         </div>
-      </div>
-
-      <MergeContactsDialog
-        contacts={mergeCandidates ?? [...selectedRows.values()]}
-        open={mergeOpen}
-        onClose={() => {
-          setMergeOpen(false)
-          setMergeCandidates(null)
-        }}
-        onMerged={onMerged}
-      />
-      <SetRelationshipDialog
-        count={selectedRows.size}
-        open={relationshipOpen}
-        busy={bulkBusy}
-        onClose={() => setRelationshipOpen(false)}
-        onSubmit={bulkSetRelationship}
-      />
-      {selected && !enrichQueue && (
-        <WebEnrichDialog
-          contact={selected}
-          open={webEnrichOpen}
-          onClose={() => setWebEnrichOpen(false)}
-          onApplied={async () => {
-            await load(search)
-            if (selectedId != null) await openContact(selectedId)
-          }}
-        />
-      )}
-      {enrichQueue?.[enrichIndex] && (
-        <WebEnrichDialog
-          // Remount per contact so the dialog's phase machine resets (its
-          // reset effect keys on `open`, which stays true across the queue).
-          key={enrichQueue[enrichIndex].id}
-          contact={enrichQueue[enrichIndex]}
-          open
-          progress={{ index: enrichIndex + 1, total: enrichQueue.length }}
-          onClose={advanceEnrichQueue}
-          onStopAll={() => setEnrichQueue(null)}
-          onApplied={async () => {
-            await load(search)
-            if (selectedId != null) await openContact(selectedId)
-          }}
-        />
       )}
     </div>
   )

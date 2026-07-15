@@ -13,7 +13,7 @@
  * vault. See docs/data-access-policy.md.
  */
 
-import { type SQL, and, asc, desc, eq, like } from 'drizzle-orm'
+import { type SQL, and, asc, desc, eq, isNull, like } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
 import { getDb } from '../db/client'
 import { derivedEntities, subscriptions } from '../db/schema'
@@ -61,7 +61,10 @@ export function registerEntitiesHandlers(ipcMain: IpcMain): void {
       const offset = Math.max(0, Number(opts?.offset) || 0)
       const q = opts?.q?.trim()
 
-      const where: SQL[] = [eq(derivedEntities.kind, kind)]
+      // Only undiscovered rows: once promoted (tracked as a place/merchant, added
+      // as a contact, or linked as a subscription), it belongs on its owned page,
+      // not Discovered. Matches the filter people:list already had.
+      const where: SQL[] = [eq(derivedEntities.kind, kind), isNull(derivedEntities.promotedId)]
       if (q) where.push(like(derivedEntities.name, `%${q}%`))
 
       const rows = db

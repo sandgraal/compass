@@ -10,6 +10,7 @@ import type { IpcMain } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as schema from '../db/schema'
 import type { MerchantProfile, TrackedMerchant } from './merchants'
+import { mergePlaces } from './places'
 
 let sqlite: Database.Database
 vi.mock('../db/client', () => ({
@@ -32,6 +33,11 @@ const DDL = `
     name TEXT NOT NULL, category TEXT, address TEXT, url TEXT, total_spend REAL, notes TEXT,
     source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER, meta TEXT
   );
+  CREATE TABLE place_merge_aliases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, survivor_place_id INTEGER NOT NULL,
+    kind TEXT NOT NULL, alias_key TEXT NOT NULL, alias_name TEXT, created_at INTEGER
+  );
+  CREATE UNIQUE INDEX place_merge_aliases_kind_alias_unique ON place_merge_aliases (kind, alias_key);
   CREATE TABLE finance_transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, date TEXT NOT NULL,
     amount REAL NOT NULL, currency TEXT NOT NULL DEFAULT 'USD', description TEXT NOT NULL,
@@ -120,6 +126,14 @@ function seedPlace(over?: { externalId?: string; name?: string; kind?: string })
   return Number(res.lastInsertRowid)
 }
 
+function seedAlias(survivorPlaceId: number, aliasKey: string, kind = 'merchant'): void {
+  sqlite
+    .prepare(
+      'INSERT INTO place_merge_aliases (survivor_place_id, kind, alias_key) VALUES (?, ?, ?)'
+    )
+    .run(survivorPlaceId, kind, aliasKey)
+}
+
 beforeEach(async () => {
   sqlite = new Database(':memory:')
   sqlite.exec(DDL)
@@ -161,6 +175,47 @@ describe('merchants:list-tracked', () => {
     const list = invoke('merchants:list-tracked') as TrackedMerchant[]
     expect(list[0].matchKey).toBe('blue bottle')
     expect(list[0].live?.txnCount).toBe(1)
+  })
+
+  it('rolls up transactions keyed to a merged-in alias into the survivor', () => {
+    const survivorId = seedPlace({
+      externalId: 'derived:merchant:blue bottle',
+      name: 'Blue Bottle'
+    })
+    seedAlias(survivorId, 'blue bottle coffee co')
+    seedTxn({ date: '2026-01-05', amount: -10, merchant: 'blue bottle' })
+    // Ingested under the LOSER's old key — still attributes to the survivor.
+    seedTxn({ date: '2026-02-10', amount: -8, merchant: 'blue bottle coffee co' })
+
+    const list = invoke('merchants:list-tracked') as TrackedMerchant[]
+    expect(list).toHaveLength(1)
+    expect(list[0].live).toEqual({
+      totalSpend: 18,
+      txnCount: 2,
+      lastTxnDate: '2026-02-10',
+      currency: 'USD'
+    })
+  })
+
+  it('two tracked merchants sharing the same key (not yet merged) both show live stats', () => {
+    // A manual merchant whose normalized name coincides with another tracked
+    // merchant's key — reachable without any merge action. Both must keep
+    // showing the shared stats (as they did before merges existed) rather
+    // than one silently losing its live stats to the other.
+    seedPlace({ externalId: 'derived:merchant:blue bottle', name: 'Blue Bottle' })
+    seedPlace({ externalId: 'manual:abc', name: 'Blue Bottle' })
+    seedTxn({ date: '2026-01-05', amount: -10, merchant: 'blue bottle' })
+
+    const list = invoke('merchants:list-tracked') as TrackedMerchant[]
+    expect(list).toHaveLength(2)
+    for (const m of list) {
+      expect(m.live).toEqual({
+        totalSpend: 10,
+        txnCount: 1,
+        lastTxnDate: '2026-01-05',
+        currency: 'USD'
+      })
+    }
   })
 })
 
@@ -224,6 +279,27 @@ describe('merchants:profile', () => {
     expect(p.tax).toEqual([
       { taxTag: 'tax:schedule-c-expense', taxYear: 2026, total: 20, count: 1 }
     ])
+  })
+
+  it('includes transactions/subscription keyed to a merged-in alias', () => {
+    const id = seedPlace()
+    seedAlias(id, 'blue bottle coffee co')
+    seedTxn({ date: '2026-01-05', amount: -10, merchant: 'blue bottle' })
+    // Ingested under the LOSER's old key after the merge — still shows up.
+    seedTxn({ date: '2026-02-10', amount: -8, merchant: 'blue bottle coffee co' })
+    // Subscription linked under the loser's key, not the survivor's.
+    sqlite
+      .prepare(
+        `INSERT INTO subscriptions (external_id, name, cost, cadence, status)
+         VALUES ('detected:blue bottle coffee co::Amex', 'Blue Bottle Coffee Co', 8, 'monthly', 'active')`
+      )
+      .run()
+
+    const p = invoke('merchants:profile', id) as MerchantProfile
+    expect(p.stats.totalSpend).toBe(18)
+    expect(p.stats.txnCount).toBe(2)
+    expect(p.transactions).toHaveLength(2)
+    expect(p.subscription?.name).toBe('Blue Bottle Coffee Co')
   })
 
   it('activity surfaces timeline hits but filters ledger (finance) records', () => {
@@ -309,5 +385,84 @@ describe('merchants:untrack', () => {
   it('untracking a manual merchant (no projection row) is fine', () => {
     const id = seedPlace({ externalId: 'manual:xyz', name: 'Corner Store' })
     expect(invoke('merchants:untrack', id)).toEqual({ success: true })
+  })
+
+  it('untracking a merge survivor reverts everything it absorbed back to Discovered', () => {
+    const survivorId = seedPlace()
+    seedAlias(survivorId, 'blue bottle coffee co')
+    sqlite
+      .prepare(
+        `INSERT INTO derived_entities (kind, match_key, name, promoted_kind, promoted_id)
+         VALUES ('merchant', 'blue bottle coffee co', 'Blue Bottle Coffee Co', 'place', ?)`
+      )
+      .run(survivorId)
+
+    invoke('merchants:untrack', survivorId)
+    const de = sqlite
+      .prepare(
+        "SELECT promoted_kind AS pk, promoted_id AS pid FROM derived_entities WHERE match_key='blue bottle coffee co'"
+      )
+      .get() as { pk: string | null; pid: number | null }
+    expect(de.pk).toBeNull()
+    expect(de.pid).toBeNull()
+    expect(sqlite.prepare('SELECT COUNT(*) n FROM place_merge_aliases').get()).toEqual({ n: 0 })
+  })
+})
+
+describe('merchant merge (via the shared places:merge mechanism)', () => {
+  it('rolls up the survivor across list-tracked and profile after a merge', () => {
+    const survivorId = seedPlace({
+      externalId: 'derived:merchant:blue bottle',
+      name: 'Blue Bottle'
+    })
+    const loserId = seedPlace({
+      externalId: 'derived:merchant:blue bottle coffee co',
+      name: 'Blue Bottle Coffee Co'
+    })
+    seedTxn({ date: '2026-01-05', amount: -10, merchant: 'blue bottle' })
+    seedTxn({ date: '2026-02-01', amount: -6, merchant: 'blue bottle coffee co' })
+
+    const ok = mergePlaces('merchant', survivorId, [loserId])
+    expect(ok).toBe(true)
+    expect(sqlite.prepare('SELECT COUNT(*) n FROM places').get()).toEqual({ n: 1 })
+
+    // A transaction ingested AFTER the merge, under the loser's old key, still
+    // attributes to the survivor — the whole point of the merge feature.
+    seedTxn({ date: '2026-03-10', amount: -4, merchant: 'blue bottle coffee co' })
+
+    const list = invoke('merchants:list-tracked') as TrackedMerchant[]
+    expect(list).toHaveLength(1)
+    expect(list[0].live).toMatchObject({ totalSpend: 20, txnCount: 3 })
+
+    const profile = invoke('merchants:profile', survivorId) as MerchantProfile
+    expect(profile.stats.totalSpend).toBe(20)
+    expect(profile.transactions).toHaveLength(3)
+  })
+
+  it('merging two merchants that already share a key does not double-count', () => {
+    // The loser's resolved key (normalizeMerchant("Blue Bottle") = "blue bottle")
+    // equals the survivor's own key — the exact case that made
+    // allMatchKeysForPlace return a duplicate before it deduped.
+    const survivorId = seedPlace({
+      externalId: 'derived:merchant:blue bottle',
+      name: 'Blue Bottle'
+    })
+    const loserId = seedPlace({ externalId: 'manual:abc', name: 'Blue Bottle' })
+    seedTxn({ date: '2026-01-05', amount: -10, merchant: 'blue bottle' })
+
+    expect(mergePlaces('merchant', survivorId, [loserId])).toBe(true)
+
+    const list = invoke('merchants:list-tracked') as TrackedMerchant[]
+    expect(list).toHaveLength(1)
+    expect(list[0].live).toEqual({
+      totalSpend: 10,
+      txnCount: 1,
+      lastTxnDate: '2026-01-05',
+      currency: 'USD'
+    })
+
+    const profile = invoke('merchants:profile', survivorId) as MerchantProfile
+    expect(profile.stats.totalSpend).toBe(10)
+    expect(profile.transactions).toHaveLength(1)
   })
 })

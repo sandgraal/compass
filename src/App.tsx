@@ -24,7 +24,6 @@ import LifeRecords from './pages/LifeRecords'
 import Merchants from './pages/Merchants'
 import Monthly from './pages/Monthly'
 import Overview from './pages/Overview'
-import People from './pages/People'
 import Places from './pages/Places'
 import Profile from './pages/Profile'
 import RentalStudio from './pages/RentalStudio'
@@ -97,7 +96,6 @@ export default function App(): JSX.Element {
           <Route path="vault" element={<Vault />} />
           <Route path="life-records" element={<LifeRecords />} />
           <Route path="contacts" element={<Contacts />} />
-          <Route path="people" element={<People />} />
           <Route path="merchants" element={<Merchants />} />
           <Route path="places" element={<Places />} />
           <Route path="finance" element={<Finance />} />

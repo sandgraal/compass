@@ -22,7 +22,7 @@
 | **Phase 6** — Code-health debt (May 2026) | 5 items | 100% — 6.1 IPC test backfill (vault/auth/finance×3/sync/knowledge/settings/spotlight/habits/updater), 6.2 knowledge tests, 6.3 empty-catch sweep, 6.4 Biome 0-warning + `--error-on-warnings` CI gate (#139), 6.5 type-safety audit all shipped |
 | **Phase 7** — Daily-Driver & Platform Roadmap | 6 tracks | **In progress.** Track A ✅ (Morning Brief + low-cash/price-hike alerts, weekly/monthly review, multi-type capture; voice deferred) · Track B 🟡 (Obsidian + Notion-import + Linear + Todoist + Things + Email-receipts shipped; Apple Reminders = spike in #376 (notarization-gated), see [`docs/apple-reminders.md`](apple-reminders.md); Slack/Jira/Outlook+CalDAV/IMAP/web-clipper open) · Track C 🟡 (MCP surface expanded; webhooks/plugin-API/marketplace/Zapier open) · Track D 🟡 (device sync: snapshot+LWW via relay mailbox shipped; per-table merge, mobile, sharing open) · Track E ✅ (proactive insights + agentic plan-my-week) · Track F 🟡 (theming shipped; mobile-responsive + a11y open). See § Phase 7. |
 | **Phase 8** — Claude Integration (bidirectional) | 6 items | **100% — all shipped** (MCP read+propose tools, in-app Claude Inbox, one-click `.mcpb` Desktop bundle, end-user plugin, 5 skills, agentic Ask Compass) — see § Phase 8 + [`claude-integration.md`](claude-integration.md) |
-| **Phase 9** — The Storehouse (own everything, export anywhere) | 9 items | **~85%.** 9.0 Contacts + Universal Export ✅ · 9.1 archive importers ✅ (**live Google Contacts sync ✅** via the People API — needs a Google reconnect for `contacts.readonly`; **contact enrichment ✅** — widened Google fields + cross-source summary, see below; macOS Contacts live-sync open) · **9.2 Documents & files store ✅ (2026-07-11)** · **9.3 Subscriptions ✅ — redesign phases 1 + 2 shipped 2026-07-14 (tracked-subscription profiles + consent-gated web enrichment, see addenda below)** · **9.4 Medical records ✅ — shipped 2026-07-06, superseded (see below)** · **9.4b Lab & vital results ✅ — shipped 2026-07-12** (quantitative counterpart to `medical_records`, see below) · 9.5 Assets ✅ · 9.6 Storehouse overview ✅ · **9.7 reverse-connectors open** — see § Phase 9 |
+| **Phase 9** — The Storehouse (own everything, export anywhere) | 9 items | **~85%.** 9.0 Contacts + Universal Export ✅ (**2026-07-15:** gained Tracked/Discovered tabs, absorbing the retired standalone People page — see the merge/dedupe addendum below) · 9.1 archive importers ✅ (**live Google Contacts sync ✅** via the People API — needs a Google reconnect for `contacts.readonly`; **contact enrichment ✅** — widened Google fields + cross-source summary, see below; macOS Contacts live-sync open) · **9.2 Documents & files store ✅ (2026-07-11)** · **9.3 Subscriptions ✅ — redesign phases 1 + 2 shipped 2026-07-14 (tracked-subscription profiles + consent-gated web enrichment, see addenda below)** · **9.4 Medical records ✅ — shipped 2026-07-06, superseded (see below)** · **9.4b Lab & vital results ✅ — shipped 2026-07-12** (quantitative counterpart to `medical_records`, see below) · 9.5 Assets ✅ · 9.6 Storehouse overview ✅ · **9.7 reverse-connectors open** — see § Phase 9 |
 | **Phase 10** — The Acquisition Engine (go get everything) | 7 waves | **~55%.** 10.1 spine ✅ (Drop Zone + `records`/Timeline + **44 recognizers**, growing — crypto/WhatsApp/X/rideshare/Fitbit/Garmin landed 2026-07) · **live-sync projectors ✅ (finance + Gmail + Calendar + GitHub + Linear + medical → the `records` spine, so live-synced data reaches People/Merchants/Places/Timeline/Search — Gmail senders → People via an automated-sender filter, calendar locations → Places, GitHub authors → People (bots/self filtered), GitHub/Linear issues → Timeline/Search; migration `0026` added GitHub `author`+`updated_at` and Linear `updated_at` for real timeline dates)** · 10.5 Data-Rights Concierge ✅ (redesigned 2026-07 to **33 sources across 6 domains**, + tax/SSA PDF recognizers) · 10.6 CRED sandbox ✅ (SSA adapter, gated off by default) · 10.7 Converse/Connect/Curate ✅ · **10.8 Location→Residency autopilot ✅** (location export → offline point-in-polygon → auto `travel_segments`; raw coords kept OFF the AI-searchable spine) · **10.3 Health hub ✅** (unified steps/sleep/Oura-scores/workouts surface over already-ingested wearables + aggregates-only `compass_health_summary`) · **10.9 metered relay + all 8 aggregators code-shipped 2026-07-05/06** (Terra/Canopy/Argyle/Arcadia/Nylas/Metriport/Knot relay-fronted + BYO-direct SnapTrade — incl. Metriport FHIR clinical records → Medical hub and Terra's 500+-wearable coverage, closing out 10.3's "remaining wearables"; **live use of the relay-fronted seven needs a deployed relay + real paid API credentials — code-complete and unit-tested, not a missing-code gap**) · **genetics raw-data import shipped** (23andMe/AncestryDNA `.txt` → sealed `genetics` vault category, `electron/lib/genetics.ts`) · **10.2 LIVE crypto valuation/IRS transcripts, 10.4 Apple Data & Privacy, full 10.6 open** — see § Phase 10 + [`storehouse-roadmap.md`](storehouse-roadmap.md) |
 | **Phase 11** — Life Planning & Cross-Border (NEW) | 7 items | **✅ Complete (2026-06-30).** Output of the June expert panel ([`strategic-review-2026-06.md`](strategic-review-2026-06.md)): all 7 items shipped — 11.1 multi-currency, 11.2 expat tax (FBAR/FATCA), 11.3 Airbnb P&L, 11.4 long-horizon retirement, 11.5 residency/days-in-country, 11.6 goals, 11.7 estate. The optional 11.1 follow-ups (ingest-time txn currency, base-currency forecast rollup, unrealized FX gain/loss) are now implemented — PRs #268/#269 + the FX-gain/loss change. **2026-07-14 addendum:** the 11.2 vault-split follow-ups (`.migrated.enc` blob retirement, `life_record_links` + Life Records link chips, FBAR user-entered-max override) shipped — see the dated addendum below. See § Phase 11 |
 
@@ -577,7 +577,9 @@ Apple Data & Privacy, Signal/Telegram), and full CRED beyond the SSA spike (10.6
     connection/invitation/recommendation/endorsement + Facebook friend), collapsing the SAME person across sources
     into one entry (touchpoints + sources + first/last seen) and matching `contacts` by normalized name. `people:list`
     IPC + a **People** page (`/people`) whose rows deep-link to `/timeline?q=<name>` (the Timeline now seeds its
-    search from `?q=`). Pure + derived, no schema change.
+    search from `?q=`). Pure + derived, no schema change. **Retired 2026-07-15** — see the merge/dedupe addendum
+    near the end of this document: `people:list`/`People.tsx`/`/people` are gone, folded into Contacts'
+    Discovered tab.
   - [x] **"Connect" — "On this day" memory card (cont.).** A Dashboard card surfaces records from prior years
     sharing today's date, grouped by year ("N years ago · YYYY"), each deep-linking to `/timeline?q=<title>`.
     Reuses the existing `records:on-this-day` IPC; the grouping is a pure, unit-tested `src/lib/on-this-day.ts`
@@ -802,7 +804,8 @@ backbone of the whole app instead of a single People page:
   (migration `0023`) projects the `records` timeline into typed entities (person / merchant / place / sub)
   with a one-click promote into the owned `contacts` / `assets` / `subscriptions` tables. Every domain page
   now reads through this projection instead of maintaining its own ad-hoc extraction. The People page (§
-  10.7 "Connect") is rebuilt on top of it.
+  10.7 "Connect") is rebuilt on top of it (and later retired into Contacts' Discovered tab — see the
+  2026-07-15 addendum near the end of this document).
 - **P5 — Subscriptions & Merchants/Places from the timeline** (#275) — Subscriptions' "Detected" section and
   a new **Merchants & Places** page (`src/pages/Places.tsx`, route `/places`, `kind: 'merchant'` /
   `kind: 'place'` entities from `entities.list`) are now surfaced from the cross-reference engine rather than
@@ -853,7 +856,9 @@ undo any of it:
   `:dismiss-duplicate`).
 - **Entity exclusions** (#341) — multi-select **"Not interested"** on People/Merchants/Places
   (`entities:exclude`) permanently hides a derived person/merchant/place from every
-  `refreshDerivedEntities` rebuild; `people:list` also now drops anyone already promoted into `contacts`.
+  `refreshDerivedEntities` rebuild; `people:list` also now drops anyone already promoted into `contacts`
+  (as of the 2026-07-15 addendum, this filter moved into `entities:list` itself and `people:list` no longer
+  exists — People became a tab on Contacts).
 - **Merchants & Places split + offline map** (#342, #345) — the combined Merchants & Places page is now
   two routes, `/merchants` and `/places` (shared `src/components/DerivedEntityList.tsx`); `/places` opens
   with an offline, zero-network SVG map (`src/components/LocationMap.tsx`) of clustered `location_points`
@@ -889,6 +894,8 @@ undo any of it:
   `computeMerchantChargeAlert` (`electron/ipc/morning-brief.ts`) flags recent charges at a tracked merchant
   that exceed 2× its historical median (≥5 prior charges required), wired into `cron.ts` and
   `src/components/MorningBrief.tsx`.
+- *Follow-up (2026-07-15):* review-only duplicate detection + merge for tracked merchants (shared with
+  Places, since both are `places` rows) — see the merge/dedupe addendum near the end of this document.
 
 ---
 
@@ -1143,6 +1150,60 @@ undo any of it:
 - [x] **Docs** — `docs/data-access-policy.md`'s enrichment paragraph generalized from "contact web
   enrichment is the one surface" to name all three enrichment IPC namespaces (contacts / places-merchants /
   subscriptions).
+
+---
+
+## Addendum (2026-07-15) — Merchant/place merge & duplicate review; People page retired into Contacts
+
+> Follow-up to the 2026-07-13 Merchants/Places redesign addenda above: those redesigns gave tracked
+> merchants/places their own owned-data profiles but no way to fix a business tracked twice under two
+> spellings ("Starbucks" vs "Starbucks Coffee #4521"). This wave adds review-only duplicate detection +
+> merge for both, and — since the merge dialog/duplicates-panel pattern is exactly what the standalone
+> People page (§ 10.7 "Connect", shipped 2026-06, since rebuilt on the cross-reference engine per the
+> 2026-07-02 P4 addendum) never got — folds People into Contacts as a Tracked/Discovered pair instead,
+> the same shape Merchants/Places/Subscriptions already use.
+
+- [x] **Schema** — new `place_merge_aliases` table (`survivorPlaceId` FK → `places.id`, `kind`
+  `'merchant'|'place'`, `alias_key`, `alias_name`, `UNIQUE(kind, alias_key)`) records each merged-away
+  loser's match key against the survivor it was folded into. Migration `0046_same_quicksilver.sql` (+
+  `ensureNewTables` mirror in `electron/db/client.ts`).
+- [x] **New pure lib** — `electron/lib/place-dedupe.ts`: fuzzy-duplicate engine for tracked
+  merchants/places, mirroring `electron/lib/contact-dedupe.ts`'s blocking/tokenizing approach but
+  **review-only** — there's no email/phone identity signal for a business, so unlike contacts there is NO
+  auto-merge tier; every suggestion needs an explicit click. Token-set/Jaccard similarity over
+  stopword-stripped names, blocked via an inverted token index. Reuses `dedupePairKey` and the
+  `dedupe-dismissed` curation kind from `contact-dedupe.ts` (externalId namespaces don't collide across
+  kinds). `electron/lib/merchant-match.ts` gained `allMatchKeysForPlace(sqlite, placeId, primaryKey, kind)`
+  — resolves a tracked row's full key set (its own key + every merged-in alias) for match-key-aware
+  ledger/visit lookups. `electron/lib/entities-projection.ts`'s `refreshDerivedEntities` now also
+  synthesizes one `derived_entities` row per alias (pointing the loser's own key at the survivor's id) so a
+  full cache rebuild still resolves merged entries — a merge's inline `promotedId` patch alone doesn't
+  survive a delete-and-reinsert rebuild.
+- [x] **IPC** (`electron/ipc/places.ts`) — `places:merge` (`{kind, survivorId, loserIds}`, kind-parameterized
+  so ONE handler serves both tracked merchants and tracked places — deliberately not duplicated under a
+  `merchants:*` namespace), `places:suggest-survivor` (`{kind, ids}` — deterministic default pick for the
+  merge dialog), `places:duplicates` (`{kind}` — review-only fuzzy suggestions from `place-dedupe.ts`),
+  `places:dismiss-duplicate` (`{aExternalId, bExternalId}`). Exposed as
+  `window.api.places.{merge,suggestSurvivor,duplicates,dismissDuplicate}`. `entities:list`
+  (`electron/ipc/entities.ts`) now filters `isNull(derivedEntities.promotedId)` server-side for every kind —
+  the same "hide already-promoted rows" behavior `people:list` used to hand-apply, now baked into the
+  shared handler so Contacts' new Discovered tab gets it for free.
+- [x] **People page retired** — `electron/ipc/people.ts` (the `people:list` handler),
+  `src/pages/People.tsx`, the `/people` route (`src/App.tsx`), and the Sidebar "People" nav entry are all
+  deleted. `electron/lib/people.ts` trimmed to the shared helpers still used elsewhere
+  (`normalizeName`, `parseEmailSender`, `humanizeHandle`, `isAutomatedSender`, `isLikelyPerson`,
+  `extractPersonName` — consumed by `electron/lib/entities.ts` and `electron/ipc/contact-enrich.ts`);
+  `buildPeople`/`Person`/`PersonSourceRow`/`ContactRow`/`PEOPLE_RECORD_FILTERS` deleted as dead code.
+  `src/pages/Contacts.tsx` gained **Tracked / Discovered** tabs (mirrors Merchants/Places/Subscriptions):
+  Discovered renders `kind="person"` derived entities via the existing shared
+  `src/components/DerivedEntityList.tsx`, "Add" promotes straight into a real contact.
+- [x] **UI** — new shared `src/components/places/MergePlacesDialog.tsx` and
+  `src/components/places/PossibleDuplicatesPanel.tsx`, used by BOTH `/merchants` and `/places` (not
+  duplicated per page, since both operate on the same `places` table). New `src/lib/entity-grouping.ts`
+  (`groupAndSort`) replaces the old per-page spend-by-category filter-chip row on Merchants/Places Tracked
+  lists with grouped-by-category sections + a sort dropdown (total spend / name / most recent / most
+  transactions); a multi-select "Merge…" bulk action opens the merge dialog pre-seeded with
+  `places:suggest-survivor`'s pick.
 
 ---
 

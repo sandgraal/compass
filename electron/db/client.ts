@@ -443,6 +443,19 @@ function ensureNewTables(sqlite: Database.Database): void {
       source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER
     );
     CREATE UNIQUE INDEX IF NOT EXISTS places_external_id_unique ON places (external_id);
+    -- Merge aliases for places/merchants (migration 0046, mirrored here). A merged
+    -- loser's match key, re-pointed at the survivor so future transactions/visits
+    -- keep resolving to it.
+    CREATE TABLE IF NOT EXISTS place_merge_aliases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      survivor_place_id INTEGER NOT NULL REFERENCES places(id),
+      kind TEXT NOT NULL,
+      alias_key TEXT NOT NULL,
+      alias_name TEXT,
+      created_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS place_merge_aliases_kind_alias_unique ON place_merge_aliases (kind, alias_key);
+    CREATE INDEX IF NOT EXISTS place_merge_aliases_survivor ON place_merge_aliases (survivor_place_id);
     -- Full-text index over the timeline (Phase 10.7 "Converse"). External-content
     -- FTS5 mirroring records by rowid; the triggers keep it in sync for EVERY writer
     -- (import + the future per-source delete). Lives here (the always-run fallback) as

@@ -72,6 +72,10 @@ beforeEach(async () => {
       source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER,
       meta TEXT
     );
+    CREATE TABLE place_merge_aliases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, survivor_place_id INTEGER NOT NULL,
+      kind TEXT NOT NULL, alias_key TEXT NOT NULL, alias_name TEXT, created_at INTEGER
+    );
     CREATE TABLE curation_exclusions (
       id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, target TEXT NOT NULL, created_at INTEGER
     );

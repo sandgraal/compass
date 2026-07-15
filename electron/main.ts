@@ -41,7 +41,6 @@ import { registerMorningBriefHandlers } from './ipc/morning-brief'
 import { registerNylasHandlers } from './ipc/nylas'
 import { registerObsidianHandlers } from './ipc/obsidian'
 import { registerOverviewHandlers } from './ipc/overview'
-import { registerPeopleHandlers } from './ipc/people'
 import { registerPlaceWebEnrichHandlers } from './ipc/place-web-enrich'
 import { registerPlacesHandlers } from './ipc/places'
 import { registerPlaidHandlers } from './ipc/plaid'
@@ -275,7 +274,6 @@ app.whenReady().then(async () => {
   registerRecordsHandlers(ipcMain)
   registerDocumentsHandlers(ipcMain)
   registerDataRightsHandlers(ipcMain)
-  registerPeopleHandlers(ipcMain)
   registerEntitiesHandlers(ipcMain)
   registerPlacesHandlers(ipcMain)
   registerPlaceWebEnrichHandlers(ipcMain)

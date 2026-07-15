@@ -153,7 +153,7 @@ export default function Overview(): JSX.Element {
           value={s ? String(s.suggestions.peopleUnpromoted + s.storehouse.contacts.count) : '—'}
           hint={sug && sug.peopleUnpromoted > 0 ? `${sug.peopleUnpromoted} to add` : 'in contacts'}
           icon={<Network size={16} />}
-          onClick={() => navigate('/people')}
+          onClick={() => navigate('/contacts')}
         />
         <Tile
           label="Merchants"
@@ -207,8 +207,8 @@ export default function Overview(): JSX.Element {
                   .map((p) => p.name)
                   .slice(0, 3)
                   .join(', ')}
-                cta="Review in People"
-                onClick={() => navigate('/people')}
+                cta="Review in Contacts"
+                onClick={() => navigate('/contacts')}
               />
             )}
             {sug.subscriptionsUntracked > 0 && (

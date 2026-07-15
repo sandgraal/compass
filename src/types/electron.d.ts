@@ -568,6 +568,16 @@ declare global {
     b: DuplicateContactSummary
     nameKey: string
   }
+  interface DuplicatePlaceSummary {
+    id: number
+    externalId: string
+    name: string
+    category: string | null
+  }
+  interface DuplicatePlacePair {
+    a: DuplicatePlaceSummary
+    b: DuplicatePlaceSummary
+  }
   interface ContactRecord {
     id: number
     externalId: string
@@ -858,19 +868,6 @@ declare global {
     netWorth: { start: number | null; end: number | null } | null
     habits: Array<{ name: string; completions: number }>
     narrative: string
-  }
-
-  interface Person {
-    name: string
-    key: string
-    count: number
-    sources: string[]
-    firstSeen: number | null
-    lastSeen: number | null
-    contactId: number | null
-    /** Total P2P money exchanged (Venmo/PayPal), |amount| summed; absent when none. */
-    totalSpend?: number
-    currency?: string | null
   }
 
   /** One deduped entry in the medical directory (a medication/condition/…). */
@@ -2215,9 +2212,6 @@ declare global {
         markRequested(sourceId: string): Promise<{ success: boolean }>
         clearRequested(sourceId: string): Promise<{ success: boolean }>
       }
-      people: {
-        list(): Promise<{ people: Person[]; promotedCount: number }>
-      }
       entities: {
         list(opts: {
           kind: EntityKind
@@ -2256,6 +2250,14 @@ declare global {
           error?: string
         }>
         webEnrichCancel(): Promise<{ success: boolean; error?: string }>
+        merge(
+          kind: 'merchant' | 'place',
+          survivorId: number,
+          loserIds: number[]
+        ): Promise<{ success: boolean }>
+        suggestSurvivor(kind: 'merchant' | 'place', ids: number[]): Promise<{ survivorId: number }>
+        duplicates(kind: 'merchant' | 'place'): Promise<DuplicatePlacePair[]>
+        dismissDuplicate(aExternalId: string, bExternalId: string): Promise<{ success: boolean }>
       }
       merchants: {
         listTracked(): Promise<TrackedMerchant[]>

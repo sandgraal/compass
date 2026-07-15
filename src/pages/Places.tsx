@@ -12,17 +12,27 @@
  *
  * Tracking a place moves it to Tracked and opens its profile immediately.
  */
-import { Compass, MapPin, Plus } from 'lucide-react'
+import { Compass, GitMerge, MapPin, Plus } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import DerivedEntityList from '../components/DerivedEntityList'
 import LocationMap from '../components/LocationMap'
 import PlaceDetail from '../components/PlaceDetail'
+import MergePlacesDialog, { type MergePlaceCandidate } from '../components/places/MergePlacesDialog'
+import PossibleDuplicatesPanel from '../components/places/PossibleDuplicatesPanel'
+import BulkActionBar from '../components/ui/BulkActionBar'
 import { useToast } from '../components/ui/Toast'
+import { type SortKey, groupAndSort } from '../lib/entity-grouping'
 import { cn } from '../lib/utils'
 import { FINANCE_TAB_STORAGE_KEY, type Tab as FinanceTab } from './Finance'
 
 const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
+
+const SORT_OPTIONS: Array<{ value: SortKey; label: string }> = [
+  { value: 'primaryMetric', label: 'Most visited' },
+  { value: 'name', label: 'Name' },
+  { value: 'recent', label: 'Most recent' }
+]
 
 type Tab = 'tracked' | 'discovered' | 'travel'
 
@@ -63,10 +73,13 @@ export default function Places(): JSX.Element {
   const [discoveredCount, setDiscoveredCount] = useState<number | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [search, setSearch] = useState('')
+  const [sortBy, setSortBy] = useState<SortKey>('primaryMetric')
   const [adding, setAdding] = useState(false)
   const [mapData, setMapData] = useState<LocationMapData | null>(null)
   const [trips, setTrips] = useState<TripBundle[]>([])
   const [mapFocus, setMapFocus] = useState<{ lat: number; lng: number } | null>(null)
+  const [checked, setChecked] = useState<Set<number>>(new Set())
+  const [mergeCandidates, setMergeCandidates] = useState<MergePlaceCandidate[] | null>(null)
   const navigate = useNavigate()
   const { toast } = useToast()
 
@@ -113,6 +126,18 @@ export default function Places(): JSX.Element {
     const q = search.trim().toLowerCase()
     return tracked.filter((p) => !q || p.name.toLowerCase().includes(q) || p.matchKey.includes(q))
   }, [tracked, search])
+
+  const groups = useMemo(() => {
+    const withMetrics = shownTracked.map((p) => ({
+      ...p,
+      sortMetrics: {
+        primaryMetric: p.live?.visitCount ?? 0,
+        lastActivity: p.live?.lastVisit ?? null,
+        count: p.live?.visitCount ?? 0
+      }
+    }))
+    return groupAndSort(withMetrics, sortBy)
+  }, [shownTracked, sortBy])
 
   const sortedTrips = useMemo(
     () => [...trips].sort((a, b) => b.startDate.localeCompare(a.startDate)),
@@ -161,6 +186,35 @@ export default function Places(): JSX.Element {
       setSelectedId(rows[0]?.id ?? null)
       if (rows.length === 0) setTab('discovered')
     })
+  }
+
+  function toggleChecked(id: number): void {
+    setChecked((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const placeSecondary = (p: TrackedPlace): string =>
+    p.live ? `${p.live.visitCount} visit${p.live.visitCount === 1 ? '' : 's'}` : 'no visits found'
+
+  function openMergeFor(ids: number[]): void {
+    const candidates = ids
+      .map((id) => tracked.find((p) => p.id === id))
+      .filter((p): p is TrackedPlace => !!p)
+      .map((p) => ({ id: p.id, name: p.name, category: p.category, secondary: placeSecondary(p) }))
+    if (candidates.length < 2) return
+    setMergeCandidates(candidates)
+  }
+
+  async function handleMerged(survivorId: number): Promise<void> {
+    setMergeCandidates(null)
+    setChecked(new Set())
+    await loadTracked()
+    setTab('tracked')
+    setSelectedId(survivorId)
   }
 
   function openResidency(): void {
@@ -294,6 +348,20 @@ export default function Places(): JSX.Element {
           <div className="flex gap-6 items-start">
             {/* Tracked list */}
             <div className="w-64 shrink-0 space-y-2">
+              <PossibleDuplicatesPanel
+                kind="place"
+                onReview={(a, b) => openMergeFor([a.id, b.id])}
+              />
+              <BulkActionBar count={checked.size} onClear={() => setChecked(new Set())}>
+                <button
+                  type="button"
+                  onClick={() => openMergeFor([...checked])}
+                  disabled={checked.size < 2}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary/15 hover:bg-primary/25 text-primary rounded-lg transition-colors disabled:opacity-50"
+                >
+                  <GitMerge size={12} /> Merge…
+                </button>
+              </BulkActionBar>
               <div className="flex items-center gap-1.5">
                 <input
                   type="search"
@@ -313,50 +381,80 @@ export default function Places(): JSX.Element {
                   <Plus size={14} />
                 </button>
               </div>
-              <ul className="space-y-1">
-                {shownTracked.map((p) => (
-                  <li key={p.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedId(p.id)
-                        setAdding(false)
-                      }}
-                      className={cn(
-                        'w-full text-left rounded-lg px-3 py-2 transition-colors border',
-                        p.id === selectedId && !adding
-                          ? 'border-primary/50 bg-primary/10'
-                          : 'border-transparent hover:bg-secondary/60'
-                      )}
-                    >
-                      <div className="flex items-baseline justify-between gap-2">
-                        <span
-                          className="text-sm font-medium text-foreground capitalize truncate"
-                          title={p.name}
-                        >
-                          {p.name}
-                        </span>
-                        {p.live && (
-                          <span className="text-xs text-foreground shrink-0 tabular-nums">
-                            {p.live.visitCount}×
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                        {p.category ? `${p.category} · ` : ''}
-                        {p.live
-                          ? `${p.live.visitCount} visit${p.live.visitCount === 1 ? '' : 's'} · ${fmtShortTs(p.live.lastVisit)}`
-                          : 'no visits found'}
-                      </div>
-                    </button>
-                  </li>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortKey)}
+                aria-label="Sort tracked places"
+                className="w-full bg-secondary border border-border rounded-lg px-2 py-1.5 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary"
+              >
+                {SORT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    Sort: {opt.label}
+                  </option>
+                ))}
+              </select>
+              <div className="space-y-3">
+                {groups.map((group) => (
+                  <div key={group.category}>
+                    {groups.length > 1 && (
+                      <p className="px-1 mb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                        {group.category}
+                      </p>
+                    )}
+                    <ul className="space-y-1">
+                      {group.items.map((p) => (
+                        <li key={p.id} className="flex items-center gap-1.5">
+                          <input
+                            type="checkbox"
+                            checked={checked.has(p.id)}
+                            onChange={() => toggleChecked(p.id)}
+                            aria-label={`Select ${p.name}`}
+                            className="h-3.5 w-3.5 shrink-0 accent-[hsl(var(--primary))] cursor-pointer"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedId(p.id)
+                              setAdding(false)
+                            }}
+                            className={cn(
+                              'flex-1 min-w-0 text-left rounded-lg px-3 py-2 transition-colors border',
+                              p.id === selectedId && !adding
+                                ? 'border-primary/50 bg-primary/10'
+                                : 'border-transparent hover:bg-secondary/60'
+                            )}
+                          >
+                            <div className="flex items-baseline justify-between gap-2">
+                              <span
+                                className="text-sm font-medium text-foreground capitalize truncate"
+                                title={p.name}
+                              >
+                                {p.name}
+                              </span>
+                              {p.live && (
+                                <span className="text-xs text-foreground shrink-0 tabular-nums">
+                                  {p.live.visitCount}×
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                              {p.category ? `${p.category} · ` : ''}
+                              {p.live
+                                ? `${p.live.visitCount} visit${p.live.visitCount === 1 ? '' : 's'} · ${fmtShortTs(p.live.lastVisit)}`
+                                : 'no visits found'}
+                            </div>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 ))}
                 {shownTracked.length === 0 && trackedLoaded && (
-                  <li className="text-xs text-muted-foreground px-3 py-4">
+                  <p className="text-xs text-muted-foreground px-3 py-4">
                     {search ? 'No matches.' : 'Nothing tracked yet.'}
-                  </li>
+                  </p>
                 )}
-              </ul>
+              </div>
             </div>
 
             {/* Profile / create form */}
@@ -451,6 +549,16 @@ export default function Places(): JSX.Element {
             Manage travel & residency in Finance →
           </button>
         </div>
+      )}
+
+      {mergeCandidates && (
+        <MergePlacesDialog
+          kind="place"
+          candidates={mergeCandidates}
+          open={mergeCandidates !== null}
+          onClose={() => setMergeCandidates(null)}
+          onMerged={handleMerged}
+        />
       )}
     </div>
   )

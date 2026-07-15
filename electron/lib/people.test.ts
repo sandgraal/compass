@@ -1,14 +1,10 @@
 /**
- * People directory (Phase 10.7 "Connect"). Covers the per-source name extraction,
- * the cross-source collapse (the marquee "one person, many sources" behavior),
- * contact matching by normalized name, and the touchpoint-first sort.
+ * Name-extraction and person/merchant-classification helpers shared by the
+ * cross-reference engine and contact dedupe.
  */
 
 import { describe, expect, it } from 'vitest'
 import {
-  type ContactRow,
-  type PersonSourceRow,
-  buildPeople,
   extractPersonName,
   humanizeHandle,
   isAutomatedSender,
@@ -150,111 +146,5 @@ describe('isLikelyPerson', () => {
 describe('normalizeName', () => {
   it('lowercases + collapses whitespace', () => {
     expect(normalizeName('  John   Doe ')).toBe('john doe')
-  })
-})
-
-const MS = (iso: string): number => Date.parse(iso)
-
-describe('buildPeople', () => {
-  it('collapses the same person across sources into one entry', () => {
-    const records: PersonSourceRow[] = [
-      {
-        source: 'linkedin',
-        type: 'connection',
-        title: 'Connected with John Doe',
-        occurredAt: MS('2020-01-01T00:00:00Z')
-      },
-      {
-        source: 'facebook',
-        type: 'connection',
-        title: 'Became friends with John Doe',
-        occurredAt: MS('2015-06-01T00:00:00Z')
-      },
-      {
-        source: 'linkedin',
-        type: 'endorsement',
-        title: 'John Doe endorsed you for SDLC',
-        occurredAt: MS('2022-03-01T00:00:00Z')
-      }
-    ]
-    const people = buildPeople(records, [])
-    expect(people).toHaveLength(1)
-    expect(people[0]).toMatchObject({
-      name: 'John Doe',
-      key: 'john doe',
-      count: 3,
-      sources: ['facebook', 'linkedin'] // distinct, sorted
-    })
-    expect(people[0].firstSeen).toBe(MS('2015-06-01T00:00:00Z')) // earliest touchpoint
-    expect(people[0].lastSeen).toBe(MS('2022-03-01T00:00:00Z')) // latest touchpoint
-    expect(people[0].contactId).toBeNull()
-  })
-
-  it('picks the first-seen casing as the canonical name on a count tie', () => {
-    const records: PersonSourceRow[] = [
-      {
-        source: 'linkedin',
-        type: 'connection',
-        title: 'Connected with john doe',
-        occurredAt: null
-      },
-      {
-        source: 'facebook',
-        type: 'connection',
-        title: 'Became friends with John Doe',
-        occurredAt: null
-      }
-    ]
-    const [person] = buildPeople(records, [])
-    expect(person.key).toBe('john doe') // same person despite casing
-    expect(person.name).toBe('john doe') // 1–1 tie → the first-seen variant, deterministically
-  })
-
-  it('matches a person to a contact by normalized name', () => {
-    const records: PersonSourceRow[] = [
-      {
-        source: 'linkedin',
-        type: 'connection',
-        title: 'Connected with Ada Lovelace',
-        occurredAt: null
-      }
-    ]
-    const contacts: ContactRow[] = [
-      { id: 7, displayName: 'ada   lovelace' },
-      { id: 8, displayName: 'Someone Else' }
-    ]
-    const [person] = buildPeople(records, contacts)
-    expect(person.contactId).toBe(7) // normalized match despite casing/spacing
-  })
-
-  it('sorts by touchpoint count (then recency, then name) and ignores non-person records', () => {
-    const records: PersonSourceRow[] = [
-      {
-        source: 'linkedin',
-        type: 'connection',
-        title: 'Connected with Solo One',
-        occurredAt: MS('2021-01-01T00:00:00Z')
-      },
-      {
-        source: 'linkedin',
-        type: 'connection',
-        title: 'Connected with Busy Two',
-        occurredAt: MS('2019-01-01T00:00:00Z')
-      },
-      {
-        source: 'linkedin',
-        type: 'recommendation',
-        title: 'Recommended Busy Two',
-        occurredAt: MS('2023-01-01T00:00:00Z')
-      },
-      {
-        source: 'netflix',
-        type: 'watch',
-        title: 'The Matrix',
-        occurredAt: MS('2024-01-01T00:00:00Z')
-      } // ignored
-    ]
-    const people = buildPeople(records, [])
-    expect(people.map((p) => p.name)).toEqual(['Busy Two', 'Solo One']) // Busy Two has 2 touchpoints
   })
 })
