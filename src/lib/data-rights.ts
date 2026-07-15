@@ -114,8 +114,9 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     intoCompass: 'Drop the CSV',
     url: 'https://www.paypal.com/reports/statements',
     recordsSourceId: 'paypal',
-    payoff: 'Feeds People — senders and recipients you’ve paid become part of your directory.',
-    payoffLink: '/people'
+    payoff:
+      'Feeds Contacts — senders and recipients you’ve paid become part of your Discovered directory.',
+    payoffLink: '/contacts'
   },
   {
     id: 'venmo',
@@ -128,8 +129,8 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     intoCompass: 'Drop the statement CSV',
     url: 'https://account.venmo.com/statement',
     recordsSourceId: 'venmo',
-    payoff: 'Same as PayPal — P2P contacts flow straight into your People directory.',
-    payoffLink: '/people'
+    payoff: 'Same as PayPal — P2P contacts flow straight into your Contacts Discovered tab.',
+    payoffLink: '/contacts'
   },
   {
     id: 'coinbase',
@@ -420,8 +421,8 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     url: 'https://accountscenter.facebook.com/info_and_permissions',
     recordsSourceId: 'facebook',
     payoff:
-      'Friends and message threads become people in your directory, with first/last-seen dates.',
-    payoffLink: '/people'
+      'Friends and message threads become people in your Contacts Discovered tab, with first/last-seen dates.',
+    payoffLink: '/contacts'
   },
   {
     id: 'linkedin',
@@ -434,8 +435,8 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     intoCompass: 'Drop Connections.csv',
     url: 'https://www.linkedin.com/mypreferences/d/download-my-data',
     recordsSourceId: 'linkedin',
-    payoff: 'Your professional network becomes searchable People entries.',
-    payoffLink: '/people'
+    payoff: 'Your professional network becomes searchable entries in Contacts’ Discovered tab.',
+    payoffLink: '/contacts'
   },
   {
     id: 'on-device',
@@ -461,8 +462,9 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     format: '.txt',
     intoCompass: 'Drop the exported .txt',
     recordsSourceId: 'whatsapp',
-    payoff: 'Chat partners join your People directory; daily activity lands on the Timeline.',
-    payoffLink: '/people'
+    payoff:
+      'Chat partners join your Contacts Discovered tab; daily activity lands on the Timeline.',
+    payoffLink: '/contacts'
   },
   {
     id: 'x',

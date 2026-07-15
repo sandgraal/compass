@@ -4,7 +4,7 @@
  * timeline deep-links, and multi-select "Not interested" (permanent exclusion
  * via entities:exclude — the same curation mechanism as the People page).
  */
-import { Check, EyeOff, Plus, Search } from 'lucide-react'
+import { EyeOff, Plus, Search } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import BulkActionBar from './ui/BulkActionBar'
@@ -13,6 +13,11 @@ import { useToast } from './ui/Toast'
 const isElectron = (): boolean => typeof window !== 'undefined' && !!window.api
 const money = (n: number): string =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+const PLURAL: Record<'merchant' | 'place' | 'person', string> = {
+  merchant: 'merchants',
+  place: 'places',
+  person: 'people'
+}
 
 /** "Mar 2022" for a touchpoint timestamp (UTC, matching the Timeline span rendering). */
 function fmtMonth(ms: number | null): string {
@@ -33,7 +38,7 @@ export default function DerivedEntityList({
   promotedLabel = 'Saved',
   onPromoted
 }: {
-  kind: 'merchant' | 'place'
+  kind: 'merchant' | 'place' | 'person'
   searchPlaceholder: string
   emptyState: React.ReactNode
   onCount?: (n: number) => void
@@ -64,7 +69,7 @@ export default function DerivedEntityList({
         setItems(rows)
         onCount?.(rows.length)
       })
-      .catch(() => toast(`Could not load your ${kind}s`, 'error'))
+      .catch(() => toast(`Could not load your ${PLURAL[kind]}`, 'error'))
       .finally(() => setLoaded(true))
   }, [kind, onCount, toast])
 
@@ -74,7 +79,14 @@ export default function DerivedEntityList({
     try {
       const res = await window.api.entities.promote({ kind: e.kind, key: e.key })
       if (res.success) {
-        setItems((prev) => prev.map((x) => (x.key === e.key ? { ...x, promotedKind: 'place' } : x)))
+        // The backend now excludes promoted rows from entities:list, so a
+        // reload would drop this row anyway — remove it immediately instead
+        // of waiting on one, mirroring excludeSelected() below.
+        setItems((prev) => {
+          const next = prev.filter((x) => x.key !== e.key)
+          onCount?.(next.length)
+          return next
+        })
         toast(`${promotedLabel} ${e.name}`, 'success')
         if (res.promotedId != null) onPromoted?.(res.promotedId, e)
       } else {
@@ -211,22 +223,16 @@ export default function DerivedEntityList({
                 </div>
               </div>
             </button>
-            {e.promotedKind === 'place' ? (
-              <span className="shrink-0 flex items-center gap-1 text-[11px] text-primary px-2 py-1">
-                <Check size={12} /> {promotedLabel}
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={() => save(e)}
-                disabled={promoting === e.key}
-                title={`${promoteLabel} ${e.name}`}
-                aria-label={`${promoteLabel} ${e.name}`}
-                className="shrink-0 flex items-center gap-1 text-[11px] text-primary border border-primary/30 rounded px-2 py-1 hover:bg-primary/10 disabled:opacity-50 transition-colors"
-              >
-                <Plus size={12} /> {promoteLabel}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => save(e)}
+              disabled={promoting === e.key}
+              title={`${promoteLabel} ${e.name}`}
+              aria-label={`${promoteLabel} ${e.name}`}
+              className="shrink-0 flex items-center gap-1 text-[11px] text-primary border border-primary/30 rounded px-2 py-1 hover:bg-primary/10 disabled:opacity-50 transition-colors"
+            >
+              <Plus size={12} /> {promoteLabel}
+            </button>
           </li>
         ))}
         {shown.length === 0 && query && (

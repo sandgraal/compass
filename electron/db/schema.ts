@@ -787,6 +787,35 @@ export const places = sqliteTable('places', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
 })
 
+// ---- Place/merchant merge aliases (merge feature, 2026-07) ----
+// When a duplicate `places` row is merged into a survivor, its transaction/visit
+// match key is recorded here so FUTURE ledger rows and visit records — which
+// resolve to the LOSER's key at ingest time, since normalizeMerchant/placeMatchKey
+// never change — still attribute to the survivor. Read-time only: no ingest path
+// changes, and nothing here is consulted at insert time. `kind` mirrors
+// `places.kind` (denormalized) so the derived-entities projection can rebuild
+// `derived:<kind>:<aliasKey>` without a join back to `places`. UNIQUE(kind,
+// aliasKey) — a given key points at exactly one current survivor; re-pointed
+// (not duplicated) when a survivor that already holds aliases is itself later
+// merged into another survivor.
+export const placeMergeAliases = sqliteTable(
+  'place_merge_aliases',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    survivorPlaceId: integer('survivor_place_id')
+      .notNull()
+      .references(() => places.id),
+    kind: text('kind').notNull(), // 'merchant' | 'place'
+    aliasKey: text('alias_key').notNull(), // matchKeyForPlace/placeMatchKey of the loser
+    aliasName: text('alias_name'), // loser's display name at merge time
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).$defaultFn(() => new Date())
+  },
+  (t) => ({
+    kindAliasUnique: uniqueIndex('place_merge_aliases_kind_alias_unique').on(t.kind, t.aliasKey),
+    survivorIdx: index('place_merge_aliases_survivor').on(t.survivorPlaceId)
+  })
+)
+
 // ---- Travel segments (Phase 11.5 — days-in-country & residency) ----
 // One row per trip the user logs OUTSIDE their home country: a country + an
 // inclusive [startDate, endDate] window. Per-country day counts (the rest of the

@@ -24,7 +24,7 @@ import { and, desc, eq, like } from 'drizzle-orm'
 import type { IpcMain } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
 import { documentLinks, documents, places, subscriptions } from '../db/schema'
-import { matchKeyForPlace } from '../lib/merchant-match'
+import { allMatchKeysForPlace, matchKeyForPlace } from '../lib/merchant-match'
 import {
   type MerchantPriceTrend,
   type MerchantSlimTxn,
@@ -44,6 +44,7 @@ import {
   type PlaceRecord,
   cleanString,
   cleanUrl,
+  clearAbsorbedAliases,
   clearPromotedFlags,
   parseMeta
 } from './places'
@@ -149,37 +150,58 @@ function rowToRecord(r: PlaceRow): PlaceRecord {
 }
 
 /**
- * Slim rows for one merchant key, oldest-first (the aggregates sort anyway).
- * Exported for reuse by `subscriptions:profile` (electron/ipc/subscriptions.ts),
- * which resolves the same merge key via `matchKeyForSubscription` — the exact
- * inverse of `findLinkedSubscription` below — to compute a subscription's
- * "total paid to date" without re-deriving the transaction query.
+ * Slim rows for a set of merchant keys (a merchant's primary key plus any
+ * merged-in aliases — see `allMatchKeysForPlace`), oldest-first (the
+ * aggregates sort anyway).
  */
-export function loadSlimTxnsByMerchantKey(matchKey: string): MerchantSlimTxn[] {
-  if (!matchKey) return []
+export function loadSlimTxnsByMerchantKeys(keys: string[]): MerchantSlimTxn[] {
+  const unique = [...new Set(keys.filter((k) => k.length > 0))]
+  if (unique.length === 0) return []
   return getRawSqlite()
     .prepare(
       `SELECT date, amount, currency, tax_tag AS taxTag, tax_year AS taxYear
-         FROM finance_transactions WHERE normalized_merchant = ? ORDER BY date`
+         FROM finance_transactions
+        WHERE normalized_merchant IN (${unique.map(() => '?').join(', ')})
+        ORDER BY date`
     )
-    .all(matchKey) as MerchantSlimTxn[]
+    .all(...unique) as MerchantSlimTxn[]
 }
 
 /**
- * Live ledger stats for many merchants in one grouped query. Keys with no
- * matching rows are absent from the result map.
+ * Slim rows for ONE merchant key. Exported for reuse by `subscriptions:profile`
+ * (electron/ipc/subscriptions.ts), which resolves the same merge key via
+ * `matchKeyForSubscription` — the exact inverse of `findLinkedSubscription`
+ * below — to compute a subscription's "total paid to date" without
+ * re-deriving the transaction query. Subscriptions aren't merge-aware (out of
+ * scope for the places/merchants merge feature), so this stays single-key.
+ */
+export function loadSlimTxnsByMerchantKey(matchKey: string): MerchantSlimTxn[] {
+  return loadSlimTxnsByMerchantKeys([matchKey])
+}
+
+/**
+ * Live ledger stats for many merchants in one grouped query. `keysByPlaceId`
+ * maps each tracked merchant's `places.id` to its full key set (primary key
+ * plus any merged-in aliases) — a merchant can no longer be identified by a
+ * single key once merges exist, so this keys off place id rather than key.
+ * Places with no matching rows under any of their keys are absent from the
+ * result map.
  */
 function liveStatsFor(
-  keys: string[]
+  keysByPlaceId: Map<number, string[]>
 ): Map<
-  string,
+  number,
   { totalSpend: number; txnCount: number; lastTxnDate: string | null; currency: string }
 > {
   const map = new Map<
-    string,
+    number,
     { totalSpend: number; txnCount: number; lastTxnDate: string | null; currency: string }
   >()
-  const unique = [...new Set(keys.filter((k) => k.length > 0))]
+  const keyToPlaceId = new Map<string, number>()
+  for (const [placeId, keys] of keysByPlaceId) {
+    for (const key of keys) if (key.length > 0) keyToPlaceId.set(key, placeId)
+  }
+  const unique = [...keyToPlaceId.keys()]
   if (unique.length === 0) return map
   const rows = getRawSqlite()
     .prepare(
@@ -198,15 +220,17 @@ function liveStatsFor(
       key: string
     } & MerchantSlimTxn
   >
-  const byKey = new Map<string, MerchantSlimTxn[]>()
+  const byPlaceId = new Map<number, MerchantSlimTxn[]>()
   for (const row of rows) {
-    const txns = byKey.get(row.key) ?? []
+    const placeId = keyToPlaceId.get(row.key)
+    if (placeId == null) continue
+    const txns = byPlaceId.get(placeId) ?? []
     txns.push(row)
-    byKey.set(row.key, txns)
+    byPlaceId.set(placeId, txns)
   }
-  for (const [key, txns] of byKey) {
+  for (const [placeId, txns] of byPlaceId) {
     const stats = computeMerchantStats(txns)
-    map.set(key, {
+    map.set(placeId, {
       totalSpend: stats.totalSpend,
       txnCount: stats.txnCount,
       lastTxnDate: stats.lastTxnDate,
@@ -216,24 +240,34 @@ function liveStatsFor(
   return map
 }
 
-/** The subscription this merchant bills as, when one is tracked. */
-function findLinkedSubscription(matchKey: string): MerchantProfile['subscription'] {
-  if (!matchKey) return null
+/**
+ * The subscription this merchant bills as, when one is tracked — tried across
+ * every key the merchant resolves to (primary key first), so a subscription
+ * linked under a pre-merge key still shows as linked after the merge.
+ */
+function findLinkedSubscription(keys: string[]): MerchantProfile['subscription'] {
+  const validKeys = keys.filter((k) => k.length > 0)
+  if (validKeys.length === 0) return null
   const db = getDb()
   // Detected/materialized rows carry the merchant key in their external id …
-  const byId = db
-    .select()
-    .from(subscriptions)
-    .where(like(subscriptions.externalId, `detected:${matchKey}::%`))
-    .all()[0]
-  // … manual rows match when their name normalizes to the same key.
-  const row =
-    byId ??
-    db
+  let row: typeof subscriptions.$inferSelect | undefined
+  for (const matchKey of validKeys) {
+    row = db
+      .select()
+      .from(subscriptions)
+      .where(like(subscriptions.externalId, `detected:${matchKey}::%`))
+      .all()[0]
+    if (row) break
+  }
+  // … manual rows match when their name normalizes to one of the keys.
+  if (!row) {
+    const keySet = new Set(validKeys)
+    row = db
       .select()
       .from(subscriptions)
       .all()
-      .find((s) => normalizeMerchant(s.name) === matchKey)
+      .find((s) => keySet.has(normalizeMerchant(s.name)))
+  }
   if (!row) return null
   return {
     id: row.id,
@@ -273,19 +307,23 @@ function cleanMeta(v: unknown, existing: MerchantMeta | null): string | null | u
 export function registerMerchantsHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('merchants:list-tracked', (): TrackedMerchant[] => {
     const db = getDb()
+    const sqlite = getRawSqlite()
     const rows = db
       .select()
       .from(places)
       .where(eq(places.kind, 'merchant'))
       .orderBy(desc(places.updatedAt))
       .all()
-    const keyed = rows.map((r) => ({ row: r, matchKey: matchKeyForPlace(r.externalId, r.name) }))
-    const live = liveStatsFor(keyed.map((k) => k.matchKey))
+    const keyed = rows.map((r) => {
+      const matchKey = matchKeyForPlace(r.externalId, r.name)
+      return { row: r, matchKey, keys: allMatchKeysForPlace(sqlite, r.id, matchKey, 'merchant') }
+    })
+    const live = liveStatsFor(new Map(keyed.map((k) => [k.row.id, k.keys])))
     return keyed.map(({ row, matchKey }) => ({
       ...rowToRecord(row),
       matchKey,
       meta: parseMeta<MerchantMeta>(row.meta),
-      live: live.get(matchKey) ?? null
+      live: live.get(row.id) ?? null
     }))
   })
 
@@ -295,20 +333,22 @@ export function registerMerchantsHandlers(ipcMain: IpcMain): void {
     const row = db.select().from(places).where(eq(places.id, id)).all()[0]
     if (!row) throw new Error('merchants:profile: not found')
     const matchKey = matchKeyForPlace(row.externalId, row.name)
+    const keys = allMatchKeysForPlace(getRawSqlite(), id, matchKey, 'merchant')
 
-    const slim = loadSlimTxnsByMerchantKey(matchKey)
+    const slim = loadSlimTxnsByMerchantKeys(keys)
     const stats = computeMerchantStats(slim)
     const inDominant = slim.filter((t) => (t.currency || 'USD') === stats.currency)
 
+    const validKeys = keys.filter((k) => k.length > 0)
     const transactions = (
-      matchKey
+      validKeys.length > 0
         ? getRawSqlite()
             .prepare(
               `SELECT id, date, amount, currency, description, category, tax_tag AS taxTag
-                 FROM finance_transactions WHERE normalized_merchant = ?
+                 FROM finance_transactions WHERE normalized_merchant IN (${validKeys.map(() => '?').join(', ')})
                 ORDER BY date DESC, id DESC LIMIT ${TXN_LIST_LIMIT}`
             )
-            .all(matchKey)
+            .all(...validKeys)
         : []
     ) as MerchantTxnListItem[]
 
@@ -353,7 +393,7 @@ export function registerMerchantsHandlers(ipcMain: IpcMain): void {
       priceTrend: computePriceTrend(inDominant),
       transactions,
       activity,
-      subscription: findLinkedSubscription(matchKey),
+      subscription: findLinkedSubscription(keys),
       documents: docs,
       tax: computeTaxSummary(inDominant)
     }
@@ -400,6 +440,7 @@ export function registerMerchantsHandlers(ipcMain: IpcMain): void {
     if (!row) return { success: true }
     db.delete(places).where(eq(places.id, id)).run()
     clearPromotedFlags(db, row.externalId)
+    clearAbsorbedAliases(db, 'merchant', id)
     return { success: true }
   })
 }

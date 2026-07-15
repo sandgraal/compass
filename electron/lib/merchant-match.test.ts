@@ -5,6 +5,7 @@
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  allMatchKeysForPlace,
   ensureNormalizedMerchants,
   matchKeyForPlace,
   matchKeyForSubscription
@@ -20,6 +21,14 @@ const DDL = `CREATE TABLE finance_transactions (
   amount REAL NOT NULL,
   description TEXT NOT NULL,
   normalized_merchant TEXT
+);
+CREATE TABLE place_merge_aliases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  survivor_place_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  alias_key TEXT NOT NULL,
+  alias_name TEXT,
+  created_at INTEGER
 );`
 
 function insertTxn(desc: string, normalized: string | null = null): void {
@@ -143,5 +152,52 @@ describe('matchKeyForSubscription', () => {
     const account = 'Amex Gold'
     const externalId = `detected:${merchant}::${account}`
     expect(matchKeyForSubscription(externalId, 'Blue Bottle')).toBe(merchant)
+  })
+})
+
+describe('allMatchKeysForPlace', () => {
+  it('returns just the primary key when nothing has been merged in', () => {
+    expect(allMatchKeysForPlace(sqlite, 1, 'netflix', 'merchant')).toEqual(['netflix'])
+  })
+
+  it('includes every alias merged into the survivor', () => {
+    sqlite
+      .prepare(
+        'INSERT INTO place_merge_aliases (survivor_place_id, kind, alias_key) VALUES (?,?,?)'
+      )
+      .run(1, 'merchant', 'netflix inc')
+    sqlite
+      .prepare(
+        'INSERT INTO place_merge_aliases (survivor_place_id, kind, alias_key) VALUES (?,?,?)'
+      )
+      .run(1, 'merchant', 'nflx')
+    expect(allMatchKeysForPlace(sqlite, 1, 'netflix', 'merchant')).toEqual([
+      'netflix',
+      'netflix inc',
+      'nflx'
+    ])
+  })
+
+  it('scopes aliases by both survivor id and kind', () => {
+    sqlite
+      .prepare(
+        'INSERT INTO place_merge_aliases (survivor_place_id, kind, alias_key) VALUES (?,?,?)'
+      )
+      .run(1, 'merchant', 'netflix inc')
+    // Different survivor, and same id but a different kind — neither should leak in.
+    sqlite
+      .prepare(
+        'INSERT INTO place_merge_aliases (survivor_place_id, kind, alias_key) VALUES (?,?,?)'
+      )
+      .run(2, 'merchant', 'other merchant')
+    sqlite
+      .prepare(
+        'INSERT INTO place_merge_aliases (survivor_place_id, kind, alias_key) VALUES (?,?,?)'
+      )
+      .run(1, 'place', 'some gym')
+    expect(allMatchKeysForPlace(sqlite, 1, 'netflix', 'merchant')).toEqual([
+      'netflix',
+      'netflix inc'
+    ])
   })
 })

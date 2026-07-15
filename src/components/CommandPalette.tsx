@@ -22,7 +22,6 @@ import {
   LayoutGrid,
   LineChart,
   MapPin,
-  Network,
   PartyPopper,
   PiggyBank,
   Plug,
@@ -294,18 +293,22 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
     {
       id: 'contacts',
       label: 'Contacts',
-      description: 'People, addresses & phone numbers',
+      description: 'People, addresses & phone numbers — plus everyone discovered across your data',
       icon: <Users size={15} />,
       action: () => nav('/contacts'),
-      keywords: ['people', 'address book', 'phone', 'vcard', 'friends', 'family']
-    },
-    {
-      id: 'people',
-      label: 'People',
-      description: 'Everyone across your imported data',
-      icon: <Network size={15} />,
-      action: () => nav('/people'),
-      keywords: ['connections', 'friends', 'linkedin', 'facebook', 'who', 'relationships']
+      keywords: [
+        'people',
+        'address book',
+        'phone',
+        'vcard',
+        'friends',
+        'family',
+        'connections',
+        'linkedin',
+        'facebook',
+        'who',
+        'relationships'
+      ]
     },
     {
       id: 'merchants',

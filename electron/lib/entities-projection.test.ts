@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import * as schema from '../db/schema'
 import { subscriptionKey } from './entities'
 import { ensureDerivedEntities, refreshDerivedEntities } from './entities-projection'
+import { normalizeMerchant } from './normalize'
 
 function makeDb(): { db: ReturnType<typeof drizzle<typeof schema>>; sqlite: Database.Database } {
   const sqlite = new Database(':memory:')
@@ -35,6 +36,10 @@ function makeDb(): { db: ReturnType<typeof drizzle<typeof schema>>; sqlite: Data
       name TEXT NOT NULL, category TEXT, address TEXT, url TEXT, total_spend REAL, notes TEXT,
       source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER,
       meta TEXT
+    );
+    CREATE TABLE place_merge_aliases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, survivor_place_id INTEGER NOT NULL,
+      kind TEXT NOT NULL, alias_key TEXT NOT NULL, alias_name TEXT, created_at INTEGER
     );
   `)
   return { db: drizzle(sqlite, { schema }), sqlite }
@@ -131,6 +136,35 @@ describe('refreshDerivedEntities', () => {
       c: number
     }
     expect(n.c).toBe(1)
+  })
+
+  it('keeps a merged-away merchant pointed at its survivor across a rebuild', () => {
+    // The survivor is tracked under a DIFFERENT key than the merged-in one — a
+    // merge inline-patches derivedEntities.promotedId, but only place_merge_aliases
+    // makes that survive a full rebuild (this test would fail without the
+    // owned.places alias-synthesis fix in refreshDerivedEntities).
+    const survivor = sqlite
+      .prepare(
+        "INSERT INTO places (external_id, kind, name) VALUES ('manual:1', 'merchant', 'Netflix Premium')"
+      )
+      .run()
+    const aliasKey = normalizeMerchant('Netflix')
+    sqlite
+      .prepare(
+        'INSERT INTO place_merge_aliases (survivor_place_id, kind, alias_key, alias_name) VALUES (?,?,?,?)'
+      )
+      .run(survivor.lastInsertRowid, 'merchant', aliasKey, 'Netflix')
+    for (const d of ['2026-01-15', '2026-02-15', '2026-03-15'])
+      insertRecord(sqlite, 'paypal', 'payment', 'Netflix', '-15.99 USD', d)
+
+    refreshDerivedEntities(db)
+    const merchant = sqlite
+      .prepare(
+        "SELECT promoted_kind, promoted_id FROM derived_entities WHERE kind='merchant' AND match_key=?"
+      )
+      .get(aliasKey) as { promoted_kind: string; promoted_id: number }
+    expect(merchant.promoted_kind).toBe('place')
+    expect(merchant.promoted_id).toBe(Number(survivor.lastInsertRowid))
   })
 })
 

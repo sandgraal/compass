@@ -14,9 +14,22 @@
 import { inArray } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type * as schema from '../db/schema'
-import { contacts, derivedEntities, places, records, subscriptions } from '../db/schema'
+import {
+  contacts,
+  derivedEntities,
+  placeMergeAliases,
+  places,
+  records,
+  subscriptions
+} from '../db/schema'
 import { loadExclusionSet } from './curation'
-import { ENTITY_EXTRACTORS, type EntityRecordRow, type OwnedRefs, deriveEntities } from './entities'
+import {
+  ENTITY_EXTRACTORS,
+  type EntityRecordRow,
+  type OwnedRefs,
+  deriveEntities,
+  placeExternalId
+} from './entities'
 
 /** Distinct sources that have at least one extractor — the DB read is scoped here. */
 export const EXTRACTOR_SOURCES: string[] = [
@@ -64,7 +77,27 @@ export function refreshDerivedEntities(db: BetterSQLite3Database<typeof schema>)
       .from(subscriptions)
       .all()
       .map((s) => s.externalId),
-    places: db.select({ id: places.id, externalId: places.externalId }).from(places).all()
+    // Merged-away merchants/places keep resolving to their survivor: a merge
+    // repoints derivedEntities.promotedId inline (see mergePlaces), but that
+    // patch alone doesn't survive THIS full delete-and-reinsert rebuild, since
+    // deriveEntities recomputes promotedId purely from this owned-places lookup.
+    // Synthesizing one entry per alias — pointing the loser's OWN key at the
+    // survivor's id — makes every future rebuild resolve it correctly too.
+    places: [
+      ...db.select({ id: places.id, externalId: places.externalId }).from(places).all(),
+      ...db
+        .select({
+          id: placeMergeAliases.survivorPlaceId,
+          kind: placeMergeAliases.kind,
+          aliasKey: placeMergeAliases.aliasKey
+        })
+        .from(placeMergeAliases)
+        .all()
+        .map((a) => ({
+          id: a.id,
+          externalId: placeExternalId(a.kind as 'merchant' | 'place', a.aliasKey)
+        }))
+    ]
   }
 
   // The user's "Not interested" list survives the full-replace rebuild because

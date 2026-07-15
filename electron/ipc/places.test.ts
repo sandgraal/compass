@@ -33,6 +33,15 @@ const DDL = `
     name TEXT NOT NULL, category TEXT, address TEXT, url TEXT, total_spend REAL, notes TEXT,
     source TEXT NOT NULL DEFAULT 'manual', created_at INTEGER, updated_at INTEGER, meta TEXT
   );
+  CREATE TABLE place_merge_aliases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, survivor_place_id INTEGER NOT NULL,
+    kind TEXT NOT NULL, alias_key TEXT NOT NULL, alias_name TEXT, created_at INTEGER
+  );
+  CREATE UNIQUE INDEX place_merge_aliases_kind_alias_unique ON place_merge_aliases (kind, alias_key);
+  CREATE TABLE curation_exclusions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, target TEXT NOT NULL, created_at INTEGER
+  );
+  CREATE UNIQUE INDEX curation_exclusions_kind_target ON curation_exclusions (kind, target);
   CREATE TABLE derived_entities (
     id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, match_key TEXT NOT NULL,
     name TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, sources TEXT NOT NULL DEFAULT '[]',
@@ -109,6 +118,14 @@ function seedPlace(over?: { externalId?: string; name?: string; kind?: string })
   return Number(res.lastInsertRowid)
 }
 
+function seedAlias(survivorPlaceId: number, aliasKey: string, kind = 'place'): void {
+  sqlite
+    .prepare(
+      'INSERT INTO place_merge_aliases (survivor_place_id, kind, alias_key) VALUES (?, ?, ?)'
+    )
+    .run(survivorPlaceId, kind, aliasKey)
+}
+
 const ms = (iso: string): number => new Date(iso).getTime()
 
 beforeEach(async () => {
@@ -182,6 +199,35 @@ describe('places:list-tracked', () => {
     const list = invoke('places:list-tracked') as TrackedPlace[]
     expect(list[0].matchKey).toBe('blue bottle cafe')
     expect(list[0].live?.visitCount).toBe(1)
+  })
+
+  it('rolls up visits matched under a merged-in alias into the survivor', () => {
+    const survivorId = seedPlace()
+    seedAlias(survivorId, 'blue bottle downtown')
+    seedRecord({
+      source: 'gcal',
+      type: 'event',
+      title: 'Coffee',
+      body: 'Blue Bottle Cafe',
+      occurredAt: ms('2026-01-10')
+    })
+    // Matched under the LOSER's old key — still attributes to the survivor.
+    seedRecord({
+      source: 'uber',
+      type: 'ride',
+      title: 'Ride',
+      body: 'Blue Bottle Downtown',
+      occurredAt: ms('2026-03-02')
+    })
+
+    const list = invoke('places:list-tracked') as TrackedPlace[]
+    expect(list).toHaveLength(1)
+    expect(list[0].live).toEqual({
+      visitCount: 2,
+      firstVisit: ms('2026-01-10'),
+      lastVisit: ms('2026-03-02'),
+      topSource: 'gcal'
+    })
   })
 
   it('derives and caches meta.geo from GPS clusters around visits', () => {
@@ -345,6 +391,30 @@ describe('places:profile', () => {
     ])
   })
 
+  it('includes visits matched under a merged-in alias', () => {
+    const id = seedPlace()
+    seedAlias(id, 'blue bottle downtown')
+    seedRecord({
+      source: 'gcal',
+      type: 'event',
+      title: 'Coffee',
+      body: 'Blue Bottle Cafe',
+      occurredAt: ms('2026-01-10')
+    })
+    seedRecord({
+      source: 'uber',
+      type: 'ride',
+      title: 'Ride',
+      body: 'Blue Bottle Downtown',
+      occurredAt: ms('2026-03-02')
+    })
+
+    const p = invoke('places:profile', id) as PlaceProfile
+    expect(p.stats.visitCount).toBe(2)
+    expect(p.visits).toHaveLength(2)
+    expect(p.visits[0].title).toBe('Ride') // newest first
+  })
+
   it('activity surfaces timeline hits but filters visit-source records', () => {
     const id = seedPlace()
     seedRecord({
@@ -493,5 +563,201 @@ describe('places:untrack', () => {
     })
     expect(invoke('places:untrack', merchantId)).toEqual({ success: true })
     expect(sqlite.prepare('SELECT COUNT(*) n FROM places').get()).toEqual({ n: 1 })
+  })
+
+  it('untracking a merge survivor reverts everything it absorbed back to Discovered', () => {
+    const survivorId = seedPlace()
+    seedAlias(survivorId, 'blue bottle downtown')
+    sqlite
+      .prepare(
+        `INSERT INTO derived_entities (kind, match_key, name, promoted_kind, promoted_id)
+         VALUES ('place', 'blue bottle downtown', 'Blue Bottle Downtown', 'place', ?)`
+      )
+      .run(survivorId)
+
+    invoke('places:untrack', survivorId)
+    const de = sqlite
+      .prepare(
+        "SELECT promoted_kind AS pk, promoted_id AS pid FROM derived_entities WHERE match_key='blue bottle downtown'"
+      )
+      .get() as { pk: string | null; pid: number | null }
+    expect(de.pk).toBeNull()
+    expect(de.pid).toBeNull()
+    expect(sqlite.prepare('SELECT COUNT(*) n FROM place_merge_aliases').get()).toEqual({ n: 0 })
+  })
+})
+
+describe('places:merge', () => {
+  it('folds scalar fields, repoints documents/derived_entities, and deletes the loser', () => {
+    const survivorId = seedPlace({ name: 'Blue Bottle Cafe' })
+    sqlite.prepare('UPDATE places SET category = ? WHERE id = ?').run('Cafe', survivorId)
+    const loserId = seedPlace({
+      externalId: 'derived:place:blue bottle downtown',
+      name: 'Blue Bottle Downtown'
+    })
+    sqlite
+      .prepare('UPDATE places SET address = ?, notes = ? WHERE id = ?')
+      .run('123 Main St', 'Great oat milk', loserId)
+
+    sqlite
+      .prepare(
+        `INSERT INTO derived_entities (kind, match_key, name, promoted_kind, promoted_id)
+         VALUES ('place', 'blue bottle downtown', 'Blue Bottle Downtown', 'place', ?)`
+      )
+      .run(loserId)
+    sqlite
+      .prepare(
+        `INSERT INTO documents (title, file_name, sha256, stored_path)
+         VALUES ('Receipt', 'r.pdf', 'sha', 'docs/r.pdf')`
+      )
+      .run()
+    sqlite
+      .prepare(
+        `INSERT INTO document_links (document_id, target_kind, target_id)
+         VALUES (1, 'place', 'derived:place:blue bottle downtown')`
+      )
+      .run()
+
+    const res = invoke('places:merge', {
+      kind: 'place',
+      survivorId,
+      loserIds: [loserId]
+    }) as { success: boolean }
+    expect(res.success).toBe(true)
+
+    const survivor = sqlite.prepare('SELECT * FROM places WHERE id = ?').get(survivorId) as {
+      category: string
+      address: string
+      notes: string
+    }
+    expect(survivor.category).toBe('Cafe') // survivor's own value kept
+    expect(survivor.address).toBe('123 Main St') // filled in from the loser
+    expect(survivor.notes).toBe('Great oat milk')
+
+    expect(sqlite.prepare('SELECT COUNT(*) n FROM places WHERE id = ?').get(loserId)).toEqual({
+      n: 0
+    })
+    const alias = sqlite
+      .prepare('SELECT survivor_place_id AS sid FROM place_merge_aliases WHERE alias_key = ?')
+      .get('blue bottle downtown') as { sid: number }
+    expect(alias.sid).toBe(survivorId)
+    const de = sqlite
+      .prepare(
+        "SELECT promoted_id AS pid FROM derived_entities WHERE match_key='blue bottle downtown'"
+      )
+      .get() as { pid: number }
+    expect(de.pid).toBe(survivorId)
+    const link = sqlite
+      .prepare('SELECT target_id AS tid FROM document_links WHERE document_id = 1')
+      .get() as { tid: string }
+    expect(link.tid).toBe('derived:place:blue bottle cafe')
+  })
+
+  it('a transaction/visit keyed to the loser now resolves through the survivor', () => {
+    const survivorId = seedPlace({ name: 'Blue Bottle Cafe' })
+    const loserId = seedPlace({
+      externalId: 'derived:place:blue bottle downtown',
+      name: 'Blue Bottle Downtown'
+    })
+    invoke('places:merge', { kind: 'place', survivorId, loserIds: [loserId] })
+
+    // Ingested AFTER the merge, under the loser's old key — still attributes.
+    seedRecord({
+      source: 'gcal',
+      type: 'event',
+      title: 'Coffee',
+      body: 'Blue Bottle Downtown',
+      occurredAt: ms('2026-04-01')
+    })
+    const list = invoke('places:list-tracked') as TrackedPlace[]
+    expect(list).toHaveLength(1)
+    expect(list[0].live?.visitCount).toBe(1)
+  })
+
+  it('carries forward aliases from a survivor that was itself merged earlier (transitive)', () => {
+    const a = seedPlace({ externalId: 'derived:place:a', name: 'A' })
+    const b = seedPlace({ externalId: 'derived:place:b', name: 'B' })
+    const c = seedPlace({ externalId: 'derived:place:c', name: 'C' })
+    invoke('places:merge', { kind: 'place', survivorId: b, loserIds: [a] })
+    invoke('places:merge', { kind: 'place', survivorId: c, loserIds: [b] })
+
+    const rows = sqlite
+      .prepare('SELECT survivor_place_id AS sid, alias_key AS key FROM place_merge_aliases')
+      .all() as Array<{ sid: number; key: string }>
+    expect(rows.every((r) => r.sid === c)).toBe(true)
+    expect(new Set(rows.map((r) => r.key))).toEqual(new Set(['a', 'b']))
+  })
+
+  it('returns success:false for an unknown survivor or when no losers match', () => {
+    const survivorId = seedPlace()
+    expect(
+      invoke('places:merge', { kind: 'place', survivorId: 999, loserIds: [survivorId] })
+    ).toEqual({
+      success: false
+    })
+    expect(invoke('places:merge', { kind: 'place', survivorId, loserIds: [999] })).toEqual({
+      success: false
+    })
+  })
+
+  it('never merges across kinds', () => {
+    const placeId = seedPlace({ name: 'Blue Bottle', kind: 'place' })
+    const merchantId = seedPlace({
+      externalId: 'derived:merchant:blue bottle',
+      name: 'Blue Bottle',
+      kind: 'merchant'
+    })
+    // Asking to merge a merchant id into a place-kind merge is rejected — the
+    // merchant row simply doesn't match the kind='place' filter, so it's
+    // treated as an unmatched loser (0 rows merged).
+    expect(
+      invoke('places:merge', { kind: 'place', survivorId: placeId, loserIds: [merchantId] })
+    ).toEqual({ success: false })
+    expect(sqlite.prepare('SELECT COUNT(*) n FROM places').get()).toEqual({ n: 2 })
+  })
+})
+
+describe('places:suggest-survivor', () => {
+  it('prefers the row with the richer profile', () => {
+    const sparse = seedPlace({ externalId: 'derived:place:a', name: 'A' })
+    const rich = seedPlace({ externalId: 'derived:place:b', name: 'B' })
+    sqlite
+      .prepare('UPDATE places SET category = ?, address = ?, notes = ? WHERE id = ?')
+      .run('Cafe', '123 Main St', 'Great coffee', rich)
+
+    const res = invoke('places:suggest-survivor', {
+      kind: 'place',
+      ids: [sparse, rich]
+    }) as { survivorId: number }
+    expect(res.survivorId).toBe(rich)
+  })
+})
+
+describe('places:duplicates / places:dismiss-duplicate', () => {
+  it('suggests a fuzzy pair and forgets it once dismissed', () => {
+    const a = seedPlace({ externalId: 'derived:place:starbucks', name: 'Starbucks' })
+    const b = seedPlace({
+      externalId: 'derived:place:starbucks coffee 4521',
+      name: 'Starbucks Coffee #4521'
+    })
+
+    const pairs = invoke('places:duplicates', { kind: 'place' }) as Array<{
+      a: { id: number }
+      b: { id: number }
+    }>
+    expect(pairs).toHaveLength(1)
+    expect(new Set([pairs[0].a.id, pairs[0].b.id])).toEqual(new Set([a, b]))
+
+    const rowA = sqlite.prepare('SELECT external_id FROM places WHERE id = ?').get(a) as {
+      external_id: string
+    }
+    const rowB = sqlite.prepare('SELECT external_id FROM places WHERE id = ?').get(b) as {
+      external_id: string
+    }
+    invoke('places:dismiss-duplicate', {
+      aExternalId: rowA.external_id,
+      bExternalId: rowB.external_id
+    })
+    expect(invoke('places:duplicates', { kind: 'place' })).toEqual([])
   })
 })

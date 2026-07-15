@@ -50,6 +50,25 @@ export function matchKeyForSubscription(externalId: string, name: string): strin
 }
 
 /**
+ * Every match key a tracked `places` row currently resolves to: its own
+ * primary key plus every match key merged into it (`place_merge_aliases`).
+ * Read-time only — nothing at ingest time needs to know about a merge, since
+ * a query built against this expanded set picks up transactions/visits keyed
+ * under an alias whether they were ingested before or after the merge.
+ */
+export function allMatchKeysForPlace(
+  sqlite: Database.Database,
+  placeId: number,
+  primaryKey: string,
+  kind: 'merchant' | 'place'
+): string[] {
+  const aliases = sqlite
+    .prepare('SELECT alias_key FROM place_merge_aliases WHERE kind = ? AND survivor_place_id = ?')
+    .all(kind, placeId) as Array<{ alias_key: string }>
+  return [primaryKey, ...aliases.map((a) => a.alias_key)]
+}
+
+/**
  * Backfill `finance_transactions.normalized_merchant` for rows that predate
  * the column (or slipped past an insert site). Batched (5k rows per
  * transaction) so a huge ledger can't hold a write lock for seconds;

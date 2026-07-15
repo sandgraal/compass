@@ -522,9 +522,6 @@ const api = {
     clearRequested: (sourceId: string) =>
       ipcRenderer.invoke('data-rights:clear-requested', sourceId)
   },
-  people: {
-    list: () => ipcRenderer.invoke('people:list')
-  },
   entities: {
     list: (opts: { kind: EntityKind; q?: string; limit?: number; offset?: number }) =>
       ipcRenderer.invoke('entities:list', opts),
@@ -554,7 +551,16 @@ const api = {
       ipcRenderer.invoke('places:web-enrich', req),
     webEnrichApply: (req: { runId: string; accepted: number[] }) =>
       ipcRenderer.invoke('places:web-enrich-apply', req),
-    webEnrichCancel: () => ipcRenderer.invoke('places:web-enrich-cancel')
+    webEnrichCancel: () => ipcRenderer.invoke('places:web-enrich-cancel'),
+    // Merge + duplicate detection (merge feature) — one shared, kind-parameterized
+    // channel serving both tracked merchants and tracked places.
+    merge: (kind: 'merchant' | 'place', survivorId: number, loserIds: number[]) =>
+      ipcRenderer.invoke('places:merge', { kind, survivorId, loserIds }),
+    suggestSurvivor: (kind: 'merchant' | 'place', ids: number[]) =>
+      ipcRenderer.invoke('places:suggest-survivor', { kind, ids }),
+    duplicates: (kind: 'merchant' | 'place') => ipcRenderer.invoke('places:duplicates', { kind }),
+    dismissDuplicate: (aExternalId: string, bExternalId: string) =>
+      ipcRenderer.invoke('places:dismiss-duplicate', { aExternalId, bExternalId })
   },
   // Tracked merchants (merchants redesign) — the rich profile surface over
   // promoted `places` rows. See electron/ipc/merchants.ts.
