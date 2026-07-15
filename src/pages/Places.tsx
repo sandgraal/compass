@@ -172,12 +172,11 @@ export default function Places(): JSX.Element {
 
   const selected = tracked.find((p) => p.id === selectedId) ?? null
 
-  function handlePromoted(promotedId: number): void {
-    void loadTracked().then(() => {
-      setTab('tracked')
-      setSelectedId(promotedId)
-      setAdding(false)
-    })
+  function handlePromoted(): void {
+    // Refresh the tracked list/count in the background — stay on Discovered
+    // so tracking one place of several doesn't yank the user away from the
+    // rest of the list (or the duplicates queue) they were working through.
+    void loadTracked()
   }
 
   function handleUntracked(): void {
