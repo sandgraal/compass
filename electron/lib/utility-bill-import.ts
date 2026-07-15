@@ -55,9 +55,12 @@ function money(s: string | undefined): number | null {
 function day(s: string | undefined): string | null {
   const t = s?.trim()
   if (!t) return null
-  const d = new Date(t)
-  if (Number.isNaN(d.getTime())) return t.length >= 10 ? t.slice(0, 10) : null
-  return d.toISOString().slice(0, 10)
+  // Preserve ISO date-only strings as-written to avoid timezone day-boundary shifts.
+  if (/^\d{4}-\d{2}-\d{2}/.test(t)) return t.slice(0, 10)
+  const ms = parseWhen(t)
+  if (ms == null) return t.length >= 10 ? t.slice(0, 10) : null
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 /**
