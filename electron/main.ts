@@ -63,6 +63,7 @@ import {
   registerStorehouseSyncHandlers,
   runSpineExpansionBackfillIfNeeded
 } from './ipc/storehouse-sync'
+import { registerSubscriptionWebEnrichHandlers } from './ipc/subscription-web-enrich'
 import { registerSubscriptionsHandlers } from './ipc/subscriptions'
 import { registerSyncHandlers } from './ipc/sync'
 import { registerTerraHandlers } from './ipc/terra'
@@ -267,6 +268,7 @@ app.whenReady().then(async () => {
   registerCurationHandlers(ipcMain)
   registerExportHandlers(ipcMain)
   registerSubscriptionsHandlers(ipcMain)
+  registerSubscriptionWebEnrichHandlers(ipcMain)
   registerAssetsHandlers(ipcMain)
   registerStorehouseHandlers(ipcMain)
   registerStorehouseSyncHandlers(ipcMain)

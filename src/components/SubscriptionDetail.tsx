@@ -1,23 +1,24 @@
 /**
- * Subscription detail panel (subscriptions redesign, phase 1) — mirrors
+ * Subscription detail panel (subscriptions redesign) — mirrors
  * MerchantDetail.tsx: everything Compass knows about one tracked
  * subscription, cross-referencing the existing ledger-audit
  * (`auditSubscriptions`) and usage-record (`detectUnusedSubscriptions`)
- * detectors via `subscriptions:profile` rather than recomputing anything.
- *
- * Web enrichment (pricing/plans/cancellation steps/alternatives) is a
- * deliberately separate phase-2 follow-up — omitted here, not stubbed.
+ * detectors via `subscriptions:profile` rather than recomputing anything,
+ * plus consent-gated web enrichment (pricing/plans/cancellation steps/
+ * alternatives) via `subscriptions:web-enrich`.
  */
 import {
   AlertTriangle,
   Calendar,
   ExternalLink,
   FileText,
+  Globe,
   Heart,
   Layers,
   Paperclip,
   Pencil,
   Receipt,
+  Sparkles,
   Trash2,
   TrendingUp,
   X
@@ -25,6 +26,8 @@ import {
 import { useCallback, useEffect, useState } from 'react'
 import { formatMoney } from '../lib/money'
 import { cn } from '../lib/utils'
+import SubscriptionWebEnrichDialog from './subscriptions/SubscriptionWebEnrichDialog'
+import SubscriptionWebPresenceCard from './subscriptions/SubscriptionWebPresenceCard'
 import { useConfirm } from './ui/ConfirmDialog'
 import { useToast } from './ui/Toast'
 
@@ -73,6 +76,7 @@ export default function SubscriptionDetail({
   const [draft, setDraft] = useState<SubscriptionInput | null>(null)
   const [busy, setBusy] = useState(false)
   const [ratingBusy, setRatingBusy] = useState(false)
+  const [webEnrichOpen, setWebEnrichOpen] = useState(false)
   const confirm = useConfirm()
   const { toast } = useToast()
 
@@ -256,6 +260,15 @@ export default function SubscriptionDetail({
           )}
           <button
             type="button"
+            onClick={() => setWebEnrichOpen(true)}
+            title="Enrich from web (uses your Anthropic key, review before saving)"
+            aria-label="Enrich from web"
+            className="p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-secondary transition-colors"
+          >
+            <Sparkles size={16} />
+          </button>
+          <button
+            type="button"
             onClick={() => (editing ? setEditing(false) : startEdit())}
             title="Edit details"
             aria-label="Edit details"
@@ -386,6 +399,16 @@ export default function SubscriptionDetail({
         )}
       </Section>
 
+      {/* Web presence (accepted web-enrichment findings) */}
+      {s.meta?.enrichment?.web && (
+        <Section icon={<Globe size={14} />} title="Web presence">
+          <SubscriptionWebPresenceCard
+            web={s.meta.enrichment.web}
+            onRefresh={() => setWebEnrichOpen(true)}
+          />
+        </Section>
+      )}
+
       {/* Documents */}
       <Section
         icon={<FileText size={14} />}
@@ -448,6 +471,22 @@ export default function SubscriptionDetail({
           </div>
         </Section>
       )}
+
+      <SubscriptionWebEnrichDialog
+        subscription={{
+          id: s.id,
+          name: s.name,
+          category: s.category,
+          cost: s.cost,
+          cadence: s.cadence
+        }}
+        open={webEnrichOpen}
+        onClose={() => setWebEnrichOpen(false)}
+        onApplied={async () => {
+          await load()
+          onChanged()
+        }}
+      />
     </div>
   )
 }

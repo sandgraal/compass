@@ -22,7 +22,7 @@
 | **Phase 6** — Code-health debt (May 2026) | 5 items | 100% — 6.1 IPC test backfill (vault/auth/finance×3/sync/knowledge/settings/spotlight/habits/updater), 6.2 knowledge tests, 6.3 empty-catch sweep, 6.4 Biome 0-warning + `--error-on-warnings` CI gate (#139), 6.5 type-safety audit all shipped |
 | **Phase 7** — Daily-Driver & Platform Roadmap | 6 tracks | **In progress.** Track A ✅ (Morning Brief + low-cash/price-hike alerts, weekly/monthly review, multi-type capture; voice deferred) · Track B 🟡 (Obsidian + Notion-import + Linear + Todoist + Things + Email-receipts shipped; Apple Reminders = spike in #376 (notarization-gated), see [`docs/apple-reminders.md`](apple-reminders.md); Slack/Jira/Outlook+CalDAV/IMAP/web-clipper open) · Track C 🟡 (MCP surface expanded; webhooks/plugin-API/marketplace/Zapier open) · Track D 🟡 (device sync: snapshot+LWW via relay mailbox shipped; per-table merge, mobile, sharing open) · Track E ✅ (proactive insights + agentic plan-my-week) · Track F 🟡 (theming shipped; mobile-responsive + a11y open). See § Phase 7. |
 | **Phase 8** — Claude Integration (bidirectional) | 6 items | **100% — all shipped** (MCP read+propose tools, in-app Claude Inbox, one-click `.mcpb` Desktop bundle, end-user plugin, 5 skills, agentic Ask Compass) — see § Phase 8 + [`claude-integration.md`](claude-integration.md) |
-| **Phase 9** — The Storehouse (own everything, export anywhere) | 9 items | **~85%.** 9.0 Contacts + Universal Export ✅ · 9.1 archive importers ✅ (**live Google Contacts sync ✅** via the People API — needs a Google reconnect for `contacts.readonly`; **contact enrichment ✅** — widened Google fields + cross-source summary, see below; macOS Contacts live-sync open) · **9.2 Documents & files store ✅ (2026-07-11)** · **9.3 Subscriptions ✅ — redesign phase 1 shipped 2026-07-14 (tracked-subscription profiles, see addendum below; phase 2 web enrichment deferred)** · **9.4 Medical records ✅ — shipped 2026-07-06, superseded (see below)** · **9.4b Lab & vital results ✅ — shipped 2026-07-12** (quantitative counterpart to `medical_records`, see below) · 9.5 Assets ✅ · 9.6 Storehouse overview ✅ · **9.7 reverse-connectors open** — see § Phase 9 |
+| **Phase 9** — The Storehouse (own everything, export anywhere) | 9 items | **~85%.** 9.0 Contacts + Universal Export ✅ · 9.1 archive importers ✅ (**live Google Contacts sync ✅** via the People API — needs a Google reconnect for `contacts.readonly`; **contact enrichment ✅** — widened Google fields + cross-source summary, see below; macOS Contacts live-sync open) · **9.2 Documents & files store ✅ (2026-07-11)** · **9.3 Subscriptions ✅ — redesign phases 1 + 2 shipped 2026-07-14 (tracked-subscription profiles + consent-gated web enrichment, see addenda below)** · **9.4 Medical records ✅ — shipped 2026-07-06, superseded (see below)** · **9.4b Lab & vital results ✅ — shipped 2026-07-12** (quantitative counterpart to `medical_records`, see below) · 9.5 Assets ✅ · 9.6 Storehouse overview ✅ · **9.7 reverse-connectors open** — see § Phase 9 |
 | **Phase 10** — The Acquisition Engine (go get everything) | 7 waves | **~55%.** 10.1 spine ✅ (Drop Zone + `records`/Timeline + **44 recognizers**, growing — crypto/WhatsApp/X/rideshare/Fitbit/Garmin landed 2026-07) · **live-sync projectors ✅ (finance + Gmail + Calendar + GitHub + Linear + medical → the `records` spine, so live-synced data reaches People/Merchants/Places/Timeline/Search — Gmail senders → People via an automated-sender filter, calendar locations → Places, GitHub authors → People (bots/self filtered), GitHub/Linear issues → Timeline/Search; migration `0026` added GitHub `author`+`updated_at` and Linear `updated_at` for real timeline dates)** · 10.5 Data-Rights Concierge ✅ (redesigned 2026-07 to **27 sources across 6 domains**, + tax/SSA PDF recognizers) · 10.6 CRED sandbox ✅ (SSA adapter, gated off by default) · 10.7 Converse/Connect/Curate ✅ · **10.8 Location→Residency autopilot ✅** (location export → offline point-in-polygon → auto `travel_segments`; raw coords kept OFF the AI-searchable spine) · **10.3 Health hub ✅** (unified steps/sleep/Oura-scores/workouts surface over already-ingested wearables + aggregates-only `compass_health_summary`) · **10.9 metered relay + all 8 aggregators code-shipped 2026-07-05/06** (Terra/Canopy/Argyle/Arcadia/Nylas/Metriport/Knot relay-fronted + BYO-direct SnapTrade — incl. Metriport FHIR clinical records → Medical hub and Terra's 500+-wearable coverage, closing out 10.3's "remaining wearables"; **live use of the relay-fronted seven needs a deployed relay + real paid API credentials — code-complete and unit-tested, not a missing-code gap**) · **genetics raw-data import shipped** (23andMe/AncestryDNA `.txt` → sealed `genetics` vault category, `electron/lib/genetics.ts`) · **10.2 LIVE crypto valuation/IRS transcripts, 10.4 Apple Data & Privacy, full 10.6 open** — see § Phase 10 + [`storehouse-roadmap.md`](storehouse-roadmap.md) |
 | **Phase 11** — Life Planning & Cross-Border (NEW) | 7 items | **✅ Complete (2026-06-30).** Output of the June expert panel ([`strategic-review-2026-06.md`](strategic-review-2026-06.md)): all 7 items shipped — 11.1 multi-currency, 11.2 expat tax (FBAR/FATCA), 11.3 Airbnb P&L, 11.4 long-horizon retirement, 11.5 residency/days-in-country, 11.6 goals, 11.7 estate. The optional 11.1 follow-ups (ingest-time txn currency, base-currency forecast rollup, unrealized FX gain/loss) are now implemented — PRs #268/#269 + the FX-gain/loss change. **2026-07-14 addendum:** the 11.2 vault-split follow-ups (`.migrated.enc` blob retirement, `life_record_links` + Life Records link chips, FBAR user-entered-max override) shipped — see the dated addendum below. See § Phase 11 |
 
@@ -1047,8 +1047,8 @@ undo any of it:
   `ensureColumn` fallback in `ensureNewTables`, guarded in a try/catch like `contacts` since the
   `subscriptions` table itself is created by migration `0013`, not the pure-ensure CREATE path).
   `meta.usage: { rating: 'love'|'use'|'rarely'|'barely', ratedAt }` is the user's manual "is this worth it"
-  self-check-in; `meta.enrichment` is reserved, unwritten, for the deferred phase-2 web-enrichment feature
-  below.
+  self-check-in; `meta.enrichment` was reserved, unwritten, for a deferred phase-2 web-enrichment feature —
+  **now built, same day — see the phase 2 addendum below.**
 - [x] **New pure lib modules** — `electron/lib/subscription-usage.ts` extracts `STREAMING_USAGE` +
   the usage-match predicate out of `electron/ipc/insights.ts`'s unused-subscription detector (behavior-
   preserving refactor) so both the Insights sweep and the new per-subscription profile share one source of
@@ -1080,6 +1080,51 @@ undo any of it:
 - **Deferred to a separate phase-2 PR** — consent-gated web-search enrichment (pricing/plans, cancellation
   steps, alternatives), analogous to the Places/Merchants "Enrich from web" feature. Scoped out
   deliberately, not stubbed for; `meta.enrichment` stays reserved but unwritten until that PR.
+  **Shipped the same day — see the phase 2 addendum below.**
+
+---
+
+## Addendum (2026-07-14) — Subscriptions redesign phase 2: consent-gated web enrichment
+
+> Follow-up to the phase 1 addendum immediately above: builds out the `meta.enrichment` namespace phase 1
+> deliberately left reserved but unwritten, mirroring the Places/Merchants "Enrich from web" feature
+> (2026-07-14 addendum further above) for tracked subscriptions. No schema migration — `subscriptions.meta`
+> and `subscriptions.cancel_url` already existed from phase 1 / the original Phase 9.3 table.
+
+- [x] **New pure lib** — `electron/lib/subscription-web-enrichment.ts`, the subscription-flavored sibling of
+  `electron/lib/place-web-enrichment.ts` (itself a sibling of `contact-web-enrichment.ts`, PR #395/#397/#398's
+  shared engine). Imports `WEB_SEARCH_TOOL`/`harvestSources`/`sanitizeUrl` from `contact-web-enrichment.ts`
+  rather than re-implementing. New forced-tool-call schema `submit_subscription_findings` asking for
+  `pricingSummary`, `annualDiscount`, `plans[]` (tier/price/cadence/note), `benefits[]`, `cancellationSteps` +
+  `cancellationUrl`, `alternatives[]` (name/note/approxPrice), `supportUrl`. New proposal kinds: `pricing` \|
+  `planTier` \| `annualSavings` \| `benefit` \| `cancellationSteps` \| `cancellationUrl` \| `supportUrl` \|
+  `alternative` — only `cancellationUrl` writes to a core column (`subscriptions.cancel_url`), and only when
+  the user explicitly accepts that specific proposal.
+- [x] **New IPC** — `electron/ipc/subscription-web-enrich.ts` registers `subscriptions:web-enrich` /
+  `subscriptions:web-enrich-apply` / `subscriptions:web-enrich-cancel` (`registerSubscriptionWebEnrichHandlers`
+  in `main.ts`), structurally identical guardrails to `place-web-enrich.ts`: single-flight `AbortController`,
+  90s timeout, ≤3 `pause_turn` continuations, 30-min pending-run TTL, `MAX_ACCEPTED_IDS` cap. Applies write
+  `subscriptions.meta.enrichment.web` (whole-namespace replace). Two small exported helpers landed in
+  `electron/ipc/subscriptions.ts`: `applySubscriptionWebEnrichment` (the write-back function, mirrors
+  `applyPlaceWebEnrichment` in `places.ts`) and `findLinkedMerchantUrl(matchKey)` (looks up a tracked
+  merchant's `places.url` by the same merge-key equality used elsewhere, passed into the enrichment search
+  as a cheap accuracy hint only — never a substitute, since `PlaceWebEnrichment` has no
+  pricing/cancellation/alternatives fields).
+- [x] **Preload/types** — `window.api.subscriptions.{webEnrich,webEnrichApply,webEnrichCancel}`; new types
+  `SubscriptionWebEnrichment`, `SubscriptionWebEnrichProposal`, `SubscriptionWebEnrichRunResult` (the latter
+  two reuse the existing shared `WebEnrichRunUsage`/`WebEnrichCandidate` types already declared for
+  contacts/places).
+- [x] **UI** — new `src/components/subscriptions/SubscriptionWebEnrichDialog.tsx` (adapted from
+  `src/components/places/PlaceWebEnrichDialog.tsx` — same consent→searching→candidates→review→applied phase
+  machine, with 4 review-dialog section groupings: Cancellation, Pricing & plans, What you get, Alternatives
+  & support) and `src/components/subscriptions/SubscriptionWebPresenceCard.tsx` (adapted from
+  `WebPresenceCard.tsx`). `src/components/SubscriptionDetail.tsx` gained a Sparkles "Enrich from web" header
+  button, a "Web presence" section rendering the card when `meta.enrichment.web` exists, and mounts the
+  dialog at the bottom — the exact seam `MerchantDetail.tsx` already uses for its own enrichment
+  button/section/dialog.
+- [x] **Docs** — `docs/data-access-policy.md`'s enrichment paragraph generalized from "contact web
+  enrichment is the one surface" to name all three enrichment IPC namespaces (contacts / places-merchants /
+  subscriptions).
 
 ---
 

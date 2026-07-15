@@ -20,7 +20,7 @@ import { writeFileSync } from 'node:fs'
 import { and, eq, gte, inArray } from 'drizzle-orm'
 import { type IpcMain, dialog } from 'electron'
 import { getDb } from '../db/client'
-import { documentLinks, documents, records, subscriptions } from '../db/schema'
+import { documentLinks, documents, places, records, subscriptions } from '../db/schema'
 import {
   type Subscription as AuditedSubscription,
   type SubscriptionAudit,
@@ -28,7 +28,7 @@ import {
 } from '../integrations/finance-subscriptions'
 import { serializeCsv } from '../lib/csv'
 import { addExclusions, loadExclusionSet } from '../lib/curation'
-import { matchKeyForSubscription } from '../lib/merchant-match'
+import { matchKeyForPlace, matchKeyForSubscription } from '../lib/merchant-match'
 import { type MerchantSlimTxn, computeMerchantStats } from '../lib/merchant-profile'
 import { type Cadence, PER_YEAR, annualizeCost } from '../lib/normalize'
 import {
@@ -37,6 +37,7 @@ import {
   usagePairKey,
   wasSubscriptionUsed
 } from '../lib/subscription-usage'
+import type { SubscriptionWebEnrichment } from '../lib/subscription-web-enrichment'
 import { UNUSED_SUB_DAYS } from './insights'
 import { loadSlimTxnsByMerchantKey } from './merchants'
 
@@ -148,11 +149,14 @@ export interface SubscriptionInput {
  * Namespaced JSON extras on a subscriptions row (`subscriptions.meta`) —
  * mirrors `places.meta`. `usage` is the user's own "is this worth it"
  * self-check-in (no usage-tracking API exists or should exist here — this is
- * an explicit, cheap, user-driven signal). `enrichment` is reserved for a
- * future consent-gated web-enrichment pass (pricing/cancellation/alternatives).
+ * an explicit, cheap, user-driven signal). `enrichment` is the consent-gated
+ * web-enrichment pass (pricing/cancellation/alternatives) — written by
+ * `subscription-web-enrich.ts`, applied via `applySubscriptionWebEnrichment`.
  */
 export interface SubscriptionMeta {
   usage?: { rating: UsageRating; ratedAt: number }
+  /** Consent-gated web enrichment — written by subscription-web-enrich.ts. */
+  enrichment?: { web?: SubscriptionWebEnrichment }
 }
 
 export type UsageRating = 'love' | 'use' | 'rarely' | 'barely'
@@ -398,6 +402,62 @@ export type SubscriptionListItem = ReturnType<typeof rowToRecord> & {
   zombie: boolean
   isDuplicate: boolean
   unused: boolean
+}
+
+/**
+ * A linked merchant's official site (a tracked `places` row matching the same
+ * merge key), if one exists — passed to the web-enrichment search as a cheap
+ * accuracy hint only. `PlaceWebEnrichment` has no pricing/cancellation/
+ * alternatives fields, so this never substitutes for the subscription's own
+ * search; it just narrows it. Mirrors `findLinkedSubscription`
+ * (electron/ipc/merchants.ts) in reverse — exact `derived:` id match first,
+ * then a linear scan fallback for manually-added places.
+ */
+export function findLinkedMerchantUrl(matchKey: string): string | null {
+  if (!matchKey) return null
+  const db = getDb()
+  const byId =
+    db
+      .select({ url: places.url })
+      .from(places)
+      .where(eq(places.externalId, `derived:merchant:${matchKey}`))
+      .all()[0] ??
+    db
+      .select({ url: places.url })
+      .from(places)
+      .where(eq(places.externalId, `derived:place:${matchKey}`))
+      .all()[0]
+  if (byId) return byId.url
+  const row = db
+    .select({ url: places.url, externalId: places.externalId, name: places.name })
+    .from(places)
+    .all()
+    .find((p) => matchKeyForPlace(p.externalId, p.name) === matchKey)
+  return row?.url ?? null
+}
+
+/**
+ * Apply accepted web-enrichment proposals: whole-namespace replace of
+ * `meta.enrichment.web`, plus an optional `cancelUrl` patch — ONLY when the
+ * caller explicitly included it (an accepted `cancellationUrl` proposal).
+ * Mirrors `applyPlaceWebEnrichment` (electron/ipc/places.ts).
+ */
+export function applySubscriptionWebEnrichment(
+  subscriptionId: number,
+  fields: Partial<Record<'cancelUrl', string>>,
+  web: SubscriptionWebEnrichment
+): boolean {
+  const db = getDb()
+  const row = db.select().from(subscriptions).where(eq(subscriptions.id, subscriptionId)).all()[0]
+  if (!row) return false
+  const meta = parseSubMeta(row.meta) ?? {}
+  const updates: Partial<SubRow> = {
+    meta: JSON.stringify({ ...meta, enrichment: { ...(meta.enrichment ?? {}), web } }),
+    updatedAt: new Date()
+  }
+  if (fields.cancelUrl != null) updates.cancelUrl = clamp(fields.cancelUrl, MAX_TEXT)
+  db.update(subscriptions).set(updates).where(eq(subscriptions.id, subscriptionId)).run()
+  return true
 }
 
 export function registerSubscriptionsHandlers(ipcMain: IpcMain): void {

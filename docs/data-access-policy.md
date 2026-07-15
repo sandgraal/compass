@@ -60,15 +60,31 @@ deliberate decision by the app's sole user** — not an accident to be "fixed"
 by re-walling domains. The propose→approve write funnel (Claude Inbox) is
 unchanged: AI reads everything, writes nothing without human approval.
 
-**Contact web enrichment** ("Enrich from web", `electron/ipc/contact-web-enrich.ts`)
-is the one surface that deliberately looks a person up on the public web. It
-sends the contact's name, org, and job title plus user-typed hints to
-Anthropic's server-side web search (BYO Anthropic key) — only on an explicit
-per-contact button press behind a consent dialog that shows the exact outbound
-payload. Emails and phone numbers are never sent, and never written back (a
-wrong identifier could trigger contact auto-merge). Results land as proposals
-the user reviews item-by-item; nothing is persisted without acceptance. No
-bulk mode, no background refresh.
+**Web enrichment** is the app's only deliberate outbound-to-the-public-web
+surface, across three IPC namespaces that all share one engine
+(`electron/lib/contact-web-enrichment.ts`'s `WEB_SEARCH_TOOL`/`harvestSources`/
+`sanitizeUrl`, imported rather than re-implemented by each sibling) and one
+trust model: fires only on an explicit per-row button press behind a consent
+dialog that shows the exact outbound payload, uses Anthropic's server-side web
+search (BYO Anthropic key), and lands results as proposals the user reviews
+item-by-item — nothing is persisted without acceptance, unverified citations
+are flagged, and there is no bulk mode or background refresh.
+
+- **Contacts** (`electron/ipc/contact-web-enrich.ts`) — sends name, org, and
+  job title plus user-typed hints. Emails and phone numbers are never sent,
+  and never written back (a wrong identifier could trigger contact
+  auto-merge).
+- **Places & merchants** (`electron/ipc/place-web-enrich.ts`, shared by both
+  since they're the same table) — sends name, category, and address plus
+  hints. Notes and visit history are never sent.
+- **Subscriptions** (`electron/ipc/subscription-web-enrich.ts`) — sends name,
+  category, and cost/cadence plus hints, to research pricing/plans,
+  cancellation steps, and alternatives. Notes and the payment account are
+  never sent; a linked merchant's already-known official site may be passed
+  as a search hint, but never its enrichment content (which has no
+  pricing/cancellation fields to draw from). The one core-column write
+  (`cancelUrl`) only happens when the user explicitly accepts that specific
+  proposal.
 
 ## What's still true (not walls — different properties)
 
