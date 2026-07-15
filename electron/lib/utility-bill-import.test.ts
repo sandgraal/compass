@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseUtilityBillCsv } from './utility-bill-csv'
+import { parseUtilityBillCsv, parseUtilityBillPdf } from './utility-bill-import'
 
 describe('parseUtilityBillCsv', () => {
   it('parses a standard bill export', () => {
@@ -90,5 +90,60 @@ describe('parseUtilityBillCsv', () => {
     const out = parseUtilityBillCsv(headers, rows)
     expect(out).toHaveLength(1)
     expect(out[0].provider).toBe('Con Edison')
+  })
+})
+
+describe('parseUtilityBillPdf', () => {
+  it('extracts amount + statement date from a typical bill layout', () => {
+    const text = [
+      'Pacific Gas and Electric Company',
+      'Account Number: 1234567890',
+      'Statement Date: 06/15/2026',
+      'Service Period: 05/15/2026 - 06/14/2026',
+      'Total Amount Due: $142.50',
+      'Usage: 412 kWh'
+    ].join('\n')
+    const out = parseUtilityBillPdf(text, 'PGE-june-2026.pdf')
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({
+      amount: 142.5,
+      statementDate: '2026-06-15',
+      periodStart: '2026-05-15',
+      periodEnd: '2026-06-14',
+      usageKwh: 412,
+      currency: 'USD'
+    })
+    expect(out[0].provider).toBe('PGE june 2026')
+    expect(out[0].externalId).toMatch(/^manual:[0-9a-f]{16}$/)
+  })
+
+  it('matches alternate "amount due" labels', () => {
+    const out = parseUtilityBillPdf('Some Utility Co\nBalance Due $88.00', 'bill.pdf')
+    expect(out).toHaveLength(1)
+    expect(out[0].amount).toBe(88)
+  })
+
+  it('falls back periodEnd to statementDate when no period range is found', () => {
+    const text = 'Statement Date: 2026-06-15\nAmount Due: $75.00'
+    const out = parseUtilityBillPdf(text, 'bill.pdf')
+    expect(out[0].periodEnd).toBe('2026-06-15')
+    expect(out[0].periodStart).toBeNull()
+  })
+
+  it('returns [] when no amount-due pattern matches (unrecognized layout)', () => {
+    const text = 'Some Utility Co\nThank you for your payment of $50.00 last month.'
+    expect(parseUtilityBillPdf(text, 'bill.pdf')).toEqual([])
+  })
+
+  it('produces the same externalId for the same content (idempotent re-import)', () => {
+    const text = 'Statement Date: 2026-06-15\nAmount Due: $75.00'
+    const a = parseUtilityBillPdf(text, 'bill.pdf')
+    const b = parseUtilityBillPdf(text, 'bill.pdf')
+    expect(a[0].externalId).toBe(b[0].externalId)
+  })
+
+  it('serviceAddress is always null — PDFs have no dedicated address field extracted', () => {
+    const text = 'Statement Date: 2026-06-15\nAmount Due: $75.00'
+    expect(parseUtilityBillPdf(text, 'bill.pdf')[0].serviceAddress).toBeNull()
   })
 })

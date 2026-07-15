@@ -113,7 +113,8 @@ import {
 import { buildTripBundles } from '../integrations/trip-bundles'
 import { writeAllFinanceKnowledge } from '../knowledge/finance-extractor'
 import { localYm, localYmd } from '../lib/dates'
-import { parseUtilityBillCsv } from '../lib/utility-bill-csv'
+import { extractPdfText } from '../lib/pdf'
+import { parseUtilityBillCsv, parseUtilityBillPdf } from '../lib/utility-bill-import'
 import { DATA_DIR } from '../paths'
 import { insertRecords } from './records'
 import { afterDomainWrite } from './storehouse-sync'
@@ -714,23 +715,36 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
     }
   })
 
-  // Manual utility-bill CSV import — a stand-in for Arcadia (Phase 10.9) while
-  // the managed relay isn't deployed. Same `utility_bills` table + Schedule E
-  // rollup, fed by a downloaded provider export instead of a live sync.
+  // Manual utility-bill import (CSV or PDF) — a stand-in for Arcadia (Phase
+  // 10.9) while the managed relay isn't deployed. Same `utility_bills` table +
+  // Schedule E rollup, fed by a downloaded provider bill instead of a live
+  // sync. Most providers hand out a PDF statement, not a CSV, so both are
+  // accepted — see the caveat in utility-bill-import.ts on how rough the PDF
+  // path is (best-effort amount/date extraction, no shared bill layout).
   ipcMain.handle('finance:import-utility-bills', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: 'Choose a utility-bill CSV',
+      title: 'Choose a utility bill (CSV or PDF)',
       properties: ['openFile'],
-      filters: [{ name: 'CSV', extensions: ['csv'] }]
+      filters: [{ name: 'Utility bill', extensions: ['csv', 'pdf'] }]
     })
     if (canceled || filePaths.length === 0) return { success: false, canceled: true }
+    const fp = filePaths[0]
+    const isPdf = fp.toLowerCase().endsWith('.pdf')
     try {
-      const { headers, rows } = readCsv(filePaths[0])
-      const bills = parseUtilityBillCsv(headers, rows)
+      let bills: ReturnType<typeof parseUtilityBillCsv>
+      if (isPdf) {
+        const { text } = await extractPdfText(fp)
+        bills = parseUtilityBillPdf(text, basename(fp))
+      } else {
+        const { headers, rows } = readCsv(fp)
+        bills = parseUtilityBillCsv(headers, rows)
+      }
       if (bills.length === 0) {
         return {
           success: false,
-          error: 'No bills found — is this a utility-bill CSV? It needs at least an amount column.'
+          error: isPdf
+            ? "Couldn't find a total amount due in this PDF — utility-bill layouts vary a lot by provider, this is best-effort."
+            : 'No bills found — is this a utility-bill CSV? It needs at least an amount column.'
         }
       }
       const imported = upsertUtilityBills(getDb(), bills)
