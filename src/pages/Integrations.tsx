@@ -1784,10 +1784,18 @@ export default function Integrations(): JSX.Element {
               })
               const setup = getIntegrationSetup(integration.id)
               const cardError = connectErrors[integration.id] ?? state.errorMessage
-              // A persisted, never-connected error (e.g. Things 3 when the app
-              // isn't installed) has no other way to clear the red banner short
-              // of a successful retry — offer a way out.
-              const canDismissError = state.errorWins && !state.isMultiConn && !state.isConnected
+              // A persisted, NEVER-successfully-connected error (e.g. Things 3
+              // when the app isn't installed) has no other way to clear the red
+              // banner short of a successful retry — offer a way out. Gated on
+              // connectedAt (not just isConnected) so a service that connected
+              // before and later errored still goes through the confirming
+              // Disconnect flow — Dismiss skips confirmation because there's
+              // nothing to lose only when there was truly never a connection.
+              const canDismissError =
+                state.errorWins &&
+                !state.isMultiConn &&
+                !state.isConnected &&
+                status?.connectedAt == null
               const errorAction =
                 setup?.requiresRelay && cardError ? (
                   <span className="space-x-3">
