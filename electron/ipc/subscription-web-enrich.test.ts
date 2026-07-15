@@ -349,8 +349,36 @@ describe('subscriptions:web-enrich-apply', () => {
       await invoke('subscriptions:web-enrich-apply', { runId: 'nope', accepted: [0] })
     ).toMatchObject({ success: false })
     const r = await invoke('subscriptions:web-enrich-apply', { runId, accepted: [] })
-    expect(r).toMatchObject({ success: true })
+    expect(r).toMatchObject({ success: true, applied: { fields: [], findings: 0 } })
     expect(subscriptionRow(id).cancel_url).toBeNull()
+  })
+
+  it('an empty/bogus accepted array writes NOTHING — not even meta.enrichment.web', async () => {
+    const id = addSubscription({ name: 'Netflix' })
+    const { runId } = await runToProposals(id)
+    await invoke('subscriptions:web-enrich-apply', { runId, accepted: [] })
+    expect(subscriptionRow(id).meta).toBeNull()
+  })
+
+  it('ids that name no proposal in this run are treated as no acceptance', async () => {
+    const id = addSubscription({ name: 'Netflix' })
+    const { runId } = await runToProposals(id)
+    const r = await invoke('subscriptions:web-enrich-apply', { runId, accepted: [999, 1000] })
+    expect(r).toMatchObject({ success: true, applied: { fields: [], findings: 0 } })
+    expect(subscriptionRow(id).meta).toBeNull()
+  })
+
+  it('a stale runId cannot be reused after a no-op apply discarded the run', async () => {
+    const id = addSubscription({ name: 'Netflix' })
+    const { runId, proposals } = await runToProposals(id)
+    await invoke('subscriptions:web-enrich-apply', { runId, accepted: [] })
+    // The run is gone even though nothing was written — can't come back and
+    // accept for real against the same runId.
+    const r = await invoke('subscriptions:web-enrich-apply', {
+      runId,
+      accepted: proposals.map((p) => p.id)
+    })
+    expect(r).toMatchObject({ success: false })
   })
 
   it('cancel discards the cached run', async () => {
