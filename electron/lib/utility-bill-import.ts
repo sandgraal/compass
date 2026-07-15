@@ -169,12 +169,18 @@ export function parseUtilityBillPdf(text: string, filename: string): UtilityBill
   const amount = money(amountMatch[1])
   if (amount == null) return []
 
-  const statementDate =
-    isoDay(parseWhen(text.match(STATEMENT_DATE)?.[1] ?? '')) ??
-    isoDay(parseWhen(text.match(ANY_DATE)?.[1] ?? ''))
+  const ymd = (raw: string | undefined): string | null => {
+    const s = raw?.trim()
+    if (!s) return null
+    // Preserve ISO date-only strings as-written to avoid timezone day-boundary shifts.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+    return isoDay(parseWhen(s))
+  }
+
+  const statementDate = ymd(text.match(STATEMENT_DATE)?.[1]) ?? ymd(text.match(ANY_DATE)?.[1])
   const period = text.match(PERIOD_RANGE)
-  const periodStart = period ? isoDay(parseWhen(period[1])) : null
-  const periodEnd = period ? isoDay(parseWhen(period[2])) : statementDate
+  const periodStart = period ? ymd(period[1]) : null
+  const periodEnd = period ? ymd(period[2]) : statementDate
   const usageKwh = money(text.match(USAGE_KWH)?.[1])
   const provider = providerFromFilename(filename)
   const base = {
