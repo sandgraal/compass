@@ -215,6 +215,11 @@ function hasActiveAuditMatch(
   return activeAudited.some((s) => s.merchant === matchKey)
 }
 
+/** Runtime-narrows a raw DB string to `Cadence` instead of an unchecked `as Cadence` cast. */
+function isCadence(value: string): value is Cadence {
+  return Object.hasOwn(CADENCE_DAYS, value)
+}
+
 /**
  * Project forecast events for user-OWNED subscriptions (the Storehouse
  * `subscriptions` table, electron/ipc/subscriptions.ts) that have no active
@@ -244,8 +249,8 @@ export function projectOwnedSubscriptionEvents(
   const horizon = addDays(today, windowDays)
 
   for (const sub of subs) {
-    const stepDays = CADENCE_DAYS[sub.cadence as Cadence]
-    if (!stepDays || !(sub.cost > 0)) continue
+    if (!isCadence(sub.cadence) || !(sub.cost > 0)) continue
+    const stepDays = CADENCE_DAYS[sub.cadence]
 
     const matchKey = matchKeyForSubscription(sub.externalId, sub.name)
     if (hasActiveAuditMatch(activeAudited, matchKey, sub.paymentAccount)) continue
@@ -259,7 +264,16 @@ export function projectOwnedSubscriptionEvents(
       undefined
     if (accountId === undefined) continue
 
-    let next = sub.nextRenewal ? parseLocalDate(sub.nextRenewal) : addDays(today, stepDays)
+    // nextRenewal is user-entered and never format-validated at write time —
+    // a malformed value (partial date, garbage string) parses to an Invalid
+    // Date, and `Invalid Date <= x` is always false, which would silently
+    // skip both fast-forward loops below and emit zero events. Fall back to
+    // the same "one cadence out from today" anchor used when it's unset.
+    const parsedRenewal = sub.nextRenewal ? parseLocalDate(sub.nextRenewal) : null
+    let next =
+      parsedRenewal && !Number.isNaN(parsedRenewal.getTime())
+        ? parsedRenewal
+        : addDays(today, stepDays)
     while (next <= today) next = addDays(next, stepDays)
 
     while (next <= horizon) {

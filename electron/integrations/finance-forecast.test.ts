@@ -212,6 +212,36 @@ describe('projectOwnedSubscriptionEvents', () => {
     expect(events[0].date).toBe('2026-05-31') // today + 30 days (monthly step)
   })
 
+  it('falls back to the cadence-based anchor when nextRenewal is malformed', () => {
+    // nextRenewal is user-entered and never format-validated at write time.
+    // A garbage value must not silently parse to an Invalid Date and produce
+    // zero events — it should fall back exactly like an unset nextRenewal.
+    const acctMap = new Map([['Chase', 1]])
+    const events = projectOwnedSubscriptionEvents(
+      [makeOwned({ paymentAccount: 'Chase', nextRenewal: 'not-a-date', cadence: 'monthly' })],
+      [],
+      acctMap,
+      null,
+      today,
+      35
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0].date).toBe('2026-05-31') // today + 30 days (monthly step)
+  })
+
+  it('skips subscriptions with an unrecognized cadence', () => {
+    const acctMap = new Map([['Chase', 1]])
+    const events = projectOwnedSubscriptionEvents(
+      [makeOwned({ paymentAccount: 'Chase', cadence: 'daily' })],
+      [],
+      acctMap,
+      null,
+      today,
+      90
+    )
+    expect(events).toHaveLength(0)
+  })
+
   it('skips subscriptions with no known cost', () => {
     const acctMap = new Map([['Chase', 1]])
     const events = projectOwnedSubscriptionEvents(
