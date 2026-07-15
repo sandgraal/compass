@@ -804,6 +804,27 @@ export default function Integrations(): JSX.Element {
     await runSnaptradeConnect()
   }
 
+  // Shared with dismissError() below — the actual state-clearing branch per
+  // service, independent of whether a confirm dialog gates it.
+  async function clearIntegrationState(service: string): Promise<void> {
+    const isElectron = typeof window !== 'undefined' && !!window.api
+    if (!isElectron) return
+    // Obsidian has no OAuth token — disconnect = forget the vault path.
+    // Files already mirrored (both directions) stay where they are.
+    if (service === 'obsidian') {
+      await window.api.obsidian.clear()
+      await loadObsidian()
+    } else if (service === 'snaptrade') {
+      // Dedicated handler: forgets the connected user but keeps the BYO
+      // partner clientId/consumerKey, unlike the generic auth:disconnect
+      // (which would wipe the whole token blob and force re-entering them).
+      await window.api.snaptrade.disconnect()
+    } else {
+      await window.api.auth.disconnect(service)
+    }
+    await loadStatuses()
+  }
+
   async function disconnect(service: string) {
     const ok = await confirm({
       title: `Disconnect ${service}?`,
@@ -812,23 +833,16 @@ export default function Integrations(): JSX.Element {
       destructive: false
     })
     if (!ok) return
-    const isElectron = typeof window !== 'undefined' && !!window.api
-    if (isElectron) {
-      // Obsidian has no OAuth token — disconnect = forget the vault path.
-      // Files already mirrored (both directions) stay where they are.
-      if (service === 'obsidian') {
-        await window.api.obsidian.clear()
-        await loadObsidian()
-      } else if (service === 'snaptrade') {
-        // Dedicated handler: forgets the connected user but keeps the BYO
-        // partner clientId/consumerKey, unlike the generic auth:disconnect
-        // (which would wipe the whole token blob and force re-entering them).
-        await window.api.snaptrade.disconnect()
-      } else {
-        await window.api.auth.disconnect(service)
-      }
-      await loadStatuses()
-    }
+    await clearIntegrationState(service)
+  }
+
+  // Clears a stuck "Error" state on a card that never successfully connected
+  // (e.g. Things 3 when the app isn't installed) — no confirm dialog, since
+  // there's no connection or synced data to lose, just a persistent red
+  // banner with no other way to dismiss it short of a successful retry.
+  async function dismissError(service: string): Promise<void> {
+    setConnectError(service, null)
+    await clearIntegrationState(service)
   }
 
   async function triggerSync(service: string) {
@@ -1555,7 +1569,7 @@ export default function Integrations(): JSX.Element {
             {/* Google */}
             <div>
               <h3 className="text-foreground font-semibold mb-2">
-                Google (Calendar · Gmail · Drive)
+                Google (Calendar · Gmail · Drive · Contacts)
               </h3>
               <ol className="list-decimal list-inside space-y-1.5 text-xs leading-relaxed">
                 <li>
@@ -1603,9 +1617,10 @@ export default function Integrations(): JSX.Element {
                 <li>
                   Enable the required APIs:{' '}
                   <strong className="text-foreground">Google Calendar API</strong>,{' '}
-                  <strong className="text-foreground">Gmail API</strong>, and{' '}
-                  <strong className="text-foreground">Google Drive API</strong> under{' '}
-                  <em>APIs &amp; Services → Library</em>.
+                  <strong className="text-foreground">Gmail API</strong>,{' '}
+                  <strong className="text-foreground">Google Drive API</strong>, and{' '}
+                  <strong className="text-foreground">Google People API</strong> (for Contacts)
+                  under <em>APIs &amp; Services → Library</em>.
                 </li>
                 <li>
                   While in test mode, add your Google account under{' '}
@@ -1769,14 +1784,45 @@ export default function Integrations(): JSX.Element {
               })
               const setup = getIntegrationSetup(integration.id)
               const cardError = connectErrors[integration.id] ?? state.errorMessage
+              // A persisted, NEVER-successfully-connected error (e.g. Things 3
+              // when the app isn't installed) has no other way to clear the red
+              // banner short of a successful retry — offer a way out. Gated on
+              // connectedAt (not just isConnected) so a service that connected
+              // before and later errored still goes through the confirming
+              // Disconnect flow — Dismiss skips confirmation because there's
+              // nothing to lose only when there was truly never a connection.
+              const canDismissError =
+                state.errorWins &&
+                !state.isMultiConn &&
+                !state.isConnected &&
+                status?.connectedAt == null
               const errorAction =
                 setup?.requiresRelay && cardError ? (
+                  <span className="space-x-3">
+                    <button
+                      type="button"
+                      onClick={() => setRelayOpen(true)}
+                      className="underline hover:text-foreground"
+                    >
+                      Open Relay settings
+                    </button>
+                    {canDismissError && (
+                      <button
+                        type="button"
+                        onClick={() => void dismissError(integration.id)}
+                        className="underline hover:text-foreground"
+                      >
+                        Dismiss
+                      </button>
+                    )}
+                  </span>
+                ) : canDismissError ? (
                   <button
                     type="button"
-                    onClick={() => setRelayOpen(true)}
+                    onClick={() => void dismissError(integration.id)}
                     className="underline hover:text-foreground"
                   >
-                    Open Relay settings
+                    Dismiss
                   </button>
                 ) : undefined
               return (
