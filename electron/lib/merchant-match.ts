@@ -55,6 +55,12 @@ export function matchKeyForSubscription(externalId: string, name: string): strin
  * Read-time only — nothing at ingest time needs to know about a merge, since
  * a query built against this expanded set picks up transactions/visits keyed
  * under an alias whether they were ingested before or after the merge.
+ *
+ * Deduped: an alias can coincide with the survivor's own primary key — e.g.
+ * merging a manual merchant whose normalized name happens to equal another
+ * tracked merchant's derived key inserts an alias row equal to that key.
+ * Callers that flatMap rows across this list (mergeVisitsForKeys) would
+ * otherwise double-count.
  */
 export function allMatchKeysForPlace(
   sqlite: Database.Database,
@@ -65,7 +71,7 @@ export function allMatchKeysForPlace(
   const aliases = sqlite
     .prepare('SELECT alias_key FROM place_merge_aliases WHERE kind = ? AND survivor_place_id = ?')
     .all(kind, placeId) as Array<{ alias_key: string }>
-  return [primaryKey, ...aliases.map((a) => a.alias_key)]
+  return [...new Set([primaryKey, ...aliases.map((a) => a.alias_key)])]
 }
 
 /**

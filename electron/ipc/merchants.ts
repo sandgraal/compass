@@ -186,6 +186,12 @@ export function loadSlimTxnsByMerchantKey(matchKey: string): MerchantSlimTxn[] {
  * single key once merges exist, so this keys off place id rather than key.
  * Places with no matching rows under any of their keys are absent from the
  * result map.
+ *
+ * A key can map to MORE THAN ONE place id: two tracked merchants can share a
+ * match key before they've been merged (e.g. a manual merchant whose
+ * normalized name happens to equal another merchant's derived key) — both
+ * must keep showing the same live stats until the user merges them, exactly
+ * as they did before merge support existed.
  */
 function liveStatsFor(
   keysByPlaceId: Map<number, string[]>
@@ -197,11 +203,16 @@ function liveStatsFor(
     number,
     { totalSpend: number; txnCount: number; lastTxnDate: string | null; currency: string }
   >()
-  const keyToPlaceId = new Map<string, number>()
+  const keyToPlaceIds = new Map<string, number[]>()
   for (const [placeId, keys] of keysByPlaceId) {
-    for (const key of keys) if (key.length > 0) keyToPlaceId.set(key, placeId)
+    for (const key of keys) {
+      if (key.length === 0) continue
+      const list = keyToPlaceIds.get(key) ?? []
+      list.push(placeId)
+      keyToPlaceIds.set(key, list)
+    }
   }
-  const unique = [...keyToPlaceId.keys()]
+  const unique = [...keyToPlaceIds.keys()]
   if (unique.length === 0) return map
   const rows = getRawSqlite()
     .prepare(
@@ -222,11 +233,13 @@ function liveStatsFor(
   >
   const byPlaceId = new Map<number, MerchantSlimTxn[]>()
   for (const row of rows) {
-    const placeId = keyToPlaceId.get(row.key)
-    if (placeId == null) continue
-    const txns = byPlaceId.get(placeId) ?? []
-    txns.push(row)
-    byPlaceId.set(placeId, txns)
+    const placeIds = keyToPlaceIds.get(row.key)
+    if (!placeIds) continue
+    for (const placeId of placeIds) {
+      const txns = byPlaceId.get(placeId) ?? []
+      txns.push(row)
+      byPlaceId.set(placeId, txns)
+    }
   }
   for (const [placeId, txns] of byPlaceId) {
     const stats = computeMerchantStats(txns)

@@ -200,4 +200,16 @@ describe('allMatchKeysForPlace', () => {
       'netflix inc'
     ])
   })
+
+  it('dedupes when an alias coincides with the survivor’s own primary key', () => {
+    // Reachable via a real merge: a manual merchant named "Netflix" normalizes
+    // to the same key as a derived merchant's own externalId-carried key, so
+    // merging the manual one in inserts an alias equal to the primary key.
+    sqlite
+      .prepare(
+        'INSERT INTO place_merge_aliases (survivor_place_id, kind, alias_key) VALUES (?,?,?)'
+      )
+      .run(1, 'merchant', 'netflix')
+    expect(allMatchKeysForPlace(sqlite, 1, 'netflix', 'merchant')).toEqual(['netflix'])
+  })
 })

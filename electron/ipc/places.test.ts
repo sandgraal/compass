@@ -674,6 +674,34 @@ describe('places:merge', () => {
     expect(list[0].live?.visitCount).toBe(1)
   })
 
+  it('merging two places that already share a key does not double-count visits', () => {
+    // The manual loser's normalized name equals the survivor's own key
+    // ("blue bottle cafe") — the exact case that made allMatchKeysForPlace
+    // return a duplicate, which mergeVisitsForKeys' flatMap would otherwise
+    // double-count.
+    const survivorId = seedPlace() // derived:place:blue bottle cafe / "Blue Bottle Cafe"
+    const loserId = seedPlace({ externalId: 'manual:xyz', name: 'Blue Bottle Cafe' })
+    seedRecord({
+      source: 'gcal',
+      type: 'event',
+      title: 'Coffee',
+      body: 'Blue Bottle Cafe',
+      occurredAt: ms('2026-01-10')
+    })
+
+    expect(invoke('places:merge', { kind: 'place', survivorId, loserIds: [loserId] })).toEqual({
+      success: true
+    })
+
+    const list = invoke('places:list-tracked') as TrackedPlace[]
+    expect(list).toHaveLength(1)
+    expect(list[0].live?.visitCount).toBe(1)
+
+    const profile = invoke('places:profile', survivorId) as PlaceProfile
+    expect(profile.stats.visitCount).toBe(1)
+    expect(profile.visits).toHaveLength(1)
+  })
+
   it('carries forward aliases from a survivor that was itself merged earlier (transitive)', () => {
     const a = seedPlace({ externalId: 'derived:place:a', name: 'A' })
     const b = seedPlace({ externalId: 'derived:place:b', name: 'B' })

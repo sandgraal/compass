@@ -196,6 +196,27 @@ describe('merchants:list-tracked', () => {
       currency: 'USD'
     })
   })
+
+  it('two tracked merchants sharing the same key (not yet merged) both show live stats', () => {
+    // A manual merchant whose normalized name coincides with another tracked
+    // merchant's key — reachable without any merge action. Both must keep
+    // showing the shared stats (as they did before merges existed) rather
+    // than one silently losing its live stats to the other.
+    seedPlace({ externalId: 'derived:merchant:blue bottle', name: 'Blue Bottle' })
+    seedPlace({ externalId: 'manual:abc', name: 'Blue Bottle' })
+    seedTxn({ date: '2026-01-05', amount: -10, merchant: 'blue bottle' })
+
+    const list = invoke('merchants:list-tracked') as TrackedMerchant[]
+    expect(list).toHaveLength(2)
+    for (const m of list) {
+      expect(m.live).toEqual({
+        totalSpend: 10,
+        txnCount: 1,
+        lastTxnDate: '2026-01-05',
+        currency: 'USD'
+      })
+    }
+  })
 })
 
 describe('merchants:profile', () => {
@@ -416,5 +437,32 @@ describe('merchant merge (via the shared places:merge mechanism)', () => {
     const profile = invoke('merchants:profile', survivorId) as MerchantProfile
     expect(profile.stats.totalSpend).toBe(20)
     expect(profile.transactions).toHaveLength(3)
+  })
+
+  it('merging two merchants that already share a key does not double-count', () => {
+    // The loser's resolved key (normalizeMerchant("Blue Bottle") = "blue bottle")
+    // equals the survivor's own key — the exact case that made
+    // allMatchKeysForPlace return a duplicate before it deduped.
+    const survivorId = seedPlace({
+      externalId: 'derived:merchant:blue bottle',
+      name: 'Blue Bottle'
+    })
+    const loserId = seedPlace({ externalId: 'manual:abc', name: 'Blue Bottle' })
+    seedTxn({ date: '2026-01-05', amount: -10, merchant: 'blue bottle' })
+
+    expect(mergePlaces('merchant', survivorId, [loserId])).toBe(true)
+
+    const list = invoke('merchants:list-tracked') as TrackedMerchant[]
+    expect(list).toHaveLength(1)
+    expect(list[0].live).toEqual({
+      totalSpend: 10,
+      txnCount: 1,
+      lastTxnDate: '2026-01-05',
+      currency: 'USD'
+    })
+
+    const profile = invoke('merchants:profile', survivorId) as MerchantProfile
+    expect(profile.stats.totalSpend).toBe(10)
+    expect(profile.transactions).toHaveLength(1)
   })
 })
