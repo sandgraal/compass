@@ -5,6 +5,7 @@ import {
   getDataRightsStatus,
   summarizeDataRightsProgress
 } from './data-rights-status'
+import { INTEGRATION_REGISTRY } from './integration-registry'
 
 describe('data-rights catalog', () => {
   it('has well-formed entries with required copy', () => {
@@ -32,6 +33,16 @@ describe('data-rights catalog', () => {
   it('only uses domains from DATA_RIGHTS_DOMAINS', () => {
     const domains = new Set(DATA_RIGHTS_SOURCES.map((s) => s.domain))
     for (const d of domains) expect(DATA_RIGHTS_DOMAINS).toContain(d)
+  })
+
+  it('every relatedIntegrationId resolves to a real INTEGRATION_REGISTRY entry', () => {
+    for (const s of DATA_RIGHTS_SOURCES) {
+      if (!s.relatedIntegrationId) continue
+      expect(
+        INTEGRATION_REGISTRY[s.relatedIntegrationId],
+        `${s.id}'s relatedIntegrationId points at unknown integration ${s.relatedIntegrationId}`
+      ).toBeDefined()
+    }
   })
 
   it('every live source has an integrationId, every non-live source has no integrationId', () => {

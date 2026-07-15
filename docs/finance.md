@@ -87,6 +87,14 @@ Add new business accounts to `SCHEDULE_C_ACCOUNT_HINTS` in `finance-tax.ts`.
 
 ### Property P&L — Arcadia utility bills (opt-in)
 
+The Arcadia relay isn't deployed yet, so a manual fallback shares the same table: the Property
+tab's "Utility bills (Arcadia)" section has an "Import CSV" button (`finance:import-utility-bills`)
+that parses a downloaded provider bill export via `parseUtilityBillCsv`
+(`electron/lib/utility-bill-csv.ts`, best-effort column matching — no single "utility bill CSV"
+standard exists) and writes into `utility_bills` through the same `upsertUtilityBills` writer a
+live Arcadia sync would use, so everything below applies whether the rows came from the relay or
+a manual drop.
+
 Arcadia-synced `utility_bills` surface on the Finance → Property tab as an always-present
 informational rollup (per-year totals, bill counts, providers), narrowed by the service-address
 filter when one is configured. Because bills carry **no geo/purpose scoping** — they may be

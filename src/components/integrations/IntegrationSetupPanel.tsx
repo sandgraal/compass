@@ -1,4 +1,11 @@
-import { CheckCircle2, ChevronDown, ChevronRight, ExternalLink, Plug2 } from 'lucide-react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  Plug2
+} from 'lucide-react'
 import { useState } from 'react'
 import type { IntegrationSetup, SetupField } from '../../lib/integration-setup'
 
@@ -22,6 +29,9 @@ interface IntegrationSetupPanelProps {
   onDisconnect: () => void
   /** BYO-direct escape hatch (Terra today). */
   byo?: ByoProps
+  /** Opens the Relay Settings panel — passed for `setup.requiresRelay` cards
+   * so the proactive warning below can jump straight there. */
+  onOpenRelaySettings?: () => void
 }
 
 const INPUT_CLASS =
@@ -42,7 +52,8 @@ export default function IntegrationSetupPanel({
   onChange,
   onConnect,
   onDisconnect,
-  byo
+  byo,
+  onOpenRelaySettings
 }: IntegrationSetupPanelProps): JSX.Element {
   const [byoOpen, setByoOpen] = useState(false)
   const connectLabel = setup.connectLabel ?? 'Connect'
@@ -67,6 +78,36 @@ export default function IntegrationSetupPanel({
 
   return (
     <div className="space-y-3">
+      {setup.requiresRelay && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 space-y-1.5">
+          <p className="text-xs text-amber-600 dark:text-amber-400 leading-relaxed flex gap-1.5">
+            <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+            <span>
+              <strong className="font-medium">Needs a self-hosted relay</strong> — the managed
+              default isn't deployed, so Connect will fail until you point Compass at a relay you
+              run yourself.{' '}
+              {onOpenRelaySettings && (
+                <button
+                  type="button"
+                  onClick={onOpenRelaySettings}
+                  className="underline underline-offset-2 hover:text-amber-500"
+                >
+                  Open Relay settings
+                </button>
+              )}
+            </span>
+          </p>
+          {setup.alternative && (
+            <p className="text-xs text-muted-foreground leading-relaxed pl-[19px]">
+              <strong className="text-foreground/80 font-medium">
+                Works today without a relay:
+              </strong>{' '}
+              {setup.alternative.note}
+            </p>
+          )}
+        </div>
+      )}
+
       {(setup.cost || setup.prerequisites.length > 0) && (
         <div className="flex flex-wrap gap-1.5">
           {setup.cost && (

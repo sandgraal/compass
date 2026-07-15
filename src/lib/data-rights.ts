@@ -56,6 +56,11 @@ export interface DataRightsSource {
   /** For `method: 'live'` — the INTEGRATION_REGISTRY key that drives the
    *  Connect button + connected-state badge. */
   integrationId?: string
+  /** Informational cross-link to an overlapping INTEGRATION_REGISTRY entry —
+   *  purely a "you could also get this live via…" pointer, never affects
+   *  status derivation (unlike `integrationId`, which only applies to
+   *  `method: 'live'` sources). */
+  relatedIntegrationId?: string
   /** For `method: 'export' | 'rights'` — the `records.source` value(s) that
    *  count as "imported" once present. Most map 1:1 with the recognizer id;
    *  a few sources unwrap into more than one recognizer. */
@@ -94,6 +99,7 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     intoCompass: 'Drop the Retail.OrderHistory CSV',
     url: 'https://www.amazon.com/hz/privacy-central/data-requests/preview.html',
     recordsSourceId: 'amazon',
+    relatedIntegrationId: 'knot',
     payoff:
       'Every order becomes searchable Timeline history — see spending patterns your bank statement can’t show.'
   },
@@ -167,6 +173,36 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     payoff: 'Replaces manual CSV uploads with an auto-updating Net Worth holdings card.',
     payoffLink: '/finance'
   },
+  {
+    id: 'retirement-holdings',
+    name: 'Retirement / 401(k) account statement',
+    domain: 'Financial',
+    method: 'export',
+    what: 'Your 401(k), IRA, or 403(b) positions — funds, share counts, balances',
+    how: "Your plan provider's participant portal (Fidelity NetBenefits, Vanguard, Empower…) → Statements or Download → positions/holdings CSV",
+    format: 'CSV',
+    intoCompass: 'Finance → Net Worth → Import positions CSV',
+    recordsSourceId: 'brokerage-holdings',
+    payoff:
+      'Retirement balances join Net Worth as an auto-tracked holdings snapshot instead of being tracked by hand.',
+    payoffLink: '/finance'
+  },
+  {
+    id: 'utility-bills',
+    name: 'Utility bill export',
+    domain: 'Financial',
+    method: 'export',
+    what: 'Your electric/gas/water statements — provider, amount, service period',
+    how: "Your utility's online account → Billing / Statements → download recent bills (PDF or CSV, varies by provider)",
+    format: 'CSV',
+    intoCompass:
+      'Finance → Property → Import CSV (Utility bills section) — a manual stand-in while the Arcadia relay isn’t deployed',
+    recordsSourceId: 'utility',
+    relatedIntegrationId: 'arcadia',
+    payoff:
+      'Fills the utilities line in your Schedule E rental P&L without a live Arcadia connection.',
+    payoffLink: '/finance'
+  },
 
   // ── Government ───────────────────────────────────────────────────────────────
   {
@@ -225,6 +261,7 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     format: 'XML (in a .zip)',
     intoCompass: 'Unzip and drop export.xml',
     recordsSourceId: 'apple-health',
+    relatedIntegrationId: 'terra',
     payoff: 'Auto-fills habit streaks — workout and sleep check-ins track themselves.',
     payoffLink: '/monthly'
   },
@@ -239,6 +276,7 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     intoCompass: 'Drop the PDF',
     url: 'https://www.medicare.gov/account/login',
     recordsSourceId: 'document',
+    relatedIntegrationId: 'metriport',
     payoff: 'Keeps a searchable copy of your care history outside any one provider’s portal.',
     payoffLink: '/timeline'
   },
@@ -253,6 +291,7 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     intoCompass: 'Unzip and drop the steps / sleep JSON files',
     url: 'https://www.fitbit.com/settings/data/export',
     recordsSourceId: 'fitbit',
+    relatedIntegrationId: 'terra',
     payoff: 'Your daily activity & sleep join the Timeline alongside Apple Health.',
     payoffLink: '/timeline'
   },
@@ -267,6 +306,7 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     intoCompass: 'Unzip and drop the activities JSON',
     url: 'https://www.garmin.com/account/datamanagement/exportdata/',
     recordsSourceId: 'garmin',
+    relatedIntegrationId: 'terra',
     payoff: 'Every workout lands on the Timeline — your training history, owned.',
     payoffLink: '/timeline'
   },
@@ -287,6 +327,36 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     url: 'https://i94.cbp.dhs.gov/',
     payoff: 'Your US days for the Substantial Presence Test — track them on the residency tab.',
     payoffLink: '/finance'
+  },
+  {
+    id: 'ttp-record',
+    name: 'TSA PreCheck / Global Entry (Trusted Traveler)',
+    domain: 'Travel',
+    method: 'rights',
+    what: 'Your Trusted Traveler membership record — PASSID, expiration, enrolled programs',
+    how: 'Log in to the Trusted Traveler Programs (TTP) site → Dashboard → view/print your membership card',
+    format: 'PDF / print',
+    intoCompass: 'Drop the PDF — indexed as a document',
+    url: 'https://ttp.dhs.gov/',
+    recordsSourceId: 'document',
+    payoff:
+      'Keeps your Trusted Traveler status and renewal date searchable alongside your other travel documents.',
+    payoffLink: '/timeline'
+  },
+  {
+    id: 'loyalty-programs',
+    name: 'Airline & hotel loyalty program data',
+    domain: 'Travel',
+    method: 'export',
+    what: 'Your mileage/points balance and flight or stay history',
+    how: "Search '<airline/hotel> loyalty program request my data' — most programs have a privacy download or an activity-history export under Account settings",
+    format: 'CSV or PDF (varies by program)',
+    intoCompass:
+      'Drop the export — PDFs are indexed as a document; CSVs fall to the generic dated-import if no dedicated parser matches',
+    recordsSourceId: ['document', 'generic'],
+    payoff:
+      'Flight and stay history joins the Timeline, filling out your travel record beyond bank-charge line items.',
+    payoffLink: '/timeline'
   },
   // (Airbnb booking history lands in a later wave, also feeding travel segments.)
 
@@ -317,6 +387,7 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
       'youtube',
       'email'
     ],
+    relatedIntegrationId: 'nylas',
     payoff:
       'The single biggest Timeline fill — years of Gmail, search, and watch history become searchable in one drop.',
     payoffLink: '/timeline'
@@ -478,5 +549,35 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     recordsSourceId: 'lyft',
     payoff: 'Same as Uber — rides on the Timeline, dropoffs in your Places directory.',
     payoffLink: '/places'
+  },
+  {
+    id: 'doordash',
+    name: 'DoorDash',
+    domain: 'Lifestyle & Shopping',
+    method: 'export',
+    what: 'Your food-delivery order history',
+    how: 'Profile → Order History → Export Order Data, or Account Settings → Manage Account → Request Archive for the full privacy export',
+    format: 'CSV',
+    intoCompass: 'Drop the orders CSV',
+    url: 'https://help.doordash.com/en-us/consumers/article/i-want-to-delete-my-personal-information-data-from-doordash',
+    recordsSourceId: 'doordash',
+    relatedIntegrationId: 'knot',
+    payoff: 'Every order joins the Timeline; restaurants roll into your Merchants directory.',
+    payoffLink: '/timeline'
+  },
+  {
+    id: 'instacart',
+    name: 'Instacart',
+    domain: 'Lifestyle & Shopping',
+    method: 'export',
+    what: 'Your grocery-delivery order history',
+    how: 'Account settings → request a copy of your personal information (or email customerprivacy@instacart.com)',
+    format: 'CSV',
+    intoCompass: 'Drop the orders CSV',
+    url: 'https://www.instacart.com/help/section/507104353/2101960736',
+    recordsSourceId: 'instacart',
+    relatedIntegrationId: 'knot',
+    payoff: 'Same as DoorDash — grocery runs join the Timeline and Merchants.',
+    payoffLink: '/timeline'
   }
 ]

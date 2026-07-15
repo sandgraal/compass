@@ -13,6 +13,7 @@ import {
   forecastOverrides,
   fxRates
 } from '../db/schema'
+import { upsertUtilityBills } from '../integrations/arcadia'
 import { deriveCalendarSegments } from '../integrations/calendar-residency'
 import { categorize, ingestCsvFolder, readCsv } from '../integrations/finance'
 import {
@@ -112,6 +113,7 @@ import {
 import { buildTripBundles } from '../integrations/trip-bundles'
 import { writeAllFinanceKnowledge } from '../knowledge/finance-extractor'
 import { localYm, localYmd } from '../lib/dates'
+import { parseUtilityBillCsv } from '../lib/utility-bill-csv'
 import { DATA_DIR } from '../paths'
 import { insertRecords } from './records'
 import { afterDomainWrite } from './storehouse-sync'
@@ -707,6 +709,33 @@ export function registerFinanceHandlers(ipcMain: IpcMain): void {
       ).padStart(2, '0')}`
       const { imported, duplicates } = importHoldings(getDb(), holdings, asOf, basename(fp))
       return { success: true, imported, duplicates, asOf, summary: summarizeHoldings(holdings) }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  // Manual utility-bill CSV import — a stand-in for Arcadia (Phase 10.9) while
+  // the managed relay isn't deployed. Same `utility_bills` table + Schedule E
+  // rollup, fed by a downloaded provider export instead of a live sync.
+  ipcMain.handle('finance:import-utility-bills', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: 'Choose a utility-bill CSV',
+      properties: ['openFile'],
+      filters: [{ name: 'CSV', extensions: ['csv'] }]
+    })
+    if (canceled || filePaths.length === 0) return { success: false, canceled: true }
+    try {
+      const { headers, rows } = readCsv(filePaths[0])
+      const bills = parseUtilityBillCsv(headers, rows)
+      if (bills.length === 0) {
+        return {
+          success: false,
+          error: 'No bills found — is this a utility-bill CSV? It needs at least an amount column.'
+        }
+      }
+      const imported = upsertUtilityBills(getDb(), bills)
+      afterDomainWrite({ entities: true }) // a new service address can become a Place
+      return { success: true, imported }
     } catch (err) {
       return { success: false, error: String(err) }
     }

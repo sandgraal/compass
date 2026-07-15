@@ -1563,6 +1563,7 @@ declare global {
         connect(): Promise<{ success: boolean; error?: string }>
         setByo(clientId: string, consumerKey: string): Promise<{ success: boolean; error?: string }>
         hasCreds(): Promise<boolean>
+        disconnect(): Promise<{ success: boolean }>
       }
       // Relay — aggregator relay URL override + connectivity test.
       relay: {
@@ -2708,6 +2709,13 @@ declare global {
             totalGain: number | null
             totalGainPct: number | null
           }
+        }>
+        // Manual utility-bill CSV import — a stand-in for Arcadia while the relay isn't deployed.
+        importUtilityBills(): Promise<{
+          success: boolean
+          canceled?: boolean
+          error?: string
+          imported?: number
         }>
         getHoldings(): Promise<{
           asOf: string | null

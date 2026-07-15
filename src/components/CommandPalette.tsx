@@ -28,6 +28,7 @@ import {
   Plug,
   Plus,
   RefreshCw,
+  ScrollText,
   Search,
   Settings,
   ShieldCheck,
@@ -411,6 +412,14 @@ export default function CommandPalette({ open, onClose }: Props): JSX.Element | 
       icon: <Plug size={15} />,
       action: () => nav('/integrations'),
       keywords: ['google', 'github', 'gmail', 'sync', 'connect']
+    },
+    {
+      id: 'data-rights',
+      label: 'Get Your Data',
+      description: 'Request & import the data you have a right to',
+      icon: <ScrollText size={15} />,
+      action: () => nav('/data-rights'),
+      keywords: ['data rights', 'export', 'gdpr', 'ccpa', 'privacy', 'download my data']
     },
     {
       id: 'settings',
