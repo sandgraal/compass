@@ -4,7 +4,7 @@ Local-first personal life OS. Electron 41 + React 18 + TypeScript + Drizzle/SQLi
 All user data stays on disk. The only outbound calls are ones you explicitly opt into: OAuth
 tokens (Google/GitHub), SimpleFIN/Plaid API credentials for bank sync, optional BYO LLM calls
 (Anthropic/OpenAI) if you configure a key — including Anthropic's server-side web search behind
-the "Enrich from web" consent dialog (contacts, places, merchants) — and an unauthenticated
+the "Enrich from web" consent dialog (contacts, places, merchants, subscriptions) — and an unauthenticated
 FX-rate fetch (open.er-api.com).
 
 ## Run

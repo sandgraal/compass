@@ -601,7 +601,13 @@ const api = {
       ipcRenderer.invoke('subscriptions:track-detected', detected),
     dismissDetected: (input: { merchant: string; account: string }) =>
       ipcRenderer.invoke('subscriptions:dismiss-detected', input),
-    exportCsv: () => ipcRenderer.invoke('subscriptions:export-csv')
+    exportCsv: () => ipcRenderer.invoke('subscriptions:export-csv'),
+    // Opt-in web enrichment (BYO Anthropic key): search → review → apply-by-id.
+    webEnrich: (req: { subscriptionId: number; hints?: string; candidateHint?: string }) =>
+      ipcRenderer.invoke('subscriptions:web-enrich', req),
+    webEnrichApply: (req: { runId: string; accepted: number[] }) =>
+      ipcRenderer.invoke('subscriptions:web-enrich-apply', req),
+    webEnrichCancel: () => ipcRenderer.invoke('subscriptions:web-enrich-cancel')
   },
 
   // --- Universal Export Center (portable, plaintext, re-importable) ---

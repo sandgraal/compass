@@ -638,6 +638,8 @@ declare global {
     /** The user's own "is this worth it" self-check-in. No usage-tracking API
      * exists or should exist — this is an explicit, cheap, user-driven signal. */
     usage?: { rating: UsageRating; ratedAt: number }
+    /** Consent-gated web enrichment — see electron/ipc/subscription-web-enrich.ts. */
+    enrichment?: { web?: SubscriptionWebEnrichment }
   }
   interface SubscriptionRecord {
     id: number
@@ -737,6 +739,68 @@ declare global {
     signals: SubscriptionSignals
     documents: SubscriptionDocumentItem[]
   }
+
+  // --- Subscriptions web enrichment (phase 2) — mirrors
+  // electron/lib/subscription-web-enrichment.ts +
+  // electron/ipc/subscription-web-enrich.ts. Proposals are reviewed in the
+  // dialog and applied BY ID against the main-process cached run. ---
+  interface SubscriptionWebEnrichment {
+    searchedAs: string
+    matchConfidence: 'high' | 'medium' | 'low'
+    pricingSummary: string | null
+    annualDiscount: string | null
+    plans: Array<{ name: string; detail: string; sourceUrl?: string }>
+    benefits: WebFact[]
+    cancellationSteps: string | null
+    cancellationUrl: string | null
+    alternatives: Array<{ name: string; note: string; sourceUrl?: string }>
+    supportUrl: string | null
+    sources: WebSource[]
+    refreshedAt: number
+    model?: string
+  }
+  interface SubscriptionWebEnrichProposal {
+    id: number
+    kind:
+      | 'pricing'
+      | 'planTier'
+      | 'annualSavings'
+      | 'benefit'
+      | 'cancellationSteps'
+      | 'cancellationUrl'
+      | 'supportUrl'
+      | 'alternative'
+    label?: string
+    currentValue: string | null
+    proposedValue: string
+    sourceUrl?: string
+    sourceVerified: boolean
+    confidence: 'high' | 'medium' | 'low'
+    /** True only for `cancellationUrl` — the one core-column write (`cancelUrl`). */
+    writesToSubscription: boolean
+  }
+  type SubscriptionWebEnrichRunResult =
+    | { success: false; error: string; needsKey?: boolean; cancelled?: boolean }
+    | ({
+        success: true
+        outcome: 'none'
+        searchedAs: string
+        message: string
+      } & WebEnrichRunUsage)
+    | ({
+        success: true
+        outcome: 'candidates'
+        searchedAs: string
+        candidates: WebEnrichCandidate[]
+      } & WebEnrichRunUsage)
+    | ({
+        success: true
+        outcome: 'proposals'
+        runId: string
+        searchedAs: string
+        matchConfidence: 'high' | 'medium' | 'low'
+        proposals: SubscriptionWebEnrichProposal[]
+      } & WebEnrichRunUsage)
 
   // --- Household & Assets (Phase 9.5 — "The Storehouse") ---
   interface AssetRecord {
@@ -2242,6 +2306,21 @@ declare global {
           account: string
         }): Promise<{ success: boolean }>
         exportCsv(): Promise<ExportResult>
+        // Opt-in web enrichment (BYO Anthropic key): search → review → apply-by-id.
+        webEnrich(req: {
+          subscriptionId: number
+          hints?: string
+          candidateHint?: string
+        }): Promise<SubscriptionWebEnrichRunResult>
+        webEnrichApply(req: {
+          runId: string
+          accepted: number[]
+        }): Promise<{
+          success: boolean
+          applied?: { fields: string[]; findings: number }
+          error?: string
+        }>
+        webEnrichCancel(): Promise<{ success: boolean }>
       }
       exporter: {
         calendarIcs(): Promise<ExportResult>
