@@ -95,11 +95,11 @@ export default function Merchants(): JSX.Element {
 
   const selected = tracked.find((m) => m.id === selectedId) ?? null
 
-  function handlePromoted(promotedId: number): void {
-    void loadTracked().then(() => {
-      setTab('tracked')
-      setSelectedId(promotedId)
-    })
+  function handlePromoted(): void {
+    // Refresh the tracked list/count in the background — stay on Discovered
+    // so tracking one merchant of several doesn't yank the user away from
+    // the rest of the list (or the duplicates queue) they were working through.
+    void loadTracked()
   }
 
   function handleUntracked(): void {

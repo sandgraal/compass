@@ -64,21 +64,24 @@ export default function PossibleDuplicatesPanel({
       {expanded && (
         <div className="border-t border-border divide-y divide-border">
           {dupes.slice(0, 20).map((pair) => (
-            <div
-              key={`${pair.a.id}::${pair.b.id}`}
-              className="px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-2"
-            >
-              <div className="flex-1 min-w-0 grid grid-cols-2 gap-3">
-                {[pair.a, pair.b].map((side) => (
+            <div key={`${pair.a.id}::${pair.b.id}`} className="px-4 py-3 space-y-2">
+              {/* Stacked, full-width names — this panel lives in a narrow (~256px)
+               * sidebar column, so a side-by-side layout truncates names down to
+               * a couple of characters. Each name gets the full row instead. */}
+              <div className="space-y-1.5">
+                {[pair.a, pair.b].map((side, i) => (
                   <div key={side.id} className="min-w-0">
-                    <p className="text-sm text-foreground capitalize truncate">{side.name}</p>
+                    {i > 0 && <p className="text-[10px] text-muted-foreground mb-0.5">vs.</p>}
+                    <p className="text-sm text-foreground capitalize truncate" title={side.name}>
+                      {side.name}
+                    </p>
                     {side.category && (
                       <p className="text-xs text-muted-foreground truncate">{side.category}</p>
                     )}
                   </div>
                 ))}
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
+              <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   disabled={busy}

@@ -328,11 +328,11 @@ export default function Contacts(): JSX.Element {
     setMergeOpen(true)
   }
 
-  /** A person promoted from Discovered — switch to Tracked and open the new contact. */
-  async function handlePersonPromoted(promotedId: number): Promise<void> {
-    setTab('tracked')
+  /** A person promoted from Discovered — refresh Tracked in the background,
+   * but stay on Discovered so adding one person doesn't yank the user away
+   * from the rest of the list they were working through. */
+  async function handlePersonPromoted(): Promise<void> {
     await load(search)
-    await openContact(promotedId)
   }
 
   // Proactively surface the reconnect prompt on load if a contacts scope is missing.
