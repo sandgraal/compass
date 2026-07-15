@@ -133,7 +133,7 @@ export function parseUtilityBillCsv(headers: string[], rows: string[][]): Utilit
 // scatter across the page).
 
 const AMOUNT_DUE =
-  /(?:total amount due|amount due|total due|balance due|new charges|current charges|total charges)[:\s]*\$?\s*([\d,]+\.\d{2})/i
+  /(?:total amount due|amount due|total due|balance due|new charges|current charges|total charges)[:\s]*\$?\s*([\d,]+(?:\.\d{2})?)/i
 const STATEMENT_DATE =
   /(?:statement date|bill date|billing date|invoice date)[:\s]*([A-Z][a-z]{2,8} \d{1,2},? \d{4}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2})/i
 const PERIOD_RANGE =
