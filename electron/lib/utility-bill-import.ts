@@ -142,7 +142,9 @@ const USAGE_KWH = /([\d,]+(?:\.\d+)?)\s*kwh/i
 const ANY_DATE = /\b(\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4}|[A-Z][a-z]{2,8} \d{1,2},? \d{4})\b/
 
 function isoDay(when: number | null): string | null {
-  return when == null ? null : new Date(when).toISOString().slice(0, 10)
+  if (when == null) return null
+  const d = new Date(when)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 /** Best-guess provider from the filename ("PGE-june-2026.pdf" -> "PGE june 2026"). */
