@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   type ForecastEvent,
   type ForecastOverride,
+  type OwnedSubscriptionInput,
   type RecurringIncomeStream,
   applyOverrides,
   detectRecurringIncome,
@@ -12,6 +13,7 @@ import {
   projectCashflow,
   projectDebtEvents,
   projectIncomeEvents,
+  projectOwnedSubscriptionEvents,
   projectSubscriptionEvents,
   startOfDayLocal
 } from './finance-forecast'
@@ -108,6 +110,119 @@ describe('projectSubscriptionEvents', () => {
     expect(high[0].confidence).toBe('high')
     expect(med[0].confidence).toBe('medium')
     expect(low[0].confidence).toBe('low')
+  })
+})
+
+describe('projectOwnedSubscriptionEvents', () => {
+  const today = new Date(2026, 4, 1) // 2026-05-01
+
+  function makeOwned(overrides: Partial<OwnedSubscriptionInput> = {}): OwnedSubscriptionInput {
+    return {
+      externalId: 'manual:abc-123',
+      name: 'gym membership',
+      cost: 40,
+      cadence: 'monthly',
+      paymentAccount: null,
+      nextRenewal: '2026-05-10',
+      ...overrides
+    }
+  }
+
+  it('projects a manually-tracked subscription with zero matching transactions', () => {
+    const acctMap = new Map([['Chase', 1]])
+    const events = projectOwnedSubscriptionEvents(
+      [makeOwned({ paymentAccount: 'Chase' })],
+      [], // no audit-detected subscriptions at all
+      acctMap,
+      null,
+      today,
+      90
+    )
+    // Monthly from 2026-05-10: 5/10, 6/9, 7/9 within 90d.
+    expect(events).toHaveLength(3)
+    expect(events.every((e) => e.amount === -40)).toBe(true)
+    expect(events.every((e) => e.label === 'gym membership')).toBe(true)
+    expect(events.every((e) => e.source === 'subscription')).toBe(true)
+    expect(events.every((e) => e.confidence === 'medium')).toBe(true)
+    expect(events[0].date).toBe('2026-05-10')
+  })
+
+  it('does not double-count a subscription that is both owned and ledger-detected', () => {
+    const acctMap = new Map([['Chase', 1]])
+    const owned = [
+      makeOwned({
+        externalId: 'detected:netflix::Chase',
+        name: 'netflix',
+        paymentAccount: 'Chase'
+      })
+    ]
+    const activeAudited = [makeSub({ merchant: 'netflix', account: 'Chase', medianAmount: 15.99 })]
+    const events = projectOwnedSubscriptionEvents(owned, activeAudited, acctMap, null, today, 90)
+    expect(events).toHaveLength(0) // already covered by the audit-derived stream
+  })
+
+  it('still projects when the merchant match is on a different account (e.g. family-plan split)', () => {
+    const acctMap = new Map([
+      ['Chase', 1],
+      ['Amex', 2]
+    ])
+    const owned = [makeOwned({ name: 'netflix', paymentAccount: 'Amex' })]
+    const activeAudited = [makeSub({ merchant: 'netflix', account: 'Chase', medianAmount: 15.99 })]
+    const events = projectOwnedSubscriptionEvents(owned, activeAudited, acctMap, null, today, 90)
+    expect(events.length).toBeGreaterThan(0)
+    expect(events.every((e) => e.accountId === 2)).toBe(true)
+  })
+
+  it('falls back to the default cash account when paymentAccount is unset or unmapped', () => {
+    const events = projectOwnedSubscriptionEvents(
+      [makeOwned({ paymentAccount: null })],
+      [],
+      new Map(),
+      7, // default cash account id
+      today,
+      90
+    )
+    expect(events.length).toBeGreaterThan(0)
+    expect(events.every((e) => e.accountId === 7)).toBe(true)
+  })
+
+  it('drops the subscription when neither an explicit nor a default account resolves', () => {
+    const events = projectOwnedSubscriptionEvents(
+      [makeOwned({ paymentAccount: null })],
+      [],
+      new Map(),
+      null,
+      today,
+      90
+    )
+    expect(events).toHaveLength(0)
+  })
+
+  it('anchors on "one cadence out from today" when nextRenewal is unset', () => {
+    const acctMap = new Map([['Chase', 1]])
+    const events = projectOwnedSubscriptionEvents(
+      [makeOwned({ paymentAccount: 'Chase', nextRenewal: null, cadence: 'monthly' })],
+      [],
+      acctMap,
+      null,
+      today,
+      35
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0].date).toBe('2026-05-31') // today + 30 days (monthly step)
+  })
+
+  it('skips subscriptions with no known cost', () => {
+    const acctMap = new Map([['Chase', 1]])
+    const events = projectOwnedSubscriptionEvents(
+      [makeOwned({ paymentAccount: 'Chase', cost: 0 })],
+      [],
+      acctMap,
+      null,
+      today,
+      90
+    )
+    expect(events).toHaveLength(0)
   })
 })
 

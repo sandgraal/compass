@@ -1,8 +1,13 @@
 /**
  * 90-day forward cash-flow projection (Phase 4.5).
  *
- * Combines four event streams into a per-account daily balance trajectory:
+ * Combines five event streams into a per-account daily balance trajectory:
  *   1. Active subscriptions (from auditSubscriptions) → recurring outflows
+ *   1b. Owned subscriptions (the Storehouse `subscriptions` table) with no
+ *      active ledger match → recurring outflows for cash-paid,
+ *      family-plan-split, or newly-added-but-not-yet-charged subscriptions
+ *      that auditSubscriptions() can never see, since it only reads
+ *      transaction history
  *   2. Recurring income (detected from positive-amount transaction history)
  *      → payroll / retainer inflows
  *   3. Debt minimum payments (from financeAccounts.minPayment +
@@ -20,6 +25,7 @@
 
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type * as schema from '../db/schema'
+import { matchKeyForSubscription } from '../lib/merchant-match'
 import { convert, getBaseCurrency, loadFxRates } from './finance-fx'
 import { mergeIncomeStreams, paystubsToIncomeStreams, readArgylePaystubs } from './finance-income'
 import { type Cadence, type Subscription, auditSubscriptions } from './finance-subscriptions'
@@ -166,6 +172,106 @@ export function projectSubscriptionEvents(
         label: sub.merchant,
         source: 'subscription',
         confidence: confidenceFromCharges(sub.nCharges)
+      })
+      next = addDays(next, stepDays)
+    }
+  }
+  return out
+}
+
+export type OwnedSubscriptionInput = {
+  externalId: string
+  name: string
+  cost: number
+  cadence: string
+  paymentAccount: string | null
+  nextRenewal: string | null
+}
+
+/**
+ * Match against the ACTIVE audited stream only — scoped to `active` (not
+ * `findAuditMatch`'s all-statuses search in electron/ipc/subscriptions.ts)
+ * because only active audit entries feed `projectSubscriptionEvents`; a
+ * match against a zombie/expired entry means nothing is currently being
+ * projected for that merchant, so the owned row still needs its own event.
+ *
+ * Deliberately NOT account-fallback like `findAuditMatch`: when the owned
+ * row names a specific `paymentAccount`, a merchant match on a DIFFERENT
+ * account is treated as a distinct instance, not a duplicate — the
+ * family-plan-split case (same merchant, separately charged to two
+ * accounts) must produce two forecast events, not collapse to one. Only
+ * when the owned row has no account on file do we fall back to a
+ * merchant-only match, giving it the benefit of the doubt that it's the
+ * same subscription the ledger already detected.
+ */
+function hasActiveAuditMatch(
+  activeAudited: Subscription[],
+  matchKey: string,
+  accountHint: string | null
+): boolean {
+  if (accountHint) {
+    return activeAudited.some((s) => s.merchant === matchKey && s.account === accountHint)
+  }
+  return activeAudited.some((s) => s.merchant === matchKey)
+}
+
+/**
+ * Project forecast events for user-OWNED subscriptions (the Storehouse
+ * `subscriptions` table, electron/ipc/subscriptions.ts) that have no active
+ * match in the ledger-derived audit stream — cash-paid, family-plan-split,
+ * or newly added but not yet charged. `auditSubscriptions()` only sees
+ * transaction history, so these would otherwise silently contribute nothing
+ * to the forecast even though their cost/cadence/next renewal are known.
+ *
+ * Dedup uses `matchKeyForSubscription`, the same key that links an owned row
+ * to a detected one everywhere else in the app — so a subscription that's
+ * both owned AND transaction-detected is counted exactly once (via the
+ * `audit.active`-driven `projectSubscriptionEvents` stream, not this one).
+ *
+ * Anchors on `nextRenewal` when known (fast-forwarding past any stale date,
+ * same as the lastSeen+cadence anchor in `projectSubscriptionEvents`); falls
+ * back to "one cadence out from today" for rows with no renewal date on file.
+ */
+export function projectOwnedSubscriptionEvents(
+  subs: OwnedSubscriptionInput[],
+  activeAudited: Subscription[],
+  accountIdByName: Map<string, number>,
+  defaultCashAccountId: number | null,
+  today: Date,
+  windowDays: number
+): ForecastEvent[] {
+  const out: ForecastEvent[] = []
+  const horizon = addDays(today, windowDays)
+
+  for (const sub of subs) {
+    const stepDays = CADENCE_DAYS[sub.cadence as Cadence]
+    if (!stepDays || !(sub.cost > 0)) continue
+
+    const matchKey = matchKeyForSubscription(sub.externalId, sub.name)
+    if (hasActiveAuditMatch(activeAudited, matchKey, sub.paymentAccount)) continue
+
+    // No resolvable account and no default cash account → nothing to route
+    // the outflow to (better silent than misleading, same rule as debt/
+    // calendar events).
+    const accountId =
+      (sub.paymentAccount ? accountIdByName.get(sub.paymentAccount) : undefined) ??
+      defaultCashAccountId ??
+      undefined
+    if (accountId === undefined) continue
+
+    let next = sub.nextRenewal ? parseLocalDate(sub.nextRenewal) : addDays(today, stepDays)
+    while (next <= today) next = addDays(next, stepDays)
+
+    while (next <= horizon) {
+      out.push({
+        date: localDateString(next),
+        accountId,
+        amount: -Math.abs(sub.cost),
+        label: sub.name,
+        source: 'subscription',
+        // User-declared, not verified against transaction history — never
+        // 'high' the way a long charge history can be.
+        confidence: 'medium'
       })
       next = addDays(next, stepDays)
     }
@@ -637,6 +743,37 @@ export function buildForecast(
   // routed (the forecast answers "will my cash be short?").
   const defaultCashAccountId = accounts.find((a) => a.is_debt !== 1)?.id ?? null
 
+  // 1b. Owned subscriptions (Storehouse) with no active ledger match — see
+  // projectOwnedSubscriptionEvents for why this stream exists.
+  const ownedSubRows = sqlite
+    .prepare(
+      `SELECT external_id, name, cost, cadence, payment_account, next_renewal
+         FROM subscriptions WHERE status = 'active'`
+    )
+    .all() as Array<{
+    external_id: string
+    name: string
+    cost: number
+    cadence: string
+    payment_account: string | null
+    next_renewal: string | null
+  }>
+  const ownedSubEvents = projectOwnedSubscriptionEvents(
+    ownedSubRows.map((r) => ({
+      externalId: r.external_id,
+      name: r.name,
+      cost: r.cost,
+      cadence: r.cadence,
+      paymentAccount: r.payment_account,
+      nextRenewal: r.next_renewal
+    })),
+    audit.active,
+    accountIdByName,
+    defaultCashAccountId,
+    today,
+    windowDays
+  )
+
   // 2. Recurring income. Prefer REAL Argyle paystubs (ground-truth cadence + net
   // pay) over bank-deposit inference; the matching inferred stream is suppressed
   // so the same paycheck isn't double-counted. With no paystubs the merge returns
@@ -696,7 +833,7 @@ export function buildForecast(
     }))
 
   const allEvents = applyOverrides(
-    [...subEvents, ...incomeEvents, ...debtEvents, ...calEvents],
+    [...subEvents, ...ownedSubEvents, ...incomeEvents, ...debtEvents, ...calEvents],
     overrides
   )
 
