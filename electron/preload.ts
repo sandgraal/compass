@@ -188,7 +188,8 @@ const api = {
     connect: () => ipcRenderer.invoke('snaptrade:connect'),
     setByo: (clientId: string, consumerKey: string) =>
       ipcRenderer.invoke('snaptrade:set-byo', clientId, consumerKey),
-    hasCreds: () => ipcRenderer.invoke('snaptrade:has-creds')
+    hasCreds: () => ipcRenderer.invoke('snaptrade:has-creds'),
+    disconnect: () => ipcRenderer.invoke('snaptrade:disconnect')
   },
 
   // --- Relay (aggregator relay URL + connectivity test) ---
@@ -705,6 +706,8 @@ const api = {
     getFxGainLoss: (year?: number) => ipcRenderer.invoke('finance:get-fx-gain-loss', year),
     importHoldings: () => ipcRenderer.invoke('finance:import-holdings'),
     getHoldings: () => ipcRenderer.invoke('finance:get-holdings'),
+    // Manual utility-bill CSV import — a stand-in for Arcadia while the relay isn't deployed.
+    importUtilityBills: () => ipcRenderer.invoke('finance:import-utility-bills'),
     getCreditSummary: () => ipcRenderer.invoke('finance:get-credit-summary'),
     addCreditScore: (input: { score: number; bureau?: string; date?: string }) =>
       ipcRenderer.invoke('finance:add-credit-score', input),

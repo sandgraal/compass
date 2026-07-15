@@ -16,6 +16,7 @@ import {
   Trash2,
   TrendingDown,
   TrendingUp,
+  Upload,
   Wallet
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
@@ -1886,6 +1887,7 @@ function PropertyTab(): JSX.Element {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [savingUtilityInclude, setSavingUtilityInclude] = useState(false)
+  const [importingUtilityBills, setImportingUtilityBills] = useState(false)
   const [placed, setPlaced] = useState('')
   const [land, setLand] = useState('')
   const [recovery, setRecovery] = useState('30')
@@ -1935,6 +1937,31 @@ function PropertyTab(): JSX.Element {
       showToast('Failed to save.', 'error')
     } finally {
       setSavingUtilityInclude(false)
+    }
+  }
+
+  // Manual stand-in for a live Arcadia sync — the managed relay isn't
+  // deployed today, so this is how utility bills get into Schedule E without it.
+  const importUtilityBillsFile = async () => {
+    if (!window.api?.finance) return
+    setImportingUtilityBills(true)
+    try {
+      const res = await window.api.finance.importUtilityBills()
+      if (res.canceled) return
+      if (!res.success) {
+        showToast(res.error ?? 'Import failed.', 'error')
+        return
+      }
+      await refresh()
+      showToast(
+        `Imported ${res.imported ?? 0} utility bill${res.imported === 1 ? '' : 's'}.`,
+        'success'
+      )
+    } catch (err) {
+      console.error('[property] utility-bill import failed', err)
+      showToast('Import failed.', 'error')
+    } finally {
+      setImportingUtilityBills(false)
     }
   }
 
@@ -2032,16 +2059,27 @@ function PropertyTab(): JSX.Element {
       </div>
 
       <div className="bg-card border border-border rounded-xl p-5">
-        <h3 className="text-sm font-semibold mb-1">Utility bills (Arcadia)</h3>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-sm font-semibold">Utility bills (Arcadia)</h3>
+          <button
+            type="button"
+            onClick={() => void importUtilityBillsFile()}
+            disabled={importingUtilityBills}
+            className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-secondary text-foreground hover:bg-secondary/80 disabled:opacity-50"
+            title="Import a downloaded utility-bill CSV — a manual stand-in while the Arcadia relay isn't deployed"
+          >
+            <Upload size={13} /> {importingUtilityBills ? 'Importing…' : 'Import CSV'}
+          </button>
+        </div>
         <p className="text-xs text-muted-foreground border border-border bg-secondary/40 rounded-lg px-3 py-2 mb-3">
-          <span className="font-medium text-foreground">Caution:</span> synced bills aren't
+          <span className="font-medium text-foreground">Caution:</span> synced/imported bills aren't
           property-scoped — they may be your personal home utilities, so they only enter Schedule E
           when you opt in below.
         </p>
         {pnl.utilityBills.count === 0 ? (
           <p className="text-xs text-muted-foreground mb-3">
-            No utility bills synced yet. Connect Arcadia on the Integrations page to pull
-            statements.
+            No utility bills yet. Connect Arcadia on the Integrations page, or import a downloaded
+            bill CSV above.
           </p>
         ) : (
           <div className="mb-3">

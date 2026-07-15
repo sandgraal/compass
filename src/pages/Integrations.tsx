@@ -819,6 +819,11 @@ export default function Integrations(): JSX.Element {
       if (service === 'obsidian') {
         await window.api.obsidian.clear()
         await loadObsidian()
+      } else if (service === 'snaptrade') {
+        // Dedicated handler: forgets the connected user but keeps the BYO
+        // partner clientId/consumerKey, unlike the generic auth:disconnect
+        // (which would wipe the whole token blob and force re-entering them).
+        await window.api.snaptrade.disconnect()
       } else {
         await window.api.auth.disconnect(service)
       }
@@ -1483,6 +1488,7 @@ export default function Integrations(): JSX.Element {
                 }
               : undefined
           }
+          onOpenRelaySettings={setup.requiresRelay ? () => setRelayOpen(true) : undefined}
         />
       )
     }

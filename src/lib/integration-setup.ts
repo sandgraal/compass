@@ -60,6 +60,20 @@ export interface IntegrationSetup {
   fields: SetupField[]
   /** Override the primary button label ("Connect" by default). */
   connectLabel?: string
+  /**
+   * For relay-fronted aggregators where a working non-relay path already
+   * exists in Compass today — surfaced ahead of a relay connect attempt
+   * since the managed relay isn't deployed. Omit when no real alternative
+   * exists (Metriport, Canopy).
+   */
+  alternative?: {
+    /** Set only when the alternative is itself a connectable
+     * INTEGRATION_REGISTRY entry (Oura, Google, Email Receipts) — renders
+     * as a link. Omit for passive/always-on fallbacks (income inference,
+     * manual expense tagging). */
+    integrationId?: string
+    note: string
+  }
 }
 
 /**
@@ -395,7 +409,11 @@ export const INTEGRATION_SETUP: Record<string, IntegrationSetup> = {
     ],
     docUrl: 'https://tryterra.co',
     fields: [],
-    connectLabel: 'Connect wearable'
+    connectLabel: 'Connect wearable',
+    alternative: {
+      integrationId: 'oura',
+      note: 'Oura already syncs live today with no relay. Fitbit, Garmin, and Apple Health also import as file exports via Get Your Data (Health).'
+    }
   },
   metriport: {
     id: 'metriport',
@@ -455,7 +473,10 @@ export const INTEGRATION_SETUP: Record<string, IntegrationSetup> = {
     ],
     docUrl: 'https://argyle.com',
     fields: [],
-    connectLabel: 'Connect payroll'
+    connectLabel: 'Connect payroll',
+    alternative: {
+      note: "The cash-flow forecast already infers income from recurring bank deposits — no connection needed, though it's an estimate, not real paystubs."
+    }
   },
   snaptrade: {
     id: 'snaptrade',
@@ -497,7 +518,10 @@ export const INTEGRATION_SETUP: Record<string, IntegrationSetup> = {
     ],
     docUrl: 'https://arcadia.com',
     fields: [],
-    connectLabel: 'Connect utilities'
+    connectLabel: 'Connect utilities',
+    alternative: {
+      note: 'You can already tag transactions as Schedule E operating expenses on the Transactions tab — utilities included — no connection needed. Get Your Data also has a utility-bill export fallback.'
+    }
   },
   nylas: {
     id: 'nylas',
@@ -517,7 +541,11 @@ export const INTEGRATION_SETUP: Record<string, IntegrationSetup> = {
     ],
     docUrl: 'https://nylas.com',
     fields: [],
-    connectLabel: 'Connect contacts'
+    connectLabel: 'Connect contacts',
+    alternative: {
+      integrationId: 'google',
+      note: 'Google Contacts already syncs live via the Google integration, no relay — Nylas only adds non-Google providers (Outlook, iCloud, Exchange).'
+    }
   },
   knot: {
     id: 'knot',
@@ -537,7 +565,11 @@ export const INTEGRATION_SETUP: Record<string, IntegrationSetup> = {
     ],
     docUrl: 'https://knotapi.com',
     fields: [],
-    connectLabel: 'Connect merchant'
+    connectLabel: 'Connect merchant',
+    alternative: {
+      integrationId: 'email-receipts',
+      note: "The Amazon order-email recognizer (Email Receipts) already gives Amazon purchase history live, no relay. Knot's value-add is other merchants (Walmart, DoorDash, Instacart…)."
+    }
   }
 }
 

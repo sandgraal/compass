@@ -214,6 +214,18 @@ export function hasSnaptradeCreds(): boolean {
   return !!(t.clientId && t.consumerKey)
 }
 
+/**
+ * Forget the connected user (disconnect) while preserving the partner
+ * clientId/consumerKey — mirrors Plaid's split between dev keys and per-item
+ * access tokens. Unlike the generic auth:disconnect (which wipes the whole
+ * 'snaptrade' token blob), this only drops the connection-derived
+ * userId/userSecret, so reconnecting doesn't force re-entering BYO creds.
+ */
+export function clearSnaptradeConnection(): void {
+  const tok = loadSnaptradeToken()
+  saveToken('snaptrade', { clientId: tok.clientId, consumerKey: tok.consumerKey })
+}
+
 // ── signed fetch + connect + sync (impure; BYO-direct, no relay) ────────────────
 
 const SNAPTRADE_BASE = 'https://api.snaptrade.com'

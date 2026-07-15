@@ -69,4 +69,24 @@ describe('integration-setup catalog', () => {
       }
     }
   })
+
+  it('only sets `alternative` on relay-fronted aggregators with a real working fallback', () => {
+    const withAlternative = Object.values(INTEGRATION_SETUP)
+      .filter((s) => s.alternative)
+      .map((s) => s.id)
+      .sort()
+    // Metriport + Canopy are deliberately excluded — no non-relay path exists.
+    expect(withAlternative).toEqual(['arcadia', 'argyle', 'knot', 'nylas', 'terra'])
+    for (const s of Object.values(INTEGRATION_SETUP)) {
+      if (!s.alternative) continue
+      expect(s.requiresRelay, `${s.id} has an alternative but doesn't requiresRelay`).toBe(true)
+      expect(s.alternative.note.length).toBeGreaterThan(0)
+      if (s.alternative.integrationId) {
+        expect(
+          INTEGRATION_REGISTRY[s.alternative.integrationId],
+          `${s.id}'s alternative points at unknown integration ${s.alternative.integrationId}`
+        ).toBeDefined()
+      }
+    }
+  })
 })

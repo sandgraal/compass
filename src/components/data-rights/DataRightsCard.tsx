@@ -2,6 +2,8 @@ import { ArrowUpRight, CheckCircle2, Circle, Clock3, Sparkles, Zap } from 'lucid
 import { Link } from 'react-router-dom'
 import type { DataRightsSource } from '../../lib/data-rights'
 import type { DataRightsStatus } from '../../lib/data-rights-status'
+import { getIntegrationMeta } from '../../lib/integration-registry'
+import { getIntegrationSetup } from '../../lib/integration-setup'
 import { cn } from '../../lib/utils'
 
 interface DataRightsCardProps {
@@ -78,6 +80,22 @@ export default function DataRightsCard({
           source.payoff
         )}
       </p>
+
+      {source.relatedIntegrationId &&
+        (() => {
+          const related = getIntegrationMeta(source.relatedIntegrationId)
+          if (!related) return null
+          const needsRelay = getIntegrationSetup(source.relatedIntegrationId)?.requiresRelay
+          return (
+            <p className="text-[11px] text-muted-foreground/70">
+              Also available live via{' '}
+              <Link to="/integrations" className="text-primary hover:underline">
+                {related.name}
+              </Link>
+              {needsRelay ? ' (needs a self-hosted relay)' : ''}
+            </p>
+          )
+        })()}
 
       {source.method === 'live' ? (
         <div className="mt-auto flex items-center justify-between gap-2 pt-1">

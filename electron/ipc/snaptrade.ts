@@ -5,8 +5,12 @@
  * Data sync runs through the generic `sync:trigger('snaptrade')` path.
  */
 
+import { eq } from 'drizzle-orm'
 import { BrowserWindow, type IpcMain } from 'electron'
+import { getDb } from '../db/client'
+import { integrations } from '../db/schema'
 import {
+  clearSnaptradeConnection,
   hasSnaptradeCreds,
   openSnaptradeConnect,
   setSnaptradeByoCreds
@@ -34,5 +38,19 @@ export function registerSnaptradeHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('snaptrade:connect', () => {
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
     return openSnaptradeConnect(win)
+  })
+
+  // Forget the connected user (userId/userSecret) but keep the partner
+  // clientId/consumerKey, so reconnecting doesn't force re-entering BYO
+  // creds — unlike falling through to the generic auth:disconnect, which
+  // would wipe the whole token blob.
+  ipcMain.handle('snaptrade:disconnect', (): { success: true } => {
+    clearSnaptradeConnection()
+    getDb()
+      .update(integrations)
+      .set({ status: 'disconnected', lastSyncedAt: null })
+      .where(eq(integrations.service, 'snaptrade'))
+      .run()
+    return { success: true }
   })
 }
