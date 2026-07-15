@@ -414,4 +414,38 @@ describe('contacts:web-enrich-apply', () => {
     const row = contactRow(id)
     expect(row.job_title).toBeNull()
   })
+
+  it('an empty/bogus accepted array writes NOTHING — not even enrichment.web', async () => {
+    callLlm.mockResolvedValue(foundResponse())
+    const id = addContact({ displayName: 'Jane Doe' })
+    const run = (await invoke('contacts:web-enrich', { contactId: id })) as { runId: string }
+    await invoke('contacts:web-enrich-apply', { runId: run.runId, accepted: [] })
+    expect(contactRow(id).enrichment).toBeNull()
+  })
+
+  it('ids that name no proposal in this run are treated as no acceptance', async () => {
+    callLlm.mockResolvedValue(foundResponse())
+    const id = addContact({ displayName: 'Jane Doe' })
+    const run = (await invoke('contacts:web-enrich', { contactId: id })) as { runId: string }
+    const r = await invoke('contacts:web-enrich-apply', { runId: run.runId, accepted: [999, 1000] })
+    expect(r).toMatchObject({ success: true, applied: { fields: [], findings: 0 } })
+    expect(contactRow(id).enrichment).toBeNull()
+  })
+
+  it('a stale runId cannot be reused after a no-op apply discarded the run', async () => {
+    callLlm.mockResolvedValue(foundResponse())
+    const id = addContact({ displayName: 'Jane Doe' })
+    const run = (await invoke('contacts:web-enrich', { contactId: id })) as {
+      runId: string
+      proposals: Array<{ id: number }>
+    }
+    await invoke('contacts:web-enrich-apply', { runId: run.runId, accepted: [] })
+    // The run is gone even though nothing was written — can't come back and
+    // accept for real against the same runId.
+    const r = await invoke('contacts:web-enrich-apply', {
+      runId: run.runId,
+      accepted: run.proposals.map((p) => p.id)
+    })
+    expect(r).toMatchObject({ success: false })
+  })
 })
