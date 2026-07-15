@@ -37,6 +37,33 @@ describe('DoorDash recognizer', () => {
     })
     expect(out[0].occurredAt).toBe(Date.parse('2026-02-15 18:30:00'))
   })
+
+  it('uses the Order ID as naturalKey when the column is present', () => {
+    const out = DOORDASH_RECOGNIZER.parse(file('doordash_orders.csv', DOORDASH))
+    expect(out[0].naturalKey).toBe('123')
+  })
+
+  it('two same-time, same-restaurant orders get distinct naturalKeys via Order ID', () => {
+    const twoOrders = [
+      'Order ID,Restaurant,Delivered At,Total',
+      '123,Chipotle,2026-02-15 18:30:00,24.50',
+      '124,Chipotle,2026-02-15 18:30:00,24.50'
+    ].join('\n')
+    const out = DOORDASH_RECOGNIZER.parse(file('doordash_orders.csv', twoOrders))
+    expect(out).toHaveLength(2)
+    expect(out[0].naturalKey).not.toBe(out[1].naturalKey)
+  })
+
+  it('falls back to time|merchant|total and still distinguishes same-time orders by total when there is no Order ID column', () => {
+    const noOrderId = [
+      'Restaurant,Delivered At,Total',
+      'Chipotle,2026-02-15 18:30:00,24.50',
+      'Chipotle,2026-02-15 18:30:00,31.00'
+    ].join('\n')
+    const out = DOORDASH_RECOGNIZER.parse(file('doordash_orders.csv', noOrderId))
+    expect(out).toHaveLength(2)
+    expect(out[0].naturalKey).not.toBe(out[1].naturalKey)
+  })
 })
 
 describe('Instacart recognizer', () => {
@@ -53,6 +80,26 @@ describe('Instacart recognizer', () => {
       body: 'Whole Foods'
     })
     expect(out[0].occurredAt).toBe(Date.parse('2026-03-01 10:00:00'))
+  })
+
+  it('uses the Order ID as naturalKey when the column is present', () => {
+    const withOrderId = [
+      'Order ID,Store,Order Date,Total',
+      'INS-9,Whole Foods,2026-03-01 10:00:00,88.32'
+    ].join('\n')
+    const out = INSTACART_RECOGNIZER.parse(file('instacart_orders.csv', withOrderId))
+    expect(out[0].naturalKey).toBe('INS-9')
+  })
+
+  it('falls back to time|merchant|total and still distinguishes same-time orders by total when there is no Order ID column', () => {
+    const noOrderId = [
+      'Store,Order Date,Total',
+      'Whole Foods,2026-03-01 10:00:00,88.32',
+      'Whole Foods,2026-03-01 10:00:00,42.10'
+    ].join('\n')
+    const out = INSTACART_RECOGNIZER.parse(file('instacart_orders.csv', noOrderId))
+    expect(out).toHaveLength(2)
+    expect(out[0].naturalKey).not.toBe(out[1].naturalKey)
   })
 })
 

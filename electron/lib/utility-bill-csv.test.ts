@@ -43,6 +43,38 @@ describe('parseUtilityBillCsv', () => {
     expect(a[0].externalId).toBe(b[0].externalId)
   })
 
+  it('gives two bills with the same provider/date/amount/address but different periods distinct externalIds', () => {
+    // Same provider, statement date, amount, and address — the only thing
+    // distinguishing these two bills is the billing period, so it must be
+    // in the hash or one would silently overwrite the other on upsert.
+    const headers = [
+      'Provider',
+      'Statement Date',
+      'Amount',
+      'Address',
+      'Period Start',
+      'Period End'
+    ]
+    const rows = [
+      ['PG&E', '2026-06-15', '100', '1 Main St', '2026-05-01', '2026-05-31'],
+      ['PG&E', '2026-06-15', '100', '1 Main St', '2026-06-01', '2026-06-30']
+    ]
+    const out = parseUtilityBillCsv(headers, rows)
+    expect(out).toHaveLength(2)
+    expect(out[0].externalId).not.toBe(out[1].externalId)
+  })
+
+  it('gives two bills with the same provider/date/amount but different usage distinct externalIds', () => {
+    const headers = ['Provider', 'Statement Date', 'Amount', 'Usage (kWh)']
+    const rows = [
+      ['PG&E', '2026-06-15', '100', '300'],
+      ['PG&E', '2026-06-15', '100', '450']
+    ]
+    const out = parseUtilityBillCsv(headers, rows)
+    expect(out).toHaveLength(2)
+    expect(out[0].externalId).not.toBe(out[1].externalId)
+  })
+
   it('returns [] when the file has no amount column', () => {
     const headers = ['Provider', 'Statement Date']
     const rows = [['PG&E', '2026-06-15']]

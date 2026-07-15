@@ -82,9 +82,18 @@ export function parseUtilityBillCsv(headers: string[], rows: string[][]): Utilit
     const provider = iProvider >= 0 ? str(r[iProvider]) : null
     const serviceAddress = iAddress >= 0 ? str(r[iAddress]) : null
     const statementDate = iStatement >= 0 ? day(r[iStatement]) : null
+    const periodStart = iStart >= 0 ? day(r[iStart]) : null
     const periodEnd = iEnd >= 0 ? day(r[iEnd]) : statementDate
+    const usageKwh = iUsage >= 0 ? money(r[iUsage]) : null
+    // Every parsed field that can distinguish two bills goes in the hash —
+    // provider/date/address alone can collide (e.g. two same-day statements
+    // with no address column), which would upsert one bill over the other.
     const externalId = `manual:${createHash('sha256')
-      .update(`${provider ?? ''}|${statementDate ?? ''}|${amount}|${serviceAddress ?? ''}`)
+      .update(
+        [provider, statementDate, periodStart, periodEnd, amount, usageKwh, serviceAddress]
+          .map((v) => v ?? '')
+          .join('|')
+      )
       .digest('hex')
       .slice(0, 16)}`
 
@@ -93,11 +102,11 @@ export function parseUtilityBillCsv(headers: string[], rows: string[][]): Utilit
       provider,
       serviceAddress,
       statementDate,
-      periodStart: iStart >= 0 ? day(r[iStart]) : null,
+      periodStart,
       periodEnd,
       amount,
       currency: 'USD',
-      usageKwh: iUsage >= 0 ? money(r[iUsage]) : null
+      usageKwh
     })
   }
   return out

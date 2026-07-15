@@ -79,7 +79,7 @@ describe('integration-setup catalog', () => {
     expect(withAlternative).toEqual(['arcadia', 'argyle', 'knot', 'nylas', 'terra'])
     for (const s of Object.values(INTEGRATION_SETUP)) {
       if (!s.alternative) continue
-      expect(s.requiresRelay, `${s.id} has an alternative but doesn't requiresRelay`).toBe(true)
+      expect(s.requiresRelay, `${s.id} has an alternative but doesn't set requiresRelay`).toBe(true)
       expect(s.alternative.note.length).toBeGreaterThan(0)
       if (s.alternative.integrationId) {
         expect(

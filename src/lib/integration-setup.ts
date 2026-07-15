@@ -68,9 +68,11 @@ export interface IntegrationSetup {
    */
   alternative?: {
     /** Set only when the alternative is itself a connectable
-     * INTEGRATION_REGISTRY entry (Oura, Google, Email Receipts) — renders
-     * as a link. Omit for passive/always-on fallbacks (income inference,
-     * manual expense tagging). */
+     * INTEGRATION_REGISTRY entry (Oura, Google, Email Receipts) — identifies
+     * which one, and is checked against the registry by
+     * integration-setup.test.ts. Currently rendered as plain text within
+     * `note`, not yet as a clickable link. Omit for passive/always-on
+     * fallbacks (income inference, manual expense tagging). */
     integrationId?: string
     note: string
   }

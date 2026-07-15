@@ -40,6 +40,7 @@ export const DOORDASH_RECOGNIZER: Recognizer = {
     const rows = parseCSV(fromHeaderRow(f.text, 'Restaurant'))
     if (!rows.length) return []
     const keys = Object.keys(rows[0])
+    const cOrderId = matchHeader(keys, 'Order ID', 'Order Id', 'OrderID', 'Delivery ID')
     const cWhen = matchHeader(keys, 'Delivered At', 'Order Time', 'Order Date', 'Timestamp')
     const cMerchant = matchHeader(keys, 'Restaurant', 'Store', 'Merchant Name')
     const cTotal = matchHeader(keys, 'Total', 'Order Total', 'Subtotal')
@@ -50,6 +51,7 @@ export const DOORDASH_RECOGNIZER: Recognizer = {
       if (when == null) continue
       const total = cTotal ? money(r[cTotal]) : null
       const merchant = cMerchant ? r[cMerchant].trim() : ''
+      const orderId = cOrderId ? r[cOrderId].trim() : ''
       out.push({
         source: 'doordash',
         type: 'order',
@@ -57,7 +59,11 @@ export const DOORDASH_RECOGNIZER: Recognizer = {
         title: `DoorDash${merchant ? ` · ${merchant}` : ''}${total ? ` · ${total.text}` : ''}`,
         body: merchant || undefined,
         payload: r,
-        naturalKey: `${cWhen ? r[cWhen].trim() : ''}|${merchant}`
+        // Prefer the order id when the export has one (stable, collision-free);
+        // otherwise fall back to time+merchant+total — still imperfect for two
+        // identical same-minute orders at the same restaurant, but the closest
+        // available signal without one.
+        naturalKey: orderId || `${cWhen ? r[cWhen].trim() : ''}|${merchant}|${total?.text ?? ''}`
       })
     }
     return out
@@ -78,6 +84,7 @@ export const INSTACART_RECOGNIZER: Recognizer = {
     const rows = parseCSV(f.text)
     if (!rows.length) return []
     const keys = Object.keys(rows[0])
+    const cOrderId = matchHeader(keys, 'Order ID', 'Order Id', 'OrderID', 'Order Number')
     const cWhen = matchHeader(keys, 'Delivery Date', 'Order Date', 'Placed At', 'Timestamp')
     const cMerchant = matchHeader(keys, 'Store', 'Retailer', 'Merchant')
     const cTotal = matchHeader(keys, 'Total', 'Order Total', 'Grand Total')
@@ -88,6 +95,7 @@ export const INSTACART_RECOGNIZER: Recognizer = {
       if (when == null) continue
       const total = cTotal ? money(r[cTotal]) : null
       const merchant = cMerchant ? r[cMerchant].trim() : ''
+      const orderId = cOrderId ? r[cOrderId].trim() : ''
       out.push({
         source: 'instacart',
         type: 'order',
@@ -95,7 +103,9 @@ export const INSTACART_RECOGNIZER: Recognizer = {
         title: `Instacart${merchant ? ` · ${merchant}` : ''}${total ? ` · ${total.text}` : ''}`,
         body: merchant || undefined,
         payload: r,
-        naturalKey: `${cWhen ? r[cWhen].trim() : ''}|${merchant}`
+        // Prefer the order id when present (stable, collision-free); otherwise
+        // fall back to time+merchant+total, same tradeoff as DoorDash above.
+        naturalKey: orderId || `${cWhen ? r[cWhen].trim() : ''}|${merchant}|${total?.text ?? ''}`
       })
     }
     return out
