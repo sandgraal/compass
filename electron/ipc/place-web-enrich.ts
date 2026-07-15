@@ -289,7 +289,16 @@ function applyPendingRun(
     pendingRun = null
     return { success: false, error: 'This enrichment run has expired — run the search again.' }
   }
-  const acceptedIds = new Set(accepted)
+  // Only ids that actually name one of THIS run's proposals count as an
+  // acceptance — an empty/bogus `accepted` array must never persist a write,
+  // per the "nothing is saved without review" consent model. Discard the run
+  // either way so a stale runId can't be replayed with a real acceptance later.
+  const validIds = new Set(run.proposals.map((p) => p.id))
+  const acceptedIds = new Set(accepted.filter((id) => validIds.has(id)))
+  if (acceptedIds.size === 0) {
+    pendingRun = null
+    return { success: true, applied: { fields: [], findings: 0 } }
+  }
   const fields = collectAcceptedPlaceFields(run.proposals, acceptedIds)
   const web = assemblePlaceWebEnrichment(run.proposals, acceptedIds, {
     searchedAs: run.searchedAs,
