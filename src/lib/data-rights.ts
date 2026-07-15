@@ -193,10 +193,10 @@ export const DATA_RIGHTS_SOURCES: DataRightsSource[] = [
     domain: 'Financial',
     method: 'export',
     what: 'Your electric/gas/water statements — provider, amount, service period',
-    how: "Your utility's online account → Billing / Statements → download recent bills (PDF or CSV, varies by provider)",
-    format: 'CSV',
+    how: "Your utility's online account → Billing / Statements → download recent bills (usually a PDF statement; a few providers offer a CSV export)",
+    format: 'PDF or CSV',
     intoCompass:
-      'Finance → Property → Import CSV (Utility bills section) — a manual stand-in while the Arcadia relay isn’t deployed',
+      'Finance → Property → Import bill (Utility bills section) — accepts the PDF statement or a CSV, a manual stand-in while the Arcadia relay isn’t deployed',
     recordsSourceId: 'utility',
     relatedIntegrationId: 'arcadia',
     payoff:

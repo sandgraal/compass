@@ -2066,9 +2066,9 @@ function PropertyTab(): JSX.Element {
             onClick={() => void importUtilityBillsFile()}
             disabled={importingUtilityBills}
             className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-secondary text-foreground hover:bg-secondary/80 disabled:opacity-50"
-            title="Import a downloaded utility-bill CSV — a manual stand-in while the Arcadia relay isn't deployed"
+            title="Import a downloaded utility bill (CSV or PDF) — a manual stand-in while the Arcadia relay isn't deployed"
           >
-            <Upload size={13} /> {importingUtilityBills ? 'Importing…' : 'Import CSV'}
+            <Upload size={13} /> {importingUtilityBills ? 'Importing…' : 'Import bill'}
           </button>
         </div>
         <p className="text-xs text-muted-foreground border border-border bg-secondary/40 rounded-lg px-3 py-2 mb-3">
