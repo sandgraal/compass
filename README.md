@@ -1,3 +1,5 @@
+Yes, this is AI Slop. Please read no further if that disturbs you.
+
 <div align="center">
 
 <img src="resources/icon.png" alt="Compass" width="120" height="120" />
