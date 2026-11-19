@@ -76,7 +76,10 @@ export default function KnowledgeBase(): JSX.Element {
 
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      // TipTap v3's StarterKit bundles Link (with openOnClick: true). Disable it
+      // so the explicit Link below is the only instance: a click on a link must
+      // never navigate the Electron window.
+      StarterKit.configure({ link: false }),
       TaskList,
       TaskItem.configure({ nested: true }),
       Placeholder.configure({ placeholder: 'Start writing…' }),
@@ -274,7 +277,7 @@ export default function KnowledgeBase(): JSX.Element {
       if (editor && c !== null) {
         currentRawRef.current = c
         isLoadingRef.current = true
-        editor.commands.setContent(markdownToHtml(c))
+        editor.commands.setContent(markdownToHtml(c), { emitUpdate: false })
         setContent('') // reset dirty state — auto-save won't fire until user edits
         isLoadingRef.current = false
       }
