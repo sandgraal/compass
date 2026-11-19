@@ -240,8 +240,10 @@ function waitForOAuthCode(
         height: 680,
         show: true,
         alwaysOnTop: true,
-        webPreferences: { nodeIntegration: false, contextIsolation: true }
+        // Loads third-party provider pages: sandboxed renderer, no preload, no popups.
+        webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true }
       })
+      win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       win.loadURL(authUrl)
       win.on('closed', () => {
         if (!settled) {

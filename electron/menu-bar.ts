@@ -7,6 +7,7 @@
  *  - Register (and clean up) the global shortcut
  */
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { is } from '@electron-toolkit/utils'
 import { eq } from 'drizzle-orm'
 import {
@@ -17,11 +18,13 @@ import {
   globalShortcut,
   ipcMain,
   nativeImage,
-  screen
+  screen,
+  shell
 } from 'electron'
 import { getDb } from './db/client'
 import { appSettings } from './db/schema'
 import { getQuickCaptureHtmlPath, getQuickCaptureHtmlUrl } from './quick-capture-path'
+import { installAppWindowGuards } from './window-security'
 
 const DEFAULT_SHORTCUT = 'CommandOrControl+Shift+Space'
 
@@ -141,11 +144,17 @@ function createCaptureWindow(__dirname: string): BrowserWindow {
     win.setWindowButtonVisibility?.(false)
   }
 
-  // Load the quick-capture renderer
-  if (is.dev && process.env.ELECTRON_RENDERER_URL) {
-    win.loadURL(getQuickCaptureHtmlUrl(process.env.ELECTRON_RENDERER_URL))
+  // Load the quick-capture renderer. Same guards as the main window: this one
+  // also runs the (non-sandboxed) preload, so a popup or stray navigation must
+  // never get a BrowserWindow of its own.
+  const devUrl = is.dev ? process.env.ELECTRON_RENDERER_URL : undefined
+  const htmlPath = getQuickCaptureHtmlPath(__dirname)
+  const appUrl = devUrl ? getQuickCaptureHtmlUrl(devUrl) : pathToFileURL(htmlPath).href
+  installAppWindowGuards(win.webContents, appUrl, (url) => shell.openExternal(url))
+  if (devUrl) {
+    win.loadURL(appUrl)
   } else {
-    win.loadFile(getQuickCaptureHtmlPath(__dirname))
+    win.loadFile(htmlPath)
   }
 
   return win
