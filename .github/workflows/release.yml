@@ -46,9 +46,10 @@ jobs:
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
 
-      # Claude Desktop one-click extension (Phase 8.3). Native better-sqlite3
-      # binding is fetched per-arch; the bundle matching the runner arch is
-      # smoke-tested, the other is a cross-arch build (binding can't execute here).
+      # Claude Desktop one-click extension (Phase 8.3). Each bundle keeps only
+      # the better-sqlite3 N-API prebuild for its arch; the bundle matching the
+      # runner arch is smoke-tested, the other is a cross-arch build (binding
+      # can't execute here).
       - name: Build Claude Desktop extension bundles (.mcpb)
         run: |
           npm run build:mcpb -- --arch arm64
