@@ -194,6 +194,7 @@ function weekYmd(w: number): string {
 }
 
 afterEach(() => {
+  vi.useRealTimers()
   sqlite.close()
 })
 
@@ -787,6 +788,10 @@ describe('correlations (chart data for /insights)', () => {
         handlers[channel] = h
       }
     } as unknown as IpcMain)
+    // The IPC handler reads the wall clock; pin it to the fixture date so the
+    // seeded rows stay inside its lookback window regardless of when CI runs.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
     const viaIpc = (await handlers['insights:correlations']({})) as { devVsRecovery: unknown }
     expect(viaIpc.devVsRecovery).not.toBeNull()
   })

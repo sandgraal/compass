@@ -71,6 +71,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   sqlite.close()
 })
 
@@ -192,6 +193,10 @@ describe('listInsights lifecycle', () => {
         handlers[channel] = h
       }
     } as unknown as IpcMain)
+    // The IPC handler reads the wall clock; pin it to the fixture date so the
+    // seeded rows stay inside its lookback window regardless of when CI runs.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
     const listed = (await handlers['insights:list']({})) as { insights: Array<{ key: string }> }
     expect(listed.insights.length).toBeGreaterThan(0)
     expect(await handlers['insights:dismiss']({}, '', true)).toEqual({ success: false })

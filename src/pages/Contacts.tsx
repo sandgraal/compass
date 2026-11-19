@@ -152,7 +152,8 @@ export default function Contacts(): JSX.Element {
   const selectAnchor = useRef<number | null>(null)
   const listEndRef = useRef<HTMLDivElement | null>(null)
 
-  const openTimeline = (query: string): void => navigate(`/timeline?q=${encodeURIComponent(query)}`)
+  const openTimeline = (query: string): void =>
+    void navigate(`/timeline?q=${encodeURIComponent(query)}`)
 
   // Debounced: typing re-queries SQLite, so don't fire per keystroke.
   useEffect(() => {
