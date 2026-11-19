@@ -155,7 +155,7 @@ describe('openExternalSafely', () => {
   })
 })
 
-type Listener = (event: { preventDefault: () => void }, url: string) => void
+type Listener = (event: { preventDefault: () => void; url?: string }, url: string) => void
 
 function fakeWebContents() {
   let openHandler: ((d: { url: string }) => { action: string }) | undefined
@@ -171,10 +171,16 @@ function fakeWebContents() {
   }
   const fire = (name: string, url: string) => {
     const preventDefault = vi.fn()
-    listeners.get(name)?.({ preventDefault }, url)
+    // Electron 45 shape: target on event.url; positional arg is the deprecated copy.
+    listeners.get(name)?.({ preventDefault, url }, url)
     return preventDefault
   }
-  return { wc, open: (url: string) => openHandler?.({ url }), fire }
+  const fireRaw = (name: string, eventUrl: string | undefined, legacyUrl: string) => {
+    const preventDefault = vi.fn()
+    listeners.get(name)?.({ preventDefault, url: eventUrl }, legacyUrl)
+    return preventDefault
+  }
+  return { wc, open: (url: string) => openHandler?.({ url }), fire, fireRaw }
 }
 
 describe('installAppWindowGuards', () => {
@@ -223,6 +229,18 @@ describe('installAppWindowGuards', () => {
     expect(fire('will-navigate', 'file:///etc/passwd')).toHaveBeenCalledOnce()
     expect(fire('will-navigate', 'smb://attacker/share')).toHaveBeenCalledOnce()
     expect(openExternal).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('reads event.url (Electron 45) ahead of the deprecated positional url', () => {
+    const { fireRaw, openExternal } = setup()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // A stale/forged positional arg pointing at the app must not let an off-app target through.
+    expect(fireRaw('will-navigate', 'file:///etc/passwd', appUrl)).toHaveBeenCalledOnce()
+    expect(fireRaw('will-redirect', 'https://evil.example/', appUrl)).toHaveBeenCalledOnce()
+    // Older shape without event.url still works via the fallback.
+    expect(fireRaw('will-navigate', undefined, 'https://example.com/')).toHaveBeenCalledOnce()
+    expect(openExternal.mock.calls).toEqual([['https://example.com/']])
     warn.mockRestore()
   })
 

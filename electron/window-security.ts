@@ -110,12 +110,16 @@ export function installAppWindowGuards(
     openExternalSafely(url, openExternal)
     return { action: 'deny' }
   })
-  webContents.on('will-navigate', (event, url) => {
+  // Electron 45 deprecates the positional `url` argument in favour of `event.url`;
+  // read the event first and fall back so the guard never sees an empty target.
+  webContents.on('will-navigate', (event, legacyUrl) => {
+    const url = event.url || legacyUrl
     if (isAppNavigation(url, appUrl)) return
     event.preventDefault()
     openExternalSafely(url, openExternal)
   })
-  webContents.on('will-redirect', (event, url) => {
+  webContents.on('will-redirect', (event, legacyUrl) => {
+    const url = event.url || legacyUrl
     if (!isAppNavigation(url, appUrl)) event.preventDefault()
   })
 }

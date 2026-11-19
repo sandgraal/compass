@@ -136,7 +136,7 @@ function createWindow(): void {
   const devUrl = is.dev ? process.env.ELECTRON_RENDERER_URL : undefined
   const appUrl = devUrl ?? pathToFileURL(rendererIndex).href
 
-  // Popups are always denied; http(s)/mailto links go to the system browser,
+  // Popups are always denied; http(s)/mailto/tel links go to the system handler,
   // any other scheme is dropped. Navigation off the app page is cancelled.
   installAppWindowGuards(mainWindow.webContents, appUrl, (url) => shell.openExternal(url))
 
