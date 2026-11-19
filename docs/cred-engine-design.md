@@ -159,8 +159,9 @@ Reuses the existing primitives verbatim — no new crypto:
 ```ts
 // .vault/portal-credentials.enc  →  AES-256-GCM, master key in OS Keychain (safeStorage)
 type PortalCreds = Record<string /*portalId*/, { username: string; password: string; savedAt: number }>
-readEncryptedJson<PortalCreds>('portal-credentials', getOrCreateKey())
-writeEncryptedJson('portal-credentials', creds, getOrCreateKey())
+const key = await getOrCreateKey() // async (safeStorage async API); await once, then stay sync
+readEncryptedJson<PortalCreds>('portal-credentials', key)
+writeEncryptedJson('portal-credentials', creds, key)
 ```
 The renderer can **set** a credential (one-way, like `assistant:set-key`) and read back only a masked tail
 via `cred:status`. It can never read a stored password back. The vault name must satisfy `SAFE_VAULT_NAME`

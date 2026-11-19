@@ -1239,7 +1239,7 @@ export function registerRecordsHandlers(ipcMain: IpcMain): void {
       /* setting absent → disabled */
     }
     if (!enabled) return { ok: false, reason: 'off' }
-    const auth = readActiveKeyInternal()
+    const auth = await readActiveKeyInternal()
     if (!auth) return { ok: false, reason: 'no-key' }
     const prompt = yearReviewNarrationPrompt(buildYearReview(getRawSqlite(), year))
     if (!prompt) return { ok: false, reason: 'empty' }

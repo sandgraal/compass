@@ -84,7 +84,7 @@ export type PlaidItemSummary = {
 }
 
 export function registerPlaidHandlers(ipcMain: IpcMain): void {
-  ipcMain.handle('plaid:get-status', (): PlaidStatus => {
+  ipcMain.handle('plaid:get-status', async (): Promise<PlaidStatus> => {
     let clientId: string | null = null
     let env: PlaidEnv | null = null
     try {
@@ -99,14 +99,14 @@ export function registerPlaidHandlers(ipcMain: IpcMain): void {
       // surfacing a hard error.
     }
     const hasConfig = clientId !== null && env !== null
-    const hasSecret = env !== null && getPlaidSecret(env) !== null
+    const hasSecret = env !== null && (await getPlaidSecret(env)) !== null
     return {
       configured: hasConfig && hasSecret,
       hasConfig,
       env,
       clientId,
       hasSecret,
-      linkedItemIds: listItemIds()
+      linkedItemIds: await listItemIds()
     }
   })
 
@@ -124,16 +124,19 @@ export function registerPlaidHandlers(ipcMain: IpcMain): void {
     return { ok: true }
   })
 
-  ipcMain.handle('plaid:set-secret', (_e, env: unknown, secret: unknown): { ok: true } => {
-    if (env !== 'sandbox' && env !== 'production') {
-      throw new Error("plaid:set-secret: env must be 'sandbox' or 'production'")
+  ipcMain.handle(
+    'plaid:set-secret',
+    async (_e, env: unknown, secret: unknown): Promise<{ ok: true }> => {
+      if (env !== 'sandbox' && env !== 'production') {
+        throw new Error("plaid:set-secret: env must be 'sandbox' or 'production'")
+      }
+      if (typeof secret !== 'string' || secret.length === 0) {
+        throw new Error('plaid:set-secret: secret must be a non-empty string')
+      }
+      await setPlaidSecret(env, secret)
+      return { ok: true }
     }
-    if (typeof secret !== 'string' || secret.length === 0) {
-      throw new Error('plaid:set-secret: secret must be a non-empty string')
-    }
-    setPlaidSecret(env, secret)
-    return { ok: true }
-  })
+  )
 
   ipcMain.handle('plaid:start-link', async (): Promise<StartLinkResult> => {
     try {
@@ -151,11 +154,11 @@ export function registerPlaidHandlers(ipcMain: IpcMain): void {
     }
   })
 
-  ipcMain.handle('plaid:disconnect', (_e, itemId: unknown): { ok: true } => {
+  ipcMain.handle('plaid:disconnect', async (_e, itemId: unknown): Promise<{ ok: true }> => {
     if (typeof itemId !== 'string' || itemId.length === 0) {
       throw new Error('plaid:disconnect: itemId must be a non-empty string')
     }
-    removeAccessToken(itemId)
+    await removeAccessToken(itemId)
     // Also delete the plaid_items row so the Integrations card stops
     // showing the institution. Access tokens (vault) and rows (SQLite)
     // are paired — removing one and leaving the other is a bug magnet.

@@ -34,13 +34,13 @@ vi.mock('./config', async (importOriginal) => {
 
 const { getPlaidClient, isPlaidConfigured, PlaidNotConfiguredError } = await import('./client')
 
-beforeEach(() => {
+beforeEach(async () => {
   TMP = mkdtempSync(join(tmpdir(), 'compass-plaid-client-'))
   configPath = join(TMP, 'plaid.env')
   mockSecret = null
 })
 
-afterEach(() => {
+afterEach(async () => {
   try {
     rmSync(TMP, { recursive: true, force: true })
   } catch {
@@ -49,9 +49,9 @@ afterEach(() => {
 })
 
 describe('getPlaidClient', () => {
-  it('throws PlaidNotConfiguredError(missing-config) when no plaid.env exists', () => {
+  it('throws PlaidNotConfiguredError(missing-config) when no plaid.env exists', async () => {
     try {
-      getPlaidClient()
+      await getPlaidClient()
       expect.fail('expected throw')
     } catch (err) {
       expect(err).toBeInstanceOf(PlaidNotConfiguredError)
@@ -59,11 +59,11 @@ describe('getPlaidClient', () => {
     }
   })
 
-  it('throws PlaidNotConfiguredError(missing-secret) when config exists but secret is unset', () => {
+  it('throws PlaidNotConfiguredError(missing-secret) when config exists but secret is unset', async () => {
     writeFileSync(configPath, 'PLAID_CLIENT_ID=cid\nPLAID_ENV=sandbox\n')
     mockSecret = null
     try {
-      getPlaidClient()
+      await getPlaidClient()
       expect.fail('expected throw')
     } catch (err) {
       expect(err).toBeInstanceOf(PlaidNotConfiguredError)
@@ -71,11 +71,11 @@ describe('getPlaidClient', () => {
     }
   })
 
-  it('builds a sandbox client with PLAID-CLIENT-ID + PLAID-SECRET headers', () => {
+  it('builds a sandbox client with PLAID-CLIENT-ID + PLAID-SECRET headers', async () => {
     writeFileSync(configPath, 'PLAID_CLIENT_ID=cid-abc\nPLAID_ENV=sandbox\n')
     mockSecret = 'sandbox-secret'
 
-    const client = getPlaidClient()
+    const client = await getPlaidClient()
 
     expect(client.env).toBe('sandbox')
     expect(client.clientId).toBe('cid-abc')
@@ -94,23 +94,23 @@ describe('getPlaidClient', () => {
     expect(headers['Plaid-Version']).toBe('2020-09-14')
   })
 
-  it('routes production env to the production base path', () => {
+  it('routes production env to the production base path', async () => {
     writeFileSync(configPath, 'PLAID_CLIENT_ID=cid\nPLAID_ENV=production\n')
     mockSecret = 'prod-secret'
 
-    const client = getPlaidClient()
+    const client = await getPlaidClient()
     expect(client.env).toBe('production')
     const basePath = (client.api as unknown as { configuration: { basePath: string } })
       .configuration.basePath
     expect(basePath).toBe(PlaidEnvironments.production)
   })
 
-  it('throws env-mismatch when caller requests an env that does not match config', () => {
+  it('throws env-mismatch when caller requests an env that does not match config', async () => {
     writeFileSync(configPath, 'PLAID_CLIENT_ID=cid\nPLAID_ENV=sandbox\n')
     mockSecret = 'sandbox-secret'
 
     try {
-      getPlaidClient('production')
+      await getPlaidClient('production')
       expect.fail('expected throw')
     } catch (err) {
       expect(err).toBeInstanceOf(PlaidNotConfiguredError)
@@ -118,23 +118,23 @@ describe('getPlaidClient', () => {
     }
   })
 
-  it('accepts an explicit env when it matches config', () => {
+  it('accepts an explicit env when it matches config', async () => {
     writeFileSync(configPath, 'PLAID_CLIENT_ID=cid\nPLAID_ENV=sandbox\n')
     mockSecret = 'sandbox-secret'
 
-    const client = getPlaidClient('sandbox')
+    const client = await getPlaidClient('sandbox')
     expect(client.env).toBe('sandbox')
   })
 
-  it('re-reads config + secret on every call (stateless)', () => {
+  it('re-reads config + secret on every call (stateless)', async () => {
     writeFileSync(configPath, 'PLAID_CLIENT_ID=cid-v1\nPLAID_ENV=sandbox\n')
     mockSecret = 'secret-v1'
-    const first = getPlaidClient()
+    const first = await getPlaidClient()
     expect(first.clientId).toBe('cid-v1')
 
     writeFileSync(configPath, 'PLAID_CLIENT_ID=cid-v2\nPLAID_ENV=sandbox\n')
     mockSecret = 'secret-v2'
-    const second = getPlaidClient()
+    const second = await getPlaidClient()
     expect(second.clientId).toBe('cid-v2')
     const headers = (
       second.api as unknown as {
@@ -144,32 +144,32 @@ describe('getPlaidClient', () => {
     expect(headers['PLAID-SECRET']).toBe('secret-v2')
   })
 
-  it('surfaces parser errors (e.g. retired development env) from the underlying config loader', () => {
+  it('surfaces parser errors (e.g. retired development env) from the underlying config loader', async () => {
     writeFileSync(configPath, 'PLAID_CLIENT_ID=cid\nPLAID_ENV=development\n')
     mockSecret = 'whatever'
-    expect(() => getPlaidClient()).toThrow(/development.*retired/i)
+    await expect(getPlaidClient()).rejects.toThrow(/development.*retired/i)
   })
 })
 
 describe('isPlaidConfigured', () => {
-  it('returns { configured: false, env: null } when no config file exists', () => {
-    expect(isPlaidConfigured()).toEqual({ configured: false, env: null })
+  it('returns { configured: false, env: null } when no config file exists', async () => {
+    expect(await isPlaidConfigured()).toEqual({ configured: false, env: null })
   })
 
-  it('returns { configured: false, env } when config exists but secret is missing', () => {
+  it('returns { configured: false, env } when config exists but secret is missing', async () => {
     writeFileSync(configPath, 'PLAID_CLIENT_ID=cid\nPLAID_ENV=sandbox\n')
     mockSecret = null
-    expect(isPlaidConfigured()).toEqual({ configured: false, env: 'sandbox' })
+    expect(await isPlaidConfigured()).toEqual({ configured: false, env: 'sandbox' })
   })
 
-  it('returns { configured: true, env } when both are present', () => {
+  it('returns { configured: true, env } when both are present', async () => {
     writeFileSync(configPath, 'PLAID_CLIENT_ID=cid\nPLAID_ENV=production\n')
     mockSecret = 'prod-secret'
-    expect(isPlaidConfigured()).toEqual({ configured: true, env: 'production' })
+    expect(await isPlaidConfigured()).toEqual({ configured: true, env: 'production' })
   })
 
-  it('swallows config errors and reports unconfigured (no stack traces leaked to renderer)', () => {
+  it('swallows config errors and reports unconfigured (no stack traces leaked to renderer)', async () => {
     writeFileSync(configPath, 'PLAID_CLIENT_ID=cid\nPLAID_ENV=development\n')
-    expect(isPlaidConfigured()).toEqual({ configured: false, env: null })
+    expect(await isPlaidConfigured()).toEqual({ configured: false, env: null })
   })
 })
