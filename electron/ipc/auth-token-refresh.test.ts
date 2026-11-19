@@ -168,4 +168,28 @@ describe('getValidGoogleToken', () => {
     expect(await getValidGoogleToken()).toBe('fresh-token')
     expect(global.fetch).toHaveBeenCalledOnce()
   })
+
+  it('re-stamps expires_at on refresh so the next call uses the cached token', async () => {
+    const { saveToken, loadToken, setOAuthCredentials, getValidGoogleToken } = await authModule()
+    saveToken('google', {
+      access_token: 'expired-token',
+      refresh_token: 'r1',
+      expires_in: 3600,
+      expires_at: Date.now() - 60 * 1000 // already expired
+    })
+    setOAuthCredentials('google', { clientId: 'cid', clientSecret: 'csecret' })
+    mockFetchOnce({ ok: true, body: { access_token: 'fresh-token', expires_in: 3600 } })
+
+    const before = Date.now()
+    expect(await getValidGoogleToken()).toBe('fresh-token')
+    const after = Date.now()
+
+    const stored = loadToken('google') as { expires_at: number }
+    expect(stored.expires_at).toBeGreaterThanOrEqual(before + 3600 * 1000)
+    expect(stored.expires_at).toBeLessThanOrEqual(after + 3600 * 1000)
+
+    // Second call must hit the cache, not Google's token endpoint again.
+    expect(await getValidGoogleToken()).toBe('fresh-token')
+    expect(global.fetch).toHaveBeenCalledOnce()
+  })
 })

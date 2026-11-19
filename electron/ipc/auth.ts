@@ -376,11 +376,14 @@ export async function refreshGoogleToken(): Promise<string> {
 
   const refreshed = (await resp.json()) as { access_token: string; expires_in: number }
 
-  // Merge new access token into the existing token bundle (preserve refresh_token)
+  // Merge new access token into the existing token bundle (preserve refresh_token).
+  // Re-stamp expires_at: getValidGoogleToken() decides from it, so leaving the
+  // original (now past) value would force a refresh on every later call.
   const updated = {
     ...tokens,
     access_token: refreshed.access_token,
-    expires_in: refreshed.expires_in
+    expires_in: refreshed.expires_in,
+    expires_at: Date.now() + refreshed.expires_in * 1000
   }
   saveToken('google', updated)
 
