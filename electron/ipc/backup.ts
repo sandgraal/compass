@@ -78,6 +78,7 @@ import {
 } from '../db/schema'
 import { getOrCreateKey } from '../lib/crypto-vault'
 import { safeEncrypt } from '../lib/safe-storage'
+import { swapInVault } from '../lib/vault-swap'
 import { DOCUMENTS_DIR, KNOWLEDGE_DIR, VAULT_DIR } from '../paths'
 
 const MAGIC = Buffer.from('COMPASSB', 'utf8') // 8 bytes
@@ -321,10 +322,10 @@ function decryptBundle(blob: Buffer, passphrase: string): Bundle {
  *   3. Run DB truncate + bulk-insert in ONE sqlite transaction. If it
  *      fails, the transaction rolls back and we have not touched the
  *      filesystem yet.
- *   4. Only after the DB transaction commits do we wipe + rewrite the
- *      vault directory and the knowledge directory, then rewrap the
- *      master key with the destination machine's `safeStorage` and
- *      write a fresh `key.enc`.
+ *   4. Only after the DB transaction commits do we replace the vault
+ *      directory (blobs + the `key.enc` rewrapped with the destination
+ *      machine's `safeStorage` before step 1 — see Stage 0) via a staged
+ *      directory swap, then wipe + rewrite the knowledge directory.
  *
  * The remaining failure window is between the DB commit and the
  * filesystem writes — if the machine power-cycles right there, the user
@@ -583,18 +584,12 @@ async function applyRestore(bundle: Bundle): Promise<{
   const rows = restoreDbTables(bundle)
 
   // --- Stage 4: FS writes — only reached if DB restore committed. ---
-  // 4a. Vault: wipe existing .enc files, write the bundle's, then emit the
-  // fresh key.enc wrapped in Stage 0.
-  if (!existsSync(VAULT_DIR)) mkdirSync(VAULT_DIR, { recursive: true })
-  for (const existing of readdirSync(VAULT_DIR)) {
-    if (existing.endsWith('.enc') || existing.endsWith('.enc.tmp')) {
-      rmSync(join(VAULT_DIR, existing), { force: true })
-    }
-  }
-  for (const [name, bytes] of vaultWrites) {
-    writeFileSync(join(VAULT_DIR, name), bytes)
-  }
-  writeFileSync(join(VAULT_DIR, 'key.enc'), wrappedKey)
+  // 4a. Vault: build the complete new vault (the bundle's blobs + the key.enc
+  // wrapped in Stage 0) in a staging dir and swap it in with renames. A
+  // failure or crash leaves either the old vault or the complete new one —
+  // never blobs without key.enc, which would make getOrCreateKey mint a new
+  // key and orphan every restored blob.
+  swapInVault(wrappedKey, vaultWrites)
 
   // 4b. Knowledge: wipe .md files (preserve .prev snapshots), then write.
   if (!existsSync(KNOWLEDGE_DIR)) mkdirSync(KNOWLEDGE_DIR, { recursive: true })

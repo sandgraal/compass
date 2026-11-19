@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http'
 import { join } from 'node:path'
 import { URL } from 'node:url'
@@ -41,7 +41,23 @@ async function writeTokenFile(path: string, data: object, what: string): Promise
   // writing a blob nothing can decrypt.
   const encrypted = await safeEncrypt(JSON.stringify(data), what)
   mkdirSync(DATA_DIR, { recursive: true })
-  writeFileSync(path, encrypted)
+  // tmp + rename: a crash mid-write must leave the previous token intact, not
+  // a truncated file that fails to decrypt (which for SnapTrade/Metriport also
+  // loses the BYO creds / patient ids stored alongside the token). Write and
+  // rename are synchronous, so the re-encrypt in `decryptFileWithStatus` —
+  // which shares the `.tmp` name — can't interleave between them.
+  const tmpPath = `${path}.tmp`
+  try {
+    writeFileSync(tmpPath, encrypted)
+    renameSync(tmpPath, path)
+  } catch (err) {
+    try {
+      unlinkSync(tmpPath)
+    } catch {
+      /* ignore */
+    }
+    throw err
+  }
 }
 
 /**

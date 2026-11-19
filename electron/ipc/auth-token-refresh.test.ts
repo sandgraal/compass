@@ -38,6 +38,12 @@ vi.mock('node:fs', () => ({
     if (!v) throw new Error(`ENOENT ${p}`)
     return v
   },
+  renameSync: (from: string, to: string) => {
+    const v = fakeFs[from]
+    if (!v) throw new Error(`ENOENT ${from}`)
+    fakeFs[to] = v
+    delete fakeFs[from]
+  },
   unlinkSync: (p: string) => {
     delete fakeFs[p]
   },
