@@ -192,7 +192,15 @@ describe('listInsights lifecycle', () => {
         handlers[channel] = h
       }
     } as unknown as IpcMain)
-    const listed = (await handlers['insights:list']({})) as { insights: Array<{ key: string }> }
+    // The handler reads the real clock; pin it to the fixtures' NOW (Date only).
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
+    let listed: { insights: Array<{ key: string }> }
+    try {
+      listed = (await handlers['insights:list']({})) as { insights: Array<{ key: string }> }
+    } finally {
+      vi.useRealTimers()
+    }
     expect(listed.insights.length).toBeGreaterThan(0)
     expect(await handlers['insights:dismiss']({}, '', true)).toEqual({ success: false })
     expect(await handlers['insights:dismiss']({}, 42, true)).toEqual({ success: false })

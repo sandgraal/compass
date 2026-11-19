@@ -787,8 +787,15 @@ describe('correlations (chart data for /insights)', () => {
         handlers[channel] = h
       }
     } as unknown as IpcMain)
-    const viaIpc = (await handlers['insights:correlations']({})) as { devVsRecovery: unknown }
-    expect(viaIpc.devVsRecovery).not.toBeNull()
+    // The handler reads the real clock; pin it to the fixtures' NOW (Date only).
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
+    try {
+      const viaIpc = (await handlers['insights:correlations']({})) as { devVsRecovery: unknown }
+      expect(viaIpc.devVsRecovery).not.toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
