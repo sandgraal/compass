@@ -18,7 +18,7 @@ import {
 
 export function registerSnaptradeHandlers(ipcMain: IpcMain): void {
   // Store the user's own SnapTrade partner credentials (clientId + consumerKey).
-  ipcMain.handle('snaptrade:set-byo', (_event, clientId: unknown, consumerKey: unknown) => {
+  ipcMain.handle('snaptrade:set-byo', async (_event, clientId: unknown, consumerKey: unknown) => {
     if (
       typeof clientId !== 'string' ||
       typeof consumerKey !== 'string' ||
@@ -27,7 +27,7 @@ export function registerSnaptradeHandlers(ipcMain: IpcMain): void {
     ) {
       return { success: false, error: 'Both a SnapTrade clientId and consumerKey are required.' }
     }
-    setSnaptradeByoCreds(clientId, consumerKey)
+    await setSnaptradeByoCreds(clientId, consumerKey)
     return { success: true }
   })
 
@@ -44,8 +44,8 @@ export function registerSnaptradeHandlers(ipcMain: IpcMain): void {
   // clientId/consumerKey, so reconnecting doesn't force re-entering BYO
   // creds — unlike falling through to the generic auth:disconnect, which
   // would wipe the whole token blob.
-  ipcMain.handle('snaptrade:disconnect', (): { success: true } => {
-    clearSnaptradeConnection()
+  ipcMain.handle('snaptrade:disconnect', async (): Promise<{ success: true }> => {
+    await clearSnaptradeConnection()
     getDb()
       .update(integrations)
       .set({ status: 'disconnected', lastSyncedAt: null })

@@ -256,7 +256,7 @@ function markError(message: string): void {
 }
 
 export async function syncEmailReceipts(mainWindow?: BrowserWindow): Promise<SyncResult> {
-  const tokens = loadToken('google') as { access_token?: string } | null
+  const tokens = (await loadToken('google')) as { access_token?: string } | null
   if (!tokens?.access_token) {
     return {
       service: SERVICE,
@@ -265,7 +265,7 @@ export async function syncEmailReceipts(mainWindow?: BrowserWindow): Promise<Syn
     }
   }
   try {
-    if (!hasGoogleScope('gmail.readonly')) {
+    if (!(await hasGoogleScope('gmail.readonly'))) {
       throw new Error('Gmail read permission not granted — reconnect Google.')
     }
     const accessToken = await getValidGoogleToken()

@@ -33,7 +33,7 @@ import {
 } from '../lib/contact-enrichment'
 import { normalizeName } from '../lib/people'
 import { type TimelineSearchHit, searchRecords } from '../lib/records-search'
-import { hasGoogleScope, loadToken } from './auth'
+import { googleGrantedScopes, loadToken } from './auth'
 import { addContactIdentifiers, writeContactEnrichment } from './contacts'
 
 // Bounds for the deep pass so a huge address book can't wedge the main process.
@@ -422,10 +422,11 @@ function countContacts(): number {
  * to prompt a reconnect (a token refresh never widens scopes). `contacts.other.readonly`
  * is the one added after most users first connected, so it's the usual trigger.
  */
-export function googleNeedsContactsReconnect(): boolean {
+export async function googleNeedsContactsReconnect(): Promise<boolean> {
   try {
-    if (!loadToken('google')) return false // not connected → nothing to reconnect
-    return !hasGoogleScope('contacts.readonly') || !hasGoogleScope('contacts.other.readonly')
+    if (!(await loadToken('google'))) return false // not connected → nothing to reconnect
+    const scopes = await googleGrantedScopes()
+    return !scopes.includes('contacts.readonly') || !scopes.includes('contacts.other.readonly')
   } catch {
     return false
   }
@@ -467,7 +468,7 @@ export async function runEnrichAll(win?: BrowserWindow | null): Promise<EnrichAl
     // by the API) also warrants a reconnect prompt.
     const otherErr = google.contacts?.otherError?.toLowerCase() ?? ''
     const otherPermission = /403|scope|permission|insufficient/.test(otherErr)
-    const needsReconnect = googleNeedsContactsReconnect() || otherPermission
+    const needsReconnect = (await googleNeedsContactsReconnect()) || otherPermission
     win?.webContents.send('sync:update', {
       service: 'contacts',
       status: 'success',
@@ -483,7 +484,7 @@ export async function runEnrichAll(win?: BrowserWindow | null): Promise<EnrichAl
       imported: Math.max(0, countContacts() - before),
       enriched: 0,
       photos: 0,
-      needsReconnect: googleNeedsContactsReconnect(),
+      needsReconnect: await googleNeedsContactsReconnect(),
       error: message
     }
   }
@@ -501,7 +502,10 @@ export function registerContactEnrichHandlers(ipcMain: IpcMain): void {
   })
 
   // Cheap read so the Contacts page can proactively show the reconnect prompt on load.
-  ipcMain.handle('contacts:enrich-status', (): { needsReconnect: boolean } => ({
-    needsReconnect: googleNeedsContactsReconnect()
-  }))
+  ipcMain.handle(
+    'contacts:enrich-status',
+    async (): Promise<{ needsReconnect: boolean }> => ({
+      needsReconnect: await googleNeedsContactsReconnect()
+    })
+  )
 }

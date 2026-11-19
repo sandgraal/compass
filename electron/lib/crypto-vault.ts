@@ -19,8 +19,8 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { safeStorage } from 'electron'
 import { VAULT_DIR } from '../paths'
+import { assertSafeStorageAvailable, decryptFileWithStatus, safeEncrypt } from './safe-storage'
 
 const ALGORITHM = 'aes-256-gcm'
 const KEY_SIZE = 32 // 256 bits
@@ -45,45 +45,76 @@ function assertSafeVaultName(name: string): void {
   }
 }
 
+const KEY_HEX = /^[0-9a-fA-F]{64}$/
+
 /**
  * Return the master AES key. On first use a new key is generated and
  * persisted at `.vault/key.enc` (encrypted via safeStorage). On every
- * subsequent call the existing key is decrypted and returned.
+ * subsequent call the existing key is decrypted and returned — nothing is
+ * cached, so a key.enc rewritten by a backup restore is picked up at once.
+ *
+ * Callers doing a read → modify → write of a vault blob must await this ONCE
+ * up front and keep the rest synchronous, or two concurrent writers can
+ * interleave and drop an update.
+ *
+ * `key.enc` files written by the deprecated sync `safeStorage.encryptString`
+ * decrypt unchanged through `decryptStringAsync` — no re-encryption needed.
  *
  * Throws if `safeStorage` isn't available on the host (would mean the
  * persisted blob is unreadable) or if the decrypted material doesn't
  * round-trip into a 32-byte buffer (corrupted file or wrong format).
  */
-export function getOrCreateKey(): Buffer {
-  if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error(
-      'safeStorage is not available — cannot read/write the vault master key. ' +
-        'On macOS this means Keychain access is broken; check OS state.'
-    )
-  }
+export async function getOrCreateKey(): Promise<Buffer> {
+  await assertSafeStorageAvailable(
+    'the vault master key (on macOS this means Keychain access is broken; check OS state)'
+  )
 
   const keyPath = join(VAULT_DIR, 'key.enc')
-  if (existsSync(keyPath)) {
-    const encrypted = readFileSync(keyPath)
-    const decrypted = safeStorage.decryptString(encrypted)
-    // The persisted form is a 64-char hex string. Reject anything else
-    // loudly — a malformed key would produce subtle downstream crypto
-    // errors (e.g. "invalid key length") that are hard to diagnose.
-    if (!/^[0-9a-fA-F]{64}$/.test(decrypted)) {
-      throw new Error(
-        `Vault master key is corrupted (expected 64 hex chars, got ${decrypted.length})`
-      )
-    }
-    const key = Buffer.from(decrypted, 'hex')
-    if (key.length !== KEY_SIZE) {
-      throw new Error(`Vault master key has wrong byte length: ${key.length}`)
-    }
-    return key
-  }
+  if (existsSync(keyPath)) return decryptKeyFile(keyPath)
 
   const key = randomBytes(KEY_SIZE)
-  const encryptedKey = safeStorage.encryptString(key.toString('hex'))
-  writeFileSync(keyPath, encryptedKey)
+  const encryptedKey = await safeEncrypt(key.toString('hex'), 'the vault master key')
+  try {
+    // `wx`: never clobber a key.enc that appeared while we were encrypting —
+    // a concurrent first call (the async API opens that window), another
+    // process, or a restore. Overwriting it would orphan every blob already
+    // encrypted under the existing key; instead, adopt the winner's key.
+    writeFileSync(keyPath, encryptedKey, { flag: 'wx' })
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return decryptKeyFile(keyPath)
+    throw err
+  }
+  return key
+}
+
+async function decryptKeyFile(keyPath: string): Promise<Buffer> {
+  // A backup restore can replace key.enc while a decrypt is awaiting. Handing
+  // the caller the OLD key would make its next write unreadable, so confirm
+  // the file still holds what we decrypted — or what we ourselves wrote back
+  // when re-encrypting after an OS key rotation — and retry if it moved.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { result, original, rewrittenTo } = await decryptFileWithStatus(keyPath)
+    const now = readFileSync(keyPath)
+    if (now.equals(original) || (rewrittenTo && now.equals(rewrittenTo))) {
+      return parseKeyHex(result)
+    }
+  }
+  throw new Error('Vault master key changed repeatedly while being read — retry the operation')
+}
+
+function parseKeyHex(decrypted: string): Buffer {
+  // The persisted form is a 64-char hex string. Reject anything else
+  // loudly — a malformed key would produce subtle downstream crypto
+  // errors (e.g. "invalid key length") that are hard to diagnose.
+  if (!KEY_HEX.test(decrypted)) {
+    throw new Error(
+      `Vault master key is corrupted (expected 64 hex chars, got ${decrypted.length})`
+    )
+  }
+  const key = Buffer.from(decrypted, 'hex')
+  if (key.length !== KEY_SIZE) {
+    throw new Error(`Vault master key has wrong byte length: ${key.length}`)
+  }
   return key
 }
 

@@ -1,11 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http'
 import { join } from 'node:path'
 import { URL } from 'node:url'
 import { eq } from 'drizzle-orm'
-import { BrowserWindow, type IpcMain, safeStorage } from 'electron'
+import { BrowserWindow, type IpcMain } from 'electron'
 import { getDb } from '../db/client'
 import { integrations } from '../db/schema'
+import { decryptFile, safeEncrypt } from '../lib/safe-storage'
 import { DATA_DIR } from '../paths'
 
 const TOKEN_KEY_PREFIX = 'compass_token_'
@@ -16,32 +17,91 @@ const GITHUB_CALLBACK_PATH = '/oauth/github/callback'
 // circular import — that module imports `loadToken` from this file.
 const OURA_API = 'https://api.ouraring.com'
 
-export function saveToken(service: string, tokenData: object): void {
-  const json = JSON.stringify(tokenData)
-  const encrypted = safeStorage.encryptString(json)
-  mkdirSync(DATA_DIR, { recursive: true })
-  writeFileSync(join(DATA_DIR, `${TOKEN_KEY_PREFIX}${service}.enc`), encrypted)
+function tokenPath(service: string): string {
+  return join(DATA_DIR, `${TOKEN_KEY_PREFIX}${service}.enc`)
 }
 
-export function loadToken(service: string): object | null {
+// Per-file write queue. The async safeStorage API puts awaits inside every
+// save, so `saveToken(s, { ...await loadToken(s), x })` from two callers could
+// interleave and drop one update. Every write to a given token file — and
+// every read-modify-write via `updateToken` — runs one at a time.
+const tokenWriteQueues = new Map<string, Promise<unknown>>()
+
+function serializeTokenWrite<T>(path: string, op: () => Promise<T>): Promise<T> {
+  const run = (tokenWriteQueues.get(path) ?? Promise.resolve()).then(op, op)
+  tokenWriteQueues.set(
+    path,
+    run.catch(() => undefined)
+  )
+  return run
+}
+
+async function writeTokenFile(path: string, data: object, what: string): Promise<void> {
+  // safeEncrypt refuses (throws) when safeStorage is unavailable rather than
+  // writing a blob nothing can decrypt.
+  const encrypted = await safeEncrypt(JSON.stringify(data), what)
+  mkdirSync(DATA_DIR, { recursive: true })
+  writeFileSync(path, encrypted)
+}
+
+/**
+ * null when the file is absent. An existing file that can't be decrypted or
+ * parsed throws — callers that tolerate that (loadToken) catch it themselves.
+ */
+async function readTokenFileStrict(path: string): Promise<object | null> {
+  if (!existsSync(path)) return null
+  return JSON.parse(await decryptFile(path))
+}
+
+async function readTokenFile(path: string): Promise<object | null> {
   try {
-    const path = join(DATA_DIR, `${TOKEN_KEY_PREFIX}${service}.enc`)
-    if (!existsSync(path)) return null
-    const encrypted = readFileSync(path)
-    const json = safeStorage.decryptString(encrypted)
-    return JSON.parse(json)
+    return await readTokenFileStrict(path)
   } catch {
     return null
   }
 }
 
-export function deleteToken(service: string): void {
-  try {
-    const path = join(DATA_DIR, `${TOKEN_KEY_PREFIX}${service}.enc`)
-    if (existsSync(path)) unlinkSync(path)
-  } catch {
-    /* ignore */
-  }
+export function saveToken(service: string, tokenData: object): Promise<void> {
+  const path = tokenPath(service)
+  return serializeTokenWrite(path, () => writeTokenFile(path, tokenData, `the ${service} token`))
+}
+
+/**
+ * Atomic read-modify-write of a stored token: `update` receives the current
+ * token (null when none) and returns the new one, or null to leave the file
+ * untouched. Serialized with every other write to the same file, so
+ * concurrent updates can't drop each other. Rejects (writing nothing) when an
+ * existing token file can't be decrypted — rebuilding it from null would
+ * silently drop every other field it holds.
+ */
+export function updateToken(
+  service: string,
+  update: (current: object | null) => object | null
+): Promise<void> {
+  const path = tokenPath(service)
+  return serializeTokenWrite(path, async () => {
+    const next = update(await readTokenFileStrict(path))
+    if (next) await writeTokenFile(path, next, `the ${service} token`)
+  })
+}
+
+export function loadToken(service: string): Promise<object | null> {
+  return readTokenFile(tokenPath(service))
+}
+
+export function deleteToken(service: string): Promise<void> {
+  const path = tokenPath(service)
+  // Queued behind writes already issued, so a save that started before the
+  // disconnect can't land after it. A save issued AFTER the delete still
+  // writes (it is a new save); flows that hold a token across an await should
+  // use `updateToken` and return null when the token is gone.
+  return serializeTokenWrite(path, async () => {
+    try {
+      if (existsSync(path)) unlinkSync(path)
+    } catch {
+      /* ignore */
+    }
+  })
 }
 
 /**
@@ -53,8 +113,8 @@ export function deleteToken(service: string): void {
  * `contacts.other.readonly`. Empty when disconnected or the token predates a
  * `scope` field.
  */
-export function googleGrantedScopes(): string[] {
-  const token = loadToken('google') as { scope?: string } | null
+export async function googleGrantedScopes(): Promise<string[]> {
+  const token = (await loadToken('google')) as { scope?: string } | null
   if (!token?.scope || typeof token.scope !== 'string') return []
   return token.scope
     .split(/\s+/)
@@ -63,8 +123,8 @@ export function googleGrantedScopes(): string[] {
 }
 
 /** True when Google granted the given bare scope (e.g. `contacts.other.readonly`). */
-export function hasGoogleScope(scope: string): boolean {
-  return googleGrantedScopes().includes(scope)
+export async function hasGoogleScope(scope: string): Promise<boolean> {
+  return (await googleGrantedScopes()).includes(scope)
 }
 
 // =====================================================================
@@ -84,20 +144,19 @@ const CREDS_KEY_PREFIX = 'compass_oauth_creds_'
 
 export type OAuthCredentials = { clientId: string; clientSecret: string }
 
-export function setOAuthCredentials(service: string, creds: OAuthCredentials): void {
-  const json = JSON.stringify(creds)
-  const encrypted = safeStorage.encryptString(json)
-  mkdirSync(DATA_DIR, { recursive: true })
-  writeFileSync(join(DATA_DIR, `${CREDS_KEY_PREFIX}${service}.enc`), encrypted)
+export function setOAuthCredentials(service: string, creds: OAuthCredentials): Promise<void> {
+  const path = join(DATA_DIR, `${CREDS_KEY_PREFIX}${service}.enc`)
+  return serializeTokenWrite(path, () =>
+    writeTokenFile(path, creds, `the ${service} OAuth credentials`)
+  )
 }
 
-export function getOAuthCredentials(service: string): OAuthCredentials | null {
+export async function getOAuthCredentials(service: string): Promise<OAuthCredentials | null> {
   // 1. Encrypted store (preferred).
   try {
     const path = join(DATA_DIR, `${CREDS_KEY_PREFIX}${service}.enc`)
     if (existsSync(path)) {
-      const encrypted = readFileSync(path)
-      const json = safeStorage.decryptString(encrypted)
+      const json = await decryptFile(path)
       const parsed = JSON.parse(json) as Partial<OAuthCredentials>
       if (parsed.clientId && parsed.clientSecret) {
         return { clientId: parsed.clientId, clientSecret: parsed.clientSecret }
@@ -116,17 +175,19 @@ export function getOAuthCredentials(service: string): OAuthCredentials | null {
   return null
 }
 
-export function hasOAuthCredentials(service: string): boolean {
-  return getOAuthCredentials(service) !== null
+export async function hasOAuthCredentials(service: string): Promise<boolean> {
+  return (await getOAuthCredentials(service)) !== null
 }
 
-export function deleteOAuthCredentials(service: string): void {
-  try {
-    const path = join(DATA_DIR, `${CREDS_KEY_PREFIX}${service}.enc`)
-    if (existsSync(path)) unlinkSync(path)
-  } catch {
-    /* ignore */
-  }
+export function deleteOAuthCredentials(service: string): Promise<void> {
+  const path = join(DATA_DIR, `${CREDS_KEY_PREFIX}${service}.enc`)
+  return serializeTokenWrite(path, async () => {
+    try {
+      if (existsSync(path)) unlinkSync(path)
+    } catch {
+      /* ignore */
+    }
+  })
 }
 
 const SUCCESS_HTML = `<!DOCTYPE html><html><head><title>Compass — Connected</title>
@@ -334,7 +395,7 @@ async function exchangeCodeForTokens(
  * Returns the fresh access token, or throws if refresh fails.
  */
 export async function refreshGoogleToken(): Promise<string> {
-  const tokens = loadToken('google') as {
+  const tokens = (await loadToken('google')) as {
     access_token?: string
     refresh_token?: string
     expires_in?: number
@@ -349,7 +410,7 @@ export async function refreshGoogleToken(): Promise<string> {
   // app users who pasted creds via the inline form can refresh their access
   // token. Without this, refresh quietly fell back to process.env (empty on
   // packaged builds) and every refresh failed with an opaque 400.
-  const creds = getOAuthCredentials('google')
+  const creds = await getOAuthCredentials('google')
   if (!creds) {
     throw new Error(
       'Google credentials not configured — open Integrations, click Connect on the Google card, and re-enter your Client ID + Secret.'
@@ -376,16 +437,22 @@ export async function refreshGoogleToken(): Promise<string> {
 
   const refreshed = (await resp.json()) as { access_token: string; expires_in: number }
 
-  // Merge new access token into the existing token bundle (preserve refresh_token).
+  // Merge the new access token into the CURRENT bundle (preserve refresh_token).
+  // If Google was disconnected while the refresh was in flight, write nothing
+  // rather than resurrecting the token from the pre-fetch snapshot.
   // Re-stamp expires_at: getValidGoogleToken() decides from it, so leaving the
   // original (now past) value would force a refresh on every later call.
-  const updated = {
-    ...tokens,
-    access_token: refreshed.access_token,
-    expires_in: refreshed.expires_in,
-    expires_at: Date.now() + refreshed.expires_in * 1000
-  }
-  saveToken('google', updated)
+  const expiresAt = Date.now() + refreshed.expires_in * 1000
+  await updateToken('google', (cur) =>
+    cur
+      ? {
+          ...cur,
+          access_token: refreshed.access_token,
+          expires_in: refreshed.expires_in,
+          expires_at: expiresAt
+        }
+      : null
+  )
 
   return refreshed.access_token
 }
@@ -395,7 +462,7 @@ export async function refreshGoogleToken(): Promise<string> {
  * Call this instead of reading the token directly in sync handlers.
  */
 export async function getValidGoogleToken(): Promise<string> {
-  const tokens = loadToken('google') as {
+  const tokens = (await loadToken('google')) as {
     access_token?: string
     refresh_token?: string
     expires_at?: number // ms epoch — we set this on save
@@ -417,7 +484,7 @@ export async function getValidGoogleToken(): Promise<string> {
 
 export function registerAuthHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('auth:connect-google', async () => {
-    const creds = getOAuthCredentials('google')
+    const creds = await getOAuthCredentials('google')
     if (!creds) {
       return {
         error:
@@ -467,7 +534,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
         clientSecret,
         verifier
       )
-      saveToken('google', tokens)
+      await saveToken('google', tokens)
 
       const db = getDb()
       db.insert(integrations)
@@ -527,7 +594,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
         clientSecret,
         ''
       )
-      saveToken('github', tokens)
+      await saveToken('github', tokens)
 
       const db = getDb()
       db.insert(integrations)
@@ -605,7 +672,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
       const grantedScopes =
         parsedScopes && parsedScopes.length > 0 ? parsedScopes : ['fine-grained']
 
-      saveToken('github', { access_token: trimmed, auth_method: 'pat', login: user.login })
+      await saveToken('github', { access_token: trimmed, auth_method: 'pat', login: user.login })
 
       const db = getDb()
       db.insert(integrations)
@@ -666,7 +733,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
       }
       const workspace = me.bot?.workspace_name ?? me.name ?? null
 
-      saveToken('notion', {
+      await saveToken('notion', {
         access_token: trimmed,
         auth_method: 'internal-integration',
         workspace
@@ -734,7 +801,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
       }
       const name = json.data.viewer.name ?? null
 
-      saveToken('linear', { access_token: trimmed, auth_method: 'personal-api-key', name })
+      await saveToken('linear', { access_token: trimmed, auth_method: 'personal-api-key', name })
 
       const db = getDb()
       db.insert(integrations)
@@ -793,7 +860,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
         return { error: `Todoist responded with HTTP ${resp.status}.` }
       }
 
-      saveToken('todoist', { access_token: trimmed, auth_method: 'personal-api-token' })
+      await saveToken('todoist', { access_token: trimmed, auth_method: 'personal-api-token' })
 
       const db = getDb()
       db.insert(integrations)
@@ -853,7 +920,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
         return { error: `Oura responded with HTTP ${resp.status}.` }
       }
 
-      saveToken('oura', { access_token: trimmed, auth_method: 'personal-access-token' })
+      await saveToken('oura', { access_token: trimmed, auth_method: 'personal-access-token' })
 
       const db = getDb()
       db.insert(integrations)
@@ -915,7 +982,7 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
         return { error: 'Client Secret looks too short.' }
       }
       try {
-        setOAuthCredentials('google', { clientId: id, clientSecret: secret })
+        await setOAuthCredentials('google', { clientId: id, clientSecret: secret })
         return { success: true }
       } catch (err) {
         return { error: (err as Error).message }
@@ -923,17 +990,17 @@ export function registerAuthHandlers(ipcMain: IpcMain): void {
     }
   )
 
-  ipcMain.handle('auth:has-google-credentials', () => ({
-    configured: hasOAuthCredentials('google')
+  ipcMain.handle('auth:has-google-credentials', async () => ({
+    configured: await hasOAuthCredentials('google')
   }))
 
-  ipcMain.handle('auth:clear-google-credentials', () => {
-    deleteOAuthCredentials('google')
+  ipcMain.handle('auth:clear-google-credentials', async () => {
+    await deleteOAuthCredentials('google')
     return { success: true }
   })
 
   ipcMain.handle('auth:disconnect', async (_event, service: string) => {
-    deleteToken(service)
+    await deleteToken(service)
     const db = getDb()
     db.update(integrations)
       .set({ status: 'disconnected', lastSyncedAt: null })

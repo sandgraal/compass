@@ -21,14 +21,14 @@ let TMP_VAULT_DIR: string
 
 vi.mock('electron', () => ({
   safeStorage: {
-    isEncryptionAvailable: () => true,
+    isAsyncEncryptionAvailable: async () => true,
     // Trivial round-trip: wrap/unwrap with a fixed prefix so the
     // "decrypts back to the original" invariant is testable.
-    encryptString: (s: string) => Buffer.from(`SAFE:${s}`, 'utf8'),
-    decryptString: (b: Buffer) => {
+    encryptStringAsync: async (s: string) => Buffer.from(`SAFE:${s}`, 'utf8'),
+    decryptStringAsync: async (b: Buffer) => {
       const s = b.toString('utf8')
       if (!s.startsWith('SAFE:')) throw new Error('mock safeStorage: invalid blob')
-      return s.slice('SAFE:'.length)
+      return { result: s.slice('SAFE:'.length), shouldReEncrypt: false }
     }
   }
 }))
@@ -51,11 +51,11 @@ const {
   clearPlaidVault
 } = await import('./vault')
 
-beforeEach(() => {
+beforeEach(async () => {
   TMP_VAULT_DIR = mkdtempSync(join(tmpdir(), 'compass-plaid-vault-'))
 })
 
-afterEach(() => {
+afterEach(async () => {
   try {
     rmSync(TMP_VAULT_DIR, { recursive: true, force: true })
   } catch {
@@ -64,131 +64,131 @@ afterEach(() => {
 })
 
 describe('plaid vault — secrets', () => {
-  it('returns null when no secret has been stored', () => {
-    expect(getPlaidSecret('sandbox')).toBeNull()
-    expect(getPlaidSecret('development')).toBeNull()
-    expect(getPlaidSecret('production')).toBeNull()
+  it('returns null when no secret has been stored', async () => {
+    expect(await getPlaidSecret('sandbox')).toBeNull()
+    expect(await getPlaidSecret('development')).toBeNull()
+    expect(await getPlaidSecret('production')).toBeNull()
   })
 
-  it('round-trips a secret', () => {
-    setPlaidSecret('development', 'secret-abc')
-    expect(getPlaidSecret('development')).toBe('secret-abc')
+  it('round-trips a secret', async () => {
+    await setPlaidSecret('development', 'secret-abc')
+    expect(await getPlaidSecret('development')).toBe('secret-abc')
   })
 
-  it('keeps secrets per environment independent', () => {
-    setPlaidSecret('sandbox', 'sandbox-secret')
-    setPlaidSecret('production', 'prod-secret')
-    expect(getPlaidSecret('sandbox')).toBe('sandbox-secret')
-    expect(getPlaidSecret('production')).toBe('prod-secret')
-    expect(getPlaidSecret('development')).toBeNull()
+  it('keeps secrets per environment independent', async () => {
+    await setPlaidSecret('sandbox', 'sandbox-secret')
+    await setPlaidSecret('production', 'prod-secret')
+    expect(await getPlaidSecret('sandbox')).toBe('sandbox-secret')
+    expect(await getPlaidSecret('production')).toBe('prod-secret')
+    expect(await getPlaidSecret('development')).toBeNull()
   })
 
-  it('overwrites on re-set', () => {
-    setPlaidSecret('sandbox', 'first')
-    setPlaidSecret('sandbox', 'second')
-    expect(getPlaidSecret('sandbox')).toBe('second')
+  it('overwrites on re-set', async () => {
+    await setPlaidSecret('sandbox', 'first')
+    await setPlaidSecret('sandbox', 'second')
+    expect(await getPlaidSecret('sandbox')).toBe('second')
   })
 
-  it('removePlaidSecret deletes only the targeted env', () => {
-    setPlaidSecret('sandbox', 'sb')
-    setPlaidSecret('production', 'pr')
-    removePlaidSecret('sandbox')
-    expect(getPlaidSecret('sandbox')).toBeNull()
-    expect(getPlaidSecret('production')).toBe('pr')
+  it('removePlaidSecret deletes only the targeted env', async () => {
+    await setPlaidSecret('sandbox', 'sb')
+    await setPlaidSecret('production', 'pr')
+    await removePlaidSecret('sandbox')
+    expect(await getPlaidSecret('sandbox')).toBeNull()
+    expect(await getPlaidSecret('production')).toBe('pr')
   })
 
-  it('removePlaidSecret is a no-op when nothing is stored', () => {
-    expect(() => removePlaidSecret('development')).not.toThrow()
+  it('removePlaidSecret is a no-op when nothing is stored', async () => {
+    await expect(removePlaidSecret('development')).resolves.not.toThrow()
   })
 
-  it('rejects empty secret strings', () => {
-    expect(() => setPlaidSecret('sandbox', '')).toThrow(/non-empty/)
+  it('rejects empty secret strings', async () => {
+    await expect(setPlaidSecret('sandbox', '')).rejects.toThrow(/non-empty/)
   })
 })
 
 describe('plaid vault — access tokens', () => {
-  it('returns null when no token is stored for an item', () => {
-    expect(getAccessToken('item_unknown')).toBeNull()
+  it('returns null when no token is stored for an item', async () => {
+    expect(await getAccessToken('item_unknown')).toBeNull()
   })
 
-  it('round-trips an access token', () => {
-    setAccessToken('item_abc', 'access-sandbox-xyz')
-    expect(getAccessToken('item_abc')).toBe('access-sandbox-xyz')
+  it('round-trips an access token', async () => {
+    await setAccessToken('item_abc', 'access-sandbox-xyz')
+    expect(await getAccessToken('item_abc')).toBe('access-sandbox-xyz')
   })
 
-  it('keeps tokens per Item independent', () => {
-    setAccessToken('item_a', 'token-a')
-    setAccessToken('item_b', 'token-b')
-    expect(getAccessToken('item_a')).toBe('token-a')
-    expect(getAccessToken('item_b')).toBe('token-b')
+  it('keeps tokens per Item independent', async () => {
+    await setAccessToken('item_a', 'token-a')
+    await setAccessToken('item_b', 'token-b')
+    expect(await getAccessToken('item_a')).toBe('token-a')
+    expect(await getAccessToken('item_b')).toBe('token-b')
   })
 
-  it('removeAccessToken deletes only the targeted item', () => {
-    setAccessToken('item_a', 'token-a')
-    setAccessToken('item_b', 'token-b')
-    removeAccessToken('item_a')
-    expect(getAccessToken('item_a')).toBeNull()
-    expect(getAccessToken('item_b')).toBe('token-b')
+  it('removeAccessToken deletes only the targeted item', async () => {
+    await setAccessToken('item_a', 'token-a')
+    await setAccessToken('item_b', 'token-b')
+    await removeAccessToken('item_a')
+    expect(await getAccessToken('item_a')).toBeNull()
+    expect(await getAccessToken('item_b')).toBe('token-b')
   })
 
-  it('listItemIds returns sorted ids without leaking tokens', () => {
-    setAccessToken('item_b', 'b')
-    setAccessToken('item_a', 'a')
-    setAccessToken('item_c', 'c')
-    expect(listItemIds()).toEqual(['item_a', 'item_b', 'item_c'])
+  it('listItemIds returns sorted ids without leaking tokens', async () => {
+    await setAccessToken('item_b', 'b')
+    await setAccessToken('item_a', 'a')
+    await setAccessToken('item_c', 'c')
+    expect(await listItemIds()).toEqual(['item_a', 'item_b', 'item_c'])
   })
 
-  it('listItemIds returns [] for a fresh vault', () => {
-    expect(listItemIds()).toEqual([])
+  it('listItemIds returns [] for a fresh vault', async () => {
+    expect(await listItemIds()).toEqual([])
   })
 
-  it('rejects empty itemId / token', () => {
-    expect(() => setAccessToken('', 'token')).toThrow(/itemId/)
-    expect(() => setAccessToken('item_a', '')).toThrow(/access_token/)
+  it('rejects empty itemId / token', async () => {
+    await expect(setAccessToken('', 'token')).rejects.toThrow(/itemId/)
+    await expect(setAccessToken('item_a', '')).rejects.toThrow(/access_token/)
   })
 
-  it('getAccessToken returns null for empty itemId rather than throwing', () => {
+  it('getAccessToken returns null for empty itemId rather than throwing', async () => {
     // Defensive — callers may not have validated input.
-    expect(getAccessToken('')).toBeNull()
+    expect(await getAccessToken('')).toBeNull()
   })
 })
 
 describe('plaid vault — clear', () => {
-  it('clearPlaidVault wipes both secrets and tokens', () => {
-    setPlaidSecret('sandbox', 'sb')
-    setAccessToken('item_a', 'tok')
-    clearPlaidVault()
-    expect(getPlaidSecret('sandbox')).toBeNull()
-    expect(getAccessToken('item_a')).toBeNull()
-    expect(listItemIds()).toEqual([])
+  it('clearPlaidVault wipes both secrets and tokens', async () => {
+    await setPlaidSecret('sandbox', 'sb')
+    await setAccessToken('item_a', 'tok')
+    await clearPlaidVault()
+    expect(await getPlaidSecret('sandbox')).toBeNull()
+    expect(await getAccessToken('item_a')).toBeNull()
+    expect(await listItemIds()).toEqual([])
   })
 
-  it('clearPlaidVault is a no-op when the file does not exist', () => {
+  it('clearPlaidVault is a no-op when the file does not exist', async () => {
     expect(existsSync(join(TMP_VAULT_DIR, 'plaid.enc'))).toBe(false)
-    expect(() => clearPlaidVault()).not.toThrow()
+    await expect(clearPlaidVault()).resolves.not.toThrow()
   })
 
-  it('clearPlaidVault leaves the encrypted file on disk (overwrites, does not rm)', () => {
+  it('clearPlaidVault leaves the encrypted file on disk (overwrites, does not rm)', async () => {
     // On-disk observers shouldn't be able to tell "wiped" apart from
     // "never used".
-    setAccessToken('item_a', 'tok')
-    clearPlaidVault()
+    await setAccessToken('item_a', 'tok')
+    await clearPlaidVault()
     expect(existsSync(join(TMP_VAULT_DIR, 'plaid.enc'))).toBe(true)
   })
 })
 
 describe('plaid vault — secrets + tokens coexist', () => {
-  it('writing a secret does not clobber tokens (and vice versa)', () => {
-    setAccessToken('item_a', 'tok')
-    setPlaidSecret('sandbox', 'sb')
-    expect(getAccessToken('item_a')).toBe('tok')
-    expect(getPlaidSecret('sandbox')).toBe('sb')
+  it('writing a secret does not clobber tokens (and vice versa)', async () => {
+    await setAccessToken('item_a', 'tok')
+    await setPlaidSecret('sandbox', 'sb')
+    expect(await getAccessToken('item_a')).toBe('tok')
+    expect(await getPlaidSecret('sandbox')).toBe('sb')
 
-    setAccessToken('item_b', 'tok2')
-    expect(getPlaidSecret('sandbox')).toBe('sb')
+    await setAccessToken('item_b', 'tok2')
+    expect(await getPlaidSecret('sandbox')).toBe('sb')
 
-    setPlaidSecret('production', 'pr')
-    expect(getAccessToken('item_a')).toBe('tok')
-    expect(getAccessToken('item_b')).toBe('tok2')
+    await setPlaidSecret('production', 'pr')
+    expect(await getAccessToken('item_a')).toBe('tok')
+    expect(await getAccessToken('item_b')).toBe('tok2')
   })
 })

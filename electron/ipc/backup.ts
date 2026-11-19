@@ -51,7 +51,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { sep as PATH_SEP, join, relative } from 'node:path'
-import { type IpcMain, app, dialog, safeStorage } from 'electron'
+import { type IpcMain, app, dialog } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
 import {
   appSettings,
@@ -77,6 +77,7 @@ import {
   syncEvents
 } from '../db/schema'
 import { getOrCreateKey } from '../lib/crypto-vault'
+import { safeEncrypt } from '../lib/safe-storage'
 import { DOCUMENTS_DIR, KNOWLEDGE_DIR, VAULT_DIR } from '../paths'
 
 const MAGIC = Buffer.from('COMPASSB', 'utf8') // 8 bytes
@@ -208,7 +209,13 @@ function collectDocumentsFiles(): Record<string, string> {
   return out
 }
 
-function collectBundle(): Bundle {
+async function collectBundle(): Promise<Bundle> {
+  // Unwrap the master key through `safeStorage` FIRST so the bundle carries
+  // it as plaintext hex; the only secret then is the user's passphrase.
+  // Awaiting before any read keeps the rest of the capture synchronous — a
+  // consistent DB + blob snapshot with no write able to land mid-collect.
+  const masterKeyHex = (await getOrCreateKey()).toString('hex')
+
   const allTables = collectAllTables(getRawSqlite())
 
   const knowledge: Record<string, string> = {}
@@ -228,12 +235,6 @@ function collectBundle(): Bundle {
       vault[entry] = readFileSync(full).toString('base64')
     }
   }
-
-  // Unwrap the master key through `safeStorage` so the bundle carries
-  // it as plaintext hex. `getOrCreateKey()` handles the safeStorage
-  // round-trip; the only secret then is the user's passphrase.
-  const masterKey = getOrCreateKey()
-  const masterKeyHex = masterKey.toString('hex')
 
   return {
     version: 3,
@@ -538,12 +539,20 @@ function restoreDbTables(bundle: Bundle): number {
     : restoreCuratedV2(bundle)
 }
 
-function applyRestore(bundle: Bundle): {
+async function applyRestore(bundle: Bundle): Promise<{
   vaultFiles: number
   knowledgeFiles: number
   rows: number
   documentFiles: number
-} {
+}> {
+  // --- Stage 0: rewrap the master key with THIS machine's safeStorage before
+  // anything destructive. If safeStorage is unavailable we throw here, while
+  // the DB and .vault/ are untouched —
+  // previously the vault was wiped and the DB committed before this check,
+  // leaving restored blobs with no key.enc. This is also the only await:
+  // every stage below is synchronous, so no other vault writer can interleave.
+  const wrappedKey = await safeEncrypt(bundle.masterKeyHex, 'the restored vault master key')
+
   // --- Stage 1: materialise vault writes (decode + sanity-check filenames) ---
   const vaultWrites: Array<[string, Buffer]> = []
   for (const [name, b64] of Object.entries(bundle.vault)) {
@@ -574,9 +583,8 @@ function applyRestore(bundle: Bundle): {
   const rows = restoreDbTables(bundle)
 
   // --- Stage 4: FS writes — only reached if DB restore committed. ---
-  // 4a. Vault: wipe existing .enc files, write the bundle's, then rewrap
-  // the master key with this machine's safeStorage and emit fresh
-  // key.enc.
+  // 4a. Vault: wipe existing .enc files, write the bundle's, then emit the
+  // fresh key.enc wrapped in Stage 0.
   if (!existsSync(VAULT_DIR)) mkdirSync(VAULT_DIR, { recursive: true })
   for (const existing of readdirSync(VAULT_DIR)) {
     if (existing.endsWith('.enc') || existing.endsWith('.enc.tmp')) {
@@ -586,11 +594,7 @@ function applyRestore(bundle: Bundle): {
   for (const [name, bytes] of vaultWrites) {
     writeFileSync(join(VAULT_DIR, name), bytes)
   }
-  if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error('safeStorage unavailable — cannot rewrap the master key on this machine')
-  }
-  const wrapped = safeStorage.encryptString(bundle.masterKeyHex)
-  writeFileSync(join(VAULT_DIR, 'key.enc'), wrapped)
+  writeFileSync(join(VAULT_DIR, 'key.enc'), wrappedKey)
 
   // 4b. Knowledge: wipe .md files (preserve .prev snapshots), then write.
   if (!existsSync(KNOWLEDGE_DIR)) mkdirSync(KNOWLEDGE_DIR, { recursive: true })
@@ -658,7 +662,7 @@ export function registerBackupHandlers(ipcMain: IpcMain): void {
       })
       if (canceled || !filePath) return { success: false, canceled: true }
 
-      const bundle = collectBundle()
+      const bundle = await collectBundle()
       const blob = encryptBundle(bundle, passphrase)
       writeFileSync(filePath, blob)
       return {
@@ -693,7 +697,7 @@ export function registerBackupHandlers(ipcMain: IpcMain): void {
       }
       const blob = readFileSync(filePaths[0])
       const bundle = decryptBundle(blob, passphrase)
-      const stats = applyRestore(bundle)
+      const stats = await applyRestore(bundle)
       return {
         success: true,
         path: filePaths[0],
@@ -715,11 +719,11 @@ export function registerBackupHandlers(ipcMain: IpcMain): void {
 // capture, the crypto (scrypt + AES-256-GCM), and the atomic restore.
 
 /** Build a passphrase-encrypted snapshot of everything (the v3 bundle). */
-export function buildEncryptedSnapshot(passphrase: string): {
+export async function buildEncryptedSnapshot(passphrase: string): Promise<{
   blob: Buffer
   exportedAt: string
-} {
-  const bundle = collectBundle()
+}> {
+  const bundle = await collectBundle()
   return { blob: encryptBundle(bundle, passphrase), exportedAt: bundle.exportedAt }
 }
 
@@ -727,7 +731,7 @@ export function buildEncryptedSnapshot(passphrase: string): {
 export function restoreEncryptedSnapshot(
   blob: Buffer,
   passphrase: string
-): { rows: number; vaultFiles: number; knowledgeFiles: number; documentFiles: number } {
+): Promise<{ rows: number; vaultFiles: number; knowledgeFiles: number; documentFiles: number }> {
   return applyRestore(decryptBundle(blob, passphrase))
 }
 

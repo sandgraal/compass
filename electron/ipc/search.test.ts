@@ -54,7 +54,7 @@ function writeVaultCategory(category: string, entries: Array<Record<string, unkn
   writeFileSync(join(dirs.vault, `${category}.enc`), JSON.stringify(entries))
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   mkdirSync(dirs.vault, { recursive: true })
   mkdirSync(dirs.knowledge, { recursive: true })
   sqlite = new Database(':memory:')
@@ -91,13 +91,13 @@ beforeEach(() => {
   `)
 })
 
-afterEach(() => {
+afterEach(async () => {
   sqlite.close()
   rmSync(dirs.base, { recursive: true, force: true })
 })
 
 describe('searchDocumentsHits — documents store is body-searchable', () => {
-  it('finds a document by a word only in its extracted text', () => {
+  it('finds a document by a word only in its extracted text', async () => {
     sqlite
       .prepare(
         'INSERT INTO documents (title, file_name, sha256, stored_path, extracted_text) VALUES (?,?,?,?,?)'
@@ -108,48 +108,48 @@ describe('searchDocumentsHits — documents store is body-searchable', () => {
     expect(hits[0]).toMatchObject({ kind: 'document', title: 'Lease 2026', fileName: 'lease.pdf' })
   })
 
-  it('returns [] when documents_fts is absent (odd/old DB)', () => {
+  it('returns [] when documents_fts is absent (odd/old DB)', async () => {
     sqlite.exec('DROP TRIGGER documents_ai; DROP TABLE documents_fts;')
     expect(searchDocumentsHits('anything')).toEqual([])
   })
 })
 
 describe('scoreMatch', () => {
-  it('returns 0 when the needle is absent', () => {
+  it('returns 0 when the needle is absent', async () => {
     expect(scoreMatch('Hello world', 'foo')).toBe(0)
   })
 
-  it('rewards earlier matches over later ones', () => {
+  it('rewards earlier matches over later ones', async () => {
     const early = scoreMatch('coffee at the cafe', 'coffee')
     const late = scoreMatch('we drove out for some coffee', 'coffee')
     expect(early).toBeGreaterThan(late)
   })
 
-  it('rewards whole-word matches', () => {
+  it('rewards whole-word matches', async () => {
     const whole = scoreMatch('budget for april', 'april')
     const partial = scoreMatch('aprilita is here', 'april')
     expect(whole).toBeGreaterThan(partial)
   })
 
-  it('penalises long haystacks', () => {
+  it('penalises long haystacks', async () => {
     const short = scoreMatch('apple', 'apple')
     const long = scoreMatch(`apple ${'x '.repeat(200)}`, 'apple')
     expect(short).toBeGreaterThan(long)
   })
 
-  it('is case-insensitive', () => {
+  it('is case-insensitive', async () => {
     expect(scoreMatch('Hello WORLD', 'hello')).toBeGreaterThan(0)
     expect(scoreMatch('Hello WORLD', 'world')).toBeGreaterThan(0)
   })
 })
 
 describe('searchVault — post-split, MIGRATED category blobs are never searched', () => {
-  it('ignores a leftover identity blob entirely (life records own that data now)', () => {
+  it('ignores a leftover identity blob entirely (life records own that data now)', async () => {
     writeVaultCategory('identity', [
       { id: 'e1', documentType: 'Passport', name: 'Chris', passportNumber: 'X1234567' }
     ])
-    expect(searchVault('x1234567')).toHaveLength(0)
-    expect(searchVault('passport')).toHaveLength(0)
+    expect(await searchVault('x1234567')).toHaveLength(0)
+    expect(await searchVault('passport')).toHaveLength(0)
   })
 })
 
@@ -174,7 +174,7 @@ describe('searchLifeRecords — metadata is body-searchable, secrets structurall
       )
   }
 
-  it('finds a record by its title (no snippet on a title match)', () => {
+  it('finds a record by its title (no snippet on a title match)', async () => {
     insertLife({ externalId: 'v:1', category: 'identity', title: 'Passport' })
     const hits = searchLifeRecords('passport')
     expect(hits).toHaveLength(1)
@@ -182,7 +182,7 @@ describe('searchLifeRecords — metadata is body-searchable, secrets structurall
     expect(hits[0].kind === 'life' && hits[0].snippet).toBeUndefined()
   })
 
-  it('finds a record by a field value or notes, with a snippet window', () => {
+  it('finds a record by a field value or notes, with a snippet window', async () => {
     insertLife({
       externalId: 'v:2',
       category: 'legal',
@@ -196,7 +196,7 @@ describe('searchLifeRecords — metadata is body-searchable, secrets structurall
     expect(searchLifeRecords('fireproof')).toHaveLength(1)
   })
 
-  it('searches foreign-account metadata but can never see an account number', () => {
+  it('searches foreign-account metadata but can never see an account number', async () => {
     // The secret VALUE is not in the table by construction — only the metadata is.
     insertLife({
       externalId: 'v:3',
@@ -210,7 +210,7 @@ describe('searchLifeRecords — metadata is body-searchable, secrets structurall
 })
 
 describe('searchVault — credentials stay sealed (title-only)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     writeVaultCategory('credentials', [
       {
         id: 'c1',
@@ -222,23 +222,23 @@ describe('searchVault — credentials stay sealed (title-only)', () => {
     ])
   })
 
-  it('finds a credential by its service label, without any snippet', () => {
-    const hits = searchVault('netflix')
+  it('finds a credential by its service label, without any snippet', async () => {
+    const hits = await searchVault('netflix')
     expect(hits).toHaveLength(1)
     expect(hits[0].kind === 'vault' && hits[0].snippet).toBeUndefined()
     expect(hits[0].kind === 'vault' && hits[0].matchedField).toBeUndefined()
   })
 
-  it('NEVER matches a password value', () => {
-    expect(searchVault('hunter2')).toHaveLength(0)
+  it('NEVER matches a password value', async () => {
+    expect(await searchVault('hunter2')).toHaveLength(0)
   })
 
-  it('NEVER matches a username (identifiers are sensitive in their own right)', () => {
-    expect(searchVault('chris@example.com')).toHaveLength(0)
+  it('NEVER matches a username (identifiers are sensitive in their own right)', async () => {
+    expect(await searchVault('chris@example.com')).toHaveLength(0)
   })
 
-  it('NEVER matches credential notes or any other body field', () => {
-    expect(searchVault('shared with family')).toHaveLength(0)
+  it('NEVER matches credential notes or any other body field', async () => {
+    expect(await searchVault('shared with family')).toHaveLength(0)
   })
 })
 
@@ -251,7 +251,7 @@ describe('searchRecordsSpine', () => {
       .run(source, type, 1750000000000, title, body, `${source}|${title}`)
   }
 
-  it('finds spine records across domains via FTS (medical included — full detail)', () => {
+  it('finds spine records across domains via FTS (medical included — full detail)', async () => {
     insertRecord('medical', 'medication', 'Aspirin 81mg', 'active · RxNorm:243670')
     insertRecord('finance', 'txn', 'Starbucks', '-6.50 USD · Dining')
     insertRecord('habit', 'habit-check', 'Meditate', 'checked')
@@ -266,7 +266,7 @@ describe('searchRecordsSpine', () => {
     expect(searchRecordsSpine('meditate')).toHaveLength(0)
   })
 
-  it('returns empty (not throwing) when the FTS table is missing', () => {
+  it('returns empty (not throwing) when the FTS table is missing', async () => {
     sqlite.exec('DROP TRIGGER records_ai; DROP TABLE records_fts;')
     expect(searchRecordsSpine('anything')).toEqual([])
   })
@@ -281,7 +281,7 @@ describe('searchContacts', () => {
       .run(`c-${displayName}`, displayName, org, blob)
   }
 
-  it('matches on the search blob (name, org, email, phone) and ranks name matches first', () => {
+  it('matches on the search blob (name, org, email, phone) and ranks name matches first', async () => {
     insertContact('Jane Doe', 'Acme', 'jane doe acme jane@example.com')
     insertContact('Bob Smith', null, 'bob smith jane-referral@example.com')
 
@@ -290,7 +290,7 @@ describe('searchContacts', () => {
     expect(hits[0]).toMatchObject({ kind: 'contact', displayName: 'Jane Doe', org: 'Acme' })
   })
 
-  it('never returns photo or enrichment payloads', () => {
+  it('never returns photo or enrichment payloads', async () => {
     insertContact('Jane Doe', null, 'jane doe')
     const [hit] = searchContacts('jane')
     expect(Object.keys(hit).sort()).toEqual([

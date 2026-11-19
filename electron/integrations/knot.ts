@@ -25,7 +25,7 @@ import { eq } from 'drizzle-orm'
 import { BrowserWindow } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
 import { integrations, syncEvents } from '../db/schema'
-import { loadToken, saveToken } from '../ipc/auth'
+import { loadToken, updateToken } from '../ipc/auth'
 import { upsertLiveRecords } from '../ipc/records'
 import { parseWhen } from '../lib/dates'
 import type { RecordInput } from '../lib/recognizers'
@@ -150,8 +150,8 @@ const KNOT_SUCCESS_URL = 'https://compass.app/knot/success' // sentinel we inter
 const KNOT_SUCCESS = new URL(KNOT_SUCCESS_URL) // parsed once for exact origin+path matching
 const MAX_PAGES = 20 // per-merchant pagination guard (each page ≤ ~100 txns)
 
-function loadKnotToken(): KnotToken {
-  return (loadToken('knot') as KnotToken | null) ?? {}
+async function loadKnotToken(): Promise<KnotToken> {
+  return ((await loadToken('knot')) as KnotToken | null) ?? {}
 }
 
 /**
@@ -161,7 +161,7 @@ function loadKnotToken(): KnotToken {
  */
 export async function syncKnot(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
   const db = getDb()
-  const tok = loadKnotToken()
+  const tok = await loadKnotToken()
   if (!tok.externalUserId || !tok.merchants?.length)
     return { service: 'knot', success: false, error: 'Knot not connected' }
   const cfg = resolveRelayConfig(getRawSqlite(), 'knot', () => null)
@@ -206,7 +206,7 @@ export async function syncKnot(mainWindow?: BrowserWindow | null): Promise<SyncR
       if (cursor) cursors[merchant] = cursor
     }
     // Persist advanced cursors for the next incremental run.
-    saveToken('knot', { ...loadKnotToken(), cursors })
+    await updateToken('knot', (cur) => ({ ...(cur as KnotToken | null), cursors }))
 
     db.insert(integrations)
       .values({
@@ -276,9 +276,11 @@ export async function openKnotConnect(
   sqlite: SqliteForFx,
   parent: BrowserWindow | null
 ): Promise<{ success: boolean; error?: string }> {
-  const existing = loadKnotToken()
+  const existing = await loadKnotToken()
   const externalUserId = existing.externalUserId ?? randomUUID()
-  if (!existing.externalUserId) saveToken('knot', { ...existing, externalUserId })
+  if (!existing.externalUserId) {
+    await updateToken('knot', (cur) => ({ ...(cur as KnotToken | null), externalUserId }))
+  }
   const cfg = resolveRelayConfig(sqlite, 'knot', () => null)
 
   let connectUrl: string
@@ -341,10 +343,13 @@ export async function openKnotConnect(
         finish({ success: false, error: 'Knot returned no valid merchant id' })
         return
       }
-      const cur = loadKnotToken()
-      const merchants = Array.from(new Set([...(cur.merchants ?? []), merchant]))
-      saveToken('knot', { ...cur, merchants })
-      finish({ success: true })
+      void updateToken('knot', (cur) => {
+        const tok = (cur as KnotToken | null) ?? {}
+        return { ...tok, merchants: Array.from(new Set([...(tok.merchants ?? []), merchant])) }
+      }).then(
+        () => finish({ success: true }),
+        (err) => finish({ success: false, error: String(err) })
+      )
     }
     win.webContents.on('will-redirect', onNavigate)
     win.webContents.on('will-navigate', onNavigate)

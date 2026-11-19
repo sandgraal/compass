@@ -265,7 +265,7 @@ function applyOuraHabitAutoLinks(
  * scores land on the Storehouse timeline.
  */
 export async function syncOura(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
-  const tokens = loadToken('oura') as { access_token?: string } | null
+  const tokens = (await loadToken('oura')) as { access_token?: string } | null
   if (!tokens?.access_token) {
     return { service: 'oura', success: false, error: 'Not connected' }
   }

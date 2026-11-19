@@ -26,8 +26,12 @@ const dbUpdateSpy = vi.fn()
 
 vi.mock('electron', () => ({
   safeStorage: {
-    encryptString: encryptStringMock,
-    decryptString: decryptStringMock
+    isAsyncEncryptionAvailable: async () => true,
+    encryptStringAsync: async (s: string) => encryptStringMock(s),
+    decryptStringAsync: async (b: Buffer) => ({
+      result: decryptStringMock(b),
+      shouldReEncrypt: false
+    })
   },
   BrowserWindow: { getAllWindows: () => [] },
   app: { getPath: () => '/tmp/compass-auth-test' }

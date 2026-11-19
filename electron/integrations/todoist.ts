@@ -86,7 +86,7 @@ type SyncResult = { service: string; success: boolean; recordsUpdated?: number; 
  * integration-row + sync_events bookkeeping as the other integrations.
  */
 export async function syncTodoist(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
-  const tokens = loadToken('todoist') as { access_token?: string } | null
+  const tokens = (await loadToken('todoist')) as { access_token?: string } | null
   if (!tokens?.access_token) {
     return { service: 'todoist', success: false, error: 'Not connected' }
   }

@@ -337,7 +337,7 @@ export async function syncSimplefin(
   if (opts?.fetchAccountsFn) {
     fetchAccountsFn = opts.fetchAccountsFn
   } else {
-    const accessUrl = getAccessUrl(connectionId)
+    const accessUrl = await getAccessUrl(connectionId)
     if (!accessUrl) {
       return {
         ...base,
@@ -548,7 +548,7 @@ export async function backfillSimplefinHistory(
   if (opts?.fetchAccountsFn) {
     fetchAccountsFn = opts.fetchAccountsFn
   } else {
-    const accessUrl = getAccessUrl(connectionId)
+    const accessUrl = await getAccessUrl(connectionId)
     if (!accessUrl) {
       return {
         ...base,
