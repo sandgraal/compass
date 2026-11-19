@@ -21,7 +21,18 @@
  * electron (app/dialog/safeStorage) and the vault master-key helper are mocked.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
@@ -44,6 +55,33 @@ const { TEST_ROOT, KB_DIR, VAULT_DIR_PATH, DOWNLOADS_DIR, DOCS_DIR } = vi.hoiste
     DOWNLOADS_DIR: path.join(root, 'downloads'),
     DOCS_DIR: path.join(root, 'documents')
   }
+})
+
+// Fault injection for the crash-atomicity tests; pass-through when null.
+// `writeCrash` models a process dying mid-write (truncated file, then throw).
+const fsFault = vi.hoisted(() => ({
+  writeCrash: null as null | ((p: string) => boolean),
+  renameFails: null as null | ((from: string, to: string) => boolean)
+}))
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  const writeFileSync = ((p, data, opts) => {
+    if (typeof p === 'string' && fsFault.writeCrash?.(p)) {
+      const buf = Buffer.isBuffer(data) ? data : Buffer.from(String(data))
+      actual.writeFileSync(p, buf.subarray(0, Math.floor(buf.length / 2)))
+      throw new Error(`ENOSPC: injected write failure ${p}`)
+    }
+    return actual.writeFileSync(p, data, opts)
+  }) as typeof actual.writeFileSync
+  const renameSync = ((from, to) => {
+    if (fsFault.renameFails?.(String(from), String(to))) {
+      throw new Error(`EPERM: injected rename failure ${String(from)}`)
+    }
+    return actual.renameSync(from, to)
+  }) as typeof actual.renameSync
+  const mocked = { ...actual, writeFileSync, renameSync }
+  return { ...mocked, default: mocked }
 })
 
 let sqlite: Database.Database
@@ -121,6 +159,8 @@ beforeEach(async () => {
   mkdirSync(DOCS_DIR, { recursive: true })
   getOrCreateKeyMock.mockReturnValue(Buffer.alloc(32, 7))
   isEncryptionAvailableMock.mockReturnValue(true)
+  fsFault.writeCrash = null
+  fsFault.renameFails = null
 })
 
 afterEach(async () => {
@@ -287,6 +327,165 @@ describe('collectBundle → applyRestore round-trip', () => {
     expect(habits).toEqual([{ name: 'Drink water' }, { name: 'Post-backup habit' }])
     expect(readFileSync(join(VAULT_DIR_PATH, 'credentials.enc'))).toEqual(Buffer.from([5, 5]))
     expect(readFileSync(join(VAULT_DIR_PATH, 'key.enc'))).toEqual(Buffer.from([9, 9, 9]))
+  })
+})
+
+// ── Vault swap crash-atomicity ───────────────────────────────────────────────
+
+describe('applyRestore vault swap atomicity', () => {
+  const STAGING = `${VAULT_DIR_PATH}.restore-staging`
+  const OLD = `${VAULT_DIR_PATH}.restore-old`
+
+  /** Bundle with two vault blobs; the live vault then diverges from it. */
+  async function divergedBundle() {
+    seedBaseline()
+    const { collectBundle } = await internal()
+    const bundle = await collectBundle()
+    bundle.vault['health.enc'] = Buffer.from([6, 6, 6]).toString('base64')
+    writeFileSync(join(VAULT_DIR_PATH, 'financial.enc'), Buffer.from([7, 7]))
+    writeFileSync(join(VAULT_DIR_PATH, 'credentials.enc'), Buffer.from([5, 5]))
+    return bundle
+  }
+
+  function expectOldVault(): void {
+    expect(readdirSync(VAULT_DIR_PATH).sort()).toEqual([
+      'credentials.enc',
+      'financial.enc',
+      'key.enc'
+    ])
+    expect(readFileSync(join(VAULT_DIR_PATH, 'financial.enc'))).toEqual(Buffer.from([7, 7]))
+    expect(readFileSync(join(VAULT_DIR_PATH, 'key.enc'))).toEqual(Buffer.from([9, 9, 9]))
+  }
+
+  function expectNewVault(masterKeyHex: string): void {
+    expect(readdirSync(VAULT_DIR_PATH).sort()).toEqual(['financial.enc', 'health.enc', 'key.enc'])
+    expect(readFileSync(join(VAULT_DIR_PATH, 'financial.enc'))).toEqual(Buffer.from([1, 2, 3, 4]))
+    expect(readFileSync(join(VAULT_DIR_PATH, 'health.enc'))).toEqual(Buffer.from([6, 6, 6]))
+    expect(readFileSync(join(VAULT_DIR_PATH, 'key.enc')).toString('utf8')).toBe(
+      `wrap:${masterKeyHex}`
+    )
+  }
+
+  it('a blob write failing midway leaves the old vault (key.enc included) untouched', async () => {
+    const bundle = await divergedBundle()
+    const { applyRestore } = await internal()
+    fsFault.writeCrash = (p) => p.endsWith('health.enc')
+
+    await expect(applyRestore(bundle)).rejects.toThrow(/injected write failure/)
+
+    expectOldVault()
+    expect(existsSync(STAGING)).toBe(false)
+    expect(existsSync(OLD)).toBe(false)
+  })
+
+  it('a failed swap rename rolls back to the old vault', async () => {
+    const bundle = await divergedBundle()
+    const { applyRestore } = await internal()
+    fsFault.renameFails = (from) => from === STAGING
+
+    await expect(applyRestore(bundle)).rejects.toThrow(/injected rename failure/)
+
+    expectOldVault()
+    expect(existsSync(STAGING)).toBe(false)
+    expect(existsSync(OLD)).toBe(false)
+  })
+
+  it('a crash between the two renames is recovered to the complete new vault', async () => {
+    const bundle = await divergedBundle()
+    const { applyRestore } = await internal()
+    // Both the swap-in and the rollback fail: the same on-disk state as the
+    // process dying right after .vault/ was moved aside.
+    fsFault.renameFails = (from) => from === STAGING || from === OLD
+
+    await expect(applyRestore(bundle)).rejects.toThrow(/injected rename failure/)
+    expect(existsSync(VAULT_DIR_PATH)).toBe(false)
+
+    fsFault.renameFails = null
+    const { recoverInterruptedVaultSwap } = await import('../lib/vault-swap')
+    recoverInterruptedVaultSwap()
+
+    expectNewVault(bundle.masterKeyHex)
+    expect(existsSync(STAGING)).toBe(false)
+    expect(existsSync(OLD)).toBe(false)
+  })
+
+  it('recovery restores the old vault when no staging dir survived', async () => {
+    seedBaseline()
+    const { recoverInterruptedVaultSwap } = await import('../lib/vault-swap')
+    renameSync(VAULT_DIR_PATH, OLD)
+
+    recoverInterruptedVaultSwap()
+
+    expect(readFileSync(join(VAULT_DIR_PATH, 'key.enc'))).toEqual(Buffer.from([9, 9, 9]))
+    expect(existsSync(OLD)).toBe(false)
+  })
+
+  it('recovery discards a partial staging dir when the live vault exists', async () => {
+    seedBaseline()
+    const { recoverInterruptedVaultSwap } = await import('../lib/vault-swap')
+    mkdirSync(STAGING)
+    writeFileSync(join(STAGING, 'financial.enc'), Buffer.from([0]))
+
+    recoverInterruptedVaultSwap()
+
+    expect(existsSync(STAGING)).toBe(false)
+    expect(readFileSync(join(VAULT_DIR_PATH, 'financial.enc'))).toEqual(Buffer.from([1, 2, 3, 4]))
+    expect(readFileSync(join(VAULT_DIR_PATH, 'key.enc'))).toEqual(Buffer.from([9, 9, 9]))
+  })
+
+  it('a case-variant KEY.enc never replaces the locally wrapped key', async () => {
+    const bundle = await divergedBundle()
+    // On APFS/NTFS `KEY.enc` is the same file as key.enc.
+    bundle.vault['KEY.enc'] = Buffer.from('attacker-key').toString('base64')
+    const { applyRestore } = await internal()
+
+    await applyRestore(bundle)
+
+    expectNewVault(bundle.masterKeyHex)
+
+    // swapInVault guards on its own too, independent of applyRestore's filter.
+    const { swapInVault } = await import('../lib/vault-swap')
+    swapInVault(Buffer.from('wrapped'), [['Key.Enc', Buffer.from('x')]])
+    expect(readdirSync(VAULT_DIR_PATH)).toEqual(['key.enc'])
+    expect(readFileSync(join(VAULT_DIR_PATH, 'key.enc')).toString('utf8')).toBe('wrapped')
+  })
+
+  it('carries over subdirectories and symlinks without following the links', async () => {
+    const bundle = await divergedBundle()
+    mkdirSync(join(VAULT_DIR_PATH, 'notes'))
+    writeFileSync(join(VAULT_DIR_PATH, 'notes', 'keep.txt'), 'keep me')
+    symlinkSync('notes/keep.txt', join(VAULT_DIR_PATH, 'rel-link'))
+    const outside = join(TEST_ROOT, 'outside.txt')
+    writeFileSync(outside, 'outside')
+    symlinkSync(outside, join(VAULT_DIR_PATH, 'abs-link'))
+    const { applyRestore } = await internal()
+
+    await applyRestore(bundle)
+
+    expect(readFileSync(join(VAULT_DIR_PATH, 'notes', 'keep.txt'), 'utf8')).toBe('keep me')
+    expect(lstatSync(join(VAULT_DIR_PATH, 'rel-link')).isSymbolicLink()).toBe(true)
+    expect(readlinkSync(join(VAULT_DIR_PATH, 'rel-link'))).toBe('notes/keep.txt')
+    expect(lstatSync(join(VAULT_DIR_PATH, 'abs-link')).isSymbolicLink()).toBe(true)
+    expect(readlinkSync(join(VAULT_DIR_PATH, 'abs-link'))).toBe(outside)
+    expect(readFileSync(outside, 'utf8')).toBe('outside')
+    for (const extra of ['notes', 'rel-link', 'abs-link']) {
+      rmSync(join(VAULT_DIR_PATH, extra), { recursive: true })
+    }
+    expectNewVault(bundle.masterKeyHex)
+  })
+
+  it('a successful restore swaps in the full new vault and keeps non-.enc files', async () => {
+    const bundle = await divergedBundle()
+    writeFileSync(join(VAULT_DIR_PATH, 'README.txt'), 'keep me')
+    const { applyRestore } = await internal()
+
+    await applyRestore(bundle)
+
+    expect(readFileSync(join(VAULT_DIR_PATH, 'README.txt'), 'utf8')).toBe('keep me')
+    rmSync(join(VAULT_DIR_PATH, 'README.txt'))
+    expectNewVault(bundle.masterKeyHex)
+    expect(existsSync(STAGING)).toBe(false)
+    expect(existsSync(OLD)).toBe(false)
   })
 })
 

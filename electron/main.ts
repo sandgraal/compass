@@ -71,6 +71,7 @@ import { initAutoUpdater, registerUpdaterHandlers, scheduleUpdateChecks } from '
 import { registerVaultHandlers } from './ipc/vault'
 import { registerWeeklyReviewHandlers } from './ipc/weekly-review'
 import { ensureDerivedEntities } from './lib/entities-projection'
+import { recoverInterruptedVaultSwap } from './lib/vault-swap'
 import { initMenuBar } from './menu-bar'
 import { APP_DATA_DIR, DATA_DIR, KNOWLEDGE_DIR, VAULT_DIR } from './paths'
 import { registerCompassUrlScheme } from './url-scheme'
@@ -79,6 +80,10 @@ import { installAppWindowGuards, installPermissionHandlers } from './window-secu
 export { APP_DATA_DIR, DATA_DIR, VAULT_DIR, KNOWLEDGE_DIR }
 
 function ensureDirectories(): void {
+  // Before VAULT_DIR is (re)created below: a restore that crashed mid-swap can
+  // leave .vault/ absent with the complete new vault in a staging dir.
+  // Creating an empty .vault/ first would make getOrCreateKey mint a new key.
+  recoverInterruptedVaultSwap()
   for (const dir of [
     DATA_DIR,
     VAULT_DIR,
