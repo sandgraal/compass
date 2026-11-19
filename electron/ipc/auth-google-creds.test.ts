@@ -31,6 +31,12 @@ const existsSyncMock = vi.fn<(p: string) => boolean>((p) => p in fakeFs)
 const unlinkSyncMock = vi.fn<(p: string) => void>((p) => {
   delete fakeFs[p]
 })
+const renameSyncMock = vi.fn<(from: string, to: string) => void>((from, to) => {
+  const v = fakeFs[from]
+  if (!v) throw new Error(`ENOENT ${from}`)
+  fakeFs[to] = v
+  delete fakeFs[from]
+})
 const mkdirSyncMock = vi.fn()
 
 vi.mock('electron', () => ({
@@ -50,6 +56,7 @@ vi.mock('node:fs', () => ({
   existsSync: existsSyncMock,
   mkdirSync: mkdirSyncMock,
   readFileSync: readFileSyncMock,
+  renameSync: renameSyncMock,
   unlinkSync: unlinkSyncMock,
   writeFileSync: writeFileSyncMock
 }))
@@ -88,6 +95,7 @@ beforeEach(() => {
   for (const k of Object.keys(fakeFs)) delete fakeFs[k]
   encryptStringMock.mockClear()
   writeFileSyncMock.mockClear()
+  renameSyncMock.mockClear()
 })
 afterEach(() => {
   // Restore env to its pre-test state — see comment on originalEnv above.
@@ -138,9 +146,12 @@ describe('auth:set-google-credentials', () => {
     const written = JSON.parse(encryptStringMock.mock.calls[0][0])
     expect(written).toEqual({ clientId: validId, clientSecret: validSecret })
 
-    // Confirm the file landed where the storage helper expects it.
+    // Confirm the file landed where the storage helper expects it (written to
+    // a .tmp sibling, then renamed over the target).
     expect(writeFileSyncMock).toHaveBeenCalledOnce()
-    expect(writeFileSyncMock.mock.calls[0][0]).toMatch(/compass_oauth_creds_google\.enc$/)
+    expect(writeFileSyncMock.mock.calls[0][0]).toMatch(/compass_oauth_creds_google\.enc\.tmp$/)
+    expect(renameSyncMock).toHaveBeenCalledOnce()
+    expect(renameSyncMock.mock.calls[0][1]).toMatch(/compass_oauth_creds_google\.enc$/)
   })
 
   it('trims whitespace around both values before validation', async () => {

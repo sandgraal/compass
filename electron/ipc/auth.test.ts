@@ -47,6 +47,13 @@ const safeStorageAvailable = vi.hoisted(() => ({ value: true }))
 
 // In-memory fs keyed by absolute path.
 const fakeFs: Record<string, Buffer> = {}
+
+// Fault injection for crash-atomicity tests. `writeCrash` models a process
+// dying mid-write: the target gets a truncated prefix, then the call throws.
+const fsFault = vi.hoisted(() => ({
+  writeCrash: null as null | ((p: string) => boolean),
+  renameFails: false
+}))
 vi.mock('node:fs', () => ({
   existsSync: (p: string) => p in fakeFs,
   mkdirSync: vi.fn(),
@@ -55,11 +62,23 @@ vi.mock('node:fs', () => ({
     if (!v) throw new Error(`ENOENT ${p}`)
     return v
   },
+  renameSync: (from: string, to: string) => {
+    if (fsFault.renameFails) throw new Error(`EIO rename ${from}`)
+    const v = fakeFs[from]
+    if (!v) throw new Error(`ENOENT ${from}`)
+    fakeFs[to] = v
+    delete fakeFs[from]
+  },
   unlinkSync: (p: string) => {
     delete fakeFs[p]
   },
   writeFileSync: (p: string, data: Buffer | string) => {
-    fakeFs[p] = Buffer.isBuffer(data) ? data : Buffer.from(data)
+    const buf = Buffer.isBuffer(data) ? data : Buffer.from(data)
+    if (fsFault.writeCrash?.(p)) {
+      fakeFs[p] = buf.subarray(0, Math.floor(buf.length / 2))
+      throw new Error(`ENOSPC ${p}`)
+    }
+    fakeFs[p] = buf
   }
 }))
 
@@ -110,6 +129,8 @@ const DATA_DIR = '/tmp/compass-auth-test-data'
 
 beforeEach(async () => {
   safeStorageAvailable.value = true
+  fsFault.writeCrash = null
+  fsFault.renameFails = false
   sqlite = new Database(':memory:')
   sqlite.exec(`
     CREATE TABLE integrations (
@@ -193,6 +214,38 @@ describe('token persistence', () => {
     safeStorageAvailable.value = true
     await saveToken('google', { t: 2 })
     expect(await loadToken('google')).toEqual({ t: 2 })
+  })
+
+  it('a write that dies midway leaves the previous token intact (tmp + rename)', async () => {
+    const { saveToken, loadToken } = await authModule()
+    const path = `${DATA_DIR}/compass_token_snaptrade.enc`
+    await saveToken('snaptrade', { userId: 'u1', userSecret: 's1' })
+    const before = fakeFs[path]
+
+    fsFault.writeCrash = () => true
+    await expect(saveToken('snaptrade', { userId: 'u2', userSecret: 's2' })).rejects.toThrow(
+      /ENOSPC/
+    )
+
+    expect(fakeFs[path]).toEqual(before)
+    expect(fakeFs[`${path}.tmp`]).toBeUndefined()
+    expect(await loadToken('snaptrade')).toEqual({ userId: 'u1', userSecret: 's1' })
+  })
+
+  it('a failed rename leaves the previous token intact and removes the tmp file', async () => {
+    const { saveToken, updateToken, loadToken } = await authModule()
+    const path = `${DATA_DIR}/compass_token_metriport.enc`
+    await saveToken('metriport', { patientId: 'p1' })
+
+    fsFault.renameFails = true
+    await expect(updateToken('metriport', (cur) => ({ ...cur, extra: 1 }))).rejects.toThrow(/EIO/)
+    expect(fakeFs[`${path}.tmp`]).toBeUndefined()
+    expect(await loadToken('metriport')).toEqual({ patientId: 'p1' })
+
+    // The queue isn't wedged: the next write lands.
+    fsFault.renameFails = false
+    await updateToken('metriport', (cur) => ({ ...cur, extra: 2 }))
+    expect(await loadToken('metriport')).toEqual({ patientId: 'p1', extra: 2 })
   })
 
   it('loadToken returns null when the file is absent', async () => {
