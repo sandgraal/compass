@@ -134,9 +134,12 @@ function rowToRecord(row: LifeRecordRow) {
  * Returns whether the record still has any secrets. No-op (and no blob
  * write) when the patch is empty.
  */
-function applySecretsPatch(recordId: number, patch: Record<string, string>): boolean | null {
+function applySecretsPatch(
+  recordId: number,
+  patch: Record<string, string>,
+  key: Buffer
+): boolean | null {
   if (Object.keys(patch).length === 0) return null
-  const key = getOrCreateKey()
   const map = readSecretsMap(key)
   const slot = { ...(map[String(recordId)] ?? {}) }
   for (const [k, v] of Object.entries(patch)) {
@@ -149,9 +152,9 @@ function applySecretsPatch(recordId: number, patch: Record<string, string>): boo
   return Object.keys(slot).length > 0
 }
 
-function deleteSecretsFor(recordId: number): void {
+async function deleteSecretsFor(recordId: number): Promise<void> {
   try {
-    const key = getOrCreateKey()
+    const key = await getOrCreateKey()
     const map = readSecretsMap(key)
     if (map[String(recordId)]) {
       delete map[String(recordId)]
@@ -169,7 +172,7 @@ function deleteSecretsFor(recordId: number): void {
  * vault migration, the finance-watcher seeder, and the 1Password importer —
  * every writer funnels through the same validation.
  */
-export function insertLifeRecord(input: {
+type LifeRecordInsert = {
   externalId: string
   category: string
   fields: Record<string, string>
@@ -178,7 +181,41 @@ export function insertLifeRecord(input: {
   source: string
   createdAt?: number | null
   updatedAt?: number | null
-}): { id: number; inserted: boolean } {
+}
+
+export async function insertLifeRecord(
+  input: LifeRecordInsert
+): Promise<{ id: number; inserted: boolean }> {
+  // Resolve the vault key BEFORE the insert (only when there are secrets to
+  // store): a Keychain failure then aborts cleanly instead of leaving a row
+  // whose secrets were silently dropped, and the insert + secrets write run
+  // synchronously with no await between them.
+  const secrets = sanitizeSecrets(input.category, input.secrets)
+  const key = Object.keys(secrets).length > 0 ? await getOrCreateKey() : null
+  return insertLifeRecordWithKey(input, key)
+}
+
+/**
+ * Synchronous insert for records that carry NO secrets (detected-account
+ * stubs, 1Password credit-card metadata). Needs no vault key, so callers in
+ * the middle of a synchronous vault read → write can use it without an await.
+ */
+export function insertPlainLifeRecord(input: Omit<LifeRecordInsert, 'secrets'>): {
+  id: number
+  inserted: boolean
+} {
+  return insertLifeRecordWithKey(input, null)
+}
+
+/** Sync core of `insertLifeRecord`. `key` may be null only when `input` carries no secrets. */
+function insertLifeRecordWithKey(
+  input: LifeRecordInsert,
+  key: Buffer | null
+): { id: number; inserted: boolean } {
+  const secrets = sanitizeSecrets(input.category, input.secrets)
+  if (Object.keys(secrets).length > 0 && !key) {
+    throw new Error('insertLifeRecord: vault key required to store secrets')
+  }
   const db = getDb()
   const fields = sanitizeFields(input.category, input.fields)
   const result = db
@@ -205,8 +242,7 @@ export function insertLifeRecord(input: {
     return { id: existing?.id ?? -1, inserted: false }
   }
   const id = Number(result.lastInsertRowid)
-  const secrets = sanitizeSecrets(input.category, input.secrets)
-  const hasSecrets = applySecretsPatch(id, secrets)
+  const hasSecrets = key ? applySecretsPatch(id, secrets, key) : null
   if (hasSecrets)
     db.update(lifeRecords).set({ hasSecrets: true }).where(eq(lifeRecords.id, id)).run()
   return { id, inserted: true }
@@ -264,7 +300,7 @@ export function seedLifeRecordsFromDetectedAccounts(
       accountType: accountTypeLabel
     }
     if (acct.lastFour) fields.lastFour = acct.lastFour
-    const { inserted } = insertLifeRecord({
+    const { inserted } = insertPlainLifeRecord({
       externalId: `detected:${randomUUID()}`,
       category: 'financial',
       fields,
@@ -434,11 +470,11 @@ export function registerLifeRecordsHandlers(ipcMain: IpcMain): void {
     return { success: true }
   })
 
-  ipcMain.handle('life:create', (_event, input: LifeRecordInput) => {
+  ipcMain.handle('life:create', async (_event, input: LifeRecordInput) => {
     if (!input || !isLifeCategory(input.category)) {
       throw new Error('life:create requires a known category')
     }
-    const { id } = insertLifeRecord({
+    const { id } = await insertLifeRecord({
       externalId: `manual:${randomUUID()}`,
       category: input.category,
       fields: input.fields ?? {},
@@ -450,8 +486,12 @@ export function registerLifeRecordsHandlers(ipcMain: IpcMain): void {
     return { success: true, id }
   })
 
-  ipcMain.handle('life:update', (_event, id: number, input: LifeRecordInput) => {
+  ipcMain.handle('life:update', async (_event, id: number, input: LifeRecordInput) => {
     if (!Number.isInteger(id)) throw new Error('life:update requires an integer id')
+    // Resolve the key up front (only if a secrets patch is present) so the
+    // row read → secrets write → row update below runs with no await inside.
+    const key =
+      input?.secrets && Object.keys(input.secrets).length > 0 ? await getOrCreateKey() : null
     const db = getDb()
     const row = db.select().from(lifeRecords).where(eq(lifeRecords.id, id)).all()[0]
     if (!row) throw new Error('life:update: record not found')
@@ -459,7 +499,7 @@ export function registerLifeRecordsHandlers(ipcMain: IpcMain): void {
     const category = row.category
     const fields = sanitizeFields(category, input?.fields)
     const secretsPatch = sanitizeSecrets(category, input?.secrets)
-    const hasSecrets = applySecretsPatch(id, secretsPatch)
+    const hasSecrets = key ? applySecretsPatch(id, secretsPatch, key) : null
     db.update(lifeRecords)
       .set({
         title: deriveTitle(category, fields),
@@ -474,19 +514,19 @@ export function registerLifeRecordsHandlers(ipcMain: IpcMain): void {
     return { success: true }
   })
 
-  ipcMain.handle('life:delete', (_event, id: number) => {
+  ipcMain.handle('life:delete', async (_event, id: number) => {
     if (!Number.isInteger(id)) throw new Error('life:delete requires an integer id')
     const db = getDb()
     db.delete(lifeRecordLinks).where(eq(lifeRecordLinks.lifeRecordId, id)).run()
     db.delete(lifeRecords).where(eq(lifeRecords.id, id)).run()
-    deleteSecretsFor(id)
+    await deleteSecretsFor(id)
     afterDomainWrite()
     return { success: true }
   })
 
-  ipcMain.handle('life:get-secrets', (_event, id: number) => {
+  ipcMain.handle('life:get-secrets', async (_event, id: number) => {
     if (!Number.isInteger(id)) throw new Error('life:get-secrets requires an integer id')
-    const key = getOrCreateKey()
+    const key = await getOrCreateKey()
     return readSecretsMap(key)[String(id)] ?? {}
   })
 

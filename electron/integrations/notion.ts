@@ -291,7 +291,7 @@ type SyncResult = { service: string; success: boolean; recordsUpdated?: number; 
  * first-ever failure still surfaces).
  */
 export async function syncNotion(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
-  const tokens = loadToken('notion') as { access_token?: string } | null
+  const tokens = (await loadToken('notion')) as { access_token?: string } | null
   if (!tokens?.access_token) {
     return { service: 'notion', success: false, error: 'Not connected' }
   }

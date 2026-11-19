@@ -84,7 +84,7 @@ export async function syncPlaidInvestments(
   if (opts?.fetchHoldings) {
     fetchHoldings = opts.fetchHoldings
   } else {
-    const accessToken = getAccessToken(plaidItemId)
+    const accessToken = await getAccessToken(plaidItemId)
     if (!accessToken) {
       return {
         itemId: plaidItemId,
@@ -96,7 +96,7 @@ export async function syncPlaidInvestments(
     }
     let api: PlaidApi
     try {
-      api = getPlaidClient().api
+      api = (await getPlaidClient()).api
     } catch (err) {
       return {
         itemId: plaidItemId,

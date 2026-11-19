@@ -77,7 +77,7 @@ export function _resetLinkUserId(): void {
  * IPC to the renderer / Link window — it is not a credential.
  */
 export async function createLinkToken(): Promise<{ linkToken: string; expiration: string }> {
-  const { api } = getPlaidClient()
+  const { api } = await getPlaidClient()
   const res = await api.linkTokenCreate({
     user: { client_user_id: getOrCreateLinkUserId() },
     client_name: 'Compass',
@@ -110,7 +110,7 @@ export async function exchangePublicToken(publicToken: string): Promise<Exchange
     throw new Error('exchangePublicToken: publicToken must be a non-empty string')
   }
 
-  const { api } = getPlaidClient()
+  const { api } = await getPlaidClient()
   const exchange = await api.itemPublicTokenExchange({ public_token: publicToken })
   const accessToken = exchange.data.access_token
   const itemId = exchange.data.item_id
@@ -118,7 +118,7 @@ export async function exchangePublicToken(publicToken: string): Promise<Exchange
   // Persist FIRST so a crash mid-flow can't leave Plaid with an Item
   // we can never reach again. itemRemove still works after the fact
   // if the user disconnects, but only if we held onto the token.
-  setAccessToken(itemId, accessToken)
+  await setAccessToken(itemId, accessToken)
 
   // Fetch accounts + institution metadata so the next PR can create
   // financeAccounts rows without a second user-visible round-trip.

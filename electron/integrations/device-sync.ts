@@ -131,9 +131,9 @@ function deviceId(): string {
   return id
 }
 
-function readPassphrase(): string | null {
+async function readPassphrase(): Promise<string | null> {
   try {
-    const rec = readEncryptedJson<{ passphrase?: string }>(VAULT_NAME, getOrCreateKey())
+    const rec = readEncryptedJson<{ passphrase?: string }>(VAULT_NAME, await getOrCreateKey())
     return rec?.passphrase?.trim() || null
   } catch {
     return null
@@ -142,7 +142,9 @@ function readPassphrase(): string | null {
 
 // ── public surface ────────────────────────────────────────────────────────────
 
-export function configureDeviceSync(passphrase: string): { success: boolean; error?: string } {
+export async function configureDeviceSync(
+  passphrase: string
+): Promise<{ success: boolean; error?: string }> {
   // Normalize: avoid accidental leading/trailing whitespace creating a different
   // effective passphrase than what push/pull use (readPassphrase() trims).
   const normalized = passphrase.trim()
@@ -153,26 +155,26 @@ export function configureDeviceSync(passphrase: string): { success: boolean; err
   if (normalized.length < 12) {
     return { success: false, error: 'Sync passphrase must be at least 12 characters' }
   }
-  writeEncryptedJson(VAULT_NAME, { passphrase: normalized }, getOrCreateKey())
+  writeEncryptedJson(VAULT_NAME, { passphrase: normalized }, await getOrCreateKey())
   writeSetting(GROUP_ID_SETTING, syncGroupId(normalized))
   deviceId() // ensure a stable local identity exists before the first push/pull
   return { success: true }
 }
 
-export function disableDeviceSync(): { success: boolean } {
-  writeEncryptedJson(VAULT_NAME, {}, getOrCreateKey())
+export async function disableDeviceSync(): Promise<{ success: boolean }> {
+  writeEncryptedJson(VAULT_NAME, {}, await getOrCreateKey())
   deleteSetting(GROUP_ID_SETTING)
   deleteSetting(LAST_SEEN_SETTING)
   return { success: true }
 }
 
-export function getDeviceSyncStatus(): {
+export async function getDeviceSyncStatus(): Promise<{
   configured: boolean
   relayUrl: string
   lastSeenExportedAt: string | null
-} {
+}> {
   return {
-    configured: readPassphrase() != null,
+    configured: (await readPassphrase()) != null,
     relayUrl: relayUrl(),
     lastSeenExportedAt: readSetting(LAST_SEEN_SETTING)
   }
@@ -194,7 +196,7 @@ export async function checkRemote(
   | { success: true; exists: boolean; meta: SyncRemoteMeta | null; newer: boolean }
   | { success: false; error: string }
 > {
-  const passphrase = readPassphrase()
+  const passphrase = await readPassphrase()
   if (!passphrase) return { success: false, error: 'Device sync is not configured' }
   try {
     const res = await doFetch(`${relayUrl()}/sync/meta/${syncGroupId(passphrase)}`, {
@@ -220,10 +222,10 @@ export async function pushSnapshot(
 ): Promise<
   { success: true; exportedAt: string; bytes: number } | { success: false; error: string }
 > {
-  const passphrase = readPassphrase()
+  const passphrase = await readPassphrase()
   if (!passphrase) return { success: false, error: 'Device sync is not configured' }
   try {
-    const { blob, exportedAt } = buildEncryptedSnapshot(passphrase)
+    const { blob, exportedAt } = await buildEncryptedSnapshot(passphrase)
     const res = await doFetch(`${relayUrl()}/sync/blob/${syncGroupId(passphrase)}`, {
       method: 'PUT',
       headers: authHeaders(),
@@ -251,7 +253,7 @@ export async function pullSnapshot(
   | { success: true; upToDate: false; exportedAt: string; rows: number }
   | { success: false; error: string }
 > {
-  const passphrase = readPassphrase()
+  const passphrase = await readPassphrase()
   if (!passphrase) return { success: false, error: 'Device sync is not configured' }
   const check = await checkRemote(doFetch)
   if (!check.success) return check
@@ -300,7 +302,7 @@ export async function pullSnapshot(
     // Capture device-LOCAL identity before the restore replaces app_settings.
     const localToken = readSetting('relayDeviceToken')
     const localDeviceId = readSetting(DEVICE_ID_SETTING)
-    const stats = restoreEncryptedSnapshot(Buffer.from(parsed.blob, 'base64'), passphrase)
+    const stats = await restoreEncryptedSnapshot(Buffer.from(parsed.blob, 'base64'), passphrase)
     if (localToken) writeSetting('relayDeviceToken', localToken)
     if (localDeviceId) writeSetting(DEVICE_ID_SETTING, localDeviceId)
     writeSetting(LAST_SEEN_SETTING, exportedAt)

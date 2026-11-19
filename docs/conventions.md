@@ -112,7 +112,13 @@ Two call sites, by when your repair needs the app to be ready:
 
 ## Security invariants (DO NOT BREAK)
 
-- Vault key NEVER leaves OS Keychain except via `safeStorage.decryptString()` in main process
+- Vault key NEVER leaves OS Keychain except via `safeStorage.decryptStringAsync()` in main process
+  (`getOrCreateKey()` in `electron/lib/crypto-vault.ts`). Only the async `safeStorage` API is
+  allowed: the sync `isEncryptionAvailable`/`encryptString`/`decryptString` are deprecated in
+  Electron 45 and removed in 46. Go through `electron/lib/safe-storage.ts`.
+- Vault read → modify → write: `await getOrCreateKey()` ONCE, then keep the read, mutation and
+  write synchronous (no `await` in between), or concurrent writers drop each other's updates.
+  Token files: use `updateToken(service, fn)` (serialized per file), not `saveToken({ ...await loadToken() })`.
 - OAuth tokens stored encrypted (same mechanism); never logged; never sent to renderer
 - CSP in production blocks all remote scripts (`script-src 'self'`)
 - Renderer can never `require('fs')` or similar — context isolation enforces this

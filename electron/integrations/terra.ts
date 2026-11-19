@@ -19,7 +19,7 @@ import { eq } from 'drizzle-orm'
 import { BrowserWindow } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
 import { integrations, syncEvents } from '../db/schema'
-import { loadToken, saveToken } from '../ipc/auth'
+import { loadToken, updateToken } from '../ipc/auth'
 import { upsertLiveRecords } from '../ipc/records'
 import { afterConnectorSync } from '../ipc/storehouse-sync'
 import { localYmd } from '../lib/dates'
@@ -159,21 +159,22 @@ const TERRA_SUCCESS_URL = 'https://compass.app/terra/success' // sentinel we int
 const TERRA_SUCCESS = new URL(TERRA_SUCCESS_URL) // parsed once for exact origin+path matching
 const TERRA_PROVIDERS = 'GARMIN,FITBIT,OURA,WHOOP,GOOGLE,APPLE,SAMSUNG,POLAR,SUUNTO,PELOTON,STRAVA'
 
-function loadTerraToken(): TerraToken {
-  return (loadToken('terra') as TerraToken | null) ?? {}
+async function loadTerraToken(): Promise<TerraToken> {
+  return ((await loadToken('terra')) as TerraToken | null) ?? {}
 }
 /** BYO iff the user pasted their own Terra dev-id + x-api-key. */
-function terraByo(): ByoCreds | null {
-  const t = loadTerraToken()
+async function terraByo(): Promise<ByoCreds | null> {
+  const t = await loadTerraToken()
   return t.devId?.trim() && t.apiKey?.trim() ? { devId: t.devId, apiKey: t.apiKey } : null
 }
 
 /** Pull the last 30 days of Terra daily/sleep/activity → health `records` (source 'terra'). */
 export async function syncTerra(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
   const db = getDb()
-  const tok = loadTerraToken()
+  const tok = await loadTerraToken()
   if (!tok.userId) return { service: 'terra', success: false, error: 'Terra not connected' }
-  const cfg = resolveRelayConfig(getRawSqlite(), 'terra', () => terraByo())
+  const byo = await terraByo()
+  const cfg = resolveRelayConfig(getRawSqlite(), 'terra', () => byo)
   const end = new Date()
   const start = new Date(end.getTime() - WINDOW_DAYS * 86_400_000)
   const query = `?user_id=${encodeURIComponent(tok.userId)}&start_date=${localYmd(start)}&end_date=${localYmd(end)}`
@@ -245,8 +246,12 @@ export async function syncTerra(mainWindow?: BrowserWindow | null): Promise<Sync
 }
 
 /** Save the user's own Terra credentials → switches this aggregator to BYO-direct mode. */
-export function setTerraByoCreds(devId: string, apiKey: string): void {
-  saveToken('terra', { ...loadTerraToken(), devId: devId.trim(), apiKey: apiKey.trim() })
+export async function setTerraByoCreds(devId: string, apiKey: string): Promise<void> {
+  await updateToken('terra', (cur) => ({
+    ...(cur as TerraToken | null),
+    devId: devId.trim(),
+    apiKey: apiKey.trim()
+  }))
 }
 
 /**
@@ -258,7 +263,8 @@ export async function openTerraConnect(
   sqlite: SqliteForFx,
   mainWindow?: BrowserWindow | null
 ): Promise<{ success: boolean; error?: string }> {
-  const cfg = resolveRelayConfig(sqlite, 'terra', () => terraByo())
+  const byo = await terraByo()
+  const cfg = resolveRelayConfig(sqlite, 'terra', () => byo)
   let widgetUrl: string
   try {
     const res = await relayFetch(cfg, 'terra', 'POST', '/auth/generateWidgetSession', {
@@ -323,8 +329,10 @@ export async function openTerraConnect(
         finish({ success: false, error: 'Terra returned no valid user_id' })
         return
       }
-      saveToken('terra', { ...loadTerraToken(), userId })
-      finish({ success: true })
+      void updateToken('terra', (cur) => ({ ...(cur as TerraToken | null), userId })).then(
+        () => finish({ success: true }),
+        (err) => finish({ success: false, error: String(err) })
+      )
     }
     win.webContents.on('will-redirect', onNavigate)
     win.webContents.on('will-navigate', onNavigate)

@@ -45,7 +45,14 @@ vi.mock('node:fs', () => ({
 }))
 
 vi.mock('electron', () => ({
-  safeStorage: { encryptString: encryptStringMock, decryptString: decryptStringMock },
+  safeStorage: {
+    isAsyncEncryptionAvailable: async () => true,
+    encryptStringAsync: async (s: string) => encryptStringMock(s),
+    decryptStringAsync: async (b: Buffer) => ({
+      result: decryptStringMock(b),
+      shouldReEncrypt: false
+    })
+  },
   BrowserWindow: { getFocusedWindow: () => null, getAllWindows: () => [] }
 }))
 
@@ -76,7 +83,7 @@ function invoke(h: Handler, ...args: unknown[]): Promise<unknown> {
   return Promise.resolve().then(() => h({}, ...args))
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   sqlite = new Database(':memory:')
   sqlite.exec(`
     CREATE TABLE integrations (
@@ -95,7 +102,7 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-afterEach(() => {
+afterEach(async () => {
   sqlite.close()
 })
 
@@ -107,8 +114,8 @@ describe('snaptrade:disconnect', () => {
     // Simulate a completed connection by writing userId/userSecret directly
     // via the same saveToken path setSnaptradeByoCreds uses internally.
     const { saveToken, loadToken } = await import('./auth')
-    saveToken('snaptrade', {
-      ...(loadToken('snaptrade') as object),
+    await saveToken('snaptrade', {
+      ...((await loadToken('snaptrade')) as object),
       userId: 'compass-abc123',
       userSecret: 'shh-per-user-secret'
     })
@@ -121,7 +128,7 @@ describe('snaptrade:disconnect', () => {
     const h = await registerAndGet('snaptrade:disconnect')
     expect(await invoke(h)).toEqual({ success: true })
 
-    const tok = loadToken('snaptrade') as {
+    const tok = (await loadToken('snaptrade')) as {
       clientId?: string
       consumerKey?: string
       userId?: string
@@ -143,6 +150,6 @@ describe('snaptrade:disconnect', () => {
     expect(await invoke(h)).toEqual({ success: true })
 
     const { loadToken } = await import('./auth')
-    expect(loadToken('snaptrade')).toEqual({ clientId: undefined, consumerKey: undefined })
+    expect(await loadToken('snaptrade')).toEqual({ clientId: undefined, consumerKey: undefined })
   })
 })

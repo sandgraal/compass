@@ -89,7 +89,7 @@ async function internal() {
   return (await import('./search'))._internal
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   sqlite = new Database(':memory:')
   sqlite.exec(`
     CREATE TABLE checklist_items (
@@ -155,7 +155,7 @@ beforeEach(() => {
   decryptBlobMock.mockReturnValue('[]')
 })
 
-afterEach(() => {
+afterEach(async () => {
   sqlite.close()
   rmSync(TEST_ROOT, { recursive: true, force: true })
   vi.clearAllMocks()
@@ -181,7 +181,7 @@ function seedRecord(source: string, type: string, title: string, body: string | 
     .run(source, type, title, body, `rec-${recSeq}`)
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   recSeq = 0
 })
 
@@ -315,7 +315,7 @@ describe('searchVault', () => {
       JSON.stringify([{ id: 'v1', service: 'Chase Sapphire', password: '4111-1111-1111-1111' }])
     )
     const { searchVault } = await internal()
-    const hits = searchVault('chase') as Array<Record<string, unknown>>
+    const hits = (await searchVault('chase')) as Array<Record<string, unknown>>
     expect(hits).toHaveLength(1)
     expect(hits[0]).toEqual({
       kind: 'vault',
@@ -332,7 +332,7 @@ describe('searchVault', () => {
     writeVaultFile('financial')
     decryptBlobMock.mockReturnValue(JSON.stringify([{ id: 'v1', institution: 'Chase Sapphire' }]))
     const { searchVault } = await internal()
-    expect(searchVault('chase')).toEqual([])
+    expect(await searchVault('chase')).toEqual([])
     expect(decryptBlobMock).not.toHaveBeenCalled()
   })
 
@@ -341,7 +341,7 @@ describe('searchVault', () => {
     // credentials title field is 'service'; provide only a username (excluded).
     decryptBlobMock.mockReturnValue(JSON.stringify([{ id: 'c1', username: 'coffee@example.com' }]))
     const { searchVault } = await internal()
-    expect(searchVault('coffee')).toEqual([])
+    expect(await searchVault('coffee')).toEqual([])
   })
 
   it('returns [] when the vault key is unavailable', async () => {
@@ -350,7 +350,7 @@ describe('searchVault', () => {
       throw new Error('no keychain')
     })
     const { searchVault } = await internal()
-    expect(searchVault('chase')).toEqual([])
+    expect(await searchVault('chase')).toEqual([])
     expect(decryptBlobMock).not.toHaveBeenCalled()
   })
 })
