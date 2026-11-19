@@ -23,11 +23,14 @@
 
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
   renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync
 } from 'node:fs'
 import { join } from 'node:path'
@@ -428,6 +431,47 @@ describe('applyRestore vault swap atomicity', () => {
     expect(existsSync(STAGING)).toBe(false)
     expect(readFileSync(join(VAULT_DIR_PATH, 'financial.enc'))).toEqual(Buffer.from([1, 2, 3, 4]))
     expect(readFileSync(join(VAULT_DIR_PATH, 'key.enc'))).toEqual(Buffer.from([9, 9, 9]))
+  })
+
+  it('a case-variant KEY.enc never replaces the locally wrapped key', async () => {
+    const bundle = await divergedBundle()
+    // On APFS/NTFS `KEY.enc` is the same file as key.enc.
+    bundle.vault['KEY.enc'] = Buffer.from('attacker-key').toString('base64')
+    const { applyRestore } = await internal()
+
+    await applyRestore(bundle)
+
+    expectNewVault(bundle.masterKeyHex)
+
+    // swapInVault guards on its own too, independent of applyRestore's filter.
+    const { swapInVault } = await import('../lib/vault-swap')
+    swapInVault(Buffer.from('wrapped'), [['Key.Enc', Buffer.from('x')]])
+    expect(readdirSync(VAULT_DIR_PATH)).toEqual(['key.enc'])
+    expect(readFileSync(join(VAULT_DIR_PATH, 'key.enc')).toString('utf8')).toBe('wrapped')
+  })
+
+  it('carries over subdirectories and symlinks without following the links', async () => {
+    const bundle = await divergedBundle()
+    mkdirSync(join(VAULT_DIR_PATH, 'notes'))
+    writeFileSync(join(VAULT_DIR_PATH, 'notes', 'keep.txt'), 'keep me')
+    symlinkSync('notes/keep.txt', join(VAULT_DIR_PATH, 'rel-link'))
+    const outside = join(TEST_ROOT, 'outside.txt')
+    writeFileSync(outside, 'outside')
+    symlinkSync(outside, join(VAULT_DIR_PATH, 'abs-link'))
+    const { applyRestore } = await internal()
+
+    await applyRestore(bundle)
+
+    expect(readFileSync(join(VAULT_DIR_PATH, 'notes', 'keep.txt'), 'utf8')).toBe('keep me')
+    expect(lstatSync(join(VAULT_DIR_PATH, 'rel-link')).isSymbolicLink()).toBe(true)
+    expect(readlinkSync(join(VAULT_DIR_PATH, 'rel-link'))).toBe('notes/keep.txt')
+    expect(lstatSync(join(VAULT_DIR_PATH, 'abs-link')).isSymbolicLink()).toBe(true)
+    expect(readlinkSync(join(VAULT_DIR_PATH, 'abs-link'))).toBe(outside)
+    expect(readFileSync(outside, 'utf8')).toBe('outside')
+    for (const extra of ['notes', 'rel-link', 'abs-link']) {
+      rmSync(join(VAULT_DIR_PATH, extra), { recursive: true })
+    }
+    expectNewVault(bundle.masterKeyHex)
   })
 
   it('a successful restore swaps in the full new vault and keeps non-.enc files', async () => {

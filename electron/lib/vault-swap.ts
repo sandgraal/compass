@@ -23,7 +23,7 @@
  */
 
 import {
-  copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -69,11 +69,24 @@ export function recoverInterruptedVaultSwap(): void {
   rmQuiet(OLD_DIR)
 }
 
+/** Vault-namespace check, case-insensitive: macOS (APFS) and Windows treat
+ *  `KEY.enc` and `key.enc` as the same file. */
+function isEncEntry(name: string): boolean {
+  const lower = name.toLowerCase()
+  return lower.endsWith('.enc') || lower.endsWith('.enc.tmp')
+}
+
+/** True for any casing of `key.enc`. */
+export function isMasterKeyName(name: string): boolean {
+  return name.toLowerCase() === 'key.enc'
+}
+
 /**
  * Replace every `.enc` in the vault with `blobs` plus `key.enc` (already
- * wrapped with this machine's safeStorage). Non-`.enc` files in the current
- * vault are carried over. Fully synchronous, so no other vault reader or
- * writer in this process can observe an intermediate state.
+ * wrapped with this machine's safeStorage). Everything else in the current
+ * vault — files, directories, symlinks (copied as links, never followed) —
+ * is carried over. Fully synchronous, so no other vault reader or writer in
+ * this process can observe an intermediate state.
  *
  * On a thrown error the previous vault is left in place (or, if even the
  * rollback rename fails, restorable by `recoverInterruptedVaultSwap`). Never
@@ -85,18 +98,20 @@ export function swapInVault(wrappedKey: Buffer, blobs: ReadonlyArray<[string, Bu
 
   try {
     mkdirSync(STAGING_DIR, { mode: statSync(VAULT_DIR).mode & 0o777 })
-    // key.enc first: order doesn't matter for atomicity, but a staging dir
-    // that somehow got promoted half-written must never lack the key.
-    writeFileSync(join(STAGING_DIR, 'key.enc'), wrappedKey)
     for (const [name, bytes] of blobs) {
-      if (name === 'key.enc') continue
+      if (isMasterKeyName(name)) continue
       writeFileSync(join(STAGING_DIR, name), bytes)
     }
-    for (const entry of readdirSync(VAULT_DIR, { withFileTypes: true })) {
-      if (!entry.isFile()) continue
-      if (entry.name.endsWith('.enc') || entry.name.endsWith('.enc.tmp')) continue
-      copyFileSync(join(VAULT_DIR, entry.name), join(STAGING_DIR, entry.name))
+    for (const name of readdirSync(VAULT_DIR)) {
+      if (isEncEntry(name)) continue
+      cpSync(join(VAULT_DIR, name), join(STAGING_DIR, name), {
+        recursive: true,
+        verbatimSymlinks: true
+      })
     }
+    // key.enc LAST, so nothing written above can replace it — on a
+    // case-insensitive filesystem a `KEY.enc` blob is the same file.
+    writeFileSync(join(STAGING_DIR, 'key.enc'), wrappedKey)
   } catch (err) {
     rmQuiet(STAGING_DIR)
     throw err

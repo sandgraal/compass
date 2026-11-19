@@ -78,7 +78,7 @@ import {
 } from '../db/schema'
 import { getOrCreateKey } from '../lib/crypto-vault'
 import { safeEncrypt } from '../lib/safe-storage'
-import { swapInVault } from '../lib/vault-swap'
+import { isMasterKeyName, swapInVault } from '../lib/vault-swap'
 import { DOCUMENTS_DIR, KNOWLEDGE_DIR, VAULT_DIR } from '../paths'
 
 const MAGIC = Buffer.from('COMPASSB', 'utf8') // 8 bytes
@@ -230,7 +230,7 @@ async function collectBundle(): Promise<Bundle> {
   if (existsSync(VAULT_DIR)) {
     for (const entry of readdirSync(VAULT_DIR)) {
       if (!entry.endsWith('.enc')) continue
-      if (entry === 'key.enc') continue
+      if (isMasterKeyName(entry)) continue
       const full = join(VAULT_DIR, entry)
       if (!statSync(full).isFile()) continue
       vault[entry] = readFileSync(full).toString('base64')
@@ -559,7 +559,9 @@ async function applyRestore(bundle: Bundle): Promise<{
   for (const [name, b64] of Object.entries(bundle.vault)) {
     if (name.includes('/') || name.includes('\\') || name.includes('..')) continue
     if (!name.endsWith('.enc')) continue
-    if (name === 'key.enc') continue // rebuilt locally from masterKeyHex
+    // Rebuilt locally from masterKeyHex. Any casing: on APFS/NTFS `KEY.enc`
+    // IS key.enc and would replace the locally wrapped key.
+    if (isMasterKeyName(name)) continue
     try {
       vaultWrites.push([name, Buffer.from(b64, 'base64')])
     } catch {
