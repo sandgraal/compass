@@ -317,8 +317,10 @@ function waitForOAuthCode(
         height: 680,
         show: true,
         alwaysOnTop: true,
-        webPreferences: { nodeIntegration: false, contextIsolation: true }
+        // Loads third-party provider pages: sandboxed renderer, no preload, no popups.
+        webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true }
       })
+      win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       win.loadURL(authUrl)
       win.on('closed', () => {
         if (!settled) {
@@ -456,8 +458,18 @@ export async function refreshGoogleToken(): Promise<string> {
   // Merge the new access token into the CURRENT bundle (preserve refresh_token).
   // If Google was disconnected while the refresh was in flight, write nothing
   // rather than resurrecting the token from the pre-fetch snapshot.
+  // Re-stamp expires_at: getValidGoogleToken() decides from it, so leaving the
+  // original (now past) value would force a refresh on every later call.
+  const expiresAt = Date.now() + refreshed.expires_in * 1000
   await updateToken('google', (cur) =>
-    cur ? { ...cur, access_token: refreshed.access_token, expires_in: refreshed.expires_in } : null
+    cur
+      ? {
+          ...cur,
+          access_token: refreshed.access_token,
+          expires_in: refreshed.expires_in,
+          expires_at: expiresAt
+        }
+      : null
   )
 
   return refreshed.access_token

@@ -1,8 +1,9 @@
 import 'dotenv/config'
 import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
-import { BrowserWindow, app, ipcMain, nativeTheme, shell } from 'electron'
+import { BrowserWindow, app, ipcMain, nativeTheme, session, shell } from 'electron'
 import { startCronJobs } from './cron'
 import { getDb, getRawSqlite, initDb } from './db/client'
 import { runVaultLifeMigrationIfNeeded } from './integrations/vault-life-migration'
@@ -74,6 +75,7 @@ import { recoverInterruptedVaultSwap } from './lib/vault-swap'
 import { initMenuBar } from './menu-bar'
 import { APP_DATA_DIR, DATA_DIR, KNOWLEDGE_DIR, VAULT_DIR } from './paths'
 import { registerCompassUrlScheme } from './url-scheme'
+import { installAppWindowGuards, installPermissionHandlers } from './window-security'
 
 export { APP_DATA_DIR, DATA_DIR, VAULT_DIR, KNOWLEDGE_DIR }
 
@@ -135,11 +137,13 @@ function createWindow(): void {
     console.error('[main] did-fail-load:', errorCode, errorDescription)
   })
 
-  // Open external links in system browser, not in-app
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
-    return { action: 'deny' }
-  })
+  const rendererIndex = join(__dirname, '../renderer/index.html')
+  const devUrl = is.dev ? process.env.ELECTRON_RENDERER_URL : undefined
+  const appUrl = devUrl ?? pathToFileURL(rendererIndex).href
+
+  // Popups are always denied; http(s)/mailto/tel links go to the system handler,
+  // any other scheme is dropped. Navigation off the app page is cancelled.
+  installAppWindowGuards(mainWindow.webContents, appUrl, (url) => shell.openExternal(url))
 
   // CSP: only enforce in production (dev server needs ws:// for HMR + eval for source maps)
   if (!is.dev) {
@@ -156,15 +160,17 @@ function createWindow(): void {
   }
 
   // Dev: load vite dev server; Prod: load built index.html
-  if (is.dev && process.env.ELECTRON_RENDERER_URL) {
-    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
+  if (devUrl) {
+    mainWindow.loadURL(devUrl)
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    mainWindow.loadFile(rendererIndex)
   }
 }
 
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.compass.app')
+  // Deny-by-default web permissions for the session every Compass window uses.
+  installPermissionHandlers(session.defaultSession)
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
