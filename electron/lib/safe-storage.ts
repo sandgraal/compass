@@ -8,7 +8,7 @@
  * working without a migration step.
  */
 
-import { readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { safeStorage } from 'electron'
 
 /** Throws unless the OS-backed async encryptor is usable. `what` names the caller in the error. */
@@ -31,14 +31,32 @@ export async function safeEncrypt(plaintext: string, what: string): Promise<Buff
  * tmp-file + rename so a crash can't truncate it. Re-encryption is
  * best-effort: on failure the original file is left as-is (it still
  * decrypts) and the plaintext is returned.
+ *
+ * The rename only happens if the file is still byte-identical to what was
+ * decrypted. A concurrent writer (backup restore, token save/delete) may have
+ * replaced or removed it during the encrypt await; renaming over that would
+ * resurrect stale contents. The compare + rename are synchronous, so nothing
+ * can slip in between them.
  */
-export async function decryptFile(path: string): Promise<string> {
-  const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(readFileSync(path))
+export async function decryptFileWithStatus(path: string): Promise<{
+  result: string
+  /** Bytes decrypted. */
+  original: Buffer
+  /** Bytes this call wrote back (re-encryption), or null if it wrote nothing. */
+  rewrittenTo: Buffer | null
+}> {
+  const original = readFileSync(path)
+  const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(original)
+  let rewrittenTo: Buffer | null = null
   if (shouldReEncrypt) {
     const tmpPath = `${path}.tmp`
     try {
-      writeFileSync(tmpPath, await safeStorage.encryptStringAsync(result))
-      renameSync(tmpPath, path)
+      const fresh = await safeStorage.encryptStringAsync(result)
+      if (existsSync(path) && readFileSync(path).equals(original)) {
+        writeFileSync(tmpPath, fresh)
+        renameSync(tmpPath, path)
+        rewrittenTo = fresh
+      }
     } catch {
       try {
         unlinkSync(tmpPath)
@@ -47,5 +65,10 @@ export async function decryptFile(path: string): Promise<string> {
       }
     }
   }
-  return result
+  return { result, original, rewrittenTo }
+}
+
+/** `decryptFileWithStatus`, returning only the plaintext. */
+export async function decryptFile(path: string): Promise<string> {
+  return (await decryptFileWithStatus(path)).result
 }

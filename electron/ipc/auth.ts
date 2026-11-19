@@ -44,10 +44,18 @@ async function writeTokenFile(path: string, data: object, what: string): Promise
   writeFileSync(path, encrypted)
 }
 
+/**
+ * null when the file is absent. An existing file that can't be decrypted or
+ * parsed throws — callers that tolerate that (loadToken) catch it themselves.
+ */
+async function readTokenFileStrict(path: string): Promise<object | null> {
+  if (!existsSync(path)) return null
+  return JSON.parse(await decryptFile(path))
+}
+
 async function readTokenFile(path: string): Promise<object | null> {
   try {
-    if (!existsSync(path)) return null
-    return JSON.parse(await decryptFile(path))
+    return await readTokenFileStrict(path)
   } catch {
     return null
   }
@@ -60,17 +68,21 @@ export function saveToken(service: string, tokenData: object): Promise<void> {
 
 /**
  * Atomic read-modify-write of a stored token: `update` receives the current
- * token (null when none) and returns the new one. Serialized with every other
- * write to the same file, so concurrent updates can't drop each other.
+ * token (null when none) and returns the new one, or null to leave the file
+ * untouched. Serialized with every other write to the same file, so
+ * concurrent updates can't drop each other. Rejects (writing nothing) when an
+ * existing token file can't be decrypted — rebuilding it from null would
+ * silently drop every other field it holds.
  */
 export function updateToken(
   service: string,
-  update: (current: object | null) => object
+  update: (current: object | null) => object | null
 ): Promise<void> {
   const path = tokenPath(service)
-  return serializeTokenWrite(path, async () =>
-    writeTokenFile(path, update(await readTokenFile(path)), `the ${service} token`)
-  )
+  return serializeTokenWrite(path, async () => {
+    const next = update(await readTokenFileStrict(path))
+    if (next) await writeTokenFile(path, next, `the ${service} token`)
+  })
 }
 
 export function loadToken(service: string): Promise<object | null> {
@@ -79,8 +91,10 @@ export function loadToken(service: string): Promise<object | null> {
 
 export function deleteToken(service: string): Promise<void> {
   const path = tokenPath(service)
-  // Queued behind in-flight writes so a save that started before the
-  // disconnect can't land after it and resurrect the token.
+  // Queued behind writes already issued, so a save that started before the
+  // disconnect can't land after it. A save issued AFTER the delete still
+  // writes (it is a new save); flows that hold a token across an await should
+  // use `updateToken` and return null when the token is gone.
   return serializeTokenWrite(path, async () => {
     try {
       if (existsSync(path)) unlinkSync(path)
@@ -423,13 +437,12 @@ export async function refreshGoogleToken(): Promise<string> {
 
   const refreshed = (await resp.json()) as { access_token: string; expires_in: number }
 
-  // Merge new access token into the existing token bundle (preserve refresh_token)
-  const updated = {
-    ...tokens,
-    access_token: refreshed.access_token,
-    expires_in: refreshed.expires_in
-  }
-  await saveToken('google', updated)
+  // Merge the new access token into the CURRENT bundle (preserve refresh_token).
+  // If Google was disconnected while the refresh was in flight, write nothing
+  // rather than resurrecting the token from the pre-fetch snapshot.
+  await updateToken('google', (cur) =>
+    cur ? { ...cur, access_token: refreshed.access_token, expires_in: refreshed.expires_in } : null
+  )
 
   return refreshed.access_token
 }

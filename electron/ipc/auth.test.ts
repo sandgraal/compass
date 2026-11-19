@@ -171,6 +171,21 @@ describe('token persistence', () => {
     expect(await loadToken('google')).toBeNull()
   })
 
+  it('updateToken refuses to rebuild an existing but undecryptable token from scratch', async () => {
+    const { updateToken } = await authModule()
+    const path = `${DATA_DIR}/compass_token_snaptrade.enc`
+    fakeFs[path] = Buffer.from('corrupt-blob', 'utf8')
+    await expect(updateToken('snaptrade', (cur) => ({ ...cur, userId: 'u' }))).rejects.toThrow()
+    expect(fakeFs[path].toString('utf8')).toBe('corrupt-blob')
+  })
+
+  it('updateToken writes nothing when the update returns null (e.g. token deleted meanwhile)', async () => {
+    const { updateToken, loadToken } = await authModule()
+    await updateToken('google', (cur) => (cur ? { ...cur, access_token: 'x' } : null))
+    expect(await loadToken('google')).toBeNull()
+    expect(encryptStringMock).not.toHaveBeenCalled()
+  })
+
   it('a failed write does not wedge the queue for later writes', async () => {
     const { saveToken, loadToken } = await authModule()
     safeStorageAvailable.value = false

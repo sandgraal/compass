@@ -21,6 +21,10 @@ let TMP_VAULT_DIR: string
 // flagged shouldReEncrypt). Hooks let a test mutate key.enc mid-operation.
 const ss = vi.hoisted(() => ({
   available: true,
+  alwaysReEncrypt: false,
+  // Real ciphertext differs on every encrypt (random nonce); model that with a
+  // counter in the prefix while alwaysReEncrypt is on.
+  nonce: 0,
   onDecrypt: null as null | (() => void),
   onEncrypt: null as null | (() => void)
 }))
@@ -30,12 +34,13 @@ vi.mock('electron', () => ({
     isAsyncEncryptionAvailable: async () => ss.available,
     encryptStringAsync: async (s: string) => {
       ss.onEncrypt?.()
-      return Buffer.from(`SAFE:${s}`, 'utf8')
+      return Buffer.from(`SAFE${ss.alwaysReEncrypt ? ss.nonce++ : ''}:${s}`, 'utf8')
     },
     decryptStringAsync: async (b: Buffer) => {
       ss.onDecrypt?.()
       const s = b.toString('utf8')
-      if (s.startsWith('SAFE:')) return { result: s.slice(5), shouldReEncrypt: false }
+      const safe = /^SAFE\d*:/.exec(s)
+      if (safe) return { result: s.slice(safe[0].length), shouldReEncrypt: ss.alwaysReEncrypt }
       if (s.startsWith('OLD:')) return { result: s.slice(4), shouldReEncrypt: true }
       throw new Error('mock safeStorage: invalid blob')
     }
@@ -54,6 +59,7 @@ const { getOrCreateKey, encryptBlob, decryptBlob, readEncryptedJson, writeEncryp
 beforeEach(async () => {
   TMP_VAULT_DIR = mkdtempSync(join(tmpdir(), 'compass-crypto-vault-'))
   ss.available = true
+  ss.alwaysReEncrypt = false
   ss.onDecrypt = null
   ss.onEncrypt = null
 })
@@ -233,6 +239,23 @@ describe('getOrCreateKey — async safeStorage semantics', () => {
     expect((await getOrCreateKey()).toString('hex')).toBe(HEX_A)
     expect(readFileSync(keyPath(), 'utf8')).toBe(`SAFE:${HEX_A}`)
     expect(existsSync(`${keyPath()}.tmp`)).toBe(false)
+  })
+
+  it('does not fail closed when shouldReEncrypt stays true on every read', async () => {
+    writeFileSync(keyPath(), Buffer.from(`SAFE:${HEX_A}`, 'utf8'))
+    ss.alwaysReEncrypt = true
+    expect((await getOrCreateKey()).toString('hex')).toBe(HEX_A)
+    expect((await getOrCreateKey()).toString('hex')).toBe(HEX_A)
+  })
+
+  it('a re-encrypt never renames over a key.enc a restore wrote meanwhile', async () => {
+    writeFileSync(keyPath(), Buffer.from(`OLD:${HEX_A}`, 'utf8'))
+    ss.onEncrypt = () => {
+      ss.onEncrypt = null // the restore lands while the re-encrypt is awaiting
+      writeFileSync(keyPath(), Buffer.from(`SAFE:${HEX_B}`, 'utf8'))
+    }
+    expect((await getOrCreateKey()).toString('hex')).toBe(HEX_B)
+    expect(readFileSync(keyPath(), 'utf8')).toBe(`SAFE:${HEX_B}`)
   })
 
   it('returns the NEW key if key.enc is replaced while a decrypt is in flight', async () => {

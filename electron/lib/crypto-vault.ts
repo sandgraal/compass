@@ -20,7 +20,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { VAULT_DIR } from '../paths'
-import { assertSafeStorageAvailable, decryptFile, safeEncrypt } from './safe-storage'
+import { assertSafeStorageAvailable, decryptFileWithStatus, safeEncrypt } from './safe-storage'
 
 const ALGORITHM = 'aes-256-gcm'
 const KEY_SIZE = 32 // 256 bits
@@ -90,14 +90,14 @@ export async function getOrCreateKey(): Promise<Buffer> {
 async function decryptKeyFile(keyPath: string): Promise<Buffer> {
   // A backup restore can replace key.enc while a decrypt is awaiting. Handing
   // the caller the OLD key would make its next write unreadable, so confirm
-  // the file is byte-identical after the decrypt and retry if it moved.
-  // (`decryptFile` may itself rewrite key.enc when the OS key rotated; the
-  // retry then simply decrypts the re-encrypted copy.)
+  // the file still holds what we decrypted — or what we ourselves wrote back
+  // when re-encrypting after an OS key rotation — and retry if it moved.
   for (let attempt = 0; attempt < 3; attempt++) {
-    const before = readFileSync(keyPath)
-    const decrypted = await decryptFile(keyPath)
-    if (!readFileSync(keyPath).equals(before)) continue
-    return parseKeyHex(decrypted)
+    const { result, original, rewrittenTo } = await decryptFileWithStatus(keyPath)
+    const now = readFileSync(keyPath)
+    if (now.equals(original) || (rewrittenTo && now.equals(rewrittenTo))) {
+      return parseKeyHex(result)
+    }
   }
   throw new Error('Vault master key changed repeatedly while being read — retry the operation')
 }
