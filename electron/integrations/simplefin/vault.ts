@@ -31,16 +31,16 @@ type SimplefinVaultShape = {
 const VAULT_NAME = 'simplefin'
 const EMPTY_VAULT: SimplefinVaultShape = { accessUrls: {} }
 
-function readVault(): SimplefinVaultShape {
-  const key = getOrCreateKey()
+// Mutators await the key ONCE, then read → modify → write synchronously (no
+// await in between), so concurrent callers can't drop each other's writes.
+function readVault(key: Buffer): SimplefinVaultShape {
   const data = readEncryptedJson<SimplefinVaultShape>(VAULT_NAME, key)
   if (!data) return { accessUrls: {} }
   // Defensive merge in case an older version of the blob has fewer fields.
   return { accessUrls: { ...EMPTY_VAULT.accessUrls, ...data.accessUrls } }
 }
 
-function writeVault(data: SimplefinVaultShape): void {
-  const key = getOrCreateKey()
+function writeVault(data: SimplefinVaultShape, key: Buffer): void {
   writeEncryptedJson(VAULT_NAME, data, key)
 }
 
@@ -70,26 +70,28 @@ export function assertValidAccessUrl(url: string): URL {
  * Returns the Access URL for the given connection id, or null if none is
  * stored (either never claimed or the user disconnected it).
  */
-export function getAccessUrl(connectionId: string): string | null {
+export async function getAccessUrl(connectionId: string): Promise<string | null> {
   if (typeof connectionId !== 'string' || connectionId.length === 0) return null
-  return readVault().accessUrls[connectionId] ?? null
+  return readVault(await getOrCreateKey()).accessUrls[connectionId] ?? null
 }
 
-export function setAccessUrl(connectionId: string, url: string): void {
+export async function setAccessUrl(connectionId: string, url: string): Promise<void> {
   if (typeof connectionId !== 'string' || connectionId.length === 0) {
     throw new Error('SimpleFIN connectionId must be a non-empty string')
   }
   assertValidAccessUrl(url) // throws on https/userinfo violations
-  const vault = readVault()
+  const key = await getOrCreateKey()
+  const vault = readVault(key)
   vault.accessUrls[connectionId] = url
-  writeVault(vault)
+  writeVault(vault, key)
 }
 
-export function removeAccessUrl(connectionId: string): void {
-  const vault = readVault()
+export async function removeAccessUrl(connectionId: string): Promise<void> {
+  const key = await getOrCreateKey()
+  const vault = readVault(key)
   if (vault.accessUrls[connectionId] !== undefined) {
     delete vault.accessUrls[connectionId]
-    writeVault(vault)
+    writeVault(vault, key)
   }
 }
 
@@ -98,8 +100,8 @@ export function removeAccessUrl(connectionId: string): void {
  * expose to the renderer — does NOT leak the URLs (which embed credentials)
  * themselves. Used by the Integrations card to show connection status.
  */
-export function listConnectionIds(): string[] {
-  return Object.keys(readVault().accessUrls).sort()
+export async function listConnectionIds(): Promise<string[]> {
+  return Object.keys(readVault(await getOrCreateKey()).accessUrls).sort()
 }
 
 /**
@@ -107,8 +109,8 @@ export function listConnectionIds(): string[] {
  * (rather than `unlink`) so on-disk observers can't tell "wiped" from "never
  * used". No-op if no blob exists yet. Mirrors `clearPlaidVault`.
  */
-export function clearSimplefinVault(): void {
+export async function clearSimplefinVault(): Promise<void> {
   const path = join(VAULT_DIR, `${VAULT_NAME}.enc`)
   if (!existsSync(path)) return
-  writeVault(EMPTY_VAULT)
+  writeVault(EMPTY_VAULT, await getOrCreateKey())
 }

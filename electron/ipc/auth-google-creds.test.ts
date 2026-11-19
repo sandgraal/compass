@@ -34,7 +34,14 @@ const unlinkSyncMock = vi.fn<(p: string) => void>((p) => {
 const mkdirSyncMock = vi.fn()
 
 vi.mock('electron', () => ({
-  safeStorage: { encryptString: encryptStringMock, decryptString: decryptStringMock },
+  safeStorage: {
+    isAsyncEncryptionAvailable: async () => true,
+    encryptStringAsync: async (s: string) => encryptStringMock(s),
+    decryptStringAsync: async (b: Buffer) => ({
+      result: decryptStringMock(b),
+      shouldReEncrypt: false
+    })
+  },
   BrowserWindow: { getAllWindows: () => [] },
   app: { getPath: () => '/tmp/compass-google-test' }
 }))

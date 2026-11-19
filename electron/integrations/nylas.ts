@@ -20,7 +20,7 @@ import { eq } from 'drizzle-orm'
 import { BrowserWindow } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
 import { integrations, syncEvents } from '../db/schema'
-import { loadToken, saveToken } from '../ipc/auth'
+import { loadToken, updateToken } from '../ipc/auth'
 import { type ContactInput, upsertContacts } from '../ipc/contacts'
 import type { SqliteForFx } from './finance-fx'
 import { relayFetch, resolveRelayConfig } from './relay-client'
@@ -105,14 +105,14 @@ type NylasToken = { grantId?: string }
 const NYLAS_SUCCESS_URL = 'https://compass.app/nylas/success' // sentinel we intercept
 const NYLAS_SUCCESS = new URL(NYLAS_SUCCESS_URL)
 
-function loadNylasToken(): NylasToken {
-  return (loadToken('nylas') as NylasToken | null) ?? {}
+async function loadNylasToken(): Promise<NylasToken> {
+  return ((await loadToken('nylas')) as NylasToken | null) ?? {}
 }
 
 /** Pull the connected grant's contacts → upsert into `contacts` → owned address book. */
 export async function syncNylas(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
   const db = getDb()
-  const tok = loadNylasToken()
+  const tok = await loadNylasToken()
   if (!tok.grantId) return { service: 'nylas', success: false, error: 'Nylas not connected' }
   const cfg = resolveRelayConfig(getRawSqlite(), 'nylas', () => null)
 
@@ -280,7 +280,7 @@ export async function openNylasConnect(
             finish({ success: false, error: 'Nylas returned no grant id' })
             return
           }
-          saveToken('nylas', { ...loadNylasToken(), grantId })
+          await updateToken('nylas', (cur) => ({ ...(cur as NylasToken | null), grantId }))
           finish({ success: true })
         } catch (err) {
           finish({ success: false, error: err instanceof Error ? err.message : String(err) })

@@ -54,10 +54,10 @@ function readRelayUrlSetting(): string | null {
   return row?.value ?? null
 }
 
-function detectByoAggregators(): string[] {
+async function detectByoAggregators(): Promise<string[]> {
   const out: string[] = []
   for (const id of BYO_CAPABLE) {
-    const tok = loadToken(id) as Record<string, unknown> | null
+    const tok = (await loadToken(id)) as Record<string, unknown> | null
     if (!tok) continue
     if (id === 'terra') {
       const devId = typeof tok.devId === 'string' ? tok.devId.trim() : ''
@@ -73,13 +73,13 @@ function detectByoAggregators(): string[] {
 }
 
 export function registerRelayHandlers(ipcMain: IpcMain): void {
-  ipcMain.handle('relay:get-config', () => {
+  ipcMain.handle('relay:get-config', async () => {
     const { relayUrl, isDefault } = pickRelayUrl(readRelayUrlSetting())
     return {
       relayUrl,
       isDefault,
       defaultUrl: DEFAULT_RELAY_URL,
-      byoAggregators: detectByoAggregators()
+      byoAggregators: await detectByoAggregators()
     }
   })
 

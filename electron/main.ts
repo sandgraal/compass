@@ -178,7 +178,7 @@ app.whenReady().then(async () => {
     console.log('[main] db initialized')
     // Backfill the derived-entity cross-reference cache once for DBs whose
     // records predate it (deferred + best-effort so it never blocks startup).
-    setImmediate(() => {
+    setImmediate(async () => {
       // One-shot: re-derive 'generic' rows whose export family now has a real
       // recognizer (Amazon full export — Prime Video / Kindle / Music / Alexa;
       // device geolocation moves OFF the records spine). Before the entity
@@ -226,7 +226,7 @@ app.whenReady().then(async () => {
       // plaintext life_records table (needs safeStorage + DB — can't be a
       // drizzle migration). A failure leaves the gate unset → retried next boot.
       try {
-        const res = runVaultLifeMigrationIfNeeded(getRawSqlite())
+        const res = await runVaultLifeMigrationIfNeeded(getRawSqlite())
         if (res.ran && res.categoriesProcessed > 0) {
           console.log(
             `[main] vault → life records migration (${res.migrated} records, ${res.secretsKept} secret fields kept in vault)`

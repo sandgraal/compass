@@ -7,9 +7,12 @@ import * as schema from '../db/schema'
 // assert PHI demographics land there and never in plaintext app_settings.
 const tokenStore = vi.hoisted(() => ({ current: {} as Record<string, unknown> }))
 vi.mock('../ipc/auth', () => ({
-  loadToken: (id: string) => tokenStore.current[id] ?? null,
-  saveToken: (id: string, value: unknown) => {
+  loadToken: async (id: string) => tokenStore.current[id] ?? null,
+  saveToken: async (id: string, value: unknown) => {
     tokenStore.current[id] = value
+  },
+  updateToken: async (id: string, update: (cur: unknown) => unknown) => {
+    tokenStore.current[id] = update(tokenStore.current[id] ?? null)
   }
 }))
 
@@ -77,7 +80,7 @@ const BUNDLE = {
 }
 
 describe('normalizeMetriportBundle', () => {
-  it('maps FHIR resources to clinical records, skipping non-clinical + code-less ones', () => {
+  it('maps FHIR resources to clinical records, skipping non-clinical + code-less ones', async () => {
     const out = normalizeMetriportBundle(BUNDLE)
     expect(out).toHaveLength(5) // Patient + code-less Condition dropped
     expect(out.find((r) => r.externalId === 'metriport:Condition:c1')).toEqual({
@@ -111,7 +114,7 @@ describe('normalizeMetriportBundle', () => {
     expect(JSON.stringify(out)).not.toContain('6.1')
   })
 
-  it('tolerates malformed input', () => {
+  it('tolerates malformed input', async () => {
     expect(normalizeMetriportBundle({})).toEqual([])
     expect(normalizeMetriportBundle({ entry: 'nope' })).toEqual([])
     expect(
@@ -124,7 +127,7 @@ describe('upsertMedicalRecords (real DB)', () => {
   let db: ReturnType<typeof drizzle<typeof schema>>
   let sqlite: InstanceType<typeof Database>
 
-  beforeEach(() => {
+  beforeEach(async () => {
     sqlite = new Database(':memory:')
     sqlite.exec(`
       CREATE TABLE medical_records (
@@ -136,7 +139,7 @@ describe('upsertMedicalRecords (real DB)', () => {
     db = drizzle<typeof schema>(sqlite, { schema })
   })
 
-  it('upserts records, then refreshes in place on re-sync (idempotent)', () => {
+  it('upserts records, then refreshes in place on re-sync (idempotent)', async () => {
     const rows = normalizeMetriportBundle(BUNDLE)
     expect(upsertMedicalRecords(db, rows)).toBe(5)
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM medical_records').get()).toEqual({ n: 5 })
@@ -157,20 +160,20 @@ describe('upsertMedicalRecords (real DB)', () => {
 describe('loadMetriportDemographics (PHI stays encrypted)', () => {
   let sqlite: InstanceType<typeof Database>
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tokenStore.current = {}
     sqlite = new Database(':memory:')
     sqlite.exec('CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER);')
   })
 
-  it('migrates a legacy plaintext seed into the encrypted store and purges the plaintext row', () => {
+  it('migrates a legacy plaintext seed into the encrypted store and purges the plaintext row', async () => {
     const demo = { firstName: 'Ada', lastName: 'Lovelace', dob: '1815-12-10' }
     sqlite
       .prepare('INSERT INTO app_settings (key, value) VALUES (?, ?)')
       .run('metriportPatient', JSON.stringify(demo))
 
     // First read migrates the seed, then returns it.
-    expect(loadMetriportDemographics(sqlite)).toEqual(demo)
+    expect(await loadMetriportDemographics(sqlite)).toEqual(demo)
     // Plaintext PHI is gone from app_settings.
     expect(
       sqlite.prepare("SELECT value FROM app_settings WHERE key = 'metriportPatient'").get()
@@ -179,10 +182,10 @@ describe('loadMetriportDemographics (PHI stays encrypted)', () => {
     expect((tokenStore.current.metriport as { demographics?: unknown }).demographics).toEqual(demo)
 
     // Second read comes straight from the encrypted store (no plaintext needed).
-    expect(loadMetriportDemographics(sqlite)).toEqual(demo)
+    expect(await loadMetriportDemographics(sqlite)).toEqual(demo)
   })
 
-  it('returns null when nothing is configured', () => {
-    expect(loadMetriportDemographics(sqlite)).toBeNull()
+  it('returns null when nothing is configured', async () => {
+    expect(await loadMetriportDemographics(sqlite)).toBeNull()
   })
 })

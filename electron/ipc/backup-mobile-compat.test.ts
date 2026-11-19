@@ -16,7 +16,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.mock('electron', () => ({
   app: { getVersion: () => '9.9.9', getPath: () => '/tmp' },
   dialog: {},
-  safeStorage: { isEncryptionAvailable: () => true, encryptString: (s: string) => Buffer.from(s) }
+  safeStorage: {
+    isAsyncEncryptionAvailable: async () => true,
+    encryptStringAsync: async (s: string) => Buffer.from(s)
+  }
 }))
 vi.mock('../db/client', () => ({
   getDb: () => {

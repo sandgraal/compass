@@ -22,7 +22,7 @@ import { BrowserWindow } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
 import { assets, integrations, syncEvents } from '../db/schema'
 import type { AssetInput } from '../ipc/assets'
-import { loadToken, saveToken } from '../ipc/auth'
+import { loadToken, updateToken } from '../ipc/auth'
 import type { SqliteForFx } from './finance-fx'
 import { getOrCreateDeviceToken, relayFetch, resolveRelayConfig } from './relay-client'
 
@@ -137,8 +137,8 @@ type CanopyToken = { pullId?: string }
 const CANOPY_SUCCESS_URL = 'https://compass.app/canopy/success' // sentinel we intercept, never load
 const CANOPY_SUCCESS = new URL(CANOPY_SUCCESS_URL) // parsed once for exact origin+path matching
 
-function loadCanopyToken(): CanopyToken {
-  return (loadToken('canopy') as CanopyToken | null) ?? {}
+async function loadCanopyToken(): Promise<CanopyToken> {
+  return ((await loadToken('canopy')) as CanopyToken | null) ?? {}
 }
 
 /** Upsert insurance policies into `assets` (by external_id), refreshing on re-sync. */
@@ -172,7 +172,7 @@ export function upsertInsuranceAssets(
 /** Pull the connected Canopy policies → upsert into `assets` → feed the estate engine. */
 export async function syncCanopy(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
   const db = getDb()
-  const tok = loadCanopyToken()
+  const tok = await loadCanopyToken()
   if (!tok.pullId) return { service: 'canopy', success: false, error: 'Canopy not connected' }
   const cfg = resolveRelayConfig(getRawSqlite(), 'canopy', () => null)
 
@@ -304,8 +304,10 @@ export async function openCanopyConnect(
         finish({ success: false, error: 'Canopy returned no valid pull_id' })
         return
       }
-      saveToken('canopy', { ...loadCanopyToken(), pullId })
-      finish({ success: true })
+      void updateToken('canopy', (cur) => ({ ...(cur as CanopyToken | null), pullId })).then(
+        () => finish({ success: true }),
+        (err) => finish({ success: false, error: String(err) })
+      )
     }
     win.webContents.on('will-redirect', onNavigate)
     win.webContents.on('will-navigate', onNavigate)

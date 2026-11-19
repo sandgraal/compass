@@ -84,8 +84,8 @@ export type SimplefinClaimResult = {
 export function registerSimplefinHandlers(ipcMain: IpcMain): void {
   ipcMain.handle(
     'simplefin:get-status',
-    (): SimplefinStatus => ({
-      connectionIds: listConnectionIds()
+    async (): Promise<SimplefinStatus> => ({
+      connectionIds: await listConnectionIds()
     })
   )
 
@@ -102,7 +102,7 @@ export function registerSimplefinHandlers(ipcMain: IpcMain): void {
       // Vault before DB: the credential is the irrecoverable thing. A crash after
       // this but before the row write leaves a dangling vault entry the user can
       // re-claim over, which is strictly safer than a row with no credential.
-      setAccessUrl(connectionId, accessUrl)
+      await setAccessUrl(connectionId, accessUrl)
 
       // Probe once for org metadata (display only). Non-fatal.
       let orgName = ''
@@ -194,31 +194,34 @@ export function registerSimplefinHandlers(ipcMain: IpcMain): void {
     }
   )
 
-  ipcMain.handle('simplefin:disconnect', (_e, connectionId: unknown): { ok: true } => {
-    if (typeof connectionId !== 'string' || connectionId.length === 0) {
-      throw new Error('simplefin:disconnect: connectionId must be a non-empty string')
-    }
-    // Tombstone the credential first.
-    removeAccessUrl(connectionId)
+  ipcMain.handle(
+    'simplefin:disconnect',
+    async (_e, connectionId: unknown): Promise<{ ok: true }> => {
+      if (typeof connectionId !== 'string' || connectionId.length === 0) {
+        throw new Error('simplefin:disconnect: connectionId must be a non-empty string')
+      }
+      // Tombstone the credential first.
+      await removeAccessUrl(connectionId)
 
-    const db = getDb()
-    const row = db
-      .select({ id: simplefinConnections.id })
-      .from(simplefinConnections)
-      .where(eq(simplefinConnections.connectionId, connectionId))
-      .get()
-    if (row) {
-      // Sever the live link on owned accounts BEFORE deleting the connection
-      // row — foreign_keys is ON, so a dangling FK would otherwise block the
-      // delete. We keep the accounts + their transaction history (local-first:
-      // disconnecting a source never destroys the user's data); they simply
-      // revert to manual/unlinked accounts.
-      db.update(financeAccounts)
-        .set({ simplefinConnectionId: null })
-        .where(eq(financeAccounts.simplefinConnectionId, row.id))
-        .run()
-      db.delete(simplefinConnections).where(eq(simplefinConnections.id, row.id)).run()
+      const db = getDb()
+      const row = db
+        .select({ id: simplefinConnections.id })
+        .from(simplefinConnections)
+        .where(eq(simplefinConnections.connectionId, connectionId))
+        .get()
+      if (row) {
+        // Sever the live link on owned accounts BEFORE deleting the connection
+        // row — foreign_keys is ON, so a dangling FK would otherwise block the
+        // delete. We keep the accounts + their transaction history (local-first:
+        // disconnecting a source never destroys the user's data); they simply
+        // revert to manual/unlinked accounts.
+        db.update(financeAccounts)
+          .set({ simplefinConnectionId: null })
+          .where(eq(financeAccounts.simplefinConnectionId, row.id))
+          .run()
+        db.delete(simplefinConnections).where(eq(simplefinConnections.id, row.id)).run()
+      }
+      return { ok: true }
     }
-    return { ok: true }
-  })
+  )
 }

@@ -24,7 +24,7 @@ import { eq } from 'drizzle-orm'
 import { BrowserWindow } from 'electron'
 import { getDb } from '../db/client'
 import { integrations, syncEvents } from '../db/schema'
-import { loadToken, saveToken } from '../ipc/auth'
+import { loadToken, updateToken } from '../ipc/auth'
 import { type ParsedHolding, SNAPTRADE_SOURCE, importHoldings } from './finance-holdings'
 
 // ── pure helpers ──────────────────────────────────────────────────────────────
@@ -195,22 +195,22 @@ type SnaptradeToken = {
   userSecret?: string // SECRET — per connected user
 }
 
-function loadSnaptradeToken(): SnaptradeToken {
-  return (loadToken('snaptrade') as SnaptradeToken | null) ?? {}
+async function loadSnaptradeToken(): Promise<SnaptradeToken> {
+  return ((await loadToken('snaptrade')) as SnaptradeToken | null) ?? {}
 }
 
 /** Store the user's own SnapTrade partner credentials (encrypted via safeStorage). */
-export function setSnaptradeByoCreds(clientId: string, consumerKey: string): void {
-  saveToken('snaptrade', {
-    ...loadSnaptradeToken(),
+export async function setSnaptradeByoCreds(clientId: string, consumerKey: string): Promise<void> {
+  await updateToken('snaptrade', (cur) => ({
+    ...(cur as SnaptradeToken | null),
     clientId: clientId.trim(),
     consumerKey: consumerKey.trim()
-  })
+  }))
 }
 
 /** True once partner credentials are present (the connect flow can then run). */
-export function hasSnaptradeCreds(): boolean {
-  const t = loadSnaptradeToken()
+export async function hasSnaptradeCreds(): Promise<boolean> {
+  const t = await loadSnaptradeToken()
   return !!(t.clientId && t.consumerKey)
 }
 
@@ -221,9 +221,11 @@ export function hasSnaptradeCreds(): boolean {
  * 'snaptrade' token blob), this only drops the connection-derived
  * userId/userSecret, so reconnecting doesn't force re-entering BYO creds.
  */
-export function clearSnaptradeConnection(): void {
-  const tok = loadSnaptradeToken()
-  saveToken('snaptrade', { clientId: tok.clientId, consumerKey: tok.consumerKey })
+export async function clearSnaptradeConnection(): Promise<void> {
+  await updateToken('snaptrade', (cur) => {
+    const tok = (cur as SnaptradeToken | null) ?? {}
+    return { clientId: tok.clientId, consumerKey: tok.consumerKey }
+  })
 }
 
 // ── signed fetch + connect + sync (impure; BYO-direct, no relay) ────────────────
@@ -244,7 +246,7 @@ async function snaptradeFetch(
   path: string,
   opts: { query?: Record<string, string>; body?: unknown; now?: number } = {}
 ): Promise<Response> {
-  const tok = loadSnaptradeToken()
+  const tok = await loadSnaptradeToken()
   if (!tok.clientId || !tok.consumerKey) throw new Error('SnapTrade credentials not set')
   const now = opts.now ?? Date.now()
   const params = new URLSearchParams({
@@ -274,10 +276,10 @@ async function snaptradeFetch(
 export async function openSnaptradeConnect(
   parent: BrowserWindow | null
 ): Promise<{ success: boolean; error?: string }> {
-  if (!hasSnaptradeCreds()) {
+  if (!(await hasSnaptradeCreds())) {
     return { success: false, error: 'Enter your SnapTrade clientId + consumerKey first' }
   }
-  let { userId, userSecret } = loadSnaptradeToken()
+  let { userId, userSecret } = await loadSnaptradeToken()
   try {
     if (!userId || !userSecret) {
       userId = userId ?? `compass-${randomUUID()}`
@@ -289,7 +291,11 @@ export async function openSnaptradeConnect(
       userId = str(reg.userId) ?? userId
       userSecret = str(reg.userSecret) ?? undefined
       if (!userSecret) throw new Error('SnapTrade did not return a userSecret')
-      saveToken('snaptrade', { ...loadSnaptradeToken(), userId, userSecret })
+      await updateToken('snaptrade', (cur) => ({
+        ...(cur as SnaptradeToken | null),
+        userId,
+        userSecret
+      }))
     }
     const loginRes = await snaptradeFetch('POST', '/api/v1/snapTrade/login', {
       query: { userId, userSecret, customRedirect: SNAPTRADE_SUCCESS_URL }
@@ -359,7 +365,7 @@ function openPortalWindow(
 /** Pull every connected account's holdings → snapshot into the net-worth store. */
 export async function syncSnaptrade(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
   const db = getDb()
-  const tok = loadSnaptradeToken()
+  const tok = await loadSnaptradeToken()
   if (!tok.clientId || !tok.consumerKey) {
     return { service: 'snaptrade', success: false, error: 'SnapTrade credentials not set' }
   }

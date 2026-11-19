@@ -71,6 +71,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   sqlite.close()
 })
 
@@ -186,21 +187,16 @@ describe('listInsights lifecycle', () => {
   it('registers insights:list / :dismiss / :pin and validates keys', async () => {
     const { registerInsightLifecycleHandlers } = await import('./insights-lifecycle')
     seedUncategorized()
+    // The IPC handler reads the wall clock; pin it so the June fixtures stay in-window.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
     const handlers: Record<string, (...args: unknown[]) => unknown> = {}
     registerInsightLifecycleHandlers({
       handle: (channel: string, h: (...args: unknown[]) => unknown) => {
         handlers[channel] = h
       }
     } as unknown as IpcMain)
-    // The handler reads the real clock; pin it to the fixtures' NOW (Date only).
-    vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(NOW)
-    let listed: { insights: Array<{ key: string }> }
-    try {
-      listed = (await handlers['insights:list']({})) as { insights: Array<{ key: string }> }
-    } finally {
-      vi.useRealTimers()
-    }
+    const listed = (await handlers['insights:list']({})) as { insights: Array<{ key: string }> }
     expect(listed.insights.length).toBeGreaterThan(0)
     expect(await handlers['insights:dismiss']({}, '', true)).toEqual({ success: false })
     expect(await handlers['insights:dismiss']({}, 42, true)).toEqual({ success: false })

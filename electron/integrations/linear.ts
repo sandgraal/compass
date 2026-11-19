@@ -114,7 +114,7 @@ type SyncResult = { service: string; success: boolean; recordsUpdated?: number; 
  * integrations, so a first-ever failure still surfaces.
  */
 export async function syncLinear(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
-  const tokens = loadToken('linear') as { access_token?: string } | null
+  const tokens = (await loadToken('linear')) as { access_token?: string } | null
   if (!tokens?.access_token) {
     return { service: 'linear', success: false, error: 'Not connected' }
   }

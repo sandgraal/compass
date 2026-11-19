@@ -17,7 +17,7 @@ import { eq } from 'drizzle-orm'
 import { BrowserWindow } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
 import { integrations, syncEvents, utilityBills } from '../db/schema'
-import { loadToken, saveToken } from '../ipc/auth'
+import { loadToken, updateToken } from '../ipc/auth'
 import { afterConnectorSync } from '../ipc/storehouse-sync'
 import type { SqliteForFx } from './finance-fx'
 import { relayFetch, resolveRelayConfig } from './relay-client'
@@ -156,14 +156,14 @@ type ArcadiaToken = { connected?: boolean; correlationId?: string }
 const ARCADIA_SUCCESS_URL = 'https://compass.app/arcadia/success' // sentinel we intercept
 const ARCADIA_SUCCESS = new URL(ARCADIA_SUCCESS_URL)
 
-function loadArcadiaToken(): ArcadiaToken {
-  return (loadToken('arcadia') as ArcadiaToken | null) ?? {}
+async function loadArcadiaToken(): Promise<ArcadiaToken> {
+  return ((await loadToken('arcadia')) as ArcadiaToken | null) ?? {}
 }
 
 /** Pull the connected utility statements → upsert into `utility_bills` → feed the property P&L. */
 export async function syncArcadia(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
   const db = getDb()
-  const tok = loadArcadiaToken()
+  const tok = await loadArcadiaToken()
   if (!tok.connected) return { service: 'arcadia', success: false, error: 'Arcadia not connected' }
   const cfg = resolveRelayConfig(getRawSqlite(), 'arcadia', () => null)
 
@@ -298,8 +298,14 @@ export async function openArcadiaConnect(
         return
       }
       e.preventDefault()
-      saveToken('arcadia', { ...loadArcadiaToken(), connected: true, correlationId })
-      finish({ success: true })
+      void updateToken('arcadia', (cur) => ({
+        ...(cur as ArcadiaToken | null),
+        connected: true,
+        correlationId
+      })).then(
+        () => finish({ success: true }),
+        (err) => finish({ success: false, error: String(err) })
+      )
     }
     win.webContents.on('will-redirect', onNavigate)
     win.webContents.on('will-navigate', onNavigate)

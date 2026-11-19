@@ -19,7 +19,7 @@
 import { eq } from 'drizzle-orm'
 import { getDb, getRawSqlite } from '../db/client'
 import { integrations, medicalRecords, syncEvents } from '../db/schema'
-import { loadToken, saveToken } from '../ipc/auth'
+import { loadToken, updateToken } from '../ipc/auth'
 import { afterConnectorSync } from '../ipc/storehouse-sync'
 import type { SqliteForFx } from './finance-fx'
 import { relayFetch, resolveRelayConfig } from './relay-client'
@@ -191,8 +191,8 @@ type SyncResult = { service: string; success: boolean; recordsUpdated?: number; 
 // Metriport-assigned handle we sync against.
 type MetriportToken = { patientId?: string; demographics?: unknown }
 
-function loadMetriportToken(): MetriportToken {
-  return (loadToken('metriport') as MetriportToken | null) ?? {}
+async function loadMetriportToken(): Promise<MetriportToken> {
+  return ((await loadToken('metriport')) as MetriportToken | null) ?? {}
 }
 
 /**
@@ -201,8 +201,8 @@ function loadMetriportToken(): MetriportToken {
  * the plaintext `app_settings['metriportPatient']` row, migrate that value into the
  * encrypted store and **purge the plaintext copy** so PHI never lingers on disk.
  */
-export function loadMetriportDemographics(sqlite: SqliteForFx): unknown {
-  const tok = loadMetriportToken()
+export async function loadMetriportDemographics(sqlite: SqliteForFx): Promise<unknown> {
+  const tok = await loadMetriportToken()
   if (tok.demographics) return tok.demographics
   // Legacy plaintext seed → migrate into the encrypted blob, then delete it.
   try {
@@ -211,7 +211,12 @@ export function loadMetriportDemographics(sqlite: SqliteForFx): unknown {
       .get('metriportPatient') as { value?: string } | undefined
     const legacy = row?.value ? JSON.parse(row.value) : null
     if (legacy) {
-      saveToken('metriport', { ...tok, demographics: legacy })
+      // Awaited BEFORE the plaintext delete: if the encrypted write fails, the
+      // legacy row must survive (the catch below leaves it in place).
+      await updateToken('metriport', (cur) => ({
+        ...(cur as MetriportToken | null),
+        demographics: legacy
+      }))
       sqlite.prepare('DELETE FROM app_settings WHERE key = ?').run('metriportPatient')
       return legacy
     }
@@ -224,7 +229,7 @@ export function loadMetriportDemographics(sqlite: SqliteForFx): unknown {
 /** Pull the connected patient's consolidated FHIR bundle → upsert into `medical_records`. */
 export async function syncMetriport(): Promise<SyncResult> {
   const db = getDb()
-  const tok = loadMetriportToken()
+  const tok = await loadMetriportToken()
   if (!tok.patientId)
     return { service: 'metriport', success: false, error: 'Metriport not connected' }
   const cfg = resolveRelayConfig(getRawSqlite(), 'metriport', () => null)
@@ -303,7 +308,7 @@ export async function syncMetriport(): Promise<SyncResult> {
 export async function openMetriportConnect(
   sqlite: SqliteForFx
 ): Promise<{ success: boolean; error?: string }> {
-  const demographics = loadMetriportDemographics(sqlite)
+  const demographics = await loadMetriportDemographics(sqlite)
   if (!demographics) {
     return {
       success: false,
@@ -320,7 +325,7 @@ export async function openMetriportConnect(
     const patient = (await res.json()) as { id?: string }
     const patientId = str(patient.id)
     if (!patientId) throw new Error('Metriport did not return a patient id')
-    saveToken('metriport', { ...loadMetriportToken(), patientId })
+    await updateToken('metriport', (cur) => ({ ...(cur as MetriportToken | null), patientId }))
 
     // Best-effort: kick off the async network query. The bundle lands via webhook; the
     // next sync reads the cached consolidated data. A failure here doesn't undo the connect.

@@ -58,9 +58,8 @@ function readLegacyCategory(category: string, key: Buffer): Array<Record<string,
   }
 }
 
-function migrate(): MigrationResult {
+function migrate(key: Buffer): MigrationResult {
   const db = getDb()
-  const key = getOrCreateKey()
   let migrated = 0
   let secretsKept = 0
   let categoriesProcessed = 0
@@ -137,10 +136,20 @@ function migrate(): MigrationResult {
  * set. Throws (and leaves the gate unset) on Keychain/DB failure so the next
  * boot retries.
  */
-export function runVaultLifeMigrationIfNeeded(
+export async function runVaultLifeMigrationIfNeeded(
   sqlite: SqliteForOneShot
-): { ran: false } | ({ ran: true } & MigrationResult) {
-  const result = runOnceGated(sqlite, VAULT_LIFE_MIGRATION_KEY, migrate)
+): Promise<{ ran: false } | ({ ran: true } & MigrationResult)> {
+  // Check the gate before touching safeStorage so an already-migrated boot
+  // never pays the Keychain round-trip. runOnceGated re-checks it.
+  if (
+    sqlite.prepare('SELECT value FROM app_settings WHERE key = ?').get(VAULT_LIFE_MIGRATION_KEY)
+  ) {
+    return { ran: false }
+  }
+  // Resolve the key BEFORE the gated pass: migrate() itself stays synchronous,
+  // so the DB writes and blob merge can't interleave with other vault writers.
+  const key = await getOrCreateKey()
+  const result = runOnceGated(sqlite, VAULT_LIFE_MIGRATION_KEY, () => migrate(key))
   if (result.ran && result.migrated > 0) afterDomainWrite()
   return result
 }
