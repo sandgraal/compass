@@ -64,7 +64,7 @@
     "recharts": "^3.8.1",
     "tailwind-merge": "^2.5.4",
     "tailwindcss-animate": "^1.0.7",
-    "vite": "^6.4.3",
+    "vite": "^6.4.6",
     "yauzl": "^3.4.0",
     "zustand": "^5.0.2"
   },
@@ -87,7 +87,7 @@
     "@vitest/coverage-v8": "^4.1.8",
     "autoprefixer": "^10.4.20",
     "drizzle-kit": "^0.31.10",
-    "electron": "^41.10.7",
+    "electron": "^45.4.1",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "esbuild": "0.27.2",

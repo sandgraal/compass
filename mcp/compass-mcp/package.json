@@ -9,7 +9,7 @@
     "start": "tsx index.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "better-sqlite3": "^12.9.0"
   },
   "devDependencies": {
