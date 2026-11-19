@@ -140,7 +140,10 @@ function createWindow(): void {
   // any other scheme is dropped. Navigation off the app page is cancelled.
   installAppWindowGuards(mainWindow.webContents, appUrl, (url) => shell.openExternal(url))
 
-  // CSP: only enforce in production (dev server needs ws:// for HMR + eval for source maps)
+  // Header CSP for http(s) responses in this session. Production loads the
+  // renderer over file://, where onHeadersReceived does not fire, so the
+  // <meta> CSP in index.html is what actually governs the app page (see
+  // electron/renderer-csp.test.ts). Keep the two in step.
   if (!is.dev) {
     mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
       callback({
