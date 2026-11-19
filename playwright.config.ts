@@ -2,6 +2,8 @@ import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e',
+  // Downloads + warms the Electron binary before any spec's timeout starts.
+  globalSetup: './e2e/global-setup.ts',
   fullyParallel: false, // Electron — single instance only
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
