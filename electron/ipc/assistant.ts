@@ -298,7 +298,7 @@ export function registerAssistantHandlers(ipcMain: IpcMain): void {
     return getAssistantStatus()
   })
 
-  ipcMain.handle('assistant:set-key', (_event, provider: unknown, key: unknown) => {
+  ipcMain.handle('assistant:set-key', async (_event, provider: unknown, key: unknown) => {
     if (provider !== 'anthropic' && provider !== 'openai') {
       return { success: false, error: `Unknown provider: ${String(provider)}` }
     }
@@ -306,19 +306,19 @@ export function registerAssistantHandlers(ipcMain: IpcMain): void {
       return { success: false, error: 'Key must be a string' }
     }
     try {
-      setAssistantKey(provider as LlmProvider, key)
+      await setAssistantKey(provider as LlmProvider, key)
       return { success: true }
     } catch (err) {
       return { success: false, error: (err as Error).message }
     }
   })
 
-  ipcMain.handle('assistant:clear-key', (_event, provider: unknown) => {
+  ipcMain.handle('assistant:clear-key', async (_event, provider: unknown) => {
     try {
       if (provider === 'anthropic' || provider === 'openai') {
-        clearAssistantKey(provider)
+        await clearAssistantKey(provider)
       } else {
-        clearAllAssistantKeys()
+        await clearAllAssistantKeys()
       }
       return { success: true }
     } catch (err) {
@@ -326,19 +326,19 @@ export function registerAssistantHandlers(ipcMain: IpcMain): void {
     }
   })
 
-  ipcMain.handle('assistant:set-active-provider', (_event, provider: unknown) => {
+  ipcMain.handle('assistant:set-active-provider', async (_event, provider: unknown) => {
     if (provider !== 'anthropic' && provider !== 'openai') {
       return { success: false, error: `Unknown provider: ${String(provider)}` }
     }
     try {
-      setActiveProvider(provider)
+      await setActiveProvider(provider)
       return { success: true }
     } catch (err) {
       return { success: false, error: (err as Error).message }
     }
   })
 
-  ipcMain.handle('assistant:set-model', (_event, provider: unknown, model: unknown) => {
+  ipcMain.handle('assistant:set-model', async (_event, provider: unknown, model: unknown) => {
     if (provider !== 'anthropic' && provider !== 'openai') {
       return { success: false, error: `Unknown provider: ${String(provider)}` }
     }
@@ -346,7 +346,7 @@ export function registerAssistantHandlers(ipcMain: IpcMain): void {
       return { success: false, error: 'Model must be a string' }
     }
     try {
-      setProviderModel(provider, model)
+      await setProviderModel(provider, model)
       return { success: true }
     } catch (err) {
       return { success: false, error: (err as Error).message }
@@ -357,7 +357,7 @@ export function registerAssistantHandlers(ipcMain: IpcMain): void {
     if (provider !== 'anthropic' && provider !== 'openai') {
       return { success: false, error: `Unknown provider: ${String(provider)}` }
     }
-    const auth = readKeyInternal(provider)
+    const auth = await readKeyInternal(provider)
     if (!auth) {
       return { success: false, error: `No ${provider} key configured.` }
     }
@@ -431,7 +431,7 @@ export function registerAssistantHandlers(ipcMain: IpcMain): void {
           .slice(-MAX_HISTORY_TURNS * 2)
       : []
 
-    const auth = readActiveKeyInternal()
+    const auth = await readActiveKeyInternal()
     if (!auth) {
       return {
         success: false,
@@ -521,7 +521,7 @@ export function registerAssistantHandlers(ipcMain: IpcMain): void {
           .slice(-MAX_HISTORY_TURNS * 2)
       : []
 
-    const auth = readActiveKeyInternal()
+    const auth = await readActiveKeyInternal()
     if (!auth) {
       return {
         success: false,

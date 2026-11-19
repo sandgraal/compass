@@ -305,7 +305,7 @@ export async function syncPlaid(
   if (opts?.fetchPage) {
     fetchPage = opts.fetchPage
   } else {
-    const accessToken = getAccessToken(plaidItemId)
+    const accessToken = await getAccessToken(plaidItemId)
     if (!accessToken) {
       return {
         itemId: plaidItemId,
@@ -318,7 +318,7 @@ export async function syncPlaid(
           'No Plaid access token in vault for this Item — reconnect from the Integrations page.'
       }
     }
-    const client = getPlaidClient()
+    const client = await getPlaidClient()
     fetchPage = makeRealFetcher(client.api, accessToken)
   }
 

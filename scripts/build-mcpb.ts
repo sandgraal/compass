@@ -15,13 +15,14 @@
  *
  * Usage:  npm run build:mcpb [-- --arch arm64|x64]
  *
- * The native binding is fetched for the CURRENT Node ABI — build with the
- * same major Node that Claude Desktop bundles (see mcp/compass-mcp/README.md).
- * Cross-ARCH builds on the same OS work (npm_config_arch steers
- * prebuild-install); cross-OS builds do not.
+ * better-sqlite3 >= 13 is an N-API addon that ships prebuilds for every
+ * supported platform inside its npm package, so the binding is not tied to a
+ * Node ABI. After install the staging dir is pruned to the prebuild(s) for the
+ * current OS + target arch. Cross-ARCH builds on the same OS work; cross-OS
+ * builds do not (the pruning keys off the build host's platform).
  */
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { packExtension } from '@anthropic-ai/mcpb/cli'
@@ -97,6 +98,26 @@ function installNativeDep(targetArch: string): void {
     stdio: 'inherit',
     env: { ...process.env, npm_config_arch: targetArch }
   })
+  pruneForeignPrebuilds(targetArch)
+}
+
+/**
+ * better-sqlite3 ships one prebuild per platform/arch (~2 MB each). Keep only
+ * the ones this bundle can load: `<platform>-<arch>.node`, plus the musl
+ * variant on Linux (the loader picks between glibc and musl at runtime).
+ */
+function pruneForeignPrebuilds(targetArch: string): void {
+  const dir = join(STAGING, 'node_modules', 'better-sqlite3', 'prebuilds')
+  if (!existsSync(dir)) return
+  const keep = new Set([`${process.platform}-${targetArch}.node`])
+  if (process.platform === 'linux') keep.add(`linuxmusl-${targetArch}.node`)
+  const files = readdirSync(dir)
+  if (!files.some((f) => keep.has(f))) {
+    throw new Error(
+      `better-sqlite3 has no prebuild for ${process.platform}-${targetArch} (found: ${files.join(', ')})`
+    )
+  }
+  for (const f of files) if (!keep.has(f)) rmSync(join(dir, f))
 }
 
 /**

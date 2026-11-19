@@ -36,8 +36,9 @@ interface AssistantKeyBlob {
   lastClearedAt?: number
 }
 
-function load(): AssistantKeyBlob {
-  const key = getOrCreateKey()
+// Mutators await the key ONCE, then load → modify → persist synchronously (no
+// await in between), so concurrent callers can't drop each other's writes.
+function load(key: Buffer): AssistantKeyBlob {
   const existing = readEncryptedJson<AssistantKeyBlob>('assistant', key)
   if (!existing) return { keys: {} }
   // Defensive: a corrupted/v0-shaped blob shouldn't crash the assistant.
@@ -47,8 +48,7 @@ function load(): AssistantKeyBlob {
   return existing
 }
 
-function persist(blob: AssistantKeyBlob): void {
-  const key = getOrCreateKey()
+function persist(blob: AssistantKeyBlob, key: Buffer): void {
   writeEncryptedJson('assistant', blob, key)
 }
 
@@ -58,15 +58,15 @@ function maskKey(raw: string): string {
   return `${raw.slice(0, 3)}…${raw.slice(-4)}`
 }
 
-export function getAssistantStatus(): {
+export async function getAssistantStatus(): Promise<{
   configuredProviders: LlmProvider[]
   activeProvider: LlmProvider | null
   // map of provider → masked tail. NEVER the raw key.
   masks: Partial<Record<LlmProvider, string>>
   models: Partial<Record<LlmProvider, string>>
   lastClearedAt: number | null
-} {
-  const blob = load()
+}> {
+  const blob = load(await getOrCreateKey())
   const configuredProviders = Object.entries(blob.keys)
     .filter(([, v]) => typeof v === 'string' && v.length > 0)
     .map(([k]) => k as LlmProvider)
@@ -86,20 +86,22 @@ export function getAssistantStatus(): {
   }
 }
 
-export function setAssistantKey(provider: LlmProvider, rawKey: string): void {
+export async function setAssistantKey(provider: LlmProvider, rawKey: string): Promise<void> {
   if (typeof rawKey !== 'string' || rawKey.trim().length < 16) {
     throw new Error('API key looks too short — refusing to persist')
   }
-  const blob = load()
+  const key = await getOrCreateKey()
+  const blob = load(key)
   blob.keys = { ...blob.keys, [provider]: rawKey.trim() }
   // First key set → make it the active provider so the user doesn't
   // have to do a second step to use it.
   if (!blob.activeProvider) blob.activeProvider = provider
-  persist(blob)
+  persist(blob, key)
 }
 
-export function clearAssistantKey(provider: LlmProvider): void {
-  const blob = load()
+export async function clearAssistantKey(provider: LlmProvider): Promise<void> {
+  const key = await getOrCreateKey()
+  const blob = load(key)
   if (!blob.keys[provider]) return
   delete blob.keys[provider]
   if (blob.activeProvider === provider) {
@@ -107,31 +109,34 @@ export function clearAssistantKey(provider: LlmProvider): void {
     blob.activeProvider = remaining[0]
   }
   blob.lastClearedAt = Date.now()
-  persist(blob)
+  persist(blob, key)
 }
 
-export function clearAllAssistantKeys(): void {
+export async function clearAllAssistantKeys(): Promise<void> {
+  const key = await getOrCreateKey()
   const blob: AssistantKeyBlob = {
     keys: {},
     activeProvider: undefined,
-    models: load().models,
+    models: load(key).models,
     lastClearedAt: Date.now()
   }
-  persist(blob)
+  persist(blob, key)
 }
 
-export function setActiveProvider(provider: LlmProvider): void {
-  const blob = load()
+export async function setActiveProvider(provider: LlmProvider): Promise<void> {
+  const key = await getOrCreateKey()
+  const blob = load(key)
   if (!blob.keys[provider]) {
     throw new Error(`Cannot activate ${provider} — no key configured`)
   }
   blob.activeProvider = provider
-  persist(blob)
+  persist(blob, key)
 }
 
-export function setProviderModel(provider: LlmProvider, model: string): void {
+export async function setProviderModel(provider: LlmProvider, model: string): Promise<void> {
   const trimmed = model.trim()
-  const blob = load()
+  const key = await getOrCreateKey()
+  const blob = load(key)
   if (trimmed.length === 0) {
     // Strip the entry rather than persisting an empty string — empty
     // strings would beat the `??` default fallback in the renderer
@@ -144,7 +149,7 @@ export function setProviderModel(provider: LlmProvider, model: string): void {
   } else {
     blob.models = { ...(blob.models ?? {}), [provider]: trimmed }
   }
-  persist(blob)
+  persist(blob, key)
 }
 
 type KeyRecord = { provider: LlmProvider; key: string; model: string | undefined }
@@ -161,8 +166,8 @@ function pickFromBlob(blob: AssistantKeyBlob, provider: LlmProvider): KeyRecord 
  * currently active. Used by the `assistant:test-key` handler so the
  * user can validate a provider they haven't switched to yet.
  */
-export function readKeyInternal(provider: LlmProvider): KeyRecord | null {
-  return pickFromBlob(load(), provider)
+export async function readKeyInternal(provider: LlmProvider): Promise<KeyRecord | null> {
+  return pickFromBlob(load(await getOrCreateKey()), provider)
 }
 
 /**
@@ -170,8 +175,8 @@ export function readKeyInternal(provider: LlmProvider): KeyRecord | null {
  * `assistant:ask` handler to make the actual LLM call. Loads the vault
  * exactly once per call.
  */
-export function readActiveKeyInternal(): KeyRecord | null {
-  const blob = load()
+export async function readActiveKeyInternal(): Promise<KeyRecord | null> {
+  const blob = load(await getOrCreateKey())
   const provider = blob.activeProvider
   if (!provider) return null
   return pickFromBlob(blob, provider)

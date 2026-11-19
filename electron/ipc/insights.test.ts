@@ -782,6 +782,9 @@ describe('correlations (chart data for /insights)', () => {
     expect(c.devVsRecovery?.axis).toBe('Oura readiness')
     expect(c.devVsRecovery?.points).toHaveLength(24)
 
+    // The IPC handler reads the wall clock; pin it so the June fixtures stay in-window.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
     const handlers: Record<string, (...args: unknown[]) => unknown> = {}
     mod.registerInsightsHandlers({
       handle: (channel: string, h: (...args: unknown[]) => unknown) => {

@@ -6,7 +6,7 @@ import { decryptBlob, encryptBlob, getOrCreateKey, writeEncryptedJson } from '..
 import { parseCSV } from '../lib/csv'
 import { detectGenotypeProvider, parseGenotypeSummary } from '../lib/genetics'
 import { VAULT_DIR } from '../paths'
-import { insertLifeRecord } from './life-records'
+import { insertPlainLifeRecord } from './life-records'
 import { afterDomainWrite } from './storehouse-sync'
 
 // Crypto primitives live in `electron/lib/crypto-vault.ts` so the Plaid
@@ -75,29 +75,32 @@ const VAULT_CATEGORIES = [
 export function registerVaultHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('vault:get-categories', () => VAULT_CATEGORIES)
 
-  ipcMain.handle('vault:get-entries', (_event, category: string) => {
-    const key = getOrCreateKey()
+  ipcMain.handle('vault:get-entries', async (_event, category: string) => {
+    const key = await getOrCreateKey()
     return readVaultCategory(category, key)
   })
 
-  ipcMain.handle('vault:add-entry', (_event, category: string, entry: Record<string, unknown>) => {
-    const key = getOrCreateKey()
-    const entries = readVaultCategory(category, key) as Record<string, unknown>[]
-    const newEntry = {
-      ...entry,
-      id: randomBytes(8).toString('hex'),
-      createdAt: Date.now(),
-      updatedAt: Date.now()
+  ipcMain.handle(
+    'vault:add-entry',
+    async (_event, category: string, entry: Record<string, unknown>) => {
+      const key = await getOrCreateKey()
+      const entries = readVaultCategory(category, key) as Record<string, unknown>[]
+      const newEntry = {
+        ...entry,
+        id: randomBytes(8).toString('hex'),
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      }
+      entries.push(newEntry)
+      writeVaultCategory(category, entries, key)
+      return newEntry
     }
-    entries.push(newEntry)
-    writeVaultCategory(category, entries, key)
-    return newEntry
-  })
+  )
 
   ipcMain.handle(
     'vault:update-entry',
-    (_event, category: string, id: string, updates: Record<string, unknown>) => {
-      const key = getOrCreateKey()
+    async (_event, category: string, id: string, updates: Record<string, unknown>) => {
+      const key = await getOrCreateKey()
       const entries = readVaultCategory(category, key) as Record<string, unknown>[]
       const idx = entries.findIndex((e) => e.id === id)
       if (idx === -1) throw new Error('Entry not found')
@@ -121,8 +124,8 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
     }
   )
 
-  ipcMain.handle('vault:delete-entry', (_event, category: string, id: string) => {
-    const key = getOrCreateKey()
+  ipcMain.handle('vault:delete-entry', async (_event, category: string, id: string) => {
+    const key = await getOrCreateKey()
     const entries = readVaultCategory(category, key) as Record<string, unknown>[]
     const deleted = entries.find((e) => (e as Record<string, unknown>).id === id)
     const filtered = entries.filter((e) => (e as Record<string, unknown>).id !== id)
@@ -162,7 +165,7 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
       const rows = parseCSV(raw)
       if (rows.length === 0) return { success: false, error: 'Empty or invalid CSV' }
 
-      const key = getOrCreateKey()
+      const key = await getOrCreateKey()
       const credEntries = readVaultCategory('credentials', key) as Record<string, unknown>[]
 
       let imported = 0
@@ -178,7 +181,7 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
         if (type.includes('credit') || type.includes('card')) {
           // Credit cards are non-secret metadata post-split (1Password's CSV
           // export never carried card numbers) → a financial life record.
-          insertLifeRecord({
+          insertPlainLifeRecord({
             externalId: `1password:${randomUUID()}`,
             category: 'financial',
             fields: { institution: title, accountType: 'Credit Card' },
@@ -234,7 +237,7 @@ export function registerVaultHandlers(ipcMain: IpcMain): void {
       }
       const summary = parseGenotypeSummary(rawText, provider)
 
-      const key = getOrCreateKey()
+      const key = await getOrCreateKey()
       const entryId = randomBytes(8).toString('hex')
       const rawBlobName = `genetics_raw_${entryId}`
       // The raw genotype text is a standalone encrypted blob, never a

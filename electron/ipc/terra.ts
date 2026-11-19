@@ -16,7 +16,7 @@ export function registerTerraHandlers(ipcMain: IpcMain): void {
   })
 
   // BYO: the user supplies their own Terra dev credentials → direct-to-upstream mode.
-  ipcMain.handle('terra:set-byo', (_event, devId: unknown, apiKey: unknown) => {
+  ipcMain.handle('terra:set-byo', async (_event, devId: unknown, apiKey: unknown) => {
     if (
       typeof devId !== 'string' ||
       typeof apiKey !== 'string' ||
@@ -25,7 +25,7 @@ export function registerTerraHandlers(ipcMain: IpcMain): void {
     ) {
       return { success: false, error: 'Both a Terra dev-id and x-api-key are required.' }
     }
-    setTerraByoCreds(devId, apiKey)
+    await setTerraByoCreds(devId, apiKey)
     return { success: true }
   })
 }

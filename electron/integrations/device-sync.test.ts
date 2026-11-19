@@ -62,7 +62,7 @@ function setting(key: string): string | null {
   return row?.value ?? null
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   sqlite = new Database(':memory:')
   sqlite.exec(
     'CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER)'
@@ -70,13 +70,13 @@ beforeEach(() => {
   vault.clear()
 })
 
-afterEach(() => {
+afterEach(async () => {
   sqlite.close()
   vi.clearAllMocks()
 })
 
 describe('syncGroupId', () => {
-  it('is a stable one-way 32-hex id (the mobile app must derive the identical value)', () => {
+  it('is a stable one-way 32-hex id (the mobile app must derive the identical value)', async () => {
     const id = syncGroupId('correct horse battery staple')
     expect(id).toMatch(/^[a-f0-9]{32}$/)
     expect(syncGroupId('correct horse battery staple')).toBe(id)
@@ -85,32 +85,32 @@ describe('syncGroupId', () => {
 })
 
 describe('configure / status / disable', () => {
-  it('stores the passphrase in the vault and derives the group id', () => {
-    expect(getDeviceSyncStatus().configured).toBe(false)
-    const r = configureDeviceSync('sync-pass-123')
+  it('stores the passphrase in the vault and derives the group id', async () => {
+    expect((await getDeviceSyncStatus()).configured).toBe(false)
+    const r = await configureDeviceSync('sync-pass-123')
     expect(r.success).toBe(true)
-    expect(getDeviceSyncStatus().configured).toBe(true)
+    expect((await getDeviceSyncStatus()).configured).toBe(true)
     expect(setting('deviceSyncGroupId')).toBe(syncGroupId('sync-pass-123'))
     expect(setting('deviceSyncDeviceId')).toMatch(/[0-9a-f-]{36}/)
   })
 
-  it('rejects passphrases under the 12-char floor (the group id faces URL-visible guessing)', () => {
-    expect(configureDeviceSync('short').success).toBe(false)
-    expect(configureDeviceSync('elevenchars').success).toBe(false) // 11 — old 8-char floor is NOT enough
-    expect(configureDeviceSync('twelve-chars').success).toBe(true)
+  it('rejects passphrases under the 12-char floor (the group id faces URL-visible guessing)', async () => {
+    expect((await configureDeviceSync('short')).success).toBe(false)
+    expect((await configureDeviceSync('elevenchars')).success).toBe(false) // 11 — old 8-char floor is NOT enough
+    expect((await configureDeviceSync('twelve-chars')).success).toBe(true)
   })
 
-  it('disable forgets the passphrase + group', () => {
-    configureDeviceSync('sync-pass-123')
-    disableDeviceSync()
-    expect(getDeviceSyncStatus().configured).toBe(false)
+  it('disable forgets the passphrase + group', async () => {
+    await configureDeviceSync('sync-pass-123')
+    await disableDeviceSync()
+    expect((await getDeviceSyncStatus()).configured).toBe(false)
     expect(setting('deviceSyncGroupId')).toBeNull()
   })
 })
 
 describe('pushSnapshot', () => {
   it('PUTs the encrypted snapshot envelope and records lastSeen', async () => {
-    configureDeviceSync('sync-pass-123')
+    await configureDeviceSync('sync-pass-123')
     const doFetch = vi.fn(async () => jsonResponse(200, { ok: true, bytes: 10 })) as FetchMock
     const r = await pushSnapshot(doFetch as unknown as typeof fetch)
     expect(r).toMatchObject({ success: true, exportedAt: '2026-07-11T10:00:00.000Z' })
@@ -134,7 +134,7 @@ describe('pushSnapshot', () => {
   })
 
   it('surfaces a relay error body', async () => {
-    configureDeviceSync('sync-pass-123')
+    await configureDeviceSync('sync-pass-123')
     const doFetch = vi.fn(async () =>
       jsonResponse(413, { error: 'Snapshot exceeds the relay blob size limit' })
     )
@@ -152,7 +152,7 @@ describe('checkRemote + pullSnapshot (LWW)', () => {
   }
 
   it('short-circuits when the remote snapshot is not newer', async () => {
-    configureDeviceSync('sync-pass-123')
+    await configureDeviceSync('sync-pass-123')
     sqlite
       .prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, 0)')
       .run('deviceSyncLastSeenExportedAt', '2026-07-11T12:00:00.000Z') // ahead of META
@@ -163,7 +163,7 @@ describe('checkRemote + pullSnapshot (LWW)', () => {
   })
 
   it('pulls + restores a newer snapshot, preserving device-local identity', async () => {
-    configureDeviceSync('sync-pass-123')
+    await configureDeviceSync('sync-pass-123')
     const myDeviceId = setting('deviceSyncDeviceId')
     sqlite
       .prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, 0)')
@@ -184,21 +184,21 @@ describe('checkRemote + pullSnapshot (LWW)', () => {
   })
 
   it('explains an empty mailbox instead of erroring opaquely', async () => {
-    configureDeviceSync('sync-pass-123')
+    await configureDeviceSync('sync-pass-123')
     const doFetch = vi.fn(async () => jsonResponse(404, { error: 'No snapshot for this group' }))
     const r = await pullSnapshot(doFetch as unknown as typeof fetch)
     expect(r).toMatchObject({ success: false, error: /push from the other device/i })
   })
 
   it('checkRemote reports newer=true for a fresh device with an existing mailbox', async () => {
-    configureDeviceSync('sync-pass-123')
+    await configureDeviceSync('sync-pass-123')
     const doFetch = vi.fn(async () => jsonResponse(200, META))
     const r = await checkRemote(doFetch as unknown as typeof fetch)
     expect(r).toMatchObject({ success: true, exists: true, newer: true })
   })
 
   it('refuses a blob response whose advertised size exceeds the client cap', async () => {
-    configureDeviceSync('sync-pass-123')
+    await configureDeviceSync('sync-pass-123')
     const doFetch = vi.fn(async (url: string) => {
       if (url.includes('/sync/meta/')) return jsonResponse(200, META)
       return new Response('{}', {

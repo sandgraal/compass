@@ -19,7 +19,7 @@ import { eq } from 'drizzle-orm'
 import { BrowserWindow } from 'electron'
 import { getDb, getRawSqlite } from '../db/client'
 import { argylePaystubs, integrations, syncEvents } from '../db/schema'
-import { loadToken, saveToken } from '../ipc/auth'
+import { loadToken, updateToken } from '../ipc/auth'
 import { afterConnectorSync } from '../ipc/storehouse-sync'
 import type { SqliteForFx } from './finance-fx'
 import { relayFetch, resolveRelayConfig } from './relay-client'
@@ -157,14 +157,14 @@ type ArgyleToken = { userId?: string }
 const ARGYLE_SUCCESS_URL = 'https://compass.app/argyle/success' // sentinel we intercept, never load
 const ARGYLE_SUCCESS = new URL(ARGYLE_SUCCESS_URL) // parsed once for exact origin+path matching
 
-function loadArgyleToken(): ArgyleToken {
-  return (loadToken('argyle') as ArgyleToken | null) ?? {}
+async function loadArgyleToken(): Promise<ArgyleToken> {
+  return ((await loadToken('argyle')) as ArgyleToken | null) ?? {}
 }
 
 /** Pull the connected user's paystubs → upsert into `argyle_paystubs` → feed the forecast. */
 export async function syncArgyle(mainWindow?: BrowserWindow | null): Promise<SyncResult> {
   const db = getDb()
-  const tok = loadArgyleToken()
+  const tok = await loadArgyleToken()
   if (!tok.userId) return { service: 'argyle', success: false, error: 'Argyle not connected' }
   const cfg = resolveRelayConfig(getRawSqlite(), 'argyle', () => null)
 
@@ -304,8 +304,10 @@ export async function openArgyleConnect(
       }
       e.preventDefault()
       // We already hold the user id from the mint step; persist it as the sync handle.
-      saveToken('argyle', { ...loadArgyleToken(), userId })
-      finish({ success: true })
+      void updateToken('argyle', (cur) => ({ ...(cur as ArgyleToken | null), userId })).then(
+        () => finish({ success: true }),
+        (err) => finish({ success: false, error: String(err) })
+      )
     }
     win.webContents.on('will-redirect', onNavigate)
     win.webContents.on('will-navigate', onNavigate)

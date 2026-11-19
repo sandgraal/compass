@@ -77,8 +77,8 @@ vi.mock('electron', () => ({
     showOpenDialog: (...a: unknown[]) => showOpenDialogMock(...a)
   },
   safeStorage: {
-    isEncryptionAvailable: () => isEncryptionAvailableMock(),
-    encryptString: (s: string) => Buffer.from(`wrap:${s}`, 'utf8')
+    isAsyncEncryptionAvailable: async () => isEncryptionAvailableMock(),
+    encryptStringAsync: async (s: string) => Buffer.from(`wrap:${s}`, 'utf8')
   }
 }))
 
@@ -107,7 +107,7 @@ async function internal() {
   return (await import('./backup'))._internal
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   sqlite = new Database(':memory:')
   // Build the FULL schema from the real migrations so collectBundle's 20
   // table selects + applyRestore's truncate/insert run against true DDL.
@@ -123,7 +123,7 @@ beforeEach(() => {
   isEncryptionAvailableMock.mockReturnValue(true)
 })
 
-afterEach(() => {
+afterEach(async () => {
   sqlite.close()
   rmSync(TEST_ROOT, { recursive: true, force: true })
   vi.clearAllMocks()
@@ -151,7 +151,7 @@ describe('collectBundle → applyRestore round-trip', () => {
   it('captures DB + knowledge + vault (excluding key.enc) into a bundle', async () => {
     seedBaseline()
     const { collectBundle } = await internal()
-    const bundle = collectBundle()
+    const bundle = await collectBundle()
 
     expect(bundle.version).toBe(3)
     expect(bundle.appVersion).toBe('9.9.9')
@@ -166,7 +166,7 @@ describe('collectBundle → applyRestore round-trip', () => {
 
   it('captures the whole live schema drift-proof, skipping FTS + migration tables', async () => {
     const { collectBundle } = await internal()
-    const keys = Object.keys(collectBundle().allTables ?? {})
+    const keys = Object.keys((await collectBundle()).allTables ?? {})
     // These were all silently OMITTED by the old curated v2 list — the whole
     // reason for v3 (a backup that dropped the timeline + documents + contacts).
     for (const t of ['records', 'documents', 'document_links', 'contacts', 'subscriptions']) {
@@ -186,14 +186,14 @@ describe('collectBundle → applyRestore round-trip', () => {
       .run()
     writeFileSync(join(DOCS_DIR, 'abc123.pdf'), Buffer.from('PDFBYTES'))
 
-    const bundle = collectBundle()
+    const bundle = await collectBundle()
     expect(bundle.allTables?.documents).toHaveLength(1)
     expect(bundle.documentsFiles?.['abc123.pdf']).toBe(Buffer.from('PDFBYTES').toString('base64'))
 
     // Wipe both, then restore.
     sqlite.prepare('DELETE FROM documents').run()
     rmSync(join(DOCS_DIR, 'abc123.pdf'), { force: true })
-    const stats = applyRestore(bundle)
+    const stats = await applyRestore(bundle)
 
     expect(stats.documentFiles).toBe(1)
     expect(sqlite.prepare('SELECT title FROM documents').all()).toEqual([{ title: 'Lease' }])
@@ -202,7 +202,7 @@ describe('collectBundle → applyRestore round-trip', () => {
 
   it('is a full replace — a table absent from an older bundle is still wiped', async () => {
     const { collectBundle, applyRestore } = await internal()
-    const bundle = collectBundle()
+    const bundle = await collectBundle()
     // Simulate an OLDER backup taken before the `documents` table existed.
     if (bundle.allTables) {
       bundle.allTables = Object.fromEntries(
@@ -216,14 +216,14 @@ describe('collectBundle → applyRestore round-trip', () => {
       )
       .run()
 
-    applyRestore(bundle)
+    await applyRestore(bundle)
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM documents').get()).toEqual({ n: 0 })
   })
 
   it('restores DB rows, knowledge markdown, vault blobs, and rewraps key.enc', async () => {
     seedBaseline()
     const { collectBundle, applyRestore } = await internal()
-    const bundle = collectBundle()
+    const bundle = await collectBundle()
 
     // Mutate live state so a successful restore is observable.
     sqlite.prepare('DELETE FROM integrations').run()
@@ -231,7 +231,7 @@ describe('collectBundle → applyRestore round-trip', () => {
     writeFileSync(join(KB_DIR, 'note.md'), '# Note\n\nCLOBBERED.\n')
     rmSync(join(VAULT_DIR_PATH, 'financial.enc'), { force: true })
 
-    const stats = applyRestore(bundle)
+    const stats = await applyRestore(bundle)
 
     expect(stats.rows).toBeGreaterThanOrEqual(3) // integration + txn + habit
     expect(stats.vaultFiles).toBe(1)
@@ -254,13 +254,13 @@ describe('collectBundle → applyRestore round-trip', () => {
   it('skips unsafe vault / knowledge / document filenames on restore', async () => {
     seedBaseline()
     const { collectBundle, applyRestore } = await internal()
-    const bundle = collectBundle()
+    const bundle = await collectBundle()
     // Inject hostile entries the staging filters must drop.
     bundle.vault['../escape.enc'] = Buffer.from([0]).toString('base64')
     bundle.knowledge['../../etc/passwd.md'] = 'nope'
     bundle.documentsFiles = { '../escape.bin': Buffer.from([0]).toString('base64') }
 
-    const stats = applyRestore(bundle)
+    const stats = await applyRestore(bundle)
     // Only the one legit vault blob + one legit md survive; the hostile document
     // filename is dropped and nothing lands outside its directory.
     expect(stats.vaultFiles).toBe(1)
@@ -270,12 +270,23 @@ describe('collectBundle → applyRestore round-trip', () => {
     expect(existsSync(join(TEST_ROOT, 'escape.bin'))).toBe(false)
   })
 
-  it('rolls back (throws) when safeStorage is unavailable, after DB commit', async () => {
+  it('refuses BEFORE any DB or vault write when safeStorage is unavailable', async () => {
     seedBaseline()
     const { collectBundle, applyRestore } = await internal()
-    const bundle = collectBundle()
+    const bundle = await collectBundle()
+    // Diverge the live state from the bundle so a partial restore would show.
+    sqlite.prepare("INSERT INTO habits (name) VALUES ('Post-backup habit')").run()
+    writeFileSync(join(VAULT_DIR_PATH, 'credentials.enc'), Buffer.from([5, 5]))
     isEncryptionAvailableMock.mockReturnValue(false)
-    expect(() => applyRestore(bundle)).toThrow(/safeStorage unavailable/i)
+
+    await expect(applyRestore(bundle)).rejects.toThrow(/safeStorage unavailable/i)
+
+    // DB untouched (the post-backup row survives), vault untouched (the live
+    // blob and the original key.enc are still there — not wiped then orphaned).
+    const habits = sqlite.prepare('SELECT name FROM habits ORDER BY id').all()
+    expect(habits).toEqual([{ name: 'Drink water' }, { name: 'Post-backup habit' }])
+    expect(readFileSync(join(VAULT_DIR_PATH, 'credentials.enc'))).toEqual(Buffer.from([5, 5]))
+    expect(readFileSync(join(VAULT_DIR_PATH, 'key.enc'))).toEqual(Buffer.from([9, 9, 9]))
   })
 })
 
