@@ -37,13 +37,39 @@ async function launch(home: string): Promise<{ app: ElectronApplication; win: Pa
   await app.evaluate(({ safeStorage }) => {
     if (process.platform === 'linux') safeStorage.setUsePlainTextEncryption(true)
   })
-  const win = await app.firstWindow()
-  await win.waitForLoadState('load')
-  await win.waitForFunction(() => typeof (window as unknown as { api?: unknown }).api === 'object')
+  const win = await mainWindow(app)
   // The renderer may re-route once on boot (e.g. onboarding on a fresh store);
   // let that settle before driving IPC so an evaluate isn't torn down mid-call.
   await win.waitForTimeout(1500)
   return { app, win }
+}
+
+/**
+ * The window that exposes the full `window.api` bridge. Not `firstWindow()`:
+ * on macOS `initMenuBar()` also opens the quick-capture tray popover, whose
+ * minimal preload only exposes `quickCaptureApi`, and it can win that race.
+ */
+async function mainWindow(app: ElectronApplication): Promise<Page> {
+  const hasApi = (p: Page): Promise<boolean> =>
+    p
+      .evaluate(() => typeof (window as unknown as { api?: unknown }).api === 'object')
+      .catch(() => false)
+  let found: Page | undefined
+  await expect
+    .poll(
+      async () => {
+        for (const p of app.windows()) {
+          if (await hasApi(p)) {
+            found = p
+            return true
+          }
+        }
+        return false
+      },
+      { timeout: 30_000, message: 'no window exposed window.api' }
+    )
+    .toBe(true)
+  return found as Page
 }
 
 const vault = (win: Page) => ({
