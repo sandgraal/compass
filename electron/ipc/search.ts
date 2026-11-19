@@ -206,7 +206,7 @@ function matchWindow(value: string, lq: string): string {
     .slice(0, 120)
 }
 
-function searchVault(query: string): GlobalSearchHit[] {
+async function searchVault(query: string): Promise<GlobalSearchHit[]> {
   // Decrypt-per-query in the main process; nothing is ever written to an
   // on-disk index. Post vault-split only `credentials` remains, and it is
   // title-only — passwords and API keys never cross the IPC boundary, not
@@ -215,7 +215,7 @@ function searchVault(query: string): GlobalSearchHit[] {
   const hits: GlobalSearchHit[] = []
   let key: Buffer
   try {
-    key = getOrCreateKey()
+    key = await getOrCreateKey()
   } catch {
     return []
   }
@@ -433,7 +433,7 @@ function searchDocumentsHits(query: string): GlobalSearchHit[] {
 }
 
 export function registerSearchHandlers(ipcMain: IpcMain): void {
-  ipcMain.handle('search:global', (_event, query: unknown) => {
+  ipcMain.handle('search:global', async (_event, query: unknown) => {
     if (typeof query !== 'string') return { hits: [] as GlobalSearchHit[] }
     // IPC boundary cap. Unbounded queries would let a buggy or hostile
     // renderer cause the search helpers to scan every file/row with a
@@ -443,7 +443,7 @@ export function registerSearchHandlers(ipcMain: IpcMain): void {
     if (trimmed.length < 2) return { hits: [] as GlobalSearchHit[] }
 
     const knowledge = searchKnowledge(trimmed)
-    const vault = searchVault(trimmed)
+    const vault = await searchVault(trimmed)
     const tasks = searchTasks(trimmed)
     const records = searchRecordsSpine(trimmed)
     const contactHits = searchContacts(trimmed)

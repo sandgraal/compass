@@ -63,7 +63,7 @@ export class PlaidNotConfiguredError extends Error {
  * so callers can detect the "needs setup" case and surface a
  * setup CTA instead of a stack trace.
  */
-export function getPlaidClient(env?: PlaidClientEnv): PlaidClient {
+export async function getPlaidClient(env?: PlaidClientEnv): Promise<PlaidClient> {
   const cfg = readPlaidConfig()
   if (!cfg) {
     throw new PlaidNotConfiguredError(
@@ -79,7 +79,7 @@ export function getPlaidClient(env?: PlaidClientEnv): PlaidClient {
     )
   }
 
-  const secret = getPlaidSecret(cfg.env)
+  const secret = await getPlaidSecret(cfg.env)
   if (!secret) {
     throw new PlaidNotConfiguredError(
       'missing-secret',
@@ -112,11 +112,14 @@ export function getPlaidClient(env?: PlaidClientEnv): PlaidClient {
  * safe in the sense that it returns a plain boolean (still requires
  * IPC because the underlying reads happen in main).
  */
-export function isPlaidConfigured(): { configured: boolean; env: PlaidClientEnv | null } {
+export async function isPlaidConfigured(): Promise<{
+  configured: boolean
+  env: PlaidClientEnv | null
+}> {
   try {
     const cfg = readPlaidConfig()
     if (!cfg) return { configured: false, env: null }
-    const secret = getPlaidSecret(cfg.env)
+    const secret = await getPlaidSecret(cfg.env)
     return { configured: secret !== null, env: cfg.env }
   } catch {
     return { configured: false, env: null }

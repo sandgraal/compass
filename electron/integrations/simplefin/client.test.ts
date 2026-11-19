@@ -15,9 +15,12 @@ import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('electron', () => ({
   safeStorage: {
-    isEncryptionAvailable: () => true,
-    encryptString: (s: string) => Buffer.from(s, 'utf8'),
-    decryptString: (b: Buffer) => b.toString('utf8')
+    isAsyncEncryptionAvailable: async () => true,
+    encryptStringAsync: async (s: string) => Buffer.from(s),
+    decryptStringAsync: async (b: Buffer) => ({
+      result: b.toString('utf8'),
+      shouldReEncrypt: false
+    })
   }
 }))
 vi.mock('../../paths', () => ({ VAULT_DIR: '/tmp/compass-simplefin-client-test' }))

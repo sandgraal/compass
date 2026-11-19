@@ -47,7 +47,14 @@ vi.mock('node:fs', () => ({
 }))
 
 vi.mock('electron', () => ({
-  safeStorage: { encryptString: encryptStringMock, decryptString: decryptStringMock },
+  safeStorage: {
+    isAsyncEncryptionAvailable: async () => true,
+    encryptStringAsync: async (s: string) => encryptStringMock(s),
+    decryptStringAsync: async (b: Buffer) => ({
+      result: decryptStringMock(b),
+      shouldReEncrypt: false
+    })
+  },
   BrowserWindow: { getAllWindows: () => [] }
 }))
 
@@ -62,7 +69,7 @@ async function authModule() {
 const ENV_KEYS = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'] as const
 const savedEnv: Record<string, string | undefined> = {}
 
-beforeEach(() => {
+beforeEach(async () => {
   for (const k of Object.keys(fakeFs)) delete fakeFs[k]
   for (const k of ENV_KEYS) {
     savedEnv[k] = process.env[k]
@@ -71,7 +78,7 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-afterEach(() => {
+afterEach(async () => {
   for (const k of ENV_KEYS) {
     if (savedEnv[k] === undefined) delete process.env[k]
     else process.env[k] = savedEnv[k]
@@ -95,36 +102,36 @@ function mockFetchOnce(response: { ok: boolean; status?: number; body?: unknown;
 describe('refreshGoogleToken', () => {
   it('throws when no refresh token is stored', async () => {
     const { saveToken, refreshGoogleToken } = await authModule()
-    saveToken('google', { access_token: 'only-access' }) // no refresh_token
+    await saveToken('google', { access_token: 'only-access' }) // no refresh_token
     await expect(refreshGoogleToken()).rejects.toThrow(/No refresh token/i)
   })
 
   it('throws when Google credentials are not configured', async () => {
     const { saveToken, refreshGoogleToken } = await authModule()
-    saveToken('google', { refresh_token: 'r1', access_token: 'a1' })
+    await saveToken('google', { refresh_token: 'r1', access_token: 'a1' })
     // no setOAuthCredentials + env cleared → getOAuthCredentials returns null
     await expect(refreshGoogleToken()).rejects.toThrow(/credentials not configured/i)
   })
 
   it('throws with the HTTP status when the refresh call is rejected', async () => {
     const { saveToken, setOAuthCredentials, refreshGoogleToken } = await authModule()
-    saveToken('google', { refresh_token: 'r1', access_token: 'a1' })
-    setOAuthCredentials('google', { clientId: 'cid', clientSecret: 'csecret' })
+    await saveToken('google', { refresh_token: 'r1', access_token: 'a1' })
+    await setOAuthCredentials('google', { clientId: 'cid', clientSecret: 'csecret' })
     mockFetchOnce({ ok: false, status: 401, text: 'invalid_grant' })
     await expect(refreshGoogleToken()).rejects.toThrow(/401/)
   })
 
   it('refreshes, persists the merged bundle, and returns the new access token', async () => {
     const { saveToken, loadToken, setOAuthCredentials, refreshGoogleToken } = await authModule()
-    saveToken('google', { refresh_token: 'r1', access_token: 'old-access' })
-    setOAuthCredentials('google', { clientId: 'cid', clientSecret: 'csecret' })
+    await saveToken('google', { refresh_token: 'r1', access_token: 'old-access' })
+    await setOAuthCredentials('google', { clientId: 'cid', clientSecret: 'csecret' })
     mockFetchOnce({ ok: true, body: { access_token: 'new-access', expires_in: 3600 } })
 
     const result = await refreshGoogleToken()
     expect(result).toBe('new-access')
 
     // Persisted: new access token, refresh_token preserved.
-    const stored = loadToken('google') as { access_token: string; refresh_token: string }
+    const stored = (await loadToken('google')) as { access_token: string; refresh_token: string }
     expect(stored.access_token).toBe('new-access')
     expect(stored.refresh_token).toBe('r1')
 
@@ -146,7 +153,7 @@ describe('getValidGoogleToken', () => {
 
   it('returns the cached access token when it is well before expiry', async () => {
     const { saveToken, getValidGoogleToken } = await authModule()
-    saveToken('google', {
+    await saveToken('google', {
       access_token: 'cached-token',
       refresh_token: 'r1',
       expires_at: Date.now() + 60 * 60 * 1000 // 1h out → no refresh
@@ -158,12 +165,12 @@ describe('getValidGoogleToken', () => {
 
   it('refreshes when the token is at/near expiry', async () => {
     const { saveToken, setOAuthCredentials, getValidGoogleToken } = await authModule()
-    saveToken('google', {
+    await saveToken('google', {
       access_token: 'stale-token',
       refresh_token: 'r1',
       expires_at: Date.now() + 60 * 1000 // 1 min out → inside the 5-min window
     })
-    setOAuthCredentials('google', { clientId: 'cid', clientSecret: 'csecret' })
+    await setOAuthCredentials('google', { clientId: 'cid', clientSecret: 'csecret' })
     mockFetchOnce({ ok: true, body: { access_token: 'fresh-token', expires_in: 3600 } })
     expect(await getValidGoogleToken()).toBe('fresh-token')
     expect(global.fetch).toHaveBeenCalledOnce()

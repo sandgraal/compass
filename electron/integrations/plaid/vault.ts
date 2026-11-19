@@ -35,8 +35,11 @@ type PlaidVaultShape = {
 const VAULT_NAME = 'plaid'
 const EMPTY_VAULT: PlaidVaultShape = { secrets: {}, accessTokens: {} }
 
-function readVault(): PlaidVaultShape {
-  const key = getOrCreateKey()
+// Every exported mutator awaits the key ONCE, then does its whole
+// read → modify → write synchronously. No await may sit between readVault and
+// writeVault, or two concurrent callers would both read the old blob and the
+// second write would drop the first one's change.
+function readVault(key: Buffer): PlaidVaultShape {
   const data = readEncryptedJson<PlaidVaultShape>(VAULT_NAME, key)
   if (!data) return { secrets: {}, accessTokens: {} }
   // Defensive merge in case an older version of the blob has fewer fields.
@@ -46,8 +49,7 @@ function readVault(): PlaidVaultShape {
   }
 }
 
-function writeVault(data: PlaidVaultShape): void {
-  const key = getOrCreateKey()
+function writeVault(data: PlaidVaultShape, key: Buffer): void {
   writeEncryptedJson(VAULT_NAME, data, key)
 }
 
@@ -59,25 +61,27 @@ function writeVault(data: PlaidVaultShape): void {
  * not configured" and surface a setup prompt rather than calling the
  * SDK with an empty string.
  */
-export function getPlaidSecret(env: PlaidEnv): string | null {
-  return readVault().secrets[env] ?? null
+export async function getPlaidSecret(env: PlaidEnv): Promise<string | null> {
+  return readVault(await getOrCreateKey()).secrets[env] ?? null
 }
 
-export function setPlaidSecret(env: PlaidEnv, secret: string): void {
+export async function setPlaidSecret(env: PlaidEnv, secret: string): Promise<void> {
   if (typeof secret !== 'string' || secret.length === 0) {
     throw new Error('Plaid secret must be a non-empty string')
   }
-  const vault = readVault()
+  const key = await getOrCreateKey()
+  const vault = readVault(key)
   vault.secrets[env] = secret
-  writeVault(vault)
+  writeVault(vault, key)
 }
 
 /** Remove the secret for a given environment. No-op if absent. */
-export function removePlaidSecret(env: PlaidEnv): void {
-  const vault = readVault()
+export async function removePlaidSecret(env: PlaidEnv): Promise<void> {
+  const key = await getOrCreateKey()
+  const vault = readVault(key)
   if (vault.secrets[env] !== undefined) {
     delete vault.secrets[env]
-    writeVault(vault)
+    writeVault(vault, key)
   }
 }
 
@@ -88,28 +92,30 @@ export function removePlaidSecret(env: PlaidEnv): void {
  * we have no token stored for that Item (either it was never connected
  * or the user disconnected it).
  */
-export function getAccessToken(itemId: string): string | null {
+export async function getAccessToken(itemId: string): Promise<string | null> {
   if (typeof itemId !== 'string' || itemId.length === 0) return null
-  return readVault().accessTokens[itemId] ?? null
+  return readVault(await getOrCreateKey()).accessTokens[itemId] ?? null
 }
 
-export function setAccessToken(itemId: string, token: string): void {
+export async function setAccessToken(itemId: string, token: string): Promise<void> {
   if (typeof itemId !== 'string' || itemId.length === 0) {
     throw new Error('Plaid itemId must be a non-empty string')
   }
   if (typeof token !== 'string' || token.length === 0) {
     throw new Error('Plaid access_token must be a non-empty string')
   }
-  const vault = readVault()
+  const key = await getOrCreateKey()
+  const vault = readVault(key)
   vault.accessTokens[itemId] = token
-  writeVault(vault)
+  writeVault(vault, key)
 }
 
-export function removeAccessToken(itemId: string): void {
-  const vault = readVault()
+export async function removeAccessToken(itemId: string): Promise<void> {
+  const key = await getOrCreateKey()
+  const vault = readVault(key)
   if (vault.accessTokens[itemId] !== undefined) {
     delete vault.accessTokens[itemId]
-    writeVault(vault)
+    writeVault(vault, key)
   }
 }
 
@@ -118,8 +124,8 @@ export function removeAccessToken(itemId: string): void {
  * Safe to expose to the renderer — does NOT leak the tokens themselves.
  * Used by the Integrations card to show connection status.
  */
-export function listItemIds(): string[] {
-  return Object.keys(readVault().accessTokens).sort()
+export async function listItemIds(): Promise<string[]> {
+  return Object.keys(readVault(await getOrCreateKey()).accessTokens).sort()
 }
 
 /**
@@ -132,8 +138,8 @@ export function listItemIds(): string[] {
  * Uses the shared `writeEncryptedJson` so any future improvements
  * there (atomic write, audit log, etc.) apply here too.
  */
-export function clearPlaidVault(): void {
+export async function clearPlaidVault(): Promise<void> {
   const path = join(VAULT_DIR, `${VAULT_NAME}.enc`)
   if (!existsSync(path)) return
-  writeVault(EMPTY_VAULT)
+  writeVault(EMPTY_VAULT, await getOrCreateKey())
 }

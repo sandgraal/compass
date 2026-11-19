@@ -31,7 +31,7 @@ const insertLifeRecordMock = vi.fn<
   (input: Record<string, unknown>) => { id: number; inserted: boolean }
 >(() => ({ id: 1, inserted: true }))
 vi.mock('./life-records', () => ({
-  insertLifeRecord: insertLifeRecordMock
+  insertPlainLifeRecord: insertLifeRecordMock
 }))
 
 // afterDomainWrite schedules the real debounced spine projection (which needs

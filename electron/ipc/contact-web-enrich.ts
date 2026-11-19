@@ -124,7 +124,7 @@ async function runWebEnrich(
 
   // Provider-pinned on purpose: web_search is an Anthropic server tool, so an
   // OpenAI-active user with an Anthropic key on file can still use this.
-  const auth = readKeyInternal('anthropic')
+  const auth = await readKeyInternal('anthropic')
   if (!auth) {
     return {
       success: false,

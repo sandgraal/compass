@@ -13,7 +13,11 @@ const writeFileSyncMock = vi.fn<(path: string, data: Buffer) => void>()
 const dbInsertSpy = vi.fn()
 
 vi.mock('electron', () => ({
-  safeStorage: { encryptString: encryptStringMock, decryptString: vi.fn() },
+  safeStorage: {
+    isAsyncEncryptionAvailable: async () => true,
+    encryptStringAsync: async (s: string) => encryptStringMock(s),
+    decryptStringAsync: vi.fn()
+  },
   BrowserWindow: { getAllWindows: () => [] },
   app: { getPath: () => '/tmp/compass-auth-todoist-test' }
 }))

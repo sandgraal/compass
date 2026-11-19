@@ -15,8 +15,9 @@ const dbInsertSpy = vi.fn()
 
 vi.mock('electron', () => ({
   safeStorage: {
-    encryptString: encryptStringMock,
-    decryptString: vi.fn()
+    isAsyncEncryptionAvailable: async () => true,
+    encryptStringAsync: async (s: string) => encryptStringMock(s),
+    decryptStringAsync: async (b: Buffer) => ({ result: vi.fn()(b), shouldReEncrypt: false })
   },
   BrowserWindow: { getAllWindows: () => [] },
   app: { getPath: () => '/tmp/compass-auth-notion-test' }

@@ -133,7 +133,7 @@ flowchart TB
 
 ## Tech stack
 
-**Electron 41** · **React 18** + **TypeScript** · **Drizzle ORM** / **SQLite** (`better-sqlite3`) · **TipTap** editor · **Recharts** · **Tailwind** (indigo-on-navy theme, Inter + JetBrains Mono) · **Vitest** + **Playwright** · **Biome** · **electron-vite** / **electron-builder**.
+**Electron 45** · **React 18** + **TypeScript** · **Drizzle ORM** / **SQLite** (`better-sqlite3`) · **TipTap** editor · **Recharts** · **Tailwind** (indigo-on-navy theme, Inter + JetBrains Mono) · **Vitest** + **Playwright** · **Biome** · **electron-vite** / **electron-builder**.
 
 ## Getting started
 

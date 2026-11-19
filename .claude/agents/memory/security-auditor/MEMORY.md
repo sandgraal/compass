@@ -46,6 +46,11 @@ _(empty — no accepted risks yet)_
 
 > One entry per audit run. Date · scope · top findings · status.
 
+### 2026-11-19 — Electron 41→45 + better-sqlite3 12→13 upgrade (uncommitted; main.ts/preload.ts untouched)
+
+**Top findings:** (1) medium, PRE-EXISTING: `electron/main.ts:134-137` setWindowOpenHandler calls `shell.openExternal(url)` with no scheme allowlist (no `new URL` + `https:`/`http:`/`mailto:` check); no `will-navigate` guard on main window. (2) low, PRE-EXISTING: no setPermissionRequestHandler/CheckHandler on any session. (3) low: `electron/ipc/auth.ts:21,89` and `electron/lib/crypto-vault.ts:68,85` use sync safeStorage (deprecated in 45, removed in 46); `auth.ts` saveToken/setOAuthCredentials do not check isEncryptionAvailable first. Verified: sync calls still work on 45; better-sqlite3 13 loads `prebuilds/<plat>-<arch>.node` via lib/*.js, lockfile has integrity hash, no install script.
+**Status: advisory** (ship-with-follow-ups)
+
 ### 2026-07-11 — encrypted backup/restore goes "v3 all-tables" (branch `feat/encrypted-backup`, uncommitted diff)
 
 **Scope:** `electron/ipc/backup.ts` only (per request), read-context from `electron/ipc/documents.ts`, `electron/db/client.ts`, `electron/db/schema.ts`, `electron/ipc/auth.ts`, `electron/paths.ts`, `docs/data-access-policy.md`, `electron/ipc/backup-handlers.test.ts`.

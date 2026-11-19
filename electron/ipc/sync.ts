@@ -527,7 +527,10 @@ export async function syncGoogle(
   mainWindow?: BrowserWindow | null,
   runExtractors = true
 ): Promise<SyncResult> {
-  const tokens = loadToken('google') as { access_token?: string; refresh_token?: string } | null
+  const tokens = (await loadToken('google')) as {
+    access_token?: string
+    refresh_token?: string
+  } | null
   if (!tokens?.access_token) return { service: 'google', success: false, error: 'Not connected' }
 
   const db = getDb()
@@ -729,7 +732,7 @@ export async function syncGoogle(
     // ---- Other Contacts (the auto-saved address book — everyone you've emailed) ----
     // Gated on the granted `contacts.other.readonly` scope so we don't error every
     // sync before the user reconnects. Tagged `source:'google-other'` at build time.
-    contactsInfo.otherScoped = hasGoogleScope('contacts.other.readonly')
+    contactsInfo.otherScoped = await hasGoogleScope('contacts.other.readonly')
     if (contactsInfo.otherScoped) {
       try {
         const { inputs, truncated, fetched } = await buildGoogleOtherContactInputs(accessToken)
@@ -806,7 +809,7 @@ export async function syncGitHub(
   mainWindow?: BrowserWindow | null,
   runExtractors = true
 ): Promise<SyncResultInternal> {
-  const tokens = loadToken('github') as { access_token?: string } | null
+  const tokens = (await loadToken('github')) as { access_token?: string } | null
   if (!tokens?.access_token) return { service: 'github', success: false, error: 'Not connected' }
 
   const db = getDb()
@@ -1240,16 +1243,16 @@ export function registerSyncHandlers(ipcMain: IpcMain): void {
     if (readVaultPathSetting()) {
       results.push(toPublicSyncResult(await syncObsidian(win)))
     }
-    if (loadToken('notion')) {
+    if (await loadToken('notion')) {
       results.push(toPublicSyncResult(await syncNotion(win)))
     }
-    if (loadToken('linear')) {
+    if (await loadToken('linear')) {
       results.push(toPublicSyncResult(await syncLinear(win)))
     }
-    if (loadToken('todoist')) {
+    if (await loadToken('todoist')) {
       results.push(toPublicSyncResult(await syncTodoist(win)))
     }
-    if (loadToken('oura')) {
+    if (await loadToken('oura')) {
       results.push(toPublicSyncResult(await syncOura(win)))
     }
     // Things is local + tokenless — it joins the fan-out only once the user has

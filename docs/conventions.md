@@ -112,7 +112,13 @@ Two call sites, by when your repair needs the app to be ready:
 
 ## Security invariants (DO NOT BREAK)
 
-- Vault key NEVER leaves OS Keychain except via `safeStorage.decryptString()` in main process
+- Vault key NEVER leaves OS Keychain except via `safeStorage.decryptStringAsync()` in main process
+  (`getOrCreateKey()` in `electron/lib/crypto-vault.ts`). Only the async `safeStorage` API is
+  allowed: the sync `isEncryptionAvailable`/`encryptString`/`decryptString` are deprecated in
+  Electron 45 and removed in 46. Go through `electron/lib/safe-storage.ts`.
+- Vault read → modify → write: `await getOrCreateKey()` ONCE, then keep the read, mutation and
+  write synchronous (no `await` in between), or concurrent writers drop each other's updates.
+  Token files: use `updateToken(service, fn)` (serialized per file), not `saveToken({ ...await loadToken() })`.
 - OAuth tokens stored encrypted (same mechanism); never logged; never sent to renderer
 - CSP in production blocks all remote scripts (`script-src 'self'`)
 - Renderer can never `require('fs')` or similar — context isolation enforces this
@@ -152,10 +158,10 @@ Every PR includes:
 Hard-won friction worth knowing up front:
 
 - **`npm test` starts vitest in *watch* mode and won't exit** (it waits for file changes — fine interactively, but it'll appear to hang in a script/agent). Use **`npm run test:run`** for one-shot validation.
-- **`better-sqlite3` has a native-ABI split.** Node-ABI is needed for `npm run test:run` and any `tsx` script (e.g. `scripts/seed-demo.ts`); Electron-ABI is needed for the built app and Playwright E2E. One install can't serve both.
-  - Switch with **`npm run rebuild:electron`** / **`npm run rebuild:node`** — both delete the old `.node` (plus `@electron/rebuild`'s `.forge-meta` skip-marker, which otherwise makes `install-app-deps` silently no-op) before rebuilding. The delete matters: a raw `electron-builder install-app-deps` or `npm rebuild better-sqlite3` overwrites `better_sqlite3.node` **in place** (same inode), and if any live process still has the old binary mapped (vitest watch, `npm run dev`, a stray Electron/tsx), macOS code-signing enforcement SIGKILLs every later process that loads that file — `require` succeeds, then the process dies silently inside `new Database()`, and further in-place rebuilds don't recover until the holder exits. Deleting first gives the new build a fresh inode, immune to stale holders.
-  - `npm run screenshots` handles the dance itself and leaves the repo Node-ABI (test-ready).
-  - After `npm run rebuild:electron`, run **`npm run rebuild:node`** before tests/push or SQLite tests fail with a `NODE_MODULE_VERSION` error. The `.db` file itself is ABI-independent.
+- **`better-sqlite3` no longer has a native-ABI split (v13+).** It is an N-API addon and ships prebuilt binaries for macOS/Windows/Linux (x64 + arm64) inside the npm package, so the same `.node` loads under Node (vitest, `tsx` scripts) and Electron (built app, E2E) with no rebuild. Nothing compiles at install time.
+  - `npm run rebuild:electron` / `npm run rebuild:node` are kept for muscle memory and are now effectively no-ops: both delete any locally compiled `build/Release/better_sqlite3.node` (which the loader would otherwise prefer over the prebuild) and `install-app-deps` / `npm rebuild` find nothing to build. A `NODE_MODULE_VERSION` error now means a stale local build exists — run either script to clear it.
+  - The macOS in-place-overwrite SIGKILL hazard only applies if you compile the addon yourself; if you do, delete the old `.node` before rebuilding.
+  - electron-builder's `files` config strips the other platforms' prebuilds from packaged apps, and `scripts/build-mcpb.ts` does the same for `.mcpb` bundles.
 - **Data isolation:** `electron/paths.ts` and `mcp/compass-mcp/index.ts` honor an opt-in **`COMPASS_HOME`** env var that redirects the *entire* data store (DB, vault, knowledge base) to a throwaway dir — set it for tests/screenshots so you never touch the real `~/Library/Application Support/Compass`. `scripts/seed-demo.ts` refuses to run unless `COMPASS_SEED_DEMO=1` **and** `COMPASS_HOME` is set to a dir other than the real home.
 - **Date-only columns: prefer LOCAL calendar days.** `finance_transactions.date` and `habit_entries.date` use the local day (see `electron/integrations/finance-snapshot.ts`, `src/lib/habit-streaks.ts`). Build keys from `getFullYear()/getMonth()/getDate()` and step by `setDate(getDate()-1)` — not `toISOString().slice(...)` (UTC → off-by-one + DST miscounts for non-UTC users). **Known inconsistency:** `checklist_items.list_date` is currently keyed by `src/lib/utils.ts todayISO()`, which is *UTC* — so `compass_today_tasks` reads UTC to match, while the newer `compass_upcoming` reads local. New local-day code should follow the finance/habits pattern; unifying checklist on local day is a tracked cleanup.
 - **Working in a git worktree** (e.g. `.claude/worktrees/*`): you can't `git checkout main` (it's held by the primary checkout). Branch with **`git checkout -b <name> origin/main`** directly — don't chain `git checkout main && …` (the `&&` short-circuits silently and your commit lands on the wrong branch). With `gh pr create`, pass **`--head <branch> --base main`** explicitly. A fresh worktree may need a one-time `npm install` (the Electron binary can be missing); the project uses **npm** — delete any stray `pnpm-lock.yaml`/`pnpm-workspace.yaml`.

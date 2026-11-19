@@ -19,12 +19,12 @@ let TMP_VAULT_DIR: string
 
 vi.mock('electron', () => ({
   safeStorage: {
-    isEncryptionAvailable: () => true,
-    encryptString: (s: string) => Buffer.from(`SAFE:${s}`, 'utf8'),
-    decryptString: (b: Buffer) => {
+    isAsyncEncryptionAvailable: async () => true,
+    encryptStringAsync: async (s: string) => Buffer.from(`SAFE:${s}`, 'utf8'),
+    decryptStringAsync: async (b: Buffer) => {
       const s = b.toString('utf8')
       if (!s.startsWith('SAFE:')) throw new Error('mock safeStorage: invalid blob')
-      return s.slice('SAFE:'.length)
+      return { result: s.slice('SAFE:'.length), shouldReEncrypt: false }
     }
   }
 }))
@@ -47,11 +47,11 @@ const {
 const URL_A = 'https://userA:passA@bridge.simplefin.org/simplefin'
 const URL_B = 'https://userB:passB@bridge.simplefin.org/simplefin'
 
-beforeEach(() => {
+beforeEach(async () => {
   TMP_VAULT_DIR = mkdtempSync(join(tmpdir(), 'compass-simplefin-vault-'))
 })
 
-afterEach(() => {
+afterEach(async () => {
   try {
     rmSync(TMP_VAULT_DIR, { recursive: true, force: true })
   } catch {
@@ -60,86 +60,88 @@ afterEach(() => {
 })
 
 describe('assertValidAccessUrl', () => {
-  it('accepts an https URL with embedded credentials', () => {
+  it('accepts an https URL with embedded credentials', async () => {
     expect(() => assertValidAccessUrl(URL_A)).not.toThrow()
   })
 
-  it('rejects a non-https URL', () => {
+  it('rejects a non-https URL', async () => {
     expect(() => assertValidAccessUrl('http://u:p@bridge.simplefin.org/simplefin')).toThrow(/https/)
   })
 
-  it('rejects an https URL without embedded credentials', () => {
+  it('rejects an https URL without embedded credentials', async () => {
     expect(() => assertValidAccessUrl('https://bridge.simplefin.org/simplefin')).toThrow(
       /credentials/
     )
   })
 
-  it('rejects a non-URL string', () => {
+  it('rejects a non-URL string', async () => {
     expect(() => assertValidAccessUrl('not a url')).toThrow(/valid URL/)
   })
 })
 
 describe('simplefin vault — access urls', () => {
-  it('returns null when nothing is stored for a connection', () => {
-    expect(getAccessUrl('conn-unknown')).toBeNull()
+  it('returns null when nothing is stored for a connection', async () => {
+    expect(await getAccessUrl('conn-unknown')).toBeNull()
   })
 
-  it('round-trips an access url', () => {
-    setAccessUrl('conn-a', URL_A)
-    expect(getAccessUrl('conn-a')).toBe(URL_A)
+  it('round-trips an access url', async () => {
+    await setAccessUrl('conn-a', URL_A)
+    expect(await getAccessUrl('conn-a')).toBe(URL_A)
   })
 
-  it('keeps urls per connection independent', () => {
-    setAccessUrl('conn-a', URL_A)
-    setAccessUrl('conn-b', URL_B)
-    expect(getAccessUrl('conn-a')).toBe(URL_A)
-    expect(getAccessUrl('conn-b')).toBe(URL_B)
+  it('keeps urls per connection independent', async () => {
+    await setAccessUrl('conn-a', URL_A)
+    await setAccessUrl('conn-b', URL_B)
+    expect(await getAccessUrl('conn-a')).toBe(URL_A)
+    expect(await getAccessUrl('conn-b')).toBe(URL_B)
   })
 
-  it('removeAccessUrl deletes only the targeted connection', () => {
-    setAccessUrl('conn-a', URL_A)
-    setAccessUrl('conn-b', URL_B)
-    removeAccessUrl('conn-a')
-    expect(getAccessUrl('conn-a')).toBeNull()
-    expect(getAccessUrl('conn-b')).toBe(URL_B)
+  it('removeAccessUrl deletes only the targeted connection', async () => {
+    await setAccessUrl('conn-a', URL_A)
+    await setAccessUrl('conn-b', URL_B)
+    await removeAccessUrl('conn-a')
+    expect(await getAccessUrl('conn-a')).toBeNull()
+    expect(await getAccessUrl('conn-b')).toBe(URL_B)
   })
 
-  it('listConnectionIds returns sorted ids and never the URLs', () => {
-    setAccessUrl('conn-b', URL_B)
-    setAccessUrl('conn-a', URL_A)
-    const ids = listConnectionIds()
+  it('listConnectionIds returns sorted ids and never the URLs', async () => {
+    await setAccessUrl('conn-b', URL_B)
+    await setAccessUrl('conn-a', URL_A)
+    const ids = await listConnectionIds()
     expect(ids).toEqual(['conn-a', 'conn-b'])
     // The URLs (credentials) must not appear in the renderer-safe list.
     expect(JSON.stringify(ids)).not.toContain('passA')
     expect(JSON.stringify(ids)).not.toContain('passB')
   })
 
-  it('rejects a malformed url at write time', () => {
-    expect(() => setAccessUrl('conn-a', 'https://no-creds.example.com')).toThrow(/credentials/)
-    expect(getAccessUrl('conn-a')).toBeNull()
+  it('rejects a malformed url at write time', async () => {
+    await expect(setAccessUrl('conn-a', 'https://no-creds.example.com')).rejects.toThrow(
+      /credentials/
+    )
+    expect(await getAccessUrl('conn-a')).toBeNull()
   })
 
-  it('rejects an empty connectionId', () => {
-    expect(() => setAccessUrl('', URL_A)).toThrow(/connectionId/)
+  it('rejects an empty connectionId', async () => {
+    await expect(setAccessUrl('', URL_A)).rejects.toThrow(/connectionId/)
   })
 })
 
 describe('simplefin vault — clear', () => {
-  it('wipes all stored urls', () => {
-    setAccessUrl('conn-a', URL_A)
-    clearSimplefinVault()
-    expect(getAccessUrl('conn-a')).toBeNull()
-    expect(listConnectionIds()).toEqual([])
+  it('wipes all stored urls', async () => {
+    await setAccessUrl('conn-a', URL_A)
+    await clearSimplefinVault()
+    expect(await getAccessUrl('conn-a')).toBeNull()
+    expect(await listConnectionIds()).toEqual([])
   })
 
-  it('is a no-op when the file does not exist', () => {
+  it('is a no-op when the file does not exist', async () => {
     expect(existsSync(join(TMP_VAULT_DIR, 'simplefin.enc'))).toBe(false)
-    expect(() => clearSimplefinVault()).not.toThrow()
+    await expect(clearSimplefinVault()).resolves.not.toThrow()
   })
 
-  it('overwrites (does not rm) so disk observers can not tell wiped from never-used', () => {
-    setAccessUrl('conn-a', URL_A)
-    clearSimplefinVault()
+  it('overwrites (does not rm) so disk observers can not tell wiped from never-used', async () => {
+    await setAccessUrl('conn-a', URL_A)
+    await clearSimplefinVault()
     expect(existsSync(join(TMP_VAULT_DIR, 'simplefin.enc'))).toBe(true)
   })
 })
